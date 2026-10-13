@@ -144,6 +144,38 @@ eq(metaVal.stats.byDifficulty[2], 1, '校验：难度 2 计数 1');
 eq(metaVal.stats.tagCount, 4, '校验：去重标签总数 4');
 
 
+/* ================= 2.7 不定项选择（少选半分） ================= */
+section('不定项 indefinite');
+const indQ = {
+  type: 'indefinite', question: '不定项题（答案 ABD）',
+  options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }, { letter: 'C', text: '丙' }, { letter: 'D', text: '丁' }],
+  answer: 'ABD'
+};
+eq(QB.judgeAnswer(indQ, ['A', 'B', 'D']).isCorrect, true, '不定项：全选对为对');
+{
+  const part = QB.judgeAnswer(indQ, ['A', 'B']);
+  eq(part.isCorrect, false, '不定项：少选不是全对');
+  eq(part.partial, true, '不定项：少选标记 partial');
+}
+{
+  const wrong = QB.judgeAnswer(indQ, ['A', 'C']);
+  eq(wrong.isCorrect, false, '不定项：含错项为错');
+  ok(!wrong.partial, '不定项：含错项不算半对');
+}
+ok(!QB.judgeAnswer(indQ, ['A', 'B', 'C', 'D']).partial, '不定项：全选（含错）不算半对');
+eq(QB.Adapters.normalizeType('不定项选择'), 'indefinite', '题型名「不定项选择」映射');
+{
+  const e = new QB.QuizEngine();
+  e.loadQuestions([indQ], 'mixed', { shuffleOptions: false });
+  e.currentIndex = 0;
+  e.toggleAnswer('A'); e.toggleAnswer('B'); e.submitAnswer();
+  const s = e.getScore();
+  eq(s.partial, 1, '引擎：partial 计数 1');
+  eq(s.score, 5, '引擎：少选得半分 5（满分 10）');
+  eq(s.correct, 0, '引擎：半对不计 correct');
+  eq(e.results[0].partial, true, '引擎：结果保留 partial');
+}
+
 section('真实数据导入（541 题）');
 const flatText = fs.readFileSync(path.join(ROOT, '题库-背题模式.json'), 'utf8');
 const nestedText = fs.readFileSync(path.join(ROOT, '题库-分类.json'), 'utf8');

@@ -7,7 +7,7 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const TYPES = ['judge', 'single', 'multi', 'fill', 'essay'];
+  const TYPES = ['judge', 'single', 'multi', 'indefinite', 'fill', 'essay'];
 
   QB.CONFIG = {
     APP_NAME: '题库系统',
@@ -34,6 +34,7 @@
       judge: '判断题',
       single: '单选题',
       multi: '多选题',
+      indefinite: '不定项',
       fill: '填空题',
       essay: '简答题'
     },
@@ -42,6 +43,7 @@
       judge: '判断',
       single: '单选',
       multi: '多选',
+      indefinite: '不定项',
       fill: '填空',
       essay: '简答'
     },

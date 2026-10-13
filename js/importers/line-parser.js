@@ -24,7 +24,7 @@
   const RE_CATEGORY = /^\s*(?:分类|类别|章节)\s*[:：]\s*(.*)$/;
   const RE_DIFFICULTY = /^\s*(?:难度|difficulty)\s*[:：]\s*(.*)$/;
   const RE_TAGS = /^\s*(?:标签|知识点|关键词)\s*[:：]\s*(.*)$/;
-  const RE_TYPE_INLINE = /[（(【\[]?\s*(判断题|单选题|多选题|填空题|简答题|问答题|单项选择|多项选择|判断|单选|多选|填空|简答)\s*[）)】\]]?/;
+  const RE_TYPE_INLINE = /[（(【\[]?\s*(判断题|单选题|多选题|不定项选择题?|不定项|填空题|简答题|问答题|单项选择|多项选择|判断|单选|多选|填空|简答)\s*[）)】\]]?/;
 
   function matchQuestionStart(t) {
     const m = t.match(RE_Q_NUM) || t.match(RE_Q_PAREN) || t.match(RE_Q_CN);

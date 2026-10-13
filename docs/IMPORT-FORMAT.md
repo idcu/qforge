@@ -31,6 +31,7 @@
 | `judge` | `question` | 忽略（渲染固定两项） | `answer` 为 正确/错误（归一支持 对/错/√/×/T/F/是/否） |
 | `single` | `question`,`options`,`answer` | 必需 | `answer` 单字母，如 `"B"` |
 | `multi` | `question`,`options`,`answer` | 必需 | `answer` 字母串，如 `"ABD"`（乱序/大小写均可，自动排序去重） |
+| `indefinite` | `question`,`options`,`answer` | 必需 | 不定项选择，结构同 multi；判分时全对满分、少选得半分、错选 0 分 |
 | `fill` | `question`,`blanks` | 忽略 | `blanks[].answer`；`accept` 为可接受备选答案 |
 | `essay` | `question` | 忽略 | `reference_answer` 参考答案（不自动判分） |
 

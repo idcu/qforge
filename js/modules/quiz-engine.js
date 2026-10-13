@@ -60,19 +60,23 @@
   QuizEngine.prototype.getScore = function () {
     let correct = 0;
     let wrong = 0;
+    let partial = 0;
     this.results.forEach((r) => {
       if (!r) return;
       if (r.isCorrect === true) correct++;
+      else if (r.partial) partial++;
       else if (r.isCorrect === false) wrong++;
     });
     const total = this.questions.length;
     const points = (QB.CONFIG && QB.CONFIG.POINTS_PER_CORRECT) || 10;
+    const decided = correct + wrong + partial;
     return {
-      score: correct * points,
+      score: correct * points + Math.round(partial * points * 0.5),
       correct: correct,
+      partial: partial,
       wrong: wrong,
-      pending: total - correct - wrong,
-      accuracy: QB.Helpers.calculateAccuracy(correct, correct + wrong)
+      pending: total - decided,
+      accuracy: QB.Helpers.calculateAccuracy(correct + partial, decided)
     };
   };
 
@@ -134,7 +138,7 @@
       return blanks.length > 0 && blanks.every((b, i) => String((a && a[i]) || '').trim() !== '');
     }
     if (q.type === 'essay') return String(a || '').trim() !== '';
-    if (q.type === 'multi') return Array.isArray(a) && a.length > 0;
+    if (q.type === 'multi' || q.type === 'indefinite') return Array.isArray(a) && a.length > 0;
     return a !== undefined && a !== null && String(a) !== '';
   };
 
@@ -149,6 +153,7 @@
       contentHash: q.contentHash || QB.makeContentHash(q),
       type: q.type,
       isCorrect: verdict.isCorrect,
+      partial: !!verdict.partial,
       correctAnswer: verdict.correctAnswer,
       userAnswer: verdict.userAnswer,
       detail: verdict.detail,
@@ -178,6 +183,7 @@
         type: q.type,
         // 考试整卷判分：简答等需自评的题型（isCorrect === null）在此计为错误，避免悬空待判定
         isCorrect: verdict.isCorrect === null ? false : verdict.isCorrect,
+        partial: !!verdict.partial,
         correctAnswer: verdict.correctAnswer,
         userAnswer: verdict.userAnswer,
         detail: verdict.detail,

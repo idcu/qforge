@@ -127,7 +127,7 @@
       return html;
     }
 
-    if (q.type === 'single' || q.type === 'multi') {
+    if (q.type === 'single' || q.type === 'multi' || q.type === 'indefinite') {
       const correctSet = result ? QB.normalizeLetters(result.correctAnswer) : '';
       const selectedArr = Array.isArray(userAns) ? userAns : (userAns ? [String(userAns)] : []);
       html += '<div class="options">';
@@ -136,13 +136,14 @@
         const isCorrect = answered && correctSet.indexOf(o.letter) >= 0;
         html += optionHtml(o.letter, o.text, {
           value: o.letter,
-          multi: q.type === 'multi',
+          multi: q.type === 'multi' || q.type === 'indefinite',
           selected: isSel,
           correct: isCorrect,
           wrong: answered && isSel && !isCorrect
         });
       });
       html += '</div>';
+      if (q.type === 'indefinite' && !answered) html += '<div class="li-meta">不定项：答案可能是一个或多个；少选得半分，多选/错选不得分。</div>';
       return html;
     }
 
@@ -173,6 +174,12 @@
 
   function renderFeedback(q, result) {
     if (!result) return '';
+    if (result.partial) {
+      return '<div class="feedback neutral"><h4>◐ 少选，得一半分</h4>' +
+        '<div class="fb-line">正确答案：<b>' + esc(result.correctAnswer || '') + '</b></div>' +
+        '<div class="fb-line">你的答案：' + esc(String(result.userAnswer || '（未作答）')) + '</div>' +
+        (result.analysis ? '<div class="analysis">解析：' + esc(result.analysis) + '</div>' : '') + '</div>';
+    }
     if (result.isCorrect === true) {
       return '<div class="feedback ok"><h4>✅ 回答正确</h4>' +
         (result.analysis ? '<div class="analysis">解析：' + esc(result.analysis) + '</div>' : '') + '</div>';
@@ -299,8 +306,8 @@
     html += '<div class="section-title">逐题回顾</div>';
     engine.questions.forEach((q, i) => {
       const r = engine.results[i];
-      const cls = !r || r.isCorrect === null ? 'neutral' : (r.isCorrect ? 'ok' : 'no');
-      const mark = !r || r.isCorrect === null ? '○ 未判定' : (r.isCorrect ? '✔ 正确' : '✘ 错误');
+      const cls = !r || r.isCorrect === null ? 'neutral' : (r.isCorrect ? 'ok' : (r.partial ? 'neutral' : 'no'));
+      const mark = !r || r.isCorrect === null ? '○ 未判定' : (r.isCorrect ? '✔ 正确' : (r.partial ? '◐ 半对' : '✘ 错误'));
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
         '<span class="li-title">' + (i + 1) + '. ' + esc(q.question) + '</span>' +

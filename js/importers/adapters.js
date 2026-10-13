@@ -14,6 +14,7 @@
     判断: 'judge', 判断题: 'judge', 是非题: 'judge', judge: 'judge', true_false: 'judge',
     单选: 'single', 单选题: 'single', 单项选择: 'single', 单项选择题: 'single', single: 'single', single_choice: 'single',
     多选: 'multi', 多选题: 'multi', 多项选择: 'multi', 多项选择题: 'multi', multi: 'multi', multiple_choice: 'multi',
+    不定项: 'indefinite', 不定项选择: 'indefinite', 不定项选择题: 'indefinite', indefinite: 'indefinite',
     填空: 'fill', 填空题: 'fill', fill: 'fill', blank: 'fill',
     简答: 'essay', 简答题: 'essay', 问答: 'essay', 问答题: 'essay', essay: 'essay', 论述题: 'essay'
   };
@@ -169,7 +170,7 @@
     if (type === 'judge') {
       item.answer = normalizeJudgeAnswer(answer, options);
       item.options = []; // 判断题统一由渲染层给出「正确/错误」
-    } else if (type === 'single' || type === 'multi') {
+    } else if (type === 'single' || type === 'multi' || type === 'indefinite') {
       item.answer = normalizeLetters(answer);
       if (!item.options.length) warnings.push('缺少选项：' + stem.slice(0, 20));
       if (!item.answer) warnings.push('缺少答案：' + stem.slice(0, 20));
@@ -334,7 +335,7 @@
       if (q.type === 'fill' && !(q.blanks || []).some((b) => b.answer)) {
         warnings.push('第 ' + (i + 1) + ' 题（填空）缺少答案');
       }
-      if ((q.type === 'single' || q.type === 'multi') && !q.options.length) {
+      if ((q.type === 'single' || q.type === 'multi' || q.type === 'indefinite') && !q.options.length) {
         warnings.push('第 ' + (i + 1) + ' 题缺少选项');
       }
       if (q.type === 'judge' && !q.answer) warnings.push('第 ' + (i + 1) + ' 题（判断）缺少答案');

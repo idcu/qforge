@@ -53,6 +53,31 @@
       return { isCorrect: !!user && user === correct, correctAnswer: correct, userAnswer: user, detail: null };
     },
 
+    /**
+     * 不定项选择：答案可能是 1～多个
+     *   全对   → isCorrect=true
+     *   少选（所选均正确但不全，且非空）→ isCorrect=false 且 partial=true（半分）
+     *   多选/错选/未选 → isCorrect=false（0 分）
+     */
+    indefinite(question, userAnswer) {
+      const correctArr = nl(question.answer).split('').filter(Boolean);
+      const userArr = nl(userAnswer).split('').filter(Boolean);
+      const correctSet = new Set(correctArr);
+      const userSet = new Set(userArr);
+      let wrongPick = 0;
+      userArr.forEach((L) => { if (!correctSet.has(L)) wrongPick++; });
+      const hitAll = correctArr.length > 0 && correctArr.every((L) => userSet.has(L));
+      const isCorrect = hitAll && wrongPick === 0 && userArr.length === correctArr.length;
+      const partial = !isCorrect && wrongPick === 0 && userArr.length > 0 && userArr.length < correctArr.length;
+      return {
+        isCorrect: isCorrect,
+        partial: partial,
+        correctAnswer: correctArr.join(''),
+        userAnswer: userArr.join(''),
+        detail: { wrongPick: wrongPick, hit: userArr.filter((L) => correctSet.has(L)).length, total: correctArr.length }
+      };
+    },
+
     /** 填空题：逐个空比对（支持 accept 备选答案） */
     fill(question, userAnswer) {
       const blanks = question.blanks || [];

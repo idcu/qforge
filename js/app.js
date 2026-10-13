@@ -224,7 +224,8 @@
   async function recordWrongs(engine) {
     for (let i = 0; i < engine.questions.length; i++) {
       const r = engine.results[i];
-      if (r && r.isCorrect === false) await QB.WrongBook.add(State.bankId, engine.questions[i]);
+      // 不定项少选（partial）得半分，不计入错题本
+      if (r && r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, engine.questions[i]);
     }
   }
 
@@ -234,10 +235,11 @@
     if (!engine || engine.hasAnswered() || !engine.canSubmit()) return;
     const q = engine.getCurrentQuestion();
     const r = engine.submitAnswer();
-    if (r && r.isCorrect === false) await QB.WrongBook.add(State.bankId, q);
-    // SRS：练习即时判分（简答待自评，不在此记录）
+    if (r && r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
+    // SRS：练习即时判分（全对 good / 少选 hard / 错 again；简答待自评不在此记录）
     if (r && r.isCorrect !== null && r.isCorrect !== undefined) {
-      QB.SRSStore.grade(State.bankId, q, r.isCorrect ? QB.SRS.RATINGS.good : QB.SRS.RATINGS.again);
+      const rating = r.isCorrect ? QB.SRS.RATINGS.good : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again);
+      QB.SRSStore.grade(State.bankId, q, rating);
     }
     QB.ProgressSaver.saveDebounced(State.bankId, engine);
     render();
@@ -257,7 +259,7 @@
     engine.questions.forEach((q, i) => {
       const r = engine.results[i];
       if (r && r.isCorrect !== null && r.isCorrect !== undefined) {
-        srsEntries.push({ question: q, rating: r.isCorrect ? QB.SRS.RATINGS.good : QB.SRS.RATINGS.again });
+        srsEntries.push({ question: q, rating: r.isCorrect ? QB.SRS.RATINGS.good : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again) });
       }
     });
     if (srsEntries.length) QB.SRSStore.gradeMany(State.bankId, srsEntries);

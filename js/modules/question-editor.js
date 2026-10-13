@@ -57,9 +57,9 @@
         '<option value="错误"' + (v === '错误' ? ' selected' : '') + '>错误</option>' +
         '</select>';
     }
-    if (type === 'single' || type === 'multi') {
+    if (type === 'single' || type === 'multi' || type === 'indefinite') {
       const correct = QB.normalizeLetters(q.answer || '').split('');
-      const input = type === 'multi' ? 'checkbox' : 'radio';
+      const input = type === 'single' ? 'radio' : 'checkbox';
       const rows = opts.map((o, i) => {
         const letter = String.fromCharCode(65 + i);
         const checked = correct.indexOf(letter) >= 0 ? ' checked' : '';
@@ -70,10 +70,12 @@
           '<button type="button" class="btn btn-sm btn-ghost" data-qe="opt-del" title="删除该选项">×</button>' +
           '</div>';
       }).join('');
-      return '<label class="qe-label">选项与答案（勾选左侧为正确项，拖动不支持，按 A→顺序排列）</label>' +
+      const hint = type === 'single' ? '单选题：仅一个正确项'
+        : (type === 'indefinite' ? '不定项：正确项可能是一个或多个（少选得半分，错选 0 分）' : '多选题：可勾选多个正确项');
+      return '<label class="qe-label">选项与答案（勾选左侧为正确项，按 A→顺序排列）</label>' +
         '<div data-qe="options">' + rows + '</div>' +
         '<button type="button" class="btn btn-sm btn-ghost" data-qe="opt-add">＋ 添加选项</button>' +
-        (type === 'multi' ? '<div class="li-meta">多选题：可勾选多个正确项</div>' : '<div class="li-meta">单选题：仅一个正确项</div>');
+        '<div class="li-meta">' + hint + '</div>';
     }
     if (type === 'fill') {
       const blanks = (q.blanks && q.blanks.length ? q.blanks : [{ answer: '', accept: '' }]);
@@ -112,7 +114,7 @@
     if (type === 'judge') {
       question.options = [];
       question.answer = fv.judgeAnswer === '错误' ? '错误' : '正确';
-    } else if (type === 'single' || type === 'multi') {
+    } else if (type === 'single' || type === 'multi' || type === 'indefinite') {
       const rows = Array.isArray(fv.optionRows) ? fv.optionRows : [];
       question.options = [];
       const picked = [];
@@ -157,7 +159,7 @@
     };
     if (type === 'judge') {
       fv.judgeAnswer = val('[data-qe="answer-judge"]') || '正确';
-    } else if (type === 'single' || type === 'multi') {
+    } else if (type === 'single' || type === 'multi' || type === 'indefinite') {
       fv.optionRows = Array.prototype.map.call(modal.querySelectorAll('[data-qe="options"] .qe-optrow'), (r) => ({
         text: r.querySelector('[data-qe="option"]').value,
         checked: r.querySelector('[data-qe="correct"]').checked
@@ -179,7 +181,7 @@
   function validate(q) {
     const errs = [];
     if (!q.question) errs.push('题干不能为空');
-    if (q.type === 'single' || q.type === 'multi') {
+    if (q.type === 'single' || q.type === 'multi' || q.type === 'indefinite') {
       if (q.options.length < 2) errs.push('至少需要 2 个有效选项');
       if (!q.answer) errs.push('请勾选正确答案');
     }
