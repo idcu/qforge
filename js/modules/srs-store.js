@@ -60,6 +60,15 @@
     return dueToday(bankId, questions, now).length;
   }
 
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  /** 本地自然日序号（按运行环境时区，0 点为界） */
+  function dayIndex(ts) {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    return Math.floor(d.getTime() / DAY_MS);
+  }
+
   /** 概览：已跟踪题数、已学题数（有 stability 的） */
   function stats(bankId, now) {
     const map = readMap(bankId);
@@ -69,9 +78,54 @@
     return { tracked: keys.length, learned: learned };
   }
 
+  /**
+   * 到期预报（纯统计，不改状态）
+   * @param {Array} questions 题库全部题目（未学过的题计入今日到期）
+   * @param {number} days 预报天数（含今天，默认 7）
+   * @returns {{today:number, learned:number, tracked:number, newCount:number, days:Array<{label,count,overdue:boolean}>}}
+   */
+  function forecast(bankId, questions, days, now) {
+    now = now == null ? Date.now() : now;
+    const horizon = days || 7;
+    const map = readMap(bankId);
+    const todayIdx = dayIndex(now);
+    const buckets = new Array(horizon).fill(0);
+    let tracked = 0;
+    let learned = 0;
+    let overdueCount = 0;
+
+    (questions || []).forEach((q) => {
+      const st = map[keyFor(q)];
+      if (!st) return; // 未学过的题：计入 newCount，且今日可练（dueQuestions 含）
+      tracked++;
+      if (st.stability > 0) learned++;
+      if (st.due == null) return;
+      const idx = dayIndex(st.due) - todayIdx;
+      if (idx < 0) { buckets[0] += 1; overdueCount += 1; } // 已逾期，并入今天
+      else if (idx < horizon) buckets[idx] += 1;
+    });
+
+    const newCount = (questions || []).length - tracked;
+    const labels = ['今天', '明天', '后天'];
+    const list = buckets.map((count, i) => ({
+      label: labels[i] || i + 1 + ' 天后',
+      count: count + (i === 0 ? newCount : 0), // 今日到期含新题
+      scheduled: count,
+      overdue: i === 0 ? overdueCount : 0,
+      newCount: i === 0 ? newCount : 0
+    }));
+    return {
+      today: list[0].count,
+      learned: learned,
+      tracked: tracked,
+      newCount: newCount,
+      days: list
+    };
+  }
+
   function clear(bankId) {
     QB.Storage.remove(keyOf(bankId));
   }
 
-  QB.SRSStore = { getState, grade, gradeMany, dueToday, countDue, stats, clear, keyFor };
+  QB.SRSStore = { getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear, keyFor };
 })(window);

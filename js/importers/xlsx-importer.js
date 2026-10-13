@@ -36,29 +36,38 @@
     return out;
   }
 
-  /** 解析 workbook.xml + rels，返回第一个工作表的目标路径 */
-  function resolveFirstSheet(entries) {
+  /** 把 rels Target 归一为 zip 内路径 */
+  function normalizeTarget(t) {
+    t = (t || '').replace(/^\//, '');
+    return t.indexOf('xl/') === 0 ? t : 'xl/' + t;
+  }
+
+  /**
+   * 解析 workbook.xml + rels，按工作簿顺序返回全部工作表
+   * @returns {Array<{name:string,path:string}>}
+   */
+  function resolveAllSheets(entries) {
     const wbText = entries['xl/workbook.xml'] ? QB.decodeUtf8(entries['xl/workbook.xml']) : null;
     const relText = entries['xl/_rels/workbook.xml.rels'] ? QB.decodeUtf8(entries['xl/_rels/workbook.xml.rels']) : null;
-    let target = 'xl/worksheets/sheet1.xml';
-    if (wbText && relText) {
-      const wbDoc = parseXml(wbText, 'workbook');
-      const sheets = wbDoc.getElementsByTagName('sheet');
-      if (sheets.length) {
-        const rid = sheets[0].getAttribute('r:id') || sheets[0].getAttribute('id');
-        const relDoc = parseXml(relText, 'rels');
-        const rels = relDoc.getElementsByTagName('Relationship');
-        for (let i = 0; i < rels.length; i++) {
-          if (rels[i].getAttribute('Id') === rid) {
-            let t = rels[i].getAttribute('Target') || '';
-            t = t.replace(/^\//, '');
-            target = t.indexOf('xl/') === 0 ? t : 'xl/' + t;
-            break;
-          }
-        }
-      }
+    // 退化情况：无清单时按约定路径读 sheet1
+    if (!wbText || !relText) {
+      return entries['xl/worksheets/sheet1.xml'] ? [{ name: 'Sheet1', path: 'xl/worksheets/sheet1.xml' }] : [];
     }
-    return target;
+    const relMap = {};
+    const relDoc = parseXml(relText, 'rels');
+    const rels = relDoc.getElementsByTagName('Relationship');
+    for (let i = 0; i < rels.length; i++) {
+      relMap[rels[i].getAttribute('Id')] = normalizeTarget(rels[i].getAttribute('Target'));
+    }
+    const wbDoc = parseXml(wbText, 'workbook');
+    const sheets = wbDoc.getElementsByTagName('sheet');
+    const out = [];
+    for (let i = 0; i < sheets.length; i++) {
+      const rid = sheets[i].getAttribute('r:id') || sheets[i].getAttribute('id');
+      const path = rid && relMap[rid] ? relMap[rid] : ('xl/worksheets/sheet' + (i + 1) + '.xml');
+      if (entries[path]) out.push({ name: sheets[i].getAttribute('name') || ('Sheet' + (i + 1)), path: path });
+    }
+    return out;
   }
 
   /** 工作表 XML → 二维字符串数组 */
@@ -96,12 +105,25 @@
     if (!buf) throw new Error('未读取到文件内容');
     const entries = await QB.ZipReader.readEntries(buf);
     const shared = readSharedStrings(entries['xl/sharedStrings.xml'] ? QB.decodeUtf8(entries['xl/sharedStrings.xml']) : null);
-    const sheetPath = resolveFirstSheet(entries);
-    if (!entries[sheetPath]) throw new Error('未找到工作表：' + sheetPath);
-    const rows = sheetToRows(QB.decodeUtf8(entries[sheetPath]), shared);
-    const res = QB.Adapters.tableToQuestions(rows);
-    return { questions: res.questions, warnings: res.warnings || [], format: 'xlsx' };
+    const sheets = resolveAllSheets(entries);
+    if (!sheets.length) throw new Error('未找到工作表');
+    // 逐工作表解析（每张表首行须为同一套表头；空表自动跳过），按工作簿顺序合并
+    const questions = [];
+    const warnings = [];
+    let used = 0;
+    sheets.forEach((sheet) => {
+      const rows = sheetToRows(QB.decodeUtf8(entries[sheet.path]), shared);
+      if (!rows.length) return;
+      const res = QB.Adapters.tableToQuestions(rows);
+      if (res.questions.length) {
+        questions.push.apply(questions, res.questions);
+        (res.warnings || []).forEach((w) => warnings.push('[' + sheet.name + '] ' + w));
+        used++;
+      }
+    });
+    if (sheets.length > 1) warnings.unshift('工作簿含 ' + sheets.length + ' 个工作表，已从其中 ' + used + ' 个合并导入 ' + questions.length + ' 题');
+    return { questions: questions, warnings: warnings, format: 'xlsx' };
   }
 
-  QB.XlsxImporter = { parse: parse, exts: ['xlsx'] };
+  QB.XlsxImporter = { parse: parse, exts: ['xlsx'], resolveAllSheets, sheetToRows };
 })(window);

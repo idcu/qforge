@@ -468,6 +468,16 @@ if (!hasDomParser) {
     eq(xlsxRes.questions[1].options.length, 4, 'XLSX：单选题拆出 4 个选项');
   }
 
+  // 多工作表合并导入（3 个 sheet：两表有题、一空表）
+  const multiBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-多工作表.xlsx'));
+  try {
+    const multi = await QB.XlsxImporter.parse({ arrayBuffer: toArrayBuffer(multiBuf), fileName: '示例-多工作表.xlsx' });
+    eq(multi.questions.length, 2, 'XLSX 多工作表：跨 2 个表合并 2 题');
+    const types = multi.questions.map((q) => q.type).sort().join('|');
+    ok(types === 'judge|single', 'XLSX 多工作表：单选+判断各 1（实际 ' + types + '）');
+    ok(multi.warnings.some((w) => w.indexOf('3 个工作表') >= 0), 'XLSX 多工作表：汇总提示含 3 个工作表');
+  } catch (e) { ok(false, 'XLSX 多工作表解析', e.message); }
+
   try { docxRes = await QB.DocxImporter.parse({ arrayBuffer: toArrayBuffer(docxBuf), fileName: '示例-文档导入.docx' }); ok(true, 'DOCX 原生解析成功'); }
   catch (e) { ok(false, 'DOCX 原生解析成功', e.message); }
   if (docxRes) {

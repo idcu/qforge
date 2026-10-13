@@ -148,9 +148,11 @@
         html = UI.renderHistoryList(recs, await QB.History.stats(State.bankId));
         break;
       }
-      case 'stats':
-        html = UI.renderStats(await QB.History.list(State.bankId));
+      case 'stats': {
+        const fc = State.bankId ? QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
+        html = UI.renderStats(await QB.History.list(State.bankId), fc);
         break;
+      }
       case 'search': {
         const results = QB.SearchFilter.filter(State.allQuestions, {
           type: State.search.type,
@@ -405,6 +407,8 @@
         return startWrongQuiz();
       case 'start-favorite':
         return startFavoriteQuiz();
+      case 'start-chapter':
+        return openChapterDialog();
       case 'nav-search':
         State.view = 'search';
         return render();
@@ -462,14 +466,20 @@
       }
       case 'finish-exam':
         if (State.engine && State.engine.mode === 'exam') {
-          const total = State.engine.questions.length;
-          const done = State.engine.answeredCount();
-          const left = total - done;
-          const msg = left > 0
-            ? '还有 ' + left + ' 题未作答，确定交卷吗？未作答将计为错误。'
-            : '全部题目已作答，确定交卷吗？';
-          const ok = await UI.confirmDialog(msg, '确认交卷');
-          if (!ok) return;
+          let unanswered = 0;
+          let partial = 0;
+          State.engine.results.forEach((r) => {
+            if (!r || r.isCorrect === null || r.isCorrect === undefined) unanswered++;
+            else if (r.partial) partial++;
+          });
+          if (unanswered > 0 || partial > 0) {
+            const lines = [];
+            if (unanswered > 0) lines.push('· 未作答 ' + unanswered + ' 题（将计为错误）');
+            if (partial > 0) lines.push('· 少选得半分 ' + partial + ' 题（不定项）');
+            lines.push('确定交卷吗？取消可返回答题卡检查。');
+            const ok = await UI.confirmDialog(lines.join('<br>'), '确认交卷');
+            if (!ok) return;
+          }
         }
         return finishQuiz();
       case 'fav-toggle': {
@@ -537,6 +547,47 @@
       default:
         return undefined;
     }
+  }
+
+  /** 章节顺序练习：按分类保持题库原始顺序逐题作答（题目不洗牌，选项乱序仍按设置） */
+  function openChapterDialog() {
+    const cats = QB.SearchFilter.categories(State.allQuestions);
+    const uncategorized = State.allQuestions.filter((q) => !q.category).length;
+    const options = ['<option value="">全部分类（按题库原序）</option>']
+      .concat(cats.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>'));
+    if (uncategorized) options.push('<option value="__none__">（未分类 ' + uncategorized + ' 题）</option>');
+    UI.openModal(
+      '<h3>章节顺序练</h3>' +
+      '<p class="li-meta">按题库中题目的原始顺序逐题作答（不随机抽题、不洗牌），适合系统过一遍教材章节。选项乱序遵循全局设置。</p>' +
+      '<div class="qe-grid"><div><label class="qe-label">选择章节</label><select id="ch-cat">' + options.join('') + '</select></div>' +
+      '<div><label class="qe-label">模式</label><select id="ch-mode"><option value="practice">练习（即时判分）</option>' +
+      '<option value="exam">考试（交卷整卷判分）</option></select></div></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="ch-limit" /><label for="ch-limit">限制每章题量（0 或不勾=全部）</label>' +
+      '<input type="number" id="ch-n" class="bp-n" min="0" value="0" style="width:80px;margin-left:8px" /></div>' +
+      '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
+      '<button class="btn" data-action="modal-ok">开始</button></div>',
+      (modal) => {
+        modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
+        modal.querySelector('[data-action="modal-ok"]').onclick = () => {
+          const cat = modal.querySelector('#ch-cat').value;
+          const mode = modal.querySelector('#ch-mode').value;
+          const limit = modal.querySelector('#ch-limit').checked ? (parseInt(modal.querySelector('#ch-n').value, 10) || 0) : 0;
+          UI.closeModal();
+          let qs;
+          if (cat === '__none__') {
+            qs = State.allQuestions.filter((q) => !q.category);
+          } else if (cat) {
+            qs = QB.Blueprint.filterPool(State.allQuestions, { category: cat });
+          } else {
+            qs = State.allQuestions.slice();
+          }
+          if (limit > 0) qs = qs.slice(0, limit);
+          if (!qs.length) { UI.toast('该章节没有题目', 'err'); return; }
+          // 不传 shuffleOptions：选项乱序遵循全局 CONFIG.SHUFFLE_OPTIONS；题目本身保持原序（不洗牌）
+          beginQuiz(qs, mode, cat ? ('章节练 · ' + cat) : '全库顺序练');
+        };
+      }
+    );
   }
 
   function openMixedDialog() {

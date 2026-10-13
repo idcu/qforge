@@ -108,6 +108,7 @@
       { action: 'start-mixed', ico: '🎲', label: '组卷', sub: '题型/分类/难度' },
       { action: 'start-wrong', ico: '📕', label: '错题重练', sub: '错题本' },
       { action: 'start-favorite', ico: '⭐', label: '收藏练习', sub: '收藏夹' },
+      { action: 'start-chapter', ico: '📖', label: '章节顺序练', sub: '按分类原序' },
       { action: 'nav-search', ico: '🔍', label: '题目搜索', sub: '关键词/筛选' }
     ];
     html += '<div class="menu-grid">';
@@ -460,10 +461,24 @@
     return html;
   }
 
-  function renderStats(records) {
+  function renderStats(records, forecastData) {
+    let prefix = '';
+    if (forecastData) {
+      const max = Math.max(1, ...forecastData.days.map((d) => d.count));
+      const shortLabel = (s) => s === '今天' ? '今' : s.replace('天后', '');
+      const fcBars = forecastData.days.map((d) =>
+        '<div class="fc-col"><span class="fc-bar" style="height:' + Math.max(2, Math.round(d.count / max * 52)) + 'px" title="' + d.label + ' ' + d.count + ' 题"></span>' +
+        '<span class="fc-n">' + d.count + '</span><span class="fc-l">' + shortLabel(d.label) + '</span></div>').join('');
+      prefix =
+        '<div class="card"><h3 class="card-title">复习调度（FSRS）</h3>' +
+        '<div class="li-meta">已学 ' + forecastData.learned + ' / ' + forecastData.tracked +
+        ' 题有调度记录，未学新题 ' + forecastData.newCount + ' 道</div>' +
+        '<div class="fc-grid">' + fcBars + '</div>' +
+        '<div class="li-meta" style="margin-top:6px">未来 7 天每日到期题量（今天含新题与逾期）；到「🧠 今日复习」开始。</div></div>';
+    }
     const overview = QB.Statistics.overview(records);
     const perf = QB.Statistics.typePerformance(records);
-    let html = '<div class="card"><h3 class="card-title">学习概览</h3><div class="stat-grid">' +
+    let html = prefix + '<div class="card"><h3 class="card-title">学习概览</h3><div class="stat-grid">' +
       '<div class="stat-box"><div class="st-num">' + overview.totalQuizzes + '</div><div class="st-label">测试次数</div></div>' +
       '<div class="stat-box"><div class="st-num">' + overview.totalAnswered + '</div><div class="st-label">答题数</div></div>' +
       '<div class="stat-box"><div class="st-num">' + overview.avgAccuracy + '%</div><div class="st-label">平均正确率</div></div>' +

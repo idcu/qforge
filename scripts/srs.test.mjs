@@ -77,9 +77,29 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
   eq(migrated.algo, 'fsrs', '旧 SM-2 状态评分后迁移为 fsrs');
   eq(migrated.stability, 2.4, '迁移：首次 good 按新卡稳定度 2.4 初始化（不继承 ease/interval）');
 
-  // gradeMany：清空后两题重新都 good，2.4 天后到期 → 次日 0 道
+  // forecast：未学新题计入今天；评分后落到对应自然日
+  {
+    QB.SRSStore.clear(b1.id);
+    const bf = QB.SRSStore.forecast(b1.id, allQ, 7, T0);
+    eq(bf.today, 2, 'forecast：清空后今天到期 2（含新题）');
+    eq(bf.newCount, 2, 'forecast：新题 2');
+    eq(bf.learned, 0, 'forecast：已学 0');
+    QB.SRSStore.grade(b1.id, allQ[0], QB.SRS.RATINGS.good, T0); // due≈2.4 天 → 第 3 个自然日
+    const af = QB.SRSStore.forecast(b1.id, allQ, 7, T0);
+    eq(af.today, 1, 'forecast：good 后今天剩 1 道新题');
+    eq(af.learned, 1, 'forecast：已学 1');
+    // due 为 T0+2.4天，dayIndex 差为 2 → 落在「3 天后」桶
+    eq(af.days[2].count, 1, 'forecast：第 3 天 1 道（2.4 天间隔）');
+    eq(af.days[1].count, 0, 'forecast：明天 0 道');
+    // 逾期并入今天
+    QB.SRSStore.grade(b1.id, allQ[1], QB.SRS.RATINGS.again, T0 - 10 * DAY);
+    const od = QB.SRSStore.forecast(b1.id, allQ, 7, T0);
+    ok(od.days[0].overdue >= 1, 'forecast：逾期题并入今天且 overdue 计数（实际 ' + od.days[0].overdue + '）');
+  }
   QB.SRSStore.clear(b1.id);
-  const qs = (await QB.DB.questions.list(b1.id, {})).items;
+
+  // gradeMany：清空后两题重新都 good，2.4 天后到期 → 次日 0 道
+  const qs = allQ;
   QB.SRSStore.gradeMany(b1.id, qs.map((question) => ({ question, rating: QB.SRS.RATINGS.good })), T0);
   eq(QB.SRSStore.countDue(b1.id, qs, T0 + DAY + 1000), 0, '批量 good 后次日无到期');
   QB.SRSStore.clear(b1.id);

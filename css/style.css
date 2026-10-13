@@ -535,3 +535,10 @@ body {
 /* ===== 拖拽导入遮罩 ===== */
 body.drag-over #view { outline: 2px dashed var(--brand); outline-offset: -8px; }
 body.drag-over::after { content: "松开以导入到当前题库"; position: fixed; inset: 12px; display: flex; align-items: center; justify-content: center; background: var(--brand-soft); color: var(--brand-text); border: 2px dashed var(--brand); border-radius: 12px; font-size: 16px; font-weight: 600; pointer-events: none; z-index: 80; }
+
+/* ===== FSRS 到期预报 ===== */
+.fc-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; align-items: end; margin-top: 12px; height: 96px; }
+.fc-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; }
+.fc-bar { width: 70%; min-height: 2px; background: var(--brand); border-radius: 4px 4px 0 0; display: block; }
+.fc-n { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1; }
+.fc-l { font-size: 11px; color: var(--text-muted); line-height: 1; }
