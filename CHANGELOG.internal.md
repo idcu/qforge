@@ -226,7 +226,7 @@
 
 ---
 
-## <见 git log -1> · test(export): 导出功能独立单元测试（96 项）
+## 40896ea · test(export): 导出功能独立单元测试（96 项）
 
 **核心改动**
 - 新增 `scripts/exporter.test.mjs`（独立 runner，复用 `_harness.mjs`）。
@@ -246,7 +246,7 @@
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
 > `197c2fd` docs(changelog) · `f189fa7` feat(quiz 选项乱序) · `2a3c826` feat(export 多格式导出) ·
-> `1aa1121` docs(changelog) · `5ba8cd3` feat(import md + line-parser) · test(export 单测，hash 见 git log -1)
+> `1aa1121` docs(changelog) · `5ba8cd3` feat(import md + line-parser) · `40896ea` test(export 单测)
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`（镜像同步 GitHub；截至本记录未 push）。
 > 本文件后续若有「回填 Commit Hash」的文档提交，其 Hash 以 `git log -1` 为准（避免自引用循环）。
