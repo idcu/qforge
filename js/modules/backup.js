@@ -113,6 +113,48 @@
     return { filename: name, assetCount: bundle ? bundle.assetCount : 0 };
   }
 
+  /** 恢复确认弹窗（文件恢复与 WebDAV 恢复共用） */
+  function confirmRestore(parsed) {
+    return new Promise((resolve, reject) => {
+      try {
+        const backup = parsed.backup;
+        const used = QB.Storage.usageBytes();
+        const keys = Object.keys(backup.data || {});
+        QB.UIRenderer.openModal(
+          '<h3>恢复备份</h3>' +
+          '<p>备份包含 <b>' + keys.length + '</b> 个数据键' +
+          (parsed.assets.length ? '、<b>' + parsed.assets.length + '</b> 张图片' : '') +
+          '，导出时间：' +
+          QB.Helpers.escapeHtml(backup.exportedAt || '未知') +
+          (parsed.source ? '<br>来源：' + QB.Helpers.escapeHtml(parsed.source) : '') + '</p>' +
+          '<div class="checkbox-row"><input type="radio" name="bk-mode" id="bk-replace" value="replace" checked>' +
+          '<label for="bk-replace">覆盖恢复（清空现有全部数据后写入，推荐）</label></div>' +
+          '<div class="checkbox-row"><input type="radio" name="bk-mode" id="bk-merge" value="merge">' +
+          '<label for="bk-merge">合并恢复（同名键覆盖，保留其余现有数据与图片）</label></div>' +
+          '<p class="li-meta">当前已用约 ' + Math.round(used / 1024) + ' KB。恢复后建议刷新页面。</p>' +
+          '<div class="modal-actions"><button class="btn btn-ghost" data-bk="cancel">取消</button>' +
+          '<button class="btn btn-danger" data-bk="ok">确认恢复</button></div>',
+          (modal) => {
+            modal.querySelector('[data-bk="cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
+            modal.querySelector('[data-bk="ok"]').onclick = async () => {
+              const mode = modal.querySelector('#bk-merge').checked ? 'merge' : 'replace';
+              try {
+                const r = applyBackup(backup, { mode: mode });
+                const imgCount = await restoreAssets(parsed.assets, mode);
+                QB.UIRenderer.closeModal();
+                QB.UIRenderer.toast('已恢复 ' + r.keys + ' 个数据键' + (imgCount ? '、' + imgCount + ' 张图片' : ''), 'ok');
+                resolve({ keys: r.keys, mode: mode, assets: imgCount });
+              } catch (e) {
+                QB.UIRenderer.toast('恢复失败：' + e.message, 'err');
+                reject(e);
+              }
+            };
+          }
+        );
+      } catch (e) { reject(e); }
+    });
+  }
+
   function pickAndRestore() {
     return new Promise((resolve, reject) => {
       const input = document.createElement('input');
@@ -123,44 +165,8 @@
         if (!file) return resolve(null);
         const reader = new FileReader();
         reader.onload = async () => {
-          let parsed;
           try {
-            parsed = await parseBackupFile(reader.result);
-          } catch (e) { reject(e); return; }
-          try {
-            const backup = parsed.backup;
-            const used = QB.Storage.usageBytes();
-            const keys = Object.keys(backup.data || {});
-            QB.UIRenderer.openModal(
-              '<h3>恢复备份</h3>' +
-              '<p>备份包含 <b>' + keys.length + '</b> 个数据键' +
-              (parsed.assets.length ? '、<b>' + parsed.assets.length + '</b> 张图片' : '') +
-              '，导出时间：' +
-              QB.Helpers.escapeHtml(backup.exportedAt || '未知') + '</p>' +
-              '<div class="checkbox-row"><input type="radio" name="bk-mode" id="bk-replace" value="replace" checked>' +
-              '<label for="bk-replace">覆盖恢复（清空现有全部数据后写入，推荐）</label></div>' +
-              '<div class="checkbox-row"><input type="radio" name="bk-mode" id="bk-merge" value="merge">' +
-              '<label for="bk-merge">合并恢复（同名键覆盖，保留其余现有数据与图片）</label></div>' +
-              '<p class="li-meta">当前已用约 ' + Math.round(used / 1024) + ' KB。恢复后建议刷新页面。</p>' +
-              '<div class="modal-actions"><button class="btn btn-ghost" data-bk="cancel">取消</button>' +
-              '<button class="btn btn-danger" data-bk="ok">确认恢复</button></div>',
-              (modal) => {
-                modal.querySelector('[data-bk="cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
-                modal.querySelector('[data-bk="ok"]').onclick = async () => {
-                  const mode = modal.querySelector('#bk-merge').checked ? 'merge' : 'replace';
-                  try {
-                    const r = applyBackup(backup, { mode: mode });
-                    const imgCount = await restoreAssets(parsed.assets, mode);
-                    QB.UIRenderer.closeModal();
-                    QB.UIRenderer.toast('已恢复 ' + r.keys + ' 个数据键' + (imgCount ? '、' + imgCount + ' 张图片' : ''), 'ok');
-                    resolve({ keys: r.keys, mode: mode, assets: imgCount });
-                  } catch (e) {
-                    QB.UIRenderer.toast('恢复失败：' + e.message, 'err');
-                    reject(e);
-                  }
-                };
-              }
-            );
+            resolve(await confirmRestore(await parseBackupFile(reader.result)));
           } catch (e) { reject(e); }
         };
         reader.onerror = () => reject(new Error('读取文件失败'));
@@ -187,6 +193,7 @@
       '<div class="modal-actions" style="justify-content:flex-start;flex-wrap:wrap">' +
       '<button class="btn" data-bk="export">下载全量备份</button>' +
       '<button class="btn btn-ghost" data-bk="import">从备份恢复</button>' +
+      '<button class="btn btn-ghost" data-bk="dav">☁ WebDAV 云备份</button>' +
       '<button class="btn btn-ghost" data-bk="gc">清理未引用图片</button>' +
       '<button class="btn btn-ghost" data-bk="close">关闭</button></div>',
       (modal) => {
@@ -196,6 +203,10 @@
           QB.UIRenderer.toast(r.assetCount ? '备份已生成（含图片 ' + r.assetCount + ' 张，.qfbk）' : '备份已生成（.json）', 'ok');
         };
         modal.querySelector('[data-bk="import"]').onclick = () => pickAndRestore();
+        modal.querySelector('[data-bk="dav"]').onclick = () => {
+          if (QB.SyncDAV) QB.SyncDAV.openFlow();
+          else QB.UIRenderer.toast('WebDAV 模块未加载', 'err');
+        };
         modal.querySelector('[data-bk="gc"]').onclick = async () => {
           try {
             const [referenced, all] = await Promise.all([globallyReferencedAssetIds(), QB.Assets.ids()]);
@@ -214,6 +225,7 @@
   QB.Backup = {
     buildBackup, applyBackup, isBackup,
     buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,
+    confirmRestore,
     download, pickAndRestore, openFlow
   };
 })(window);

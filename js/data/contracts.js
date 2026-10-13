@@ -19,6 +19,7 @@
     session: 'user:session',
     revlog: 'user:revlog',
     metaFsrsWeights: 'meta:fsrsWeights',
+    metaDav: 'meta:dav',
     metaCurrentBank: 'meta:currentBank',
     metaTheme: 'meta:theme'
   };

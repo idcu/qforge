@@ -709,6 +709,33 @@
 
 ---
 
+## 待回填 · feat(sync): WebDAV 云备份（手动异步同步）
+
+**背景**：竞品评分中多端同步维度的低成本折中——不做账号体系与实时同步（那是 `DATA_BACKEND=api` 的边界），用 WebDAV 固定对象 PUT/GET 实现跨设备手动备份。
+
+**核心改动**
+- 新增 `js/modules/sync-dav.js`（`QB.SyncDAV`）：配置存 `qb:meta:dav`（目录 URL/账号/应用密码/上次同步），固定对象 `qforge-backup-latest.bin`，不使用 PROPFIND；PUT 上传（有图走 `Backup.buildAssetBundle` 的 .qfbk ZIP，无图为 JSON），GET 拉取后交共享恢复确认。401/403/404/5xx 分级中文报错；`fetch` 可注入（逻辑层可测）；Basic Auth 头。
+- 备份模块抽出 `confirmRestore(parsed)`，文件恢复与 WebDAV 恢复共用同一「覆盖/合并 + 资产清理/写入」确认弹窗（新增 parsed.source 展示来源）；备份弹窗新增「☁ WebDAV 云备份」入口与设置弹窗（上传/下载恢复/清除配置/上次同步信息）。
+- KEYS 新增 `metaDav`；index.html/harness 加载顺序；CI 第 14 步。
+- **CORS 诚实标注**：坚果云等公共 WebDAV 默认不发跨域头，浏览器可能拦截（与 URL 导入同一类服务端限制，非代码缺陷）；文档与弹窗均提示，自建/Nextcloud 通常可配置。密码只存本机，不经过淬题任何服务。
+- 文档：user-guide 9.1（WebDAV/CORS/与实时同步边界）、ARCHITECTURE（backup/sync-dav 两行）、DATABASE 映射 + learning 字段补全、README、本档。
+
+**验证数据（Node v24.14.0）**
+- 新增 `scripts/sync-dav.test.mjs` **32 断言全过**：配置存取/校验（空/ftp/缺账号密码/非法 URL）、URL 尾斜杠拼接、Basic base64、PUT JSON（方法/头/body/201/lastAt 记录）、401/500、有图 PUT 为 ZIP（PK 头/204）、GET 解析/source 标注/404/403。
+- backup 重构后备份套件 15 断言零回归；14 套件合计 **1803/1803**。
+- 首屏体积（**54 文件/49 js**，gzip -9）：**119.4 KB gzip / 335.8 KB raw**（上批 115.9 KB，+3.5KB）。
+
+**公共抽象清单**
+- 新增：`QB.SyncDAV`（getConfig/saveConfig/clearConfig/validateConfig/targetUrl/authHeader/upload/fetchBackup/openFlow）、`Backup.confirmRestore`、`KEYS.metaDav`。
+- 复用：`Backup.buildAssetBundle/parseBackupFile/restoreAssets/applyBackup`、UIRenderer modal/toast/confirm、Storage；无重复打包/恢复逻辑。
+- 影响范围：仅备份弹窗新增按钮与恢复弹窗新增可选 source 行；既有文件备份/恢复路径行为不变（pickAndRestore 内部改为先 parse 再走共享 confirm）。
+
+**遗留 TODO / 风险**
+- 真实 WebDAV（坚果云/Nextcloud/群晖）连通性与 CORS 需人工验证；若坚果云类被 CORS 拦截，用户只能继续走文件备份，功能降级明确。
+- 固定单文件名（latest），无历史版本；冲突解决策略是「最后上传覆盖」，手动同步场景足够。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·

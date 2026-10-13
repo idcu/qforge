@@ -50,5 +50,7 @@ jobs:
         run: node scripts/srs.test.mjs
       - name: 备份恢复测试
         run: node scripts/backup.test.mjs
+      - name: WebDAV 云备份测试
+        run: node scripts/sync-dav.test.mjs
       - name: PWA 资源校验
         run: node scripts/pwa.test.mjs

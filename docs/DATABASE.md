@@ -173,11 +173,12 @@ CREATE TABLE assets (
 | `qb:questions:<bankId>` | `questions` | 按库分键；字段名 camelCase ↔ snake_case |
 | `qb:user:wrong:<bankId>` | `wrong_questions` | `{questionKey, wrongCount, lastAt}` |
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
-| `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{algo:'fsrs', due, stability, difficulty, reps, lapses, last}` |
+| `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}` |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
 | `qb:user:session` | `sessions` | 单条会话快照 |
 | `qb:user:revlog` | `review_log` | 全局 FIFO 评分日志，元素 `{id,h,r,t}` |
 | `qb:meta:fsrsWeights` | —（前端偏好） | 个性化 FSRS 权重与训练元数据 |
+| `qb:meta:dav` | —（前端偏好） | WebDAV 配置（目录 URL/账号/应用密码/上次同步时间），仅本机 |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
 
