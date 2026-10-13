@@ -109,7 +109,7 @@ qb/
 QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 ```
 
-**实测数据（Node v24.14.0，2026-10-13 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
+**实测数据（Node v24.14.0，2026-10-14 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
 - 14 个逻辑层测试套件 **1803 / 1803 通过**（UTC / UTC+8 双时区实跑）：冒烟 202（注入 DOMParser 时 222）、导出 103、Office 导出 1148、编辑器 29、**富文本 33**、**图片资产 45**、组卷 18、来源/网络导入 29、FSRS **65**、**FSRS 优化器 37**、SRS 29、备份 15、**WebDAV 32**、PWA 18。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
 - FSRS 优化器：以 mulberry32 + 伯努利模拟的合成评分日志（420 卡 × 4 次复习 = 1260 个相邻评分样本，含 140 次「又忘了」）验证有效性——当真权重相对默认值扰动 ±25% 时，训练后 logloss 0.3440 < 默认权重 0.3473（改善约 0.97%，超过 0.2% 采纳门控）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果确定一致。套件耗时约 2.6s。

@@ -623,7 +623,7 @@
 
 ---
 
-## 待回填 · feat(rich-text): 公共富文本渲染器与上下标轻量公式
+## a57a1b8 · feat(rich-text): 公共富文本渲染器与上下标轻量公式
 
 **背景**：竞品集体评分（10 竞品 × 8 维）后按性价比全量推进的第 1 项；同时作为图片题（IndexedDB）的渲染地基。
 
@@ -649,7 +649,7 @@
 
 ---
 
-## 待回填 · feat(assets): 图片题（IndexedDB 资产 + 题库包 .qbk 往返 + 含图备份 .qfbk）
+## 28d6c72 · feat(assets): 图片题（IndexedDB 资产 + 题库包 .qbk 往返 + 含图备份 .qfbk）
 
 **背景**：竞品评分中富媒体维度（6/10）为纯前端可补的最大短板；本项落地文字考试常见的图片题（电路图/现场图/图表），不引入任何第三方库。
 
@@ -681,7 +681,7 @@
 
 ---
 
-## 待回填 · feat(srs): FSRS learning steps（1m/10m）与按题库权重 preset
+## 0a0532c · feat(srs): FSRS learning steps（1m/10m）与按题库权重 preset
 
 **背景**：竞品评分中与 Anki 的算法半档差距（新卡首日无短周期步骤、权重全局一组），本项对齐官方 FSRS 调度习惯。
 
@@ -709,7 +709,7 @@
 
 ---
 
-## 待回填 · feat(sync): WebDAV 云备份（手动异步同步）
+## 44ea8e0 · feat(sync): WebDAV 云备份（手动异步同步）
 
 **背景**：竞品评分中多端同步维度的低成本折中——不做账号体系与实时同步（那是 `DATA_BACKEND=api` 的边界），用 WebDAV 固定对象 PUT/GET 实现跨设备手动备份。
 
@@ -745,6 +745,7 @@
 > `cce9a0d` SRS · `7511ac4` 备份恢复 · `5c4f855` PWA · `7010208` 不定项 ·
 > `4d00e2f` docs(本批 README/CHANGELOG) · `b90bafa` 品牌定名「淬题 qforge」
 > 未标注项批次：`b041b6b` xlsx/docx 双向导出+收藏导出 · `2ad0dc5` 组卷单场乱序开关 · `28871d2` ci(GitHub Actions) · `d8ba2d6` fix(srs 时区断言/CI 双时区矩阵)
+> 竞品跟进批次（2026-10-14）：`a57a1b8` 富文本/上下标公式 · `28d6c72` 图片题（IDB/.qbk/.qfbk） · `0a0532c` FSRS learning steps/按题库 preset · `44ea8e0` WebDAV 云备份
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
