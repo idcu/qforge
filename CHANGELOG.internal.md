@@ -473,7 +473,7 @@
 
 ---
 
-## 待回填 hash · feat(srs): 调度算法升级 SM-2 简化版 → FSRS-4.5
+## 78ecaa7 · feat(srs): 调度算法升级 SM-2 简化版 → FSRS-4.5
 
 **核心改动**
 - 新增 `js/modules/fsrs.js`：忠实移植官方 **FSRS-4.5**（17 个默认权重、DECAY=-0.5/FACTOR=19/81、目标保留率 0.9），状态 `{algo:'fsrs', due, stability, difficulty, reps, lapses, last}`；again/hard/good/easy 四档，纯函数无 DOM/存储依赖。
@@ -493,7 +493,7 @@
 
 ---
 
-## 待回填 hash · feat(ui): P0 五项——标签筛选 / 列表分页 / 存储健康 / 快捷键帮助 / 打印
+## bafa6fa · feat(ui): P0 五项——标签筛选 / 列表分页 / 存储健康 / 快捷键帮助 / 打印
 
 **核心改动**
 - **P0-1 标签筛选**：`SearchFilter.tags()` 新增；`filter` 支持 `tag`/`tags`（任一命中）；关键词检索域扩到标签；搜索栏新增标签下拉；列表项展示标签 chips。
@@ -520,6 +520,7 @@
 > `cce9a0d` SRS · `7511ac4` 备份恢复 · `5c4f855` PWA · `7010208` 不定项 ·
 > `4d00e2f` docs(本批 README/CHANGELOG) · `b90bafa` 品牌定名「淬题 qforge」
 > 未标注项批次：`b041b6b` xlsx/docx 双向导出+收藏导出 · `2ad0dc5` 组卷单场乱序开关 · `28871d2` ci(GitHub Actions) · `d8ba2d6` fix(srs 时区断言/CI 双时区矩阵)
+> P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印）
 >
-> 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `ea48d35` 已 push；`d8ba2d6` 及本回填提交待 push），镜像同步 GitHub。
+> 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS 与 P0 批次待 push），镜像同步 GitHub。
 > 本文件后续若有「回填 Commit Hash」的文档提交，其 Hash 以 `git log -1` 为准（避免自引用循环）。
