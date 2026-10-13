@@ -12,6 +12,7 @@ const MODULES = [
   'js/data/sample-data.js',
   'js/config.js',
   'js/utils/helpers.js',
+  'js/utils/rich-text.js',
   'js/utils/storage.js',
   'js/utils/shuffle.js',
   'js/utils/answer-normalize.js',

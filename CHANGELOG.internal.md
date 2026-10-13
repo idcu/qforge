@@ -623,6 +623,32 @@
 
 ---
 
+## 待回填 · feat(rich-text): 公共富文本渲染器与上下标轻量公式
+
+**背景**：竞品集体评分（10 竞品 × 8 维）后按性价比全量推进的第 1 项；同时作为图片题（IndexedDB）的渲染地基。
+
+**核心改动**
+- 新增 `js/utils/rich-text.js`（`QB.RichText`，零依赖纯函数）：题干/选项/解析/参考答案等**模型内容上屏的统一入口**，禁止各处自行 `escapeHtml` 拼接。
+  - `render(text)`：先复用 `Helpers.escapeHtml` 转义，再把 `x^{2}` → `<sup>2</sup>`、`a_{n}` → `<sub>n</sub>`；花括号必须显式定界，裸 `^`/`_`（snake_case、2^3）原样保留，记号内 HTML 仍转义（注入用例断言覆盖）。
+  - `toPlain(text)`：去记号返回**未转义**纯文本（搜索高亮入参/未来索引），契约写明拼 HTML 前调用方必须自行转义。
+- 接入点：`ui-renderer` 答题题干/选项/四类反馈解析/参考答案走 `render`；答题卡回顾、错题/收藏/管理器列表标题与答案区走「toPlain+escape」；搜索高亮改喂 toPlain；`question-editor` 管理器列表同步。判分、contentHash、搜索索引、导入导出仍用原始文本（记号是普通文本，JSON/CSV/MD/XLSX/DOCX 全链路原样往返）。
+- 加载顺序：index.html 与 `_harness.mjs` 均在 helpers 之后插入。
+- 文档：ARCHITECTURE 公共抽象表 + 影响范围条目；user-guide 新增 3.2（语法表/Unicode 说明/复杂公式不做）；IMPORT-FORMAT 模型说明；README 特性/目录/测试表/体积/CI；CI 第 12 步。
+
+**验证数据（Node v24.14.0）**
+- 新增 `scripts/rich-text.test.mjs` **23 断言全过**（空值、转义防注入、上下标 5 例、裸符号 4 例、toPlain 契约、组合安全）。
+- 既有 11 套件零回归（渲染输出变化不影响逻辑层断言）；合计 **12 套件 1676/1676**。
+- 首屏体积（**50 文件/45 js**，gzip -9）：**104.3 KB gzip / 296.2 KB raw**（上批 103.3 KB，+1.0KB）。
+
+**公共抽象清单**
+- 新增 `QB.RichText.render/toPlain`（+ 导出两个源正则 SUP_RE/SUB_RE）。
+- 影响范围：ui-renderer 模型内容渲染点（optionHtml/renderFeedback/renderQuiz/答题卡/错题/收藏/搜索/renderAnswerText）与 question-editor 管理器列表标题；无第三方调用方，文本框编辑与数据层不感知记号。
+
+**遗留 TODO**
+- 图片占位（`![](asset:id)`）与 hydrate 在下一项 IndexedDB 图片题中落地，本提交不提前实现。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·

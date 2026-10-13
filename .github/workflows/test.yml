@@ -34,6 +34,8 @@ jobs:
         run: node scripts/office-export.test.mjs
       - name: 题目编辑器测试
         run: node scripts/editor.test.mjs
+      - name: 富文本渲染器测试
+        run: node scripts/rich-text.test.mjs
       - name: 组卷蓝图测试
         run: node scripts/blueprint.test.mjs
       - name: 来源与网络导入测试

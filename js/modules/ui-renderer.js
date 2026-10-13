@@ -6,6 +6,9 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
   const esc = QB.escapeHtml;
+  // 模型内容（题干/选项/解析）走富文本渲染；紧凑列表用「去记号 + 转义」的安全纯文本
+  const rich = (s) => QB.RichText.render(s);
+  const plain = (s) => esc(QB.RichText.toPlain(s));
 
   const JUDGE_OPTIONS = [
     { letter: 'A', text: '正确', value: true },
@@ -29,7 +32,7 @@
     return '<div class="' + cls.join(' ') + '" data-action="' + (state.multi ? 'toggle' : 'pick') +
       '" data-value="' + esc(state.value !== undefined ? state.value : letter) + '">' +
       '<span class="opt-letter">' + esc(letter) + '</span>' +
-      '<span class="opt-text">' + esc(text) + '</span></div>';
+      '<span class="opt-text">' + rich(text) + '</span></div>';
   }
 
   /* ---------------- 题库列表 / 首页 ---------------- */
@@ -227,27 +230,27 @@
     if (!result) return '';
     if (result.partial) {
       return '<div class="feedback neutral"><h4>◐ 少选，得一半分</h4>' +
-        '<div class="fb-line">正确答案：<b>' + esc(result.correctAnswer || '') + '</b></div>' +
+        '<div class="fb-line">正确答案：<b>' + rich(result.correctAnswer || '') + '</b></div>' +
         '<div class="fb-line">你的答案：' + esc(String(result.userAnswer || '（未作答）')) + '</div>' +
-        (result.analysis ? '<div class="analysis">解析：' + esc(result.analysis) + '</div>' : '') + '</div>';
+        (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + '</div>';
     }
     if (result.isCorrect === true) {
       return '<div class="feedback ok"><h4>✅ 回答正确</h4>' +
-        (result.analysis ? '<div class="analysis">解析：' + esc(result.analysis) + '</div>' : '') + '</div>';
+        (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + '</div>';
     }
     if (result.isCorrect === null) {
       return '<div class="feedback neutral"><h4>📝 请自评</h4>' +
-        '<div class="fb-line">参考答案：' + esc(result.correctAnswer) + '</div>' +
-        (result.analysis ? '<div class="analysis">解析：' + esc(result.analysis) + '</div>' : '') +
+        '<div class="fb-line">参考答案：' + rich(result.correctAnswer) + '</div>' +
+        (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') +
         '<div class="quiz-actions">' +
         '<button class="btn btn-sm" data-action="self-correct">我答对了</button>' +
         '<button class="btn btn-sm btn-danger" data-action="self-wrong">我答错了</button>' +
         '</div></div>';
     }
     return '<div class="feedback no"><h4>❌ 回答错误</h4>' +
-      '<div class="fb-line">正确答案：<b>' + esc(result.correctAnswer || '') + '</b></div>' +
+      '<div class="fb-line">正确答案：<b>' + rich(result.correctAnswer || '') + '</b></div>' +
       '<div class="fb-line">你的答案：' + esc(String(result.userAnswer || '（未作答）')) + '</div>' +
-      (result.analysis ? '<div class="analysis">解析：' + esc(result.analysis) + '</div>' : '') + '</div>';
+      (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + '</div>';
   }
 
   function renderQuiz(engine, opts) {
@@ -272,7 +275,7 @@
     html += progressBar(prog.percentage);
 
     html += '<div class="card">' +
-      '<div class="question-text">' + esc(q.question) + '</div>' +
+      '<div class="question-text">' + rich(q.question) + '</div>' +
       renderAnswerArea(q, userAns, result, answered) +
       '</div>';
 
@@ -365,11 +368,11 @@
       const mark = !r || r.isCorrect === null ? '○ 未判定' : (r.isCorrect ? '✔ 正确' : (r.partial ? '◐ 半对' : '✘ 错误'));
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
-        '<span class="li-title">' + (i + 1) + '. ' + esc(q.question) + '</span>' +
+        '<span class="li-title">' + (i + 1) + '. ' + plain(q.question) + '</span>' +
         '<span class="li-meta">' + mark + '</span></div>' +
-        '<div class="li-meta">正确答案：' + esc(r ? r.correctAnswer : '') +
+        '<div class="li-meta">正确答案：' + plain(r ? r.correctAnswer : '') +
         '　你的答案：' + esc(r ? String(r.userAnswer || '（未作答）') : '（未作答）') + '</div>' +
-        (q.analysis ? '<div class="li-meta">解析：' + esc(q.analysis) + '</div>' : '') +
+        (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '') +
         '</div>';
     });
 
@@ -411,7 +414,7 @@
       const q = it.question;
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
-        '<span class="li-title">' + esc(q.question) + '</span>' +
+        '<span class="li-title">' + plain(q.question) + '</span>' +
         '<span class="li-meta">错 ' + (it.wrongCount || 1) + ' 次</span></div>' +
         renderAnswerText(q) +
         '<div class="li-actions">' +
@@ -447,14 +450,14 @@
   }
 
   function renderAnswerText(q) {
-    if (q.type === 'judge') return '<div class="li-meta">答案：' + esc(q.answer) + '</div>' +
-      (q.analysis ? '<div class="li-meta">解析：' + esc(q.analysis) + '</div>' : '');
-    if (q.type === 'fill') return '<div class="li-meta">答案：' + esc(q.answer) + '</div>' +
-      (q.analysis ? '<div class="li-meta">解析：' + esc(q.analysis) + '</div>' : '');
-    if (q.type === 'essay') return '<div class="li-meta">参考答案：' + esc(q.reference_answer) + '</div>';
-    let s = '<div class="li-meta">答案：' + esc(q.answer) + '</div>';
-    s += (q.options || []).map((o) => '<div class="li-meta">' + esc(o.letter) + '. ' + esc(o.text) + '</div>').join('');
-    if (q.analysis) s += '<div class="li-meta">解析：' + esc(q.analysis) + '</div>';
+    if (q.type === 'judge') return '<div class="li-meta">答案：' + plain(q.answer) + '</div>' +
+      (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '');
+    if (q.type === 'fill') return '<div class="li-meta">答案：' + plain(q.answer) + '</div>' +
+      (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '');
+    if (q.type === 'essay') return '<div class="li-meta">参考答案：' + plain(q.reference_answer) + '</div>';
+    let s = '<div class="li-meta">答案：' + plain(q.answer) + '</div>';
+    s += (q.options || []).map((o) => '<div class="li-meta">' + esc(o.letter) + '. ' + plain(o.text) + '</div>').join('');
+    if (q.analysis) s += '<div class="li-meta">解析：' + plain(q.analysis) + '</div>';
     if (Array.isArray(q.tags) && q.tags.length) {
       s += '<div class="tag-row">' + q.tags.map((t) => '<span class="tag-chip">' + esc(t) + '</span>').join('') + '</div>';
     }
@@ -587,7 +590,7 @@
     win.items.forEach((q) => {
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
-        '<span class="li-title">' + QB.SearchFilter.highlight(q.question, criteria.keyword) + '</span></div>' +
+        '<span class="li-title">' + QB.SearchFilter.highlight(QB.RichText.toPlain(q.question), criteria.keyword) + '</span></div>' +
         renderAnswerText(q) + '</div>';
     });
     const start = win.page * LIST_PAGE_SIZE + 1;

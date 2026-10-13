@@ -317,7 +317,7 @@
         '<div class="li-head"><input type="checkbox" data-qm="pick" />' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
         difficultyBadge(q.difficulty) +
-        '<span class="li-title">' + esc(q.question) + '</span></div>' +
+        '<span class="li-title">' + esc(QB.RichText.toPlain(q.question)) + '</span></div>' +
         '<div class="li-meta">' +
         (q.category ? '<span class="tag-chip">' + esc(q.category) + '</span>' : '') +
         (q.tags || []).map((t) => '<span class="tag-chip tag-soft">' + esc(t) + '</span>').join('') +
