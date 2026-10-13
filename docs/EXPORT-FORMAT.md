@@ -26,7 +26,7 @@
 ### 2.1 JSON 结构
 ```json
 {
-  "app": "题库系统",
+  "app": "淬题",
   "version": "1.0.0",
   "exportedAt": "2026-10-13T10:00:00.000Z",
   "kind": "bank | wrong | favorites",

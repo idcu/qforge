@@ -19,7 +19,7 @@ function section(t) { console.log('\n== ' + t + ' =='); }
 
 section('Web App Manifest');
 const manifest = JSON.parse(read('manifest.webmanifest'));
-eq(manifest.name, 'qforge 题库系统', 'name');
+eq(manifest.name, '淬题 qforge', 'name');
 ok(!!manifest.short_name, 'short_name 存在');
 eq(manifest.start_url, './', 'start_url 相对路径（适配 Pages 子路径）');
 eq(manifest.scope, './', 'scope 相对路径');

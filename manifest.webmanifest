@@ -1,6 +1,6 @@
 {
-  "name": "qforge 题库系统",
-  "short_name": "qforge",
+  "name": "淬题 qforge",
+  "short_name": "淬题",
   "description": "零依赖、可离线使用的题库与刷题系统：多题型、错题、SRS 间隔重复、导入导出。",
   "lang": "zh-CN",
   "start_url": "./",

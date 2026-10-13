@@ -61,7 +61,7 @@
 
 ### 2.2 本系统导出格式
 ```json
-{ "app": "题库系统", "version": "1.0.0", "bank": { "name": "…" }, "questions": [ … ] }
+{ "app": "淬题", "version": "1.0.0", "bank": { "name": "…" }, "questions": [ … ] }
 ```
 
 ### 2.3 中文扁平（如 `题库-背题模式.json`）
