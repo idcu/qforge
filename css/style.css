@@ -491,6 +491,11 @@ body {
 .ac-dot.ac-correct { background: var(--brand-soft); border-color: var(--brand); }
 .ac-dot.ac-wrong { background: rgba(232, 70, 58, .12); border-color: var(--danger); }
 
+/* ===== 今日复习热点 ===== */
+.menu-item { position: relative; }
+.menu-item.hot { border-color: var(--brand); }
+.hot-dot { position: absolute; top: 10px; right: 12px; width: 8px; height: 8px; border-radius: 999px; background: var(--danger); }
+
 @media (max-width: 560px) {
   .view { padding: 14px 10px 30px; }
   .brand { font-size: 15px; }

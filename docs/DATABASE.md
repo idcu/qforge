@@ -116,6 +116,23 @@ CREATE TABLE sessions (
 ```
 > 每用户每库至多一条有效会话（本期单用户全局一条，存 `qb:user:session`）。
 
+### 2.7 review_schedule（SRS 间隔重复）
+```sql
+CREATE TABLE review_schedule (
+  id          VARCHAR(32) PRIMARY KEY,
+  user_id     VARCHAR(32),
+  bank_id     VARCHAR(32) REFERENCES banks(id) ON DELETE CASCADE,
+  content_hash VARCHAR(16) NOT NULL,             -- 与题目去重键一致
+  due_at      BIGINT NOT NULL,                   -- 下次到期时间戳
+  interval_d  INT NOT NULL DEFAULT 0,            -- 间隔（天）
+  ease        REAL NOT NULL DEFAULT 2.3,
+  reps        INT NOT NULL DEFAULT 0,
+  lapses      INT NOT NULL DEFAULT 0,
+  last_at     BIGINT NOT NULL DEFAULT 0,
+  UNIQUE INDEX uq_review_user_bank_hash (user_id, bank_id, content_hash)
+);
+```
+
 ## 3. LocalStorage ↔ 数据库映射
 
 | LocalStorage 逻辑键（含前缀 `qb:`） | 对应表 | 说明 |
@@ -124,6 +141,7 @@ CREATE TABLE sessions (
 | `qb:questions:<bankId>` | `questions` | 按库分键；字段名 camelCase ↔ snake_case |
 | `qb:user:wrong:<bankId>` | `wrong_questions` | `{questionKey, wrongCount, lastAt}` |
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
+| `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{due, interval, ease, reps, lapses, last}`（SRS） |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
 | `qb:user:session` | `sessions` | 单条会话快照 |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |

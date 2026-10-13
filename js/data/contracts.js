@@ -14,6 +14,7 @@
     questions: (bankId) => 'questions:' + bankId,
     wrong: (bankId) => 'user:wrong:' + bankId,
     favorite: (bankId) => 'user:fav:' + bankId,
+    review: (bankId) => 'user:review:' + bankId,
     history: 'user:history',
     session: 'user:session',
     metaCurrentBank: 'meta:currentBank',

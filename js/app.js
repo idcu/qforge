@@ -107,7 +107,7 @@
     QB.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
     res.items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
     State.allQuestions = res.items;
-    State.counts = { total: res.items.length, byType: byType };
+    State.counts = { total: res.items.length, byType: byType, dueReview: QB.SRSStore.countDue(State.bankId, res.items) };
   }
 
   /* ---------------- 渲染分发 ---------------- */
@@ -235,6 +235,10 @@
     const q = engine.getCurrentQuestion();
     const r = engine.submitAnswer();
     if (r && r.isCorrect === false) await QB.WrongBook.add(State.bankId, q);
+    // SRS：练习即时判分（简答待自评，不在此记录）
+    if (r && r.isCorrect !== null && r.isCorrect !== undefined) {
+      QB.SRSStore.grade(State.bankId, q, r.isCorrect ? QB.SRS.RATINGS.good : QB.SRS.RATINGS.again);
+    }
     QB.ProgressSaver.saveDebounced(State.bankId, engine);
     render();
   }
@@ -248,6 +252,15 @@
       engine.gradeAll();
       await recordWrongs(engine);
     }
+    // SRS：把本次已判定的结果批量写入复习调度（简答未自评跳过）
+    const srsEntries = [];
+    engine.questions.forEach((q, i) => {
+      const r = engine.results[i];
+      if (r && r.isCorrect !== null && r.isCorrect !== undefined) {
+        srsEntries.push({ question: q, rating: r.isCorrect ? QB.SRS.RATINGS.good : QB.SRS.RATINGS.again });
+      }
+    });
+    if (srsEntries.length) QB.SRSStore.gradeMany(State.bankId, srsEntries);
     const score = engine.getScore();
     const durationMs = Date.now() - (State.quizMeta.startTs || Date.now());
     await QB.History.add({
@@ -279,6 +292,13 @@
     const list = await QB.Favorites.list(State.bankId);
     if (!list.length) { UI.toast('收藏夹是空的', 'err'); return; }
     beginQuiz(QB.shuffle(list.map((x) => x.question)).slice(0, QB.CONFIG.QUESTIONS_PER_QUIZ), 'practice', '收藏练习');
+  }
+
+  /** 今日复习：抽取 SRS 到期题（含未学新题），打乱成练习 */
+  function startReview() {
+    const due = QB.SRSStore.dueToday(State.bankId, State.allQuestions);
+    if (!due.length) { UI.toast('今日没有到期需要复习的题目 🎉', 'ok'); return; }
+    beginQuiz(QB.shuffle(due), 'practice', '今日复习（' + due.length + ' 题）');
   }
 
   /* ---------------- 事件处理 ---------------- */
@@ -349,6 +369,8 @@
         return QB.QuestionEditor.openManager(State.bank).then(() => loadBankData());
 
       /* —— 练习入口 —— */
+      case 'start-review':
+        return startReview();
       case 'start-practice':
         return beginQuiz(pickQuestions(null), 'practice', '练习模式');
       case 'start-exam':
@@ -385,12 +407,14 @@
         return submitCurrent();
       case 'self-correct': {
         State.engine.selfAssess(true);
+        QB.SRSStore.grade(State.bankId, State.engine.getCurrentQuestion(), QB.SRS.RATINGS.good);
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
         return render();
       }
       case 'self-wrong': {
         State.engine.selfAssess(false);
         await QB.WrongBook.add(State.bankId, State.engine.getCurrentQuestion());
+        QB.SRSStore.grade(State.bankId, State.engine.getCurrentQuestion(), QB.SRS.RATINGS.again);
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
         return render();
       }

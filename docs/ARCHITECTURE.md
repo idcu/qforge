@@ -92,6 +92,8 @@
 | `modules/statistics.js` | `overview`/`typePerformance`/`suggestions` |
 | `modules/search-filter.js` | `search`/`filter`/`highlight`/`categories` |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
+| `modules/srs.js` | **间隔重复纯调度器（SM-2 简化）**：`review/isDue/isDueToday/dueQuestions` |
+| `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday` |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |
 | `modules/data-io.js` | `pickFile`/`importFlow`（预览弹窗） |
 | `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`openFlow`，JSON/CSV/Markdown/TXT，题库/错题（收藏预留），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |

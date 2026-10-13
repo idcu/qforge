@@ -75,18 +75,21 @@
         '<button class="btn btn-ghost" data-action="bank-import-sample">导入示例题目</button>');
     }
 
+    const due = counts.dueReview || 0;
     const menu = [
+      { action: 'start-review', ico: '🧠', label: '今日复习', sub: due + ' 题到期（间隔重复）', hot: due > 0 },
       { action: 'start-practice', ico: '✍️', label: '练习模式', sub: '边答边看解析' },
       { action: 'start-exam', ico: '⏱️', label: '考试模式', sub: '限时 / 交卷' },
-      { action: 'start-mixed', ico: '🎲', label: '混合练习', sub: '选择题型组合' },
+      { action: 'start-mixed', ico: '🎲', label: '组卷', sub: '题型/分类/难度' },
       { action: 'start-wrong', ico: '📕', label: '错题重练', sub: '错题本' },
       { action: 'start-favorite', ico: '⭐', label: '收藏练习', sub: '收藏夹' },
       { action: 'nav-search', ico: '🔍', label: '题目搜索', sub: '关键词/筛选' }
     ];
     html += '<div class="menu-grid">';
     menu.forEach((m) => {
-      html += '<div class="menu-item" data-action="' + m.action + '">' +
+      html += '<div class="menu-item' + (m.hot ? ' hot' : '') + '" data-action="' + m.action + '">' +
         '<span class="menu-ico">' + m.ico + '</span>' +
+        (m.hot ? '<span class="hot-dot"></span>' : '') +
         '<div class="menu-label">' + esc(m.label) + '</div>' +
         '<div class="menu-sub">' + esc(m.sub) + '</div></div>';
     });
