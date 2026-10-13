@@ -16,11 +16,16 @@ jobs:
       fail-fast: false
       matrix:
         node-version: ['20', '24']
+        tz: ['UTC', 'Asia/Shanghai']
+    env:
+      TZ: ${{ matrix.tz }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+      - name: 时区确认（${{ matrix.tz }}）
+        run: node -e "console.log('TZ=' + (process.env.TZ || 'system-default'))"
       - name: 冒烟测试（六题型/真实 541 题/三格式往返/CRUD/答题卡）
         run: node scripts/smoke-test.mjs
       - name: 导出单元测试

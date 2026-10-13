@@ -18,7 +18,9 @@ function eq(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，�
 function section(t) { console.log('\n== ' + t + ' =='); }
 
 const DAY = 24 * 3600 * 1000;
-const T0 = Date.UTC(2026, 9, 13, 0, 0, 0);
+// 锚点必须用「本地午夜」：isDueToday 按运行环境本地自然日判定，
+// 用 Date.UTC 构造会让断言随 CI（UTC）/本机（UTC+8）时区产生不同结果。
+const T0 = new Date(2026, 9, 13, 0, 0, 0).getTime();
 
 section('纯调度器：新题与评分曲线');
 {
@@ -56,9 +58,11 @@ section('纯调度器：新题与评分曲线');
 
 section('到期判定（自然日）');
 {
-  const dueTomorrow = QB.SRS.review(null, QB.SRS.RATINGS.good, T0); // due = T0+1day
-  const sameDayNight = T0 + DAY - 1; // 次日 23:59 前
-  ok(QB.SRS.isDueToday(dueTomorrow, sameDayNight), '明天到期的题在次日 23:59 前算今日到期');
+  const dueTomorrow = QB.SRS.review(null, QB.SRS.RATINGS.good, T0); // due = 次日本地 00:00
+  // 到期前一秒（到期日本地 00:00 的前 1 秒，仍属前一自然日）：未到期
+  ok(!QB.SRS.isDueToday(dueTomorrow, T0 + DAY - 1), '到期前一天 23:59:59 仍未到期');
+  // 到期当天 23:59:59（同一自然日内）：今日到期（含当日任何时刻）
+  ok(QB.SRS.isDueToday(dueTomorrow, T0 + 2 * DAY - 1), '到期当天 23:59:59 算今日到期');
   ok(!QB.SRS.isDueToday(dueTomorrow, T0), '明天到期的题在今天未到期');
   const overdue = QB.SRS.review(null, QB.SRS.RATINGS.good, T0 - 10 * DAY);
   ok(QB.SRS.isDueToday(overdue, T0), '逾期题算今日到期');

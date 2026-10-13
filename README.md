@@ -87,7 +87,7 @@ qb/
 | `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/538 题双格式全量判分自洽） |
 | `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
 | `node scripts/blueprint.test.mjs` | 组卷蓝图筛选/抽题/缺口测试（18 项断言） |
-| `node scripts/srs.test.mjs` | SRS 间隔调度（SM-2 简化）测试（29 项断言） |
+| `node scripts/srs.test.mjs` | SRS 间隔调度（SM-2 简化）测试（30 项断言，含自然日到期的时区无关校验） |
 | `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（15 项断言） |
 | `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源校验（18 项断言） |
 | `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出 的耗时与内存） |
@@ -99,13 +99,13 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 ```
 
 **实测数据（Node v24.14.0，2026-10-13 全量回归，详见 `CHANGELOG.internal.md`）**：
-- 8 个逻辑层测试套件 **1539 / 1539 通过**：冒烟 179、导出 103、Office 导出 1148、编辑器 29、SRS 29、组卷 18、PWA 18、备份 15。
+- 8 个逻辑层测试套件 **1540 / 1540 通过**：冒烟 179、导出 103、Office 导出 1148、编辑器 29、SRS 30、组卷 18、PWA 18、备份 15。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
 - Office 导出：538 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验（539 行 × 16 列）。
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
 - 首屏静态体积（index.html + css + 全部 41 个 js + sw/manifest/icon，共 46 个文件，gzip -9 实测）：**83.3 KB gzip / 236.1 KB raw**。
 - 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 2.16ms、落库 2.49ms、检索 0.62ms、50 题整卷判分 0.10ms、538 题乱序 0.50ms、文本四格式导出 3.42ms、**XLSX 构建 7.14ms（665 KB）**、**DOCX 构建 2.98ms（258 KB）**、Markdown 538 题再解析 4.51ms。
-- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 矩阵零依赖直跑全部 8 个套件。
+- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 8 个套件，防止自然日/时间断言的时区回归。
 
 ## 远端仓库
 
