@@ -450,6 +450,29 @@ body {
 .warn-list { margin: 8px 0 0; padding-left: 18px; color: var(--warning); font-size: 13px; max-height: 160px; overflow: auto; }
 .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 14px; }
 
+/* ===== 题目管理 / 编辑器 ===== */
+.qe-form { display: flex; flex-direction: column; gap: 6px; }
+.qe-label { font-size: 13px; color: var(--text-muted); margin-top: 8px; }
+.qe-form input[type='text'], .qe-form textarea, .qe-form select {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); font-size: 14px; box-sizing: border-box;
+}
+.qe-form textarea { resize: vertical; }
+.qe-grid { display: flex; gap: 10px; }
+.qe-grid > div { flex: 1; }
+.qe-optrow { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.qe-optrow input[type='text'] { flex: 1; }
+.qe-letter { min-width: 22px; font-weight: 600; color: var(--text-muted); }
+.qe-err { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 6px; }
+.qe-row .li-head { gap: 8px; }
+.btn-danger-text { color: var(--danger); }
+.tag-chip {
+  display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px;
+  background: var(--brand-soft); color: var(--brand-text); margin-right: 6px;
+}
+.tag-chip.tag-soft { background: var(--surface-muted); color: var(--text-muted); }
+.diff-badge { color: var(--warning); font-size: 12px; letter-spacing: 1px; }
+
 @media (max-width: 560px) {
   .view { padding: 14px 10px 30px; }
   .brand { font-size: 15px; }

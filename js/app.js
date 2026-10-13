@@ -345,7 +345,8 @@
         return render();
       }
       case 'questions-manage':
-        return QB.QuestionEditor.openReservedDialog();
+        if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        return QB.QuestionEditor.openManager(State.bank).then(() => loadBankData());
 
       /* —— 练习入口 —— */
       case 'start-practice':
