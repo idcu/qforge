@@ -242,11 +242,46 @@
 
 ---
 
+## 7bb1d5f · chore(pages): 添加 .nojekyll 以适配 GitHub Pages 静态发布
+
+**核心改动**
+- 根目录新增空文件 `.nojekyll`，关闭 GitHub Pages 的 Jekyll 处理，保证 `samples/` 等全部文件原样发布。
+- 站点全相对路径、`index.html` 在仓库根、CSS 无外部资源、零构建，Pages 选择 `main` 分支根目录即可直接发布（访问路径 `https://<user>.github.io/qforge/`）。
+
+**验证数据**
+- 静态引用扫描：无 `/` 开头的绝对 `src/href`、CSS 无 `url(...)` 外部资源；本地静态服务此前已验证页面正常。
+
+**远端**
+- 分支已由 `idcu` 改名 `main` 并推送 Gitee（删除远端旧 `idcu`），GitHub 镜像同步后在仓库 Settings → Pages 选 `main / root` 开启。
+
+---
+
+## <hash 见 git log -1> · feat(data): 新增去重后的物业原始题库（541 → 538）
+
+**核心改动**
+- 新增 `samples/原始-物业题库-538题.json`：标准导出结构（kind=bank，bank 名「物业考试题库（原始）」，category=物业），由 `题库-背题模式.json`（541 题）按 contentHash 去重得到，并用 `题库-分类.json` 回填分类，538 题全部带 category（13 个分类）。
+
+**去重明细（源数据真实情况，非代码缺陷）**
+- 文件内重复 3 组、冗余 3 条（同题型 + 同题干）：
+  1. [单选] 物业正式进入使用阶段的标志是（）。 源序号 29 / 164，hash `a70c6563`
+  2. [单选] 我国中型写字楼的建筑面积一般在()。 源序号 219 / 286，hash `0826da41`
+  3. [多选] 工业区物业管理的内容包括（）等。 源序号 451 / 453，hash `cc0ebc63`
+
+**验证数据（Node v24.14.0，实测）**
+- 去重后 538 题：判断 83 / 单选 330 / 多选 125；带分类 538、分类数 13。
+- 新文件再导入：total=538、`inFileDuplicates=0`、唯一 contentHash=538（零重复零警告）。
+- 文件 337,791 字节（UTF-8）。
+
+**遗留 TODO / 风险**
+- 该题库目前以「可导入样例」形式提供（应用内「导入」选择该文件即成为题库）；file:// 双击场景无法自动读取本地 JSON，若要首页「一键载入」需改为内置 JS 数据包（会增加首屏体积），待产品决策。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
-> `197c2fd` docs(changelog) · `f189fa7` feat(quiz 选项乱序) · `2a3c826` feat(export 多格式导出) ·
-> `1aa1121` docs(changelog) · `5ba8cd3` feat(import md + line-parser) · `40896ea` test(export 单测)
+> `197c2fd`/`1aa1121`/`2d65170` docs(changelog) · `f189fa7` 选项乱序 · `2a3c826` 多格式导出 ·
+> `5ba8cd3` import md + line-parser · `40896ea` test(export 单测) · `7bb1d5f` chore(pages .nojekyll)
 >
-> 远端：`origin git@gitee.com:idcu/qforge.git`（镜像同步 GitHub；截至本记录未 push）。
+> 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（已 push；旧 `idcu` 已删），镜像同步 GitHub。
 > 本文件后续若有「回填 Commit Hash」的文档提交，其 Hash 以 `git log -1` 为准（避免自引用循环）。
