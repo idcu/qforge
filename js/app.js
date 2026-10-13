@@ -193,7 +193,7 @@
     engine.loadQuestions(questions, 'mixed', opts || {});
     engine.mode = mode || 'practice';
     State.engine = engine;
-    State.quizMeta = { startTs: Date.now(), title: title || '' };
+    State.quizMeta = { startTs: Date.now(), title: title || '', focusLeaves: 0, locked: false };
     State.view = 'quiz';
     if (engine.mode === 'exam') startExamTimer(); else stopTimer();
     QB.ProgressSaver.save(State.bankId, engine);
@@ -280,10 +280,17 @@
       score: score.score,
       accuracy: score.accuracy,
       byType: engine.byType(),
-      durationMs: durationMs
+      durationMs: durationMs,
+      focusLeaves: isExam ? (State.quizMeta.focusLeaves || 0) : 0
     });
+    State.quizMeta.locked = true;
     await QB.ProgressSaver.clear();
-    State.resultMeta = { title: isExam ? '考试结果' : '练习结果', durationMs: durationMs };
+    State.resultMeta = {
+      title: isExam ? '考试结果' : '练习结果',
+      durationMs: durationMs,
+      focusLeaves: isExam ? (State.quizMeta.focusLeaves || 0) : 0,
+      isExam: isExam
+    };
     State.view = 'result';
     render();
   }
@@ -347,6 +354,11 @@
       case 'bank-import': {
         if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
         await QB.DataIO.importFlow(State.bank);
+        return render();
+      }
+      case 'bank-import-text': {
+        if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
+        await QB.DataIO.importTextFlow(State.bank);
         return render();
       }
       case 'bank-export': {
@@ -670,6 +682,45 @@
       render();
     });
 
+    // 文件拖拽导入：拖到窗口任意位置即可（答题中拒绝，避免误触）
+    let dragDepth = 0;
+    document.addEventListener('dragenter', (e) => {
+      if (!Array.from(e.dataTransfer.types || []).includes('Files')) return;
+      e.preventDefault();
+      dragDepth++;
+      document.body.classList.add('drag-over');
+    });
+    document.addEventListener('dragover', (e) => {
+      if (Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
+    });
+    document.addEventListener('dragleave', (e) => {
+      if (!Array.from(e.dataTransfer.types || []).includes('Files')) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (!dragDepth) document.body.classList.remove('drag-over');
+    });
+    document.addEventListener('drop', async (e) => {
+      if (!Array.from(e.dataTransfer.types || []).includes('Files')) return;
+      e.preventDefault();
+      dragDepth = 0;
+      document.body.classList.remove('drag-over');
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      if (!State.bank) { UI.toast('请先创建或选择题库', 'err'); return; }
+      if (State.engine) { UI.toast('答题中不能导入，请先交卷或退出', 'err'); return; }
+      await QB.DataIO.importFile(State.bank, file);
+      render();
+    });
+
+    // 考试防作弊信号：统计切出页面次数（仅记录与结果提示，不做拦截）
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) return;
+      const m = State.quizMeta;
+      if (State.view === 'quiz' && State.engine && State.engine.mode === 'exam' && m && !m.locked) {
+        m.focusLeaves = (m.focusLeaves || 0) + 1;
+        UI.toast('已记录第 ' + m.focusLeaves + ' 次离开考试页面', 'err');
+      }
+    });
+
     document.addEventListener('keydown', (e) => {
       const modal = document.getElementById('modal-root');
       if (e.key === 'Escape' && modal && !modal.hidden) { UI.closeModal(); return; }
@@ -774,7 +825,24 @@
     const isHttp = location.protocol === 'https:' || location.protocol === 'http:';
     if (!isHttp || !('serviceWorker' in navigator)) return;
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => { /* 离线/受限环境忽略 */ });
+      navigator.serviceWorker.register('sw.js', { scope: './' }).then((reg) => {
+        // 已打开的页面：有新版本在等待 → 提示刷新
+        const promptUpdate = (worker) => {
+          if (!worker) return;
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+              UI.toast('发现新版本，刷新页面即可更新', 'ok');
+            }
+          });
+        };
+        if (reg.waiting && navigator.serviceWorker.controller) {
+          UI.toast('发现新版本，刷新页面即可更新', 'ok');
+        }
+        promptUpdate(reg.installing);
+        reg.addEventListener('updatefound', () => promptUpdate(reg.installing));
+        // 不自动 reload：新 SW 等待所有标签关闭后激活（无 skipWaiting），
+        // 避免答题中刷新丢失进度；用户下次打开即为新版本。
+      }).catch(() => { /* 离线/受限环境忽略 */ });
     });
   }
 

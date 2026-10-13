@@ -12,17 +12,17 @@
 - **题目元数据**：每题支持难度（1–5 级）与多标签，导入/导出/组卷/成绩分析全链路贯通。
 - **题目 CRUD**：题库内可视化新增 / 编辑 / 单删 / 勾选批删，按题型与关键词筛选、分页浏览。
 - **多题库**：新建 / 重命名 / 删除（级联）/ 切换，题目与用户数据按题库隔离。
-- **批量导入**：JSON、CSV/TSV、Markdown(.md)、Excel(.xlsx)、Word(.docx) —— 全部**原生解析，零第三方库**；Markdown 与导出格式互通、可往返。
+- **批量导入**：JSON、CSV/TSV、Markdown(.md)、Excel(.xlsx)、Word(.docx) —— 全部**原生解析，零第三方库**；Markdown 与导出格式互通、可往返；另支持**直接粘贴文本**（JSON/行式题目）与**文件拖拽到窗口**导入。
 - **多格式导出**：题库 / 错题本 / 收藏夹可导出为 JSON、CSV、**Excel(.xlsx)**、**Word(.docx)**、Markdown、TXT —— 前五者均可再次导入往返；kind × format 正交注册表，二进制 OOXML 经原生 ZipWriter（CRC32）零依赖打包。
 - **选项乱序**：练习/考试时单选/多选/不定项选项随机排列、答案自动重映射（只影响当次作答，不改库存数据）。
 - **组卷蓝图**：按「题型 × 分类 × 难度区间 × 数量」精确抽题，题量不足时给出缺口明细；支持练习/考试两种落位。
-- **刷题功能**：练习模式、考试模式（计时/交卷/自动交卷）、答题卡跳转与未答确认、随机出题。
+- **刷题功能**：练习模式、考试模式（计时/交卷/自动交卷、切出页面次数记录）、答题卡跳转与未答确认、随机出题。
 - **成绩报告**：交卷后按题型 / 分类 / 难度三个维度给出正确率分布与逐题回顾。
 - **间隔重复（FSRS-4.5）**：Anki 同源 FSRS 调度器（目标保留率 90%，稳定度/难度双变量），按作答表现（又忘了/困难/良好/简单）安排复习，首页「今日复习」一键开练；旧 SM-2 数据首次评分自动迁移。
 - **学习数据**：错题本、收藏夹、历史记录与统计；关键词搜索覆盖题干/解析/标签（高亮），支持题型/分类/**标签**组合筛选；错题/收藏/搜索均每页 20 条分页。
 - **可观测与可打印**：首页本地存储占用条（70%/85% 两档告警）、`?` 快捷键帮助面板、打印/另存 PDF 样式（自动隐藏外壳与按钮）。
 - **备份与恢复**：单文件全量备份（含全部题库与学习数据），支持覆盖/合并恢复与存储占用提示。
-- **PWA**：manifest + service worker（stale-while-revalidate），可安装到桌面、离线打开壳应用。
+- **PWA**：manifest + service worker（stale-while-revalidate），可安装到桌面、离线打开壳应用，检测到新版本时提示刷新。
 - **体验**：答题进度自动保存与恢复、键盘快捷键、深浅色主题、响应式布局。
 - **可迁移架构**：UI 只依赖数据访问层接口（Repository），一行配置即可从 LocalStorage 切到 REST 后端。
 
@@ -83,7 +83,7 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 8777） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（186 项断言：六题型判分/元数据/乱序/标签筛选/真实 541 题/三格式往返/CRUD/答题卡/xlsx·docx 二进制结构） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（191 项断言：六题型判分/元数据/乱序/标签筛选/粘贴导入/真实 541 题/三格式往返/CRUD/答题卡/xlsx·docx 二进制结构） |
 | `node scripts/exporter.test.mjs` | 导出功能单元测试（103 项断言，六题型/转义/难度标签列/Markdown 往返） |
 | `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/538 题双格式全量判分自洽） |
 | `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
@@ -101,11 +101,11 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 ```
 
 **实测数据（Node v24.14.0，2026-10-13 全量回归，详见 `CHANGELOG.internal.md`）**：
-- 9 个逻辑层测试套件 **1578 / 1578 通过**：冒烟 186、导出 103、Office 导出 1148、编辑器 29、FSRS 40、SRS 21、组卷 18、PWA 18、备份 15。
+- 9 个逻辑层测试套件 **1583 / 1583 通过**：冒烟 191、导出 103、Office 导出 1148、编辑器 29、FSRS 40、SRS 21、组卷 18、PWA 18、备份 15。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
 - Office 导出：538 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验（539 行 × 16 列）。
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
-- 首屏静态体积（index.html + css + 全部 42 个 js + sw/manifest/icon，共 47 个文件，gzip -9 实测）：**88.0 KB gzip / 249.4 KB raw**。
+- 首屏静态体积（index.html + css + 全部 42 个 js + sw/manifest/icon，共 47 个文件，gzip -9 实测）：**89.9 KB gzip / 256.5 KB raw**。
 - 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 2.16ms、落库 2.49ms、检索 0.62ms、50 题整卷判分 0.10ms、538 题乱序 0.50ms、文本四格式导出 3.42ms、**XLSX 构建 7.14ms（665 KB）**、**DOCX 构建 2.98ms（258 KB）**、Markdown 538 题再解析 4.51ms。
 - CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 9 个套件，防止自然日/时间断言的时区回归。
 

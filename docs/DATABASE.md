@@ -98,6 +98,7 @@ CREATE TABLE attempts (
   accuracy    REAL        NOT NULL,                  -- 0-100
   by_type     TEXT,                                  -- JSON: {"single":{"correct":5,"total":7}}
   duration_ms BIGINT,
+  focus_leaves INT NOT NULL DEFAULT 0,              -- 考试期间切出页面次数（防作弊信号，练习恒 0）
   created_at  BIGINT      NOT NULL
 );
 CREATE INDEX idx_attempts_bank ON attempts(bank_id, created_at);

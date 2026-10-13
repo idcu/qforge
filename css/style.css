@@ -531,3 +531,7 @@ body {
   .card, .list-item, .quiz-card { border: none; box-shadow: none; break-inside: avoid; }
   .pager, .pager-meta { display: none; }
 }
+
+/* ===== 拖拽导入遮罩 ===== */
+body.drag-over #view { outline: 2px dashed var(--brand); outline-offset: -8px; }
+body.drag-over::after { content: "松开以导入到当前题库"; position: fixed; inset: 12px; display: flex; align-items: center; justify-content: center; background: var(--brand-soft); color: var(--brand-text); border: 2px dashed var(--brand); border-radius: 12px; font-size: 16px; font-weight: 600; pointer-events: none; z-index: 80; }

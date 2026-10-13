@@ -96,6 +96,7 @@
     if (!total) {
       return html + emptyState('该题库还没有题目。',
         '<button class="btn" data-action="bank-import">导入题目</button> ' +
+        '<button class="btn btn-ghost" data-action="bank-import-text">粘贴文本导入</button> ' +
         '<button class="btn btn-ghost" data-action="bank-import-sample">导入示例题目</button>') + renderStorageHealth();
     }
 
@@ -122,6 +123,7 @@
     html += '<div class="section-title">数据管理</div>' +
       '<div class="toolbar">' +
       '<button class="btn btn-ghost" data-action="bank-import">导入题目</button>' +
+      '<button class="btn btn-ghost" data-action="bank-import-text">粘贴文本导入</button>' +
       '<button class="btn btn-ghost" data-action="bank-export">导出题目</button>' +
       '<button class="btn btn-ghost" data-action="backup-manage">备份与恢复</button>' +
       '<button class="btn btn-ghost" data-action="questions-manage">题目管理（新增/编辑/删除）</button>' +
@@ -307,6 +309,10 @@
       '</div>' +
       '<div class="li-meta" style="margin-top:10px">题库：' + esc(bank ? bank.name : '') +
       (meta.durationMs ? ' · 用时 ' + esc(QB.Helpers.formatDuration(meta.durationMs)) : '') + '</div>' +
+      (meta.isExam ? '<div class="li-meta exam-focus-' + ((meta.focusLeaves || 0) > 0 ? 'warn' : 'ok') +
+        '" style="margin-top:6px">' + ((meta.focusLeaves || 0) > 0
+          ? '⚠ 考试期间离开页面 ' + meta.focusLeaves + ' 次（切屏/最小化/切换标签均计入）'
+          : '✔ 考试期间未离开页面') + '</div>' : '') +
       '</div>';
 
     // 多维分布（题型 / 分类 / 难度）
@@ -446,7 +452,8 @@
         '<span class="li-title">' + esc(r.bankName || '') + '</span>' +
         '<span class="li-meta">' + esc(QB.Helpers.formatDate(r.createdAt)) + '</span></div>' +
         '<div class="li-meta">得分 ' + (r.score || 0) + ' · 正确 ' + (r.correct || 0) + ' · 错误 ' + (r.wrong || 0) +
-        ' · 正确率 ' + (r.accuracy || 0) + '%' + (r.durationMs ? ' · 用时 ' + esc(QB.Helpers.formatDuration(r.durationMs)) : '') + '</div>' +
+        ' · 正确率 ' + (r.accuracy || 0) + '%' + (r.durationMs ? ' · 用时 ' + esc(QB.Helpers.formatDuration(r.durationMs)) : '') +
+        (r.mode === 'exam' && r.focusLeaves ? ' · ⚠ 切出 ' + r.focusLeaves + ' 次' : '') + '</div>' +
         '<div class="li-actions"><button class="btn btn-sm btn-ghost" data-action="history-remove" data-id="' + esc(r.id) + '">删除</button></div>' +
         '</div>';
     });

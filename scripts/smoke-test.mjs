@@ -423,6 +423,27 @@ const PAGE_SIZE = 20;
 eq(Math.ceil(tagQs.length / PAGE_SIZE), 1, '列表分页：3 条 1 页');
 eq(Math.ceil(45 / PAGE_SIZE), 3, '列表分页：45 条 3 页');
 
+// 粘贴文本导入嗅探（P1）：行式文本 → LineParser；JSON 文本 → JsonImporter
+section('粘贴文本导入');
+const pasted = [
+  '1. （单选题）HTTP 默认端口是？',
+  'A. 21', 'B. 80', 'C. 443', 'D. 8080',
+  '答案：B', '分类：网络', '',
+  '2. （判断题）地球是平的。',
+  '答案：错误'
+].join('\n');
+const pasteRes = await QB.DataIO.parsePastedText(pasted);
+eq(pasteRes.questions.length, 2, '粘贴行式文本解析 2 题');
+eq(pasteRes.questions[0].answer, 'B', '粘贴：单选答案 B');
+eq(pasteRes.questions[1].type, 'judge', '粘贴：判断题型识别');
+const pasteJson = await QB.DataIO.parsePastedText(JSON.stringify([
+  { type: 'single', question: 'JSON 粘贴题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+]));
+eq(pasteJson.questions.length, 1, '粘贴 JSON 数组解析 1 题');
+let pasteThrew = false;
+try { await QB.DataIO.parsePastedText('   '); } catch (e) { pasteThrew = true; }
+ok(pasteThrew, '粘贴空白内容抛错');
+
 /* ================= 9. XLSX / DOCX 原生解析 ================= */
 section('XLSX / DOCX 原生解析（zip + XML）');
 if (!hasDomParser) {
