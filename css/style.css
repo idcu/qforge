@@ -476,6 +476,21 @@ body {
 .bp-name { flex: 1; font-size: 14px; }
 .bp-n { width: 90px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
 
+/* ===== 答题卡 ===== */
+.answer-card { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.answer-card summary { cursor: pointer; font-size: 13px; color: var(--text-muted); user-select: none; }
+.ac-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 6px; margin-top: 10px; }
+.ac-cell { height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); cursor: pointer; font-size: 13px; }
+.ac-cell.cur { outline: 2px solid var(--brand); }
+.ac-cell.ac-answered { background: var(--surface-muted); color: var(--text); }
+.ac-cell.ac-correct { background: var(--brand-soft); color: var(--brand-text); border-color: var(--brand); }
+.ac-cell.ac-wrong { background: rgba(232, 70, 58, .12); color: var(--danger); border-color: var(--danger); }
+.ac-legend { margin-top: 10px; font-size: 12px; color: var(--text-muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.ac-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; border: 1px solid var(--border); }
+.ac-dot.ac-answered { background: var(--surface-muted); }
+.ac-dot.ac-correct { background: var(--brand-soft); border-color: var(--brand); }
+.ac-dot.ac-wrong { background: rgba(232, 70, 58, .12); border-color: var(--danger); }
+
 @media (max-width: 560px) {
   .view { padding: 14px 10px 30px; }
   .brand { font-size: 15px; }

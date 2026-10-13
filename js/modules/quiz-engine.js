@@ -220,6 +220,54 @@
     return this.currentIndex >= this.questions.length - 1;
   };
 
+  /** 第 i 题的作答状态：correct / wrong / pending（简答待自评）/ answered（已答未判）/ empty */
+  QuizEngine.prototype.statusAt = function (i) {
+    const r = this.results[i];
+    if (r) return r.isCorrect === true ? 'correct' : (r.isCorrect === false ? 'wrong' : 'pending');
+    const q = this.questions[i];
+    const a = this.answers[i];
+    if (!q) return 'empty';
+    if (q.type === 'multi') return (Array.isArray(a) && a.length) ? 'answered' : 'empty';
+    if (q.type === 'fill') return (Array.isArray(a) && a.length && a.every((x) => String(x == null ? '' : x).trim() !== '')) ? 'answered' : 'empty';
+    return (a !== undefined && a !== null && String(a).trim() !== '') ? 'answered' : 'empty';
+  };
+
+  QuizEngine.prototype.answeredCount = function () {
+    let n = 0;
+    for (let i = 0; i < this.questions.length; i++) if (this.statusAt(i) !== 'empty') n++;
+    return n;
+  };
+
+  QuizEngine.prototype.jumpTo = function (i) {
+    if (i >= 0 && i < this.questions.length) { this.currentIndex = i; return true; }
+    return false;
+  };
+
+  /** 多维成绩分布：题型 / 分类 / 难度（仅统计已判定题） */
+  QuizEngine.prototype.breakdown = function () {
+    const agg = (keyOf) => {
+      const m = {};
+      this.questions.forEach((q, i) => {
+        const r = this.results[i];
+        if (!r || r.isCorrect === null) return;
+        const key = keyOf(q);
+        if (!m[key]) m[key] = { key: key, correct: 0, total: 0 };
+        m[key].total++;
+        if (r.isCorrect === true) m[key].correct++;
+      });
+      return Object.keys(m).sort().map((k) => {
+        const o = m[k];
+        o.accuracy = QB.Helpers.calculateAccuracy(o.correct, o.total);
+        return o;
+      });
+    };
+    return {
+      byType: this.byType(),
+      byCategory: agg((q) => q.category || '未分类'),
+      byDifficulty: agg((q) => '难度 ' + (Number(q.difficulty) || 0))
+    };
+  };
+
   /* ---------------- 进度保存 / 恢复 ---------------- */
 
   QuizEngine.prototype.getState = function () {

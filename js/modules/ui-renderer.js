@@ -234,8 +234,27 @@
     html += '<button class="btn btn-ghost" data-action="fav-toggle" title="收藏本题">☆ 收藏</button>';
     html += '</div>';
 
+    // 答题卡（题目较多时才显示，支持点击跳转）
+    if (engine.questions.length > 1) html += renderAnswerCard(engine);
+
     if (!isExam && answered) html += renderFeedback(q, result);
     return html;
+  }
+
+  /** 答题卡网格：空/已答/对错状态，点击跳转 */
+  function renderAnswerCard(engine) {
+    const cells = engine.questions.map((_, i) => {
+      const st = engine.statusAt(i);
+      const cur = i === engine.currentIndex ? ' cur' : '';
+      return '<button type="button" class="ac-cell ac-' + st + cur + '" data-action="card-jump" data-idx="' + i + '" title="第 ' + (i + 1) + ' 题">' + (i + 1) + '</button>';
+    }).join('');
+    const done = engine.answeredCount();
+    return '<details class="answer-card" open><summary>答题卡（已答 ' + done + ' / ' + engine.questions.length + '）</summary>' +
+      '<div class="ac-grid">' + cells + '</div>' +
+      '<div class="ac-legend"><span class="ac-dot ac-empty"></span>未答 ' +
+      '<span class="ac-dot ac-answered"></span>已答 ' +
+      '<span class="ac-dot ac-correct"></span>正确 ' +
+      '<span class="ac-dot ac-wrong"></span>错误</div></details>';
   }
 
   /* ---------------- 结果 ---------------- */
@@ -253,6 +272,24 @@
       '<div class="li-meta" style="margin-top:10px">题库：' + esc(bank ? bank.name : '') +
       (meta.durationMs ? ' · 用时 ' + esc(QB.Helpers.formatDuration(meta.durationMs)) : '') + '</div>' +
       '</div>';
+
+    // 多维分布（题型 / 分类 / 难度）
+    const bd = engine.breakdown();
+    const distCard = (title, rows, labelOf) => {
+      const withData = rows.filter((r) => r.total > 0);
+      if (!withData.length) return '';
+      const bars = withData.map((r) =>
+        '<div class="bar-row"><span class="bar-label">' + esc(labelOf(r)) + '</span>' +
+        '<span class="bar-track"><i class="bar-fill" style="width:' + r.accuracy + '%"></i></span>' +
+        '<span class="bar-val">' + r.correct + '/' + r.total + ' · ' + r.accuracy + '%</span></div>').join('');
+      return '<div class="card"><h3 class="card-title">' + title + '</h3>' + bars + '</div>';
+    };
+    html += distCard('按题型', Object.keys(bd.byType).filter((t) => bd.byType[t].total).map((t) => ({
+      key: t, correct: bd.byType[t].correct, total: bd.byType[t].total,
+      accuracy: QB.Helpers.calculateAccuracy(bd.byType[t].correct, bd.byType[t].total)
+    })), (r) => QB.typeLabel(r.key));
+    html += distCard('按分类', bd.byCategory, (r) => r.key);
+    html += distCard('按难度', bd.byDifficulty, (r) => r.key === '难度 0' ? '未设置' : r.key);
 
     // 逐题回顾
     html += '<div class="section-title">逐题回顾</div>';

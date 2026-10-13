@@ -334,6 +334,24 @@ eq(esc2.pending, 0, '考试：交卷后无待判定');
 eq(esc2.correct, 1, '考试：仅第 2 题正确');
 eq(esc2.wrong, 4, '考试：其余 4 题计错（含未作答）');
 
+// 答题卡状态 / 跳转 / 多维分布
+eq(exam.statusAt(0), 'wrong', '答题卡：第 1 题未答整卷判定后为 wrong');
+eq(exam.statusAt(1), 'correct', '答题卡：第 2 题为 correct');
+eq(exam.answeredCount(), 5, '整卷判定后所有题均有结果（计数 5）');
+ok(exam.jumpTo(3) && exam.currentIndex === 3, 'jumpTo 跳转题目');
+ok(!exam.jumpTo(99), 'jumpTo 越界返回 false');
+const bd2 = exam.breakdown();
+ok(bd2.byType && Array.isArray(bd2.byCategory) && Array.isArray(bd2.byDifficulty), 'breakdown 返回题型/分类/难度');
+ok(bd2.byCategory.some((r) => r.total >= 1), 'breakdown 分类有统计行');
+// 练习模式：已答未判定 = answered
+const stEng = new QB.QuizEngine();
+const stQ = { type: 'single', question: '状态题', options: [{ letter: 'A', text: 'x' }, { letter: 'B', text: 'y' }], answer: 'A' };
+stEng.loadQuestions([stQ, { type: 'judge', question: '空题', answer: '正确' }], 'mixed', { shuffleOptions: false });
+stEng.currentIndex = 0; stEng.selectAnswer('A');
+eq(stEng.statusAt(0), 'answered', '练习已选未提交 = answered');
+eq(stEng.statusAt(1), 'empty', '未动过的题 = empty');
+eq(stEng.answeredCount(), 1, 'answeredCount 仅统计已选');
+
 /* ================= 8. 统计与搜索 ================= */
 section('统计与搜索');
 const recs = await QB.History.list(bankA.id);

@@ -404,7 +404,25 @@
         State.engine.prevQuestion();
         return render();
       }
+      case 'card-jump': {
+        const idx = parseInt(el.getAttribute('data-idx'), 10);
+        if (State.engine && State.engine.jumpTo(idx)) {
+          QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
+          return render();
+        }
+        return;
+      }
       case 'finish-exam':
+        if (State.engine && State.engine.mode === 'exam') {
+          const total = State.engine.questions.length;
+          const done = State.engine.answeredCount();
+          const left = total - done;
+          const msg = left > 0
+            ? '还有 ' + left + ' 题未作答，确定交卷吗？未作答将计为错误。'
+            : '全部题目已作答，确定交卷吗？';
+          const ok = await UI.confirmDialog(msg, '确认交卷');
+          if (!ok) return;
+        }
         return finishQuiz();
       case 'fav-toggle': {
         if (!State.engine) return;
