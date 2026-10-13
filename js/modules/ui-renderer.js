@@ -499,12 +499,17 @@
     } else {
       status = '冷启动：使用官方默认权重，攒够 ' + info.threshold + ' 个相邻评分对后可训练个性化参数';
     }
-    return '<div class="card"><h3 class="card-title">FSRS 个性化参数</h3>' +
+    const scopes = Array.isArray(info.scopes) && info.scopes.length > 1
+      ? '<div class="scope-tabs">' + info.scopes.map((s) =>
+        '<button class="btn btn-sm ' + (s.active ? '' : 'btn-ghost') + '" data-action="fsrs-scope" data-scope="' + esc(s.id || '') + '">' + esc(s.label) + '</button>').join('') + '</div>'
+      : '';
+    return '<div class="card"><h3 class="card-title">FSRS 个性化参数</h3>' + scopes +
       '<div class="sh-track" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' +
       '<i class="sh-fill' + (pct < 100 ? '' : '') + '" style="width:' + pct + '%"></i></div>' +
-      '<div class="li-meta" style="margin:6px 0 10px">训练样本 ' + info.samples + ' / ' + info.threshold + '　' + esc(status) + '</div>' +
+      '<div class="li-meta" style="margin:6px 0 10px">训练样本 ' + info.samples + ' / ' + info.threshold + '　' + esc(status) +
+      '　作用域：' + esc(info.scopeLabel || '全局') + '</div>' +
       '<div class="toolbar"><button class="btn" data-action="fsrs-train"' + (info.samples < info.threshold ? ' disabled' : '') + '>训练参数</button>' +
-      (info.trained ? '<button class="btn btn-ghost" data-action="fsrs-reset">恢复官方默认</button>' : '') +
+      (info.trained ? '<button class="btn btn-ghost" data-action="fsrs-reset">恢复官方默认（本作用域）</button>' : '') +
       '</div></div>';
   }
 

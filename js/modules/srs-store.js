@@ -38,7 +38,7 @@
     const map = readMap(bankId);
     const k = keyFor(q);
     const fr = fsrsRating(rating);
-    const next = QB.FSRS.review(map[k], fr, ts, QB.FSRSOpt.getActiveWeights());
+    const next = QB.FSRS.review(map[k], fr, ts, QB.FSRSOpt.getActiveWeights(bankId));
     map[k] = next;
     writeMap(bankId, map);
     QB.FSRSOpt.appendLog([{ t: ts, h: k, r: fr }]);
@@ -50,7 +50,7 @@
     if (!entries || !entries.length) return;
     const ts = now == null ? Date.now() : now;
     const map = readMap(bankId);
-    const w = QB.FSRSOpt.getActiveWeights();
+    const w = QB.FSRSOpt.getActiveWeights(bankId);
     const logs = [];
     entries.forEach((e) => {
       const k = keyFor(e.question);

@@ -681,6 +681,34 @@
 
 ---
 
+## 待回填 · feat(srs): FSRS learning steps（1m/10m）与按题库权重 preset
+
+**背景**：竞品评分中与 Anki 的算法半档差距（新卡首日无短周期步骤、权重全局一组），本项对齐官方 FSRS 调度习惯。
+
+**核心改动**
+- **新卡/重学步骤（fsrs.js）**：状态新增可选 `learning={step,mode:'new'|'review'}`，步骤表 `[1m,10m]`（导出 `LEARNING_STEPS`，新增 `isLearning()`）。
+  - 新卡首次评分：again→步骤 0（1m）、hard→步骤 1（10m），good/easy 直接毕业；learning 中 again 回到 1m（不重复计 lapse、s/d 不动）、hard 停留当前步、good 前进一步，走完毕业——新卡毕业以毕业评分（通常 good）重新初始化 s/d；easy 随时直接毕业。
+  - 已毕业卡 again：s/d 照常按又错公式更新后进 relearning（mode='review'），毕业时沿用又错后的 s/d（不重新初始化），lapse 正常累计。
+  - 毕业卡 hard/good/easy 路径与旧版完全一致；revlog 优化器重放天然兼容（学习步骤间隔分钟级，elapsedDays 钳 0）。
+- **按题库 preset（fsrs-opt.js）**：权重存储改为 `{global?, banks?{bankId:meta}}`，旧单组 `{w,...}` 读取时自动归一为 global（不写迁移）；`getActiveWeights(bankId)` 回退链「题库 preset → 全局 → 官方默认」；`train(revlog, bankId)` 可把训练结果存到指定作用域，revlog 仍全局采集（参数按人）；reset 按作用域；两作用域皆空时删除整个键。
+- **接线**：srs-store grade/gradeMany 用当前 bankId 取活动权重；统计页 FSRS 卡新增作用域切换（scope-tabs：全局/各题库，题库删除后自动回退全局），训练/恢复按钮带作用域文案与确认；CSS 新增 .scope-tabs（无新组件库）。
+- 文档：fsrs.js 头注释、user-guide 5.1（学习步骤+preset+作用域化生效）、ARCHITECTURE fsrs/fsrs-opt 两行、DATABASE §2.7/§2.8（learning 字段、meta 新结构与回退）、README、本档。
+
+**验证数据（Node v24.14.0，UTC/UTC+8 双时区）**
+- fsrs.test 40 → **65**（+25：新卡 again/hard 步骤、learning 内 again/hard/good 推进与不重复计 lapse、毕业重新初始化、easy 跳毕、保留率≈0.9、relearning 两步毕业沿用 s/d）；fsrs-opt.test 22 → **37**（+15：旧结构归一、preset 优先级/隔离/单删、训练写题库作用域而全局为空、他库默认）。
+- 13 套件合计 **1771/1771**，UTC 与 UTC+8 各跑一遍零失败；其余套件零回归（srs 到期判定基于 due 时间戳，分钟级 due 自然落在今日桶）。
+- 首屏体积（53 文件/48 js，gzip -9）：**115.9 KB gzip / 326.9 KB raw**（上批 113.8 KB，+2.1KB）。
+
+**公共抽象清单**
+- 新增：`FSRS.LEARNING_STEPS`、`FSRS.isLearning`，`FSRSOpt.getActiveWeights(bankId)`/`getWeightsMeta(bankId)`/`saveWeights(w,meta,bankId)`/`resetWeights(bankId)`/`train(log,bankId)`（旧无参调用语义=全局，完全向后兼容），srs-store 传入 bankId。
+- 影响范围：fsrs.review 对**新卡 again/hard** 与**毕业卡 again** 的 due 语义改变（分钟级步骤），毕业路径数值不变；fsrs-opt 存储结构升级但旧结构读时归一；UI 唯一调用点（统计卡/app 动作）已同步，srs-store 之外无其他调用方。
+
+**遗留 TODO / 风险**
+- 学习步骤固定 1m/10m，未做用户可配置（对齐官方默认，避免过度设计）；步骤期题目在「今日复习」队列中反复出现属预期。
+- 作用域切换 UI、scope-tabs 为浏览器交互，逻辑层已覆盖存取/回退，真机人工验证。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·

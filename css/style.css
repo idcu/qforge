@@ -263,6 +263,9 @@ body {
 
 .question-text { font-size: 17px; font-weight: 600; margin: 4px 0 16px; white-space: pre-wrap; }
 
+/* FSRS 作用域切换 */
+.scope-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+
 /* 题目图片（IndexedDB 资产 hydrate 后显示） */
 .rt-img { display: block; max-width: 100%; margin: 8px 0; border-radius: var(--radius, 8px); }
 .opt-text .rt-img, .analysis .rt-img { max-width: 320px; }

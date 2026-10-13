@@ -47,14 +47,68 @@ section('首次评分：初始化');
   ok(a.due < h.due && h.due < g.due && g.due < e.due, '到期时间 again<hard<good<easy');
 }
 
-section('到期时刻保留率 ≈ 目标保留率 0.9');
+section('毕业评分的到期保留率 ≈ 目标保留率 0.9');
 {
-  for (const rating of [R.again, R.hard, R.good, R.easy]) {
+  for (const rating of [R.good, R.easy]) {
     const st = review(null, rating, T0);
+    ok(!st.learning, 'rating=' + rating + ' 新卡直接毕业');
     const intervalDays = (st.due - T0) / DAY;
     const retention = QB.FSRS.powerDecay(intervalDays, st.stability);
     approx(retention, 0.9, 1e-9, 'rating=' + rating + ' 到期保留率≈0.9（间隔 ' + intervalDays.toFixed(2) + ' 天）');
   }
+}
+
+section('新卡 learning steps（1m / 10m）');
+{
+  const MIN = 60 * 1000;
+  const a = review(null, R.again, T0);
+  eq(a.learning && a.learning.step, 0, '新卡 again → learning 步骤 0');
+  eq(a.learning.mode, 'new', 'mode=new');
+  eq(a.due - T0, MIN, '1 分钟后再见');
+  eq(a.stability, 0.4, '步骤期仍初始化稳定度 0.4');
+  eq(a.lapses, 1, '首次 again 计 lapse');
+
+  const h = review(null, R.hard, T0);
+  eq(h.learning.step, 1, '新卡 hard → learning 步骤 1（10m）');
+  eq(h.due - T0, 10 * MIN, '10 分钟后再见');
+
+  // again → 1m 后 good → 10m，再 good → 毕业（以 good 重新初始化 s/d）
+  let st = review(null, R.again, T0);
+  st = review(st, R.again, st.due);
+  eq(st.learning.step, 0, 'learning 中 again 重置到步骤 0');
+  eq(st.lapses, 1, 'learning 中 again 不重复计 lapse');
+  eq(st.due - st.last, MIN, '仍 1 分钟');
+  st = review(st, R.good, st.due);
+  eq(st.learning.step, 1, 'good 推进到步骤 1');
+  eq(st.due - st.last, 10 * MIN, '间隔 10 分钟');
+  eq(st.stability, 0.4, '步骤中 s/d 不动');
+  st = review(st, R.hard, st.due);
+  eq(st.learning.step, 1, 'hard 停留当前步骤');
+  const grad = review(st, R.good, st.due);
+  ok(!grad.learning, '走完步骤 good 毕业');
+  eq(grad.stability, 2.4, '新卡毕业以 good 初始化稳定度 2.4');
+  const retention = QB.FSRS.powerDecay((grad.due - grad.last) / DAY, grad.stability);
+  approx(retention, 0.9, 1e-9, '毕业后到期保留率≈0.9');
+
+  // easy 在任意步骤直接毕业，按 easy 初始化
+  const easyOut = review(review(null, R.again, T0), R.easy, T0 + MIN);
+  ok(!easyOut.learning, 'learning 中 easy 直接毕业');
+  eq(easyOut.stability, 5.9, 'easy 毕业稳定度 5.9');
+}
+
+section('遗忘后进 relearning（mode=review）');
+{
+  let st = review(null, R.good, T0);
+  st = review(st, R.good, st.due);
+  const lapse = review(st, R.again, st.due);
+  eq(lapse.learning.mode, 'review', '已毕业卡 again → relearning');
+  eq(lapse.lapses, st.lapses + 1, 'lapse 累计');
+  ok(lapse.stability < st.stability, '又错稳定度下降（' + lapse.stability + ' < ' + st.stability + '）');
+  let rl = review(lapse, R.good, lapse.due);
+  eq(rl.learning && rl.learning.step, 1, 'relearning：good 推进到步骤 1（10m）');
+  const grad = review(rl, R.good, rl.due);
+  ok(!grad.learning, 'relearning 走完两步 good 毕业');
+  eq(grad.stability, lapse.stability, '重学毕业沿用又错后的稳定度（不重新初始化）');
 }
 
 section('连续 good：稳定度与间隔增长');

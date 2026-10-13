@@ -11,7 +11,10 @@
  *   easy(4) 简单     → 间隔放大、难度下降
  * 注意：应用层 QB.SRS.RATINGS 使用 0–3，由 SRSStore 统一映射（+1）。
  *
- * 状态结构：{ algo:'fsrs', due, stability, difficulty, reps, lapses, last }
+ * 状态结构：{ algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning? }
+ * learning（可空）= 新卡首日学习步骤 / 遗忘后重学：{ step, mode:'new'|'review' }
+ *   步骤 1m/10m（对齐 Anki FSRS 默认 learning steps）；good 走完全部步骤即「毕业」，
+ *   easy 随时直接毕业；毕业前 due 为分钟级，不参与长期间隔安排。
  * 旧 SM-2 状态（无 stability 字段）首次评分时自动作为 FSRS 新卡处理（迁移，见 srs-store）。
  */
 (function (global) {
@@ -33,6 +36,9 @@
   ];
 
   const RATINGS = { again: 1, hard: 2, good: 3, easy: 4 };
+
+  // 新卡/重学的分钟级步骤（毫秒）；good 跨过最后一步即毕业
+  const LEARNING_STEPS = [60 * 1000, 10 * 60 * 1000];
 
   function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
   function powerDecay(elapsedDays, stability) {
@@ -92,6 +98,79 @@
     };
   }
 
+  /** 组装公共字段 */
+  function withFields(prev, now, s, d, addLapse) {
+    return {
+      algo: 'fsrs',
+      stability: round4(s),
+      difficulty: round4(d),
+      reps: (prev && prev.algo === 'fsrs' ? prev.reps : 0) + 1,
+      lapses: (prev && prev.algo === 'fsrs' ? prev.lapses : 0) + (addLapse ? 1 : 0),
+      last: now
+    };
+  }
+
+  /**
+   * 毕业：离开 learning，按稳定度排长期间隔。
+   * mode='new'（新卡学完）：以毕业评分重新初始化 s/d；
+   * mode='review'（遗忘后重学完）：沿用又错更新后的 s/d。
+   */
+  function graduate(prev, rating, now, w, mode) {
+    let s, d;
+    if (mode === 'new') {
+      s = initStability(rating, w);
+      d = initDifficulty(rating, w);
+    } else {
+      s = prev.stability;
+      d = prev.difficulty;
+    }
+    return {
+      algo: 'fsrs',
+      due: Math.round(now + nextIntervalDays(s) * DAY),
+      stability: round4(s),
+      difficulty: round4(d),
+      reps: prev.reps,
+      lapses: prev.lapses,
+      last: now
+    };
+  }
+
+  /** learning/relearning 中再评分：只推进步骤与分钟级 due，s/d 不动 */
+  function reviewLearning(prev, r, now) {
+    const mode = prev.learning.mode;
+    const step = prev.learning.step || 0;
+    const base = {
+      algo: 'fsrs', stability: prev.stability, difficulty: prev.difficulty,
+      reps: prev.reps, lapses: prev.lapses, last: now
+    };
+    if (r === RATINGS.again) {
+      return Object.assign(base, { due: now + LEARNING_STEPS[0], learning: { step: 0, mode: mode } });
+    }
+    if (r === RATINGS.hard) {
+      // 困难：在当前步骤再等一个同样时长
+      return Object.assign(base, { due: now + LEARNING_STEPS[step], learning: { step: step, mode: mode } });
+    }
+    // good：前进一步，走完即毕业；easy：随时毕业
+    if (r === RATINGS.good && step + 1 < LEARNING_STEPS.length) {
+      return Object.assign(base, { due: now + LEARNING_STEPS[step + 1], learning: { step: step + 1, mode: mode } });
+    }
+    return graduate(base, r, now, null, mode);
+  }
+
+  /** 新卡首次评分：again/hard 进 learning，good/easy 直接毕业 */
+  function reviewNew(r, now, w) {
+    const s = initStability(r, w);
+    const d = initDifficulty(r, w);
+    const base = { algo: 'fsrs', stability: round4(s), difficulty: round4(d), reps: 1, lapses: r === RATINGS.again ? 1 : 0, last: now };
+    if (r === RATINGS.again) {
+      return Object.assign(base, { due: now + LEARNING_STEPS[0], learning: { step: 0, mode: 'new' } });
+    }
+    if (r === RATINGS.hard) {
+      return Object.assign(base, { due: now + LEARNING_STEPS[1], learning: { step: 1, mode: 'new' } });
+    }
+    return graduate(base, r, now, w, 'new');
+  }
+
   /**
    * 复习一次，返回新状态（不改入参）
    * @param {Object|null} prev 旧状态（空或无 stability 视为新卡；SM-2 旧状态同样从首次评分重新初始化）
@@ -104,28 +183,30 @@
     const n = Number(rating);
     const r = clamp(Math.round(Number.isNaN(n) ? RATINGS.good : n), 1, 4);
 
-    let s;
-    let d;
-    if (prev && prev.algo === 'fsrs' && prev.stability > 0) {
-      const elapsedDays = prev.last ? Math.max(0, (now - prev.last) / DAY) : 0;
-      const retrievability = powerDecay(elapsedDays, prev.stability);
-      s = nextStability(prev.stability, retrievability, r, w);
-      d = nextDifficulty(prev.difficulty || initDifficulty(r, w), r, w);
-    } else {
-      // 新卡，或 SM-2 旧状态迁移：以本次评分初始化
-      s = initStability(r, w);
-      d = initDifficulty(r, w);
+    // learning/relearning 中：只走步骤机，不再做长期稳定度更新
+    if (prev && prev.algo === 'fsrs' && prev.learning) {
+      return reviewLearning(prev, r, now);
     }
 
-    return {
-      algo: 'fsrs',
-      due: Math.round(now + nextIntervalDays(s) * DAY),
-      stability: round4(s),
-      difficulty: round4(d),
-      reps: (prev && prev.algo === 'fsrs' ? prev.reps : 0) + 1,
-      lapses: (prev && prev.algo === 'fsrs' ? prev.lapses : 0) + (r === RATINGS.again ? 1 : 0),
-      last: now
-    };
+    // 新卡，或 SM-2 旧状态迁移
+    if (!(prev && prev.algo === 'fsrs' && prev.stability > 0)) {
+      return reviewNew(r, now, w);
+    }
+
+    // 已毕业卡的正常复习/遗忘
+    const elapsedDays = prev.last ? Math.max(0, (now - prev.last) / DAY) : 0;
+    const retrievability = powerDecay(elapsedDays, prev.stability);
+    const s = nextStability(prev.stability, retrievability, r, w);
+    const d = nextDifficulty(prev.difficulty || initDifficulty(r, w), r, w);
+    const out = withFields(prev, now, s, d, r === RATINGS.again);
+    if (r === RATINGS.again) {
+      // 遗忘：进 relearning（1 分钟后再见），s/d 已按又错公式更新，毕业时沿用
+      out.due = now + LEARNING_STEPS[0];
+      out.learning = { step: 0, mode: 'review' };
+      return out;
+    }
+    out.due = Math.round(now + nextIntervalDays(s) * DAY);
+    return out;
   }
 
   function round4(n) { return Math.round(n * 10000) / 10000; }
@@ -137,14 +218,21 @@
     return powerDecay(elapsedDays, state.stability);
   }
 
+  /** 是否处于学习/重学步骤中（分钟级到期） */
+  function isLearning(state) {
+    return !!(state && state.learning);
+  }
+
   QB.FSRS = {
     RATINGS,
     DEFAULT_W,
     DECAY,
     FACTOR,
     REQUEST_RETENTION,
+    LEARNING_STEPS,
     initialState,
     review,
+    isLearning,
     initStability,
     initDifficulty,
     nextStability,

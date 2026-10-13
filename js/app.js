@@ -25,7 +25,8 @@
     quizMeta: {},
     resultMeta: {},
     search: { keyword: '', type: '', category: '', tag: '' },
-    listPage: { wrong: 0, favorites: 0, search: 0 }
+    listPage: { wrong: 0, favorites: 0, search: 0 },
+    fsrsScope: null       // FSRS 权重作用域：null=全局，或 bankId
   };
 
   const TABS = [
@@ -151,10 +152,17 @@
       case 'stats': {
         const fc = State.bankId ? QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
         const diag = QB.FSRSOpt.diagnose();
+        const banks = await QB.DB.banks.list();
+        if (State.fsrsScope && !banks.some((b) => b.id === State.fsrsScope)) State.fsrsScope = null;
+        const scopeBank = banks.find((b) => b.id === State.fsrsScope);
+        const scopes = [{ id: '', label: '全局（跨题库）', active: State.fsrsScope === null }]
+          .concat(banks.map((b) => ({ id: b.id, label: b.name, active: b.id === State.fsrsScope })));
         const fsrsInfo = {
           samples: diag.samples,
           threshold: QB.FSRSOpt.MIN_SAMPLES,
-          trained: QB.FSRSOpt.getWeightsMeta()
+          trained: QB.FSRSOpt.getWeightsMeta(State.fsrsScope),
+          scopes: scopes,
+          scopeLabel: scopeBank ? scopeBank.name : '全局'
         };
         html = UI.renderStats(await QB.History.list(State.bankId), fc, fsrsInfo);
         break;
@@ -549,22 +557,29 @@
       }
 
       /* —— FSRS 参数优化 —— */
+      case 'fsrs-scope': {
+        State.fsrsScope = el.dataset.scope || null;
+        return render();
+      }
       case 'fsrs-train': {
-        UI.toast('正在训练（约需数秒）…');
+        const scope = State.fsrsScope;
+        const scopeName = scope ? (State.banks.find((b) => b.id === scope) || {}).name || '本题库' : '全局';
+        UI.toast('正在训练（' + scopeName + '，约需数秒）…');
         let res;
         try {
-          res = await new Promise((resolve) => setTimeout(() => resolve(QB.FSRSOpt.train()), 30));
+          res = await new Promise((resolve) => setTimeout(() => resolve(QB.FSRSOpt.train(undefined, scope)), 30));
         } catch (e) { UI.toast('训练失败：' + e.message, 'err'); return render(); }
         if (res.ok) {
-          UI.toast('训练完成：logloss 改善 ' + (res.improvement * 100).toFixed(1) + '%，已对后续评分生效', 'ok');
+          UI.toast('训练完成（' + scopeName + '）：logloss 改善 ' + (res.improvement * 100).toFixed(1) + '%，已对后续评分生效', 'ok');
         } else {
           UI.toast(res.reason || '训练未采纳', 'err');
         }
         return render();
       }
       case 'fsrs-reset': {
-        if (await UI.confirmDialog('恢复为官方默认权重？个性化参数将被清除。', '恢复')) {
-          QB.FSRSOpt.resetWeights();
+        const scope = State.fsrsScope;
+        if (await UI.confirmDialog('恢复' + (scope ? '本题库' : '全局') + '为官方默认权重？该作用域个性化参数将被清除。', '恢复')) {
+          QB.FSRSOpt.resetWeights(scope);
           UI.toast('已恢复官方默认权重', 'ok');
         }
         return render();

@@ -139,7 +139,7 @@ CREATE TABLE review_schedule (
   UNIQUE INDEX uq_review_user_bank_hash (user_id, bank_id, content_hash)
 );
 ```
-> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last}`。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。
+> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last,learning?}`；`learning={step,mode:'new'|'review'}` 表示新卡/遗忘卡处于 1m/10m 学习步骤（分钟级 due，毕业后续长期间隔）。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。
 
 ### 2.8 review_log（FSRS 评分日志，参数优化用）
 ```sql
@@ -152,7 +152,7 @@ CREATE TABLE review_log (
   INDEX idx_revlog_user_time (user_id, reviewed_at)
 );
 ```
-> 前端 FIFO 上限 20,000 条，存 `qb:user:revlog`，元素 `{id,h,r,t}`。优化器把同题相邻两次评分组成样本（间隔 + 评分档位），用伯努利负对数似然拟合 17 个权重。个性化权重存 `qb:meta:fsrsWeights`（`{w[],trainedAt,samples,defaultLoss,loss,improvement}`）；无该键时使用官方默认权重。
+> 前端 FIFO 上限 20,000 条，存 `qb:user:revlog`，元素 `{id,h,r,t}`。优化器把同题相邻两次评分组成样本（间隔 + 评分档位），用伯努利负对数似然拟合 17 个权重。个性化权重存 `qb:meta:fsrsWeights`，结构 `{global?:{w[],trainedAt,samples,defaultLoss,loss,improvement,scope}, banks?:{[bankId]: 同结构}}`；活动权重按「题库 preset → 全局 → 官方默认」回退；旧版本单组 `{w[]}` 读取时自动归一为 global。revlog 始终全局采集（参数按人），preset 只决定权重作用域。
 
 ### 2.9 assets（题目图片资产，本期落 IndexedDB）
 ```sql

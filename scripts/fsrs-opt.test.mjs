@@ -180,6 +180,51 @@ section('活动权重接入评分');
   clearOpt();
 }
 
+section('按题库 preset：优先级、隔离、旧结构兼容');
+{
+  clearOpt();
+  const wg = QB.FSRS.DEFAULT_W.map((v, i) => i === 0 ? v + 0.1 : v);
+  const wb = QB.FSRS.DEFAULT_W.map((v, i) => i === 2 ? v + 0.2 : v);
+
+  // 旧版本 {w,...} 单组结构自动归一为全局
+  QB.Storage.set(QB.KEYS.metaFsrsWeights, { w: wg, trainedAt: 1, samples: 200 });
+  ok(Math.abs(O.getActiveWeights('bankX')[0] - wg[0]) < 1e-9, '旧结构：题库读到全局权重');
+  ok(!!O.getWeightsMeta() && !O.getWeightsMeta('bankX'), '旧结构：全局有 meta、题库无 preset');
+  clearOpt();
+
+  // 全局 + 题库 preset：题库优先，其余题库回退全局
+  O.saveWeights(wg, { samples: 200, improvement: 0.01 });
+  O.saveWeights(wb, { samples: 150, improvement: 0.02 }, 'bankA');
+  ok(Math.abs(O.getActiveWeights('bankA')[2] - wb[2]) < 1e-9, 'bankA 用本题库 preset');
+  ok(Math.abs(O.getActiveWeights('bankB')[0] - wg[0]) < 1e-9, 'bankB 回退全局');
+  eq(O.getWeightsMeta('bankA').samples, 150, 'bankA meta 读取正确');
+  eq(O.getWeightsMeta().samples, 200, '全局 meta 不受题库 preset 影响');
+
+  // 删题库 preset：回退全局；删全局：键清空回官方默认
+  O.resetWeights('bankA');
+  ok(!O.getWeightsMeta('bankA'), '题库 preset 可单独删除');
+  ok(Math.abs(O.getActiveWeights('bankA')[0] - wg[0]) < 1e-9, '删除后回退全局');
+  O.resetWeights();
+  ok(!O.getWeightsMeta(), '全局删除后无 meta');
+  eq(JSON.stringify(O.getActiveWeights('bankA')), JSON.stringify(QB.FSRS.DEFAULT_W), '回官方默认权重');
+}
+
+section('训练可写入题库作用域（revlog 仍全局）');
+{
+  clearOpt();
+  const rand = rng(11);
+  const wTrue = QB.FSRS.DEFAULT_W.map((v) => v * (1 + (rand() - 0.5) * 0.5));
+  const revlog = [];
+  simulate(revlog, wTrue, { seed: 303, cards: 380, maxReviews: 4 });
+  const r = O.train(revlog, 'bankPreset');
+  ok(r.ok, '题库作用域训练被采纳：' + (r.ok ? '改善 ' + (r.improvement * 100).toFixed(1) + '%' : r.reason));
+  ok(!!O.getWeightsMeta('bankPreset'), 'bankPreset 有 meta');
+  ok(!O.getWeightsMeta(), '全局 meta 仍为空（样本与权重作用域分离）');
+  ok(Math.abs(O.getActiveWeights('bankPreset')[0] - r.weights[0]) < 1e-9, 'bankPreset 活动权重=训练结果');
+  ok(Math.abs(O.getActiveWeights('otherBank')[0] - QB.FSRS.DEFAULT_W[0]) < 1e-9, '其他题库仍用官方默认');
+  clearOpt();
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

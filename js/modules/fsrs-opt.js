@@ -51,29 +51,64 @@
     QB.Storage.set(QB.KEYS.revlog, list);
   }
 
-  /* ---------------- 权重存取 ---------------- */
+  /* ---------------- 权重存取（全局 + 按题库 preset） ----------------
+   * 存储结构：{ global?: {w,...meta}, banks?: { [bankId]: {w,...meta} } }
+   * 旧版本 {w,...}（单组全局权重）读取时自动归一为 global，不写迁移。
+   * 训练样本始终来自全局 revlog（参数按人），preset 只决定权重作用域。 */
 
-  function getActiveWeights() {
-    const saved = QB.Storage.get(QB.KEYS.metaFsrsWeights, null);
-    if (saved && Array.isArray(saved.w) && saved.w.length === QB.FSRS.DEFAULT_W.length) {
-      return saved.w.slice();
+  function normalizeStore(raw) {
+    if (!raw || typeof raw !== 'object') return { global: null, banks: {} };
+    if (Array.isArray(raw.w)) return { global: raw, banks: raw.banks && typeof raw.banks === 'object' ? raw.banks : {} };
+    return {
+      global: raw.global && Array.isArray(raw.global.w) ? raw.global : null,
+      banks: raw.banks && typeof raw.banks === 'object' ? raw.banks : {}
+    };
+  }
+
+  function readStore() {
+    return normalizeStore(QB.Storage.get(QB.KEYS.metaFsrsWeights, null));
+  }
+
+  function validMeta(meta) {
+    return meta && Array.isArray(meta.w) && meta.w.length === QB.FSRS.DEFAULT_W.length ? meta : null;
+  }
+
+  /** 活动权重：题库 preset → 全局 → 官方默认 */
+  function getActiveWeights(bankId) {
+    const store = readStore();
+    const meta = (bankId && validMeta(store.banks[bankId])) || validMeta(store.global);
+    return meta ? meta.w.slice() : QB.FSRS.DEFAULT_W.slice();
+  }
+
+  /** 某作用域训练元数据（bankId 省略=全局）；无则 null */
+  function getWeightsMeta(bankId) {
+    const store = readStore();
+    if (bankId) return validMeta(store.banks[bankId]) || null;
+    return validMeta(store.global);
+  }
+
+  function writeStore(store) {
+    if (!store.global && !Object.keys(store.banks).length) {
+      QB.Storage.remove(QB.KEYS.metaFsrsWeights); // 回到纯默认状态
+    } else {
+      QB.Storage.set(QB.KEYS.metaFsrsWeights, store);
     }
-    return QB.FSRS.DEFAULT_W.slice();
   }
 
-  function getWeightsMeta() {
-    const saved = QB.Storage.get(QB.KEYS.metaFsrsWeights, null);
-    return saved || null;
+  function saveWeights(w, meta, bankId) {
+    const store = readStore();
+    const entry = Object.assign({ w: w.slice(), trainedAt: Date.now() }, meta || {});
+    if (bankId) store.banks[bankId] = entry;
+    else store.global = entry;
+    writeStore(store);
   }
 
-  function saveWeights(w, meta) {
-    QB.Storage.set(QB.KEYS.metaFsrsWeights, Object.assign({
-      w: w.slice(), trainedAt: Date.now()
-    }, meta || {}));
-  }
-
-  function resetWeights() {
-    QB.Storage.remove(QB.KEYS.metaFsrsWeights);
+  /** 删除某题库 preset；省略 bankId 时清除全局权重 */
+  function resetWeights(bankId) {
+    const store = readStore();
+    if (bankId) delete store.banks[bankId];
+    else store.global = null;
+    writeStore(store);
   }
 
   /* ---------------- 样本构造 ---------------- */
@@ -200,9 +235,11 @@
 
   /**
    * 一键训练：检查门槛 → 抽样 → 优化 → 改善校验 → 写盘
+   * @param {Array} [revlogInput] 评分日志（默认读全局）
+   * @param {string} [bankId] 权重保存作用域：省略=全局，传 id=该题库 preset
    * @returns {{ok:boolean, reason?:string, defaultLoss?:number, loss?:number, improvement?:number, samples:number}}
    */
-  function train(revlogInput) {
+  function train(revlogInput, bankId) {
     const log = revlogInput || readLog();
     const diag = diagnose(log);
     if (diag.samples < MIN_SAMPLES) {
@@ -227,8 +264,9 @@
     }
     saveWeights(res.weights, {
       samples: diag.samples, trainedSamples: countSamples(trainSeqs),
-      defaultLoss: defaultLoss, loss: res.loss, improvement: improvement
-    });
+      defaultLoss: defaultLoss, loss: res.loss, improvement: improvement,
+      scope: bankId ? 'bank' : 'global'
+    }, bankId);
     return {
       ok: true, samples: diag.samples, defaultLoss: defaultLoss,
       loss: res.loss, improvement: improvement, weights: res.weights
