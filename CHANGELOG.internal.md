@@ -649,6 +649,38 @@
 
 ---
 
+## 待回填 · feat(assets): 图片题（IndexedDB 资产 + 题库包 .qbk 往返 + 含图备份 .qfbk）
+
+**背景**：竞品评分中富媒体维度（6/10）为纯前端可补的最大短板；本项落地文字考试常见的图片题（电路图/现场图/图表），不引入任何第三方库。
+
+**核心改动**
+- **资产存储 `js/utils/assets.js`（QB.Assets）**：图片字节存 IndexedDB（库 `qforge`/store `assets`），不占 localStorage 5MB 配额；id=`as`+FNV-1a(字节)hex+`-`+字节长度，内容寻址、同图去重；接口全异步（put/putEntries/get/getMap/allEntries/ids/remove/clear/removeOrphans）。驱动可注入：`idbDriver()`（生产）/`memoryDriver()`（测试），与 Repository local/api 双实现同构。
+- **富文本扩展（rich-text.js）**：图片占位 `![alt](asset:<id>)` → 无 src 的 `<img class="rt-img" data-asset>`，视图上屏后 `RichText.hydrate(root)` 批量从 IDB 换 blob:URL（每次 hydrate 回收上一轮 URL；缺图替换为占位文本）；新增 collectAssets/questionAssetIds；toPlain 将图片压成 `[图]`（列表/搜索紧凑显示）；alt 注入与 alt 内上下标污染属性均有断言。
+- **编辑器**：题目编辑器新增「📷 插入图片」，focusin 跟踪最近聚焦的题干/选项/解析文本框，标记插到光标处；JPEG 长边 >1600 走 canvas 重采样（0.82），PNG/GIF/WebP/SVG 原样保存（保留透明/动画）；保存后走既有 update/create，模型仅多文本标记，判分/去重/搜索不受影响。
+- **题库包 .qbk（新 `js/modules/qbk.js` + `js/importers/qbk-importer.js`）**：stored ZIP（复用 ZipWriter/ZipReader）= `bank.json` + `assets/<id>.<ext>`；导出注册第 7 种格式（`async:true`，统一入口 `Exporters.buildAsync`，同步 buildContent 对 qbk 明确抛错），默认选中仍是 JSON；导入复用 JsonImporter 不重复嗅探，资产回写 IDB，缺图给警告但不阻断；qbk 同时进入文件/拖拽/URL 入口（URL 受既有 8MB 快照上限）。JSON/CSV/XLSX/DOCX/MD 只保留占位文本（导出选项文案已注明）。
+- **备份升级**：存在图片时全量备份自动输出 `.qfbk`（backup.json + assets/，结构与 qbk 同构），无图时仍是纯 JSON；恢复按 PK 头自动识别，覆盖恢复先清 IDB；备份管理新增「清理未引用图片」（全量题库引用集差集，confirm 后 removeOrphans）。旧 JSON 备份 100% 兼容。
+- CSS `.rt-img`（max-width:100%，选项/解析内 320px）；app 主渲染点统一 hydrate；index.html/harness 加载顺序更新；CI 第 13 步。
+- 文档：user-guide 3.3、IMPORT-FORMAT §1.1/§9、EXPORT-FORMAT §2、DATABASE §2.9 assets 表、ARCHITECTURE（utils/importers/module 三表）、README、本档。
+
+**验证数据（Node v24.14.0）**
+- 新增 `scripts/assets.test.mjs` **45 断言全过**：内容寻址/去重/getMap/缺省、mime 互转、qbk ZIP 打包-解包字节级一致、qbk 导入端到端（资产入库/缺图警告）、buildAsync qbk 往返、qfbk 备份打包/自动识别/覆盖恢复/纯 JSON 兼容、孤儿清理、注册表二进制标记。
+- rich-text 测试扩到 **33 断言**（新增 10 项图片占位：转义/无 src/alt/属性安全/toPlain/collect/questionAssetIds）。
+- 同步更新既有格式数断言（smoke、exporter、office-export：6→7）；13 套件合计 **1731/1731**（smoke 202/exporter 103/office 1148/editor 29/rich-text 33/assets 45/blueprint 18/source 29/fsrs 40/fsrs-opt 22/srs 29/backup 15/pwa 18）。
+- 首屏体积（**53 文件/48 js**，gzip -9）：**113.8 KB gzip / 320.1 KB raw**（上批 104.3 KB，+9.5KB：assets/qbk/qbk-importer + 编辑器/hydrate/备份逻辑；图片字节本身在 IDB，不计入首屏）。
+
+**公共抽象清单**
+- 新增：`QB.Assets`（存储门面+双驱动）、`QB.Qbk`（buildBundle/parseBundle/isZipBytes/referencedIds，qbk 与 qfbk 共用）、`QB.QbkImporter`（注册名 qbk）、`QB.RichText.collectAssets/questionAssetIds/hydrate`、`Exporters.buildAsync`（异步格式统一入口）、`Backup.buildAssetBundle/parseBackupFile/restoreAssets/globallyReferencedAssetIds`。
+- 复用：ZipWriter/ZipReader（stored）、JsonImporter（不复制 JSON 嗅探）、Helpers.escapeHtml、Storage 前缀/防抖、Storage 全量枚举（LS 备份路径不变）、confirmDialog/toast/modal。
+- 影响范围：Exporters 注册表 +1 行（默认仍选 JSON；既有同步调用方仅测试，已同步断言）；rich-text render 输出在含标记时新增 img 标签（无标记题目输出字节不变）；Backup.download 变 async（唯一调用方为备份弹窗按钮，内部已 await 并按 assetCount 切换 toast）。
+
+**遗留 TODO / 风险**
+- IndexedDB、canvas 压缩、blob:URL hydrate、真实 .qbk/.qfbk 文件双击恢复为浏览器行为，Node 用内存驱动+stored ZIP 覆盖逻辑层，真机/a11y 需人工验证。
+- file:// 下 IndexedDB 在部分浏览器被禁用（文档已提示走 serve/Pages）；老旧浏览器无 IDB 时题目文本仍可用，仅图片功能报错 toast。
+- URL 导入 .qbk 受 8MB 快照上限（文档已注明大文件走本地/拖拽）。
+- xlsx/docx 内嵌图片不解析（仍只取文本），后续如需要补 xl/media、word/media + rels 解析。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·

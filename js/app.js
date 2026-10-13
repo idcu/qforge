@@ -181,6 +181,7 @@
     }
 
     view().innerHTML = html;
+    QB.RichText.hydrate(view()); // IndexedDB 图片异步换 src（无图时为空操作）
     updateStatus();
 
     if (wasSearch) {

@@ -154,6 +154,17 @@ CREATE TABLE review_log (
 ```
 > 前端 FIFO 上限 20,000 条，存 `qb:user:revlog`，元素 `{id,h,r,t}`。优化器把同题相邻两次评分组成样本（间隔 + 评分档位），用伯努利负对数似然拟合 17 个权重。个性化权重存 `qb:meta:fsrsWeights`（`{w[],trainedAt,samples,defaultLoss,loss,improvement}`）；无该键时使用官方默认权重。
 
+### 2.9 assets（题目图片资产，本期落 IndexedDB）
+```sql
+CREATE TABLE assets (
+  id          CHAR(24)     PRIMARY KEY,         -- 'as' + FNV-1a hex(8) + '-' + 字节长度，内容寻址
+  mime        VARCHAR(32) NOT NULL,             -- image/png|image/jpeg|image/gif|image/webp|image/svg+xml
+  data        BLOB        NOT NULL,
+  created_at  BIGINT      NOT NULL
+);
+```
+> 前端存 IndexedDB（库名 `qforge`，object store `assets`，key=id），**不进 localStorage**（避开 5MB 配额）。题目文本以 Markdown 图片占位 `![alt](asset:<id>)` 引用，可出现在题干/选项/解析/参考答案；同图按字节哈希去重。删题后的孤儿资产由「备份与恢复 → 清理未引用图片」回收（扫描全量题目的引用集差集）。迁移后端时本表与题目文本解耦，可独立上传/CDN 化。
+
 ## 3. LocalStorage ↔ 数据库映射
 
 | LocalStorage 逻辑键（含前缀 `qb:`） | 对应表 | 说明 |

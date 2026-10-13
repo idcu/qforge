@@ -29,6 +29,51 @@
     return QB.DB.questions.removeMany(ids);
   }
 
+  /* ---------------- 图片插入（浏览器 DOM，不进 harness） ---------------- */
+
+  const IMG_TARGETS = 'textarea[data-qe="question"],textarea[data-qe="analysis"],textarea[data-qe="essay"],input[data-qe="option"]';
+  const JPEG_MAX_EDGE = 1600;
+  const JPEG_QUALITY = 0.82;
+
+  function loadImageObject(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片解码失败')); };
+      img.src = url;
+    });
+  }
+
+  /** 图片文件 → 资产 id。JPEG 超边压缩；其余格式（png/gif/webp/svg）原样保留透明/动画 */
+  async function fileToAsset(file) {
+    if (!file || !/^image\//.test(file.type || '')) throw new Error('请选择图片文件');
+    if (/\/jpe?g$/.test(file.type) && typeof document !== 'undefined') {
+      const img = await loadImageObject(file);
+      const scale = Math.min(1, JPEG_MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+      if (scale < 1) {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise((resolve, reject) =>
+          canvas.toBlob((b) => b ? resolve(b) : reject(new Error('图片压缩失败')), 'image/jpeg', JPEG_QUALITY));
+        return QB.Assets.put(new Uint8Array(await blob.arrayBuffer()), 'image/jpeg');
+      }
+    }
+    return QB.Assets.put(new Uint8Array(await file.arrayBuffer()), file.type || 'image/png');
+  }
+
+  function insertAtCursor(el, snippet) {
+    const start = el.selectionStart != null ? el.selectionStart : el.value.length;
+    const end = el.selectionEnd != null ? el.selectionEnd : el.value.length;
+    el.value = el.value.slice(0, start) + snippet + el.value.slice(end);
+    const caret = start + snippet.length;
+    try { el.setSelectionRange(caret, caret); } catch (e) { /* input 类型不支持时忽略 */ }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.focus();
+  }
+
   /* ---------------- 题目编辑表单 ---------------- */
 
   const DIFF_OPTS = [0, 1, 2, 3, 4, 5];
@@ -205,6 +250,7 @@
       '<div class="qe-form">' +
       '<label class="qe-label">题型</label><select data-qe="type">' + typeOptions(curType) + '</select>' +
       '<label class="qe-label">题干</label><textarea data-qe="question" rows="2" placeholder="题干文本（填空用 ____ 表示空位）">' + esc(q.question || '') + '</textarea>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-qe="img">📷 插入图片（先点击题干/选项/解析定位光标）</button>' +
       '<div data-qe="answerbox">' + answerSection(q) + '</div>' +
       '<label class="qe-label">解析（可选）</label><textarea data-qe="analysis" rows="2">' + esc(q.analysis || '') + '</textarea>' +
       '<div class="qe-grid">' +
@@ -257,6 +303,35 @@
         draft.type = curType;
         answerbox.innerHTML = answerSection(draft);
       });
+
+      // 图片插入：记录最近聚焦的题干/选项/解析文本框，按钮把占位符插到光标处
+      let lastEditable = modal.querySelector('[data-qe="question"]');
+      modal.addEventListener('focusin', (e) => {
+        if (e.target.matches && e.target.matches(IMG_TARGETS)) lastEditable = e.target;
+      });
+      modal.querySelector('[data-qe="img"]').onclick = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async () => {
+          const file = input.files && input.files[0];
+          if (!file) return;
+          UI.toast('正在处理图片…');
+          try {
+            const id = await fileToAsset(file);
+            const target = (lastEditable && document.body.contains(lastEditable))
+              ? lastEditable
+              : modal.querySelector('[data-qe="question"]');
+            insertAtCursor(target, '![](' + 'asset:' + id + ')');
+            UI.toast('图片已插入（保存题目后生效）', 'ok');
+          } catch (ex) {
+            UI.toast('图片插入失败：' + ex.message, 'err');
+          }
+        };
+        document.body.appendChild(input);
+        input.click();
+        document.body.removeChild(input);
+      };
 
       modal.querySelector('[data-qe="cancel"]').onclick = () => done();
       modal.querySelector('[data-qe="save"]').onclick = async () => {

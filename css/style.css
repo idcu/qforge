@@ -263,6 +263,11 @@ body {
 
 .question-text { font-size: 17px; font-weight: 600; margin: 4px 0 16px; white-space: pre-wrap; }
 
+/* 题目图片（IndexedDB 资产 hydrate 后显示） */
+.rt-img { display: block; max-width: 100%; margin: 8px 0; border-radius: var(--radius, 8px); }
+.opt-text .rt-img, .analysis .rt-img { max-width: 320px; }
+.rt-img-missing { color: var(--text-muted); font-size: 13px; }
+
 .option {
   display: flex;
   gap: 10px;

@@ -585,7 +585,7 @@ ok(xlsxBuilt.content instanceof ArrayBuffer && xlsxBuilt.content.byteLength > 0,
 ok(new Uint8Array(xlsxBuilt.content)[0] === 0x50 && new Uint8Array(xlsxBuilt.content)[1] === 0x4b, 'xlsx ZIP 头 PK');
 const docxBuilt = QB.Exporters.buildContent('docx', expBank);
 ok(docxBuilt.content instanceof ArrayBuffer && docxBuilt.content.byteLength > 0, 'docx 导出为二进制 ArrayBuffer');
-eq(QB.Exporters.FORMATS.length, 6, '已注册导出格式数 = 6（json/csv/xlsx/docx/markdown/txt）');
+eq(QB.Exporters.FORMATS.length, 7, '已注册导出格式数 = 7（qbk/json/csv/xlsx/docx/markdown/txt）');
 
 /* ================= 10. 级联删除 ================= */
 section('级联删除');

@@ -1,6 +1,6 @@
 # 导入格式说明（IMPORT-FORMAT）
 
-> 导入支持 **JSON / CSV / TSV / Markdown(.md) / XLSX / DOCX** 六种来源，全部在浏览器本地解析（零第三方库）。
+> 导入支持 **题库包(.qbk) / JSON / CSV / TSV / Markdown(.md) / XLSX / DOCX** 七种来源，全部在浏览器本地解析（零第三方库）。
 > 解析规则变化时须同步更新本文档与 `js/importers/adapters.js`、`js/importers/line-parser.js`。
 
 ## 1. 标准题目模型
@@ -43,7 +43,8 @@
 
 | 格式 | 扩展名 | 必备结构 | 选项写法 | 注意事项 |
 | --- | --- | --- | --- | --- |
-| JSON | `.json` | 数组，或含 `questions` 数组，或 `{题型:{分类:[]}}` 嵌套 | `["A.文本"]` / `[{letter,text}]` | 编码 UTF-8；四种结构自动嗅探 |
+| 题库包 | `.qbk` | stored ZIP：`bank.json` + `assets/*` 图片 | 同 JSON | 唯一携带图片资产的格式；见 §9 |
+| JSON | `.json` | 数组，或含 `questions` 数组，或 `{题型:{分类:[]}}` 嵌套 | `["A.文本"]` / `[{letter,text}]` | 编码 UTF-8；四种结构自动嗅探；不含图片文件 |
 | CSV | `.csv` | 首行表头，**必须含「题目/题干」列** | 「选项A…选项H」拆列，或选项列内含 `A.` 前缀 | 逗号/制表符/分号分隔自动识别；支持 BOM、引号转义、引号内换行 |
 | TSV/TXT | `.tsv` `.txt` | 同 CSV | 同 CSV | 分隔符按首行自动判断 |
 | Markdown | `.md` `.markdown` | `## 数字. 题干` 分题，`- **A.** 选项`，`**答案：X**` | `- **A.** 文本` 列表行 | 与本系统 md 导出格式对齐，支持导出→再导入往返；见 §6 |
@@ -218,7 +219,22 @@ http(s) 环境下可直接粘贴远端文件地址导入，与选择文件走**�
 - `file://` 双击打开时该入口禁用（浏览器安全限制）；需要时用 GitHub Pages 或 `node scripts/serve.mjs`。
 - 不带凭据的公开地址；带 Token 的私有源属于未来 REST 后端范畴。
 
-## 9. 样例文件
+## 9. 题库包（.qbk，含图片）
+
+带图片的题库跨设备/跨浏览器迁移格式，本质是 stored ZIP（零依赖 ZipWriter/ZipReader 读写）：
+
+```
+bank.json                 # 标准导出 JSON（题面含 ![](asset:<id>) 占位）
+assets/asxxxxxxxx-123.jpg # 图片字节，文件名即资产 id（FNV-1a 哈希-字节长度）
+assets/asyyyyyyyy-456.png
+```
+
+- 由「导出 → 题库包 .qbk」生成；导入时走与其他格式完全相同的预览/合并/覆盖流程，图片自动写入本浏览器 IndexedDB（同内容去重）。
+- 包内缺失题目引用的图片时给出警告，题面位置显示占位，不阻断导入。
+- URL 网络导入同样支持 .qbk（受 8MB 快照上限约束；超大题库包请文件/拖拽导入）。
+- JSON/CSV/XLSX/DOCX/Markdown 均只保留图片占位文本，不携带图片字节。
+
+## 10. 样例文件
 
 `qb/samples/` 下提供各格式样例，可直接用于导入测试：
 

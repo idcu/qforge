@@ -50,6 +50,34 @@ eq(toPlain('E=mc^2'), 'E=mc^2', '裸符号保留');
 eq(toPlain('<b>x'), '<b>x', 'toPlain 不转义（契约：HTML 前调用方自行转义）');
 eq(toPlain(null), '', 'toPlain(null)');
 
+section('图片资产占位');
+{
+  const id = 'as1a2b3c4d-12345';
+  const html = render('见图 ![](asset:' + id + ') 说明');
+  ok(html.indexOf('<img class="rt-img" data-asset="' + id + '"') >= 0, 'render 输出 data-asset 占位');
+  ok(html.indexOf('src=') < 0, '占位无 src（等待 hydrate）');
+  const withAlt = render('![电路图](asset:' + id + ')');
+  ok(withAlt.indexOf('alt="电路图"') >= 0, 'alt 保留');
+  const evil = render('![<script>](asset:' + id + ')');
+  ok(evil.indexOf('<script>') < 0 && evil.indexOf('&lt;script&gt;') >= 0, 'alt 中 HTML 转义');
+  const supAlt = render('![x^{2}](asset:' + id + ')');
+  ok(supAlt.indexOf('<sup>', supAlt.indexOf('alt=')) < 0, 'alt 中上下标标签不进属性');
+  eq(toPlain('前 ![](asset:' + id + ') 后'), '前 [图] 后', 'toPlain 图片→[图]');
+  eq(toPlain('![电路](asset:' + id + ')'), '[电路]', 'toPlain 保留 alt 文案');
+  const ids = QB.RichText.collectAssets(
+    'a ![](asset:' + id + ')',
+    '![](asset:as00000000-1)',
+    '重复 ![](asset:' + id + ')');
+  eq(ids.length, 2, 'collectAssets 跨参数去重（2 个）');
+  ok(ids[0] === id && ids[1] === 'as00000000-1', 'collectAssets 保持出现顺序');
+  const qIds = QB.RichText.questionAssetIds({
+    question: '![](asset:as00000000-1)',
+    options: [{ text: '![](asset:as00000000-1)' }, { text: '![](asset:as00000002-2)' }],
+    analysis: '解析无图'
+  });
+  eq(qIds.length, 2, 'questionAssetIds 扫描题干/选项/分析去重');
+}
+
 section('与 escapeHtml 的安全组合（列表用法）');
 eq(QB.escapeHtml(toPlain('x^{2}<b>')), 'x2&lt;b&gt;', 'toPlain 后转义可安全入 HTML');
 

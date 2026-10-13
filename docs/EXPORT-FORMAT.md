@@ -16,14 +16,16 @@
 
 | id | 格式 | 扩展名 | MIME | 特点 | 可否再导入 |
 | --- | --- | --- | --- | --- | --- |
-| `json` | JSON 备份 | `.json` | application/json | 标准结构（含 bank 元信息、kind、时间戳） | ✅ 直接再导入 |
+| `qbk` | 题库包 | `.qbk` | application/zip | stored ZIP：bank.json + `assets/*` 图片，唯一携带图片的格式；`async:true` 经 `buildAsync` 构建 | ✅ 直接再导入（图片回写 IndexedDB） |
+| `json` | JSON 备份 | `.json` | application/json | 标准结构（含 bank 元信息、kind、时间戳）；图片只保留占位文本 | ✅ 直接再导入（无图） |
 | `csv` | CSV 表格 | `.csv` | text/csv | **UTF-8 BOM**（Excel 直开不乱码），表头与导入规范一致 | ✅ 直接再导入 |
 | `xlsx` | Excel 工作簿 | `.xlsx` | spreadsheetml.sheet | 原生 ZIP 打包（stored + CRC32，零依赖），inlineStr 单元格，单工作表 | ✅ 直接再导入（首个工作表） |
 | `docx` | Word 文档 | `.docx` | wordprocessingml.document | 原生 ZIP 打包，段落即 LineParser 排版行 | ✅ 可再导入（见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §5） |
 | `markdown` | Markdown 题单 | `.md` | text/markdown | 含题型角标、选项、答案、解析、分类，便于阅读/打印 | ✅ 可再导入（行式解析，见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §6） |
 | `txt` | 纯文本试卷 | `.txt` | text/plain | 等宽排版，含答案 | ❌（阅读用） |
 
-- xlsx/docx 为二进制格式（注册表项带 `binary: true`），`buildContent` 返回的 `content` 是 `ArrayBuffer`；四种文本格式返回字符串。
+- xlsx/docx/qbk 为二进制格式（注册表项带 `binary: true`），`content` 是 `ArrayBuffer`；四种文本格式返回字符串。
+- qbk 为 `async: true`（需异步读 IndexedDB），统一入口是 `Exporters.buildAsync(id, payload)`；同步 `buildContent` 对 qbk 明确抛错。图片文件名 = 资产 id（`as<FNV1ahex>-<字节长度>`），缺图时 toast 报缺失数，占位标记仍随 bank.json 导出。
 - 打包经公共模块 `QB.ZipWriter`（`js/utils/zip-writer.js`，stored 不压缩 + CRC32）与 `QB.OfficeWriter`（`js/modules/office-writer.js`，OOXML 部件生成）；采用 stored 是为了让自家 `ZipReader` 在无 `DecompressionStream` 的环境也能闭环回读，代价是体积大于 deflate（538 题约 0.65 MB / 0.26 MB，见 §6 实测）。
 
 ### 2.1 JSON 结构

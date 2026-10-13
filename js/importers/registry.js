@@ -8,7 +8,7 @@
   const QB = (global.QB = global.QB || {});
 
   const TEXT_EXTS = ['json', 'csv', 'tsv', 'txt', 'md', 'markdown'];
-  const BINARY_EXTS = ['xlsx', 'docx'];
+  const BINARY_EXTS = ['xlsx', 'docx', 'qbk'];
 
   const parsers = {};
 
@@ -78,6 +78,7 @@
   register(QB.MdImporter);
   register(QB.XlsxImporter);
   register(QB.DocxImporter);
+  register(QB.QbkImporter);
 
   QB.Importers = {
     register,

@@ -218,9 +218,25 @@
     return L.join('\r\n');
   }
 
+  /** 题库包 .qbk（stored ZIP：bank.json + assets/*），需异步读取 IndexedDB */
+  async function buildQBK(payload) {
+    const ids = QB.Qbk.referencedIds(payload.entries.map((e) => e.question));
+    const map = await QB.Assets.getMap(ids);
+    const assets = ids.filter((id) => map.has(id)).map((id) => {
+      const rec = map.get(id);
+      return { id: id, bytes: rec.bytes, mime: rec.mime };
+    });
+    return {
+      content: QB.Qbk.buildBundle('bank.json', buildJSON(payload), assets),
+      assetCount: assets.length,
+      missing: ids.length - assets.length
+    };
+  }
+
   /** 格式注册表：新增格式在此注册即可被弹窗与下载流程复用 */
   const FORMATS = [
-    { id: 'json', label: 'JSON 备份（标准结构，可再次导入）', ext: 'json', mime: 'application/json;charset=utf-8', build: buildJSON },
+    { id: 'qbk', label: '题库包（.qbk，含图片，跨设备迁移，可再次导入）', ext: 'qbk', mime: 'application/zip', build: buildQBK, binary: true, async: true },
+    { id: 'json', label: 'JSON 备份（标准结构，可再次导入；不含图片文件）', ext: 'json', mime: 'application/json;charset=utf-8', build: buildJSON },
     { id: 'csv', label: 'CSV 表格（Excel 可直接打开，可再次导入）', ext: 'csv', mime: 'text/csv;charset=utf-8', build: buildCSV },
     { id: 'xlsx', label: 'Excel 工作簿（.xlsx，可再次导入）', ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', build: buildXLSX, binary: true },
     { id: 'docx', label: 'Word 文档（.docx，可再次导入）', ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', build: buildDOCX, binary: true },
@@ -240,7 +256,22 @@
   function buildContent(formatId, payload) {
     const fmt = FORMATS.find((f) => f.id === formatId);
     if (!fmt) throw new Error('不支持的导出格式：' + formatId);
+    if (fmt.async) throw new Error('该格式为异步构建，请用 buildAsync：' + formatId);
     return { content: fmt.build(payload), ext: fmt.ext, mime: fmt.mime };
+  }
+
+  /** 同步/异步格式统一入口（qbk 需读 IndexedDB） */
+  async function buildAsync(formatId, payload) {
+    const fmt = FORMATS.find((f) => f.id === formatId);
+    if (!fmt) throw new Error('不支持的导出格式：' + formatId);
+    const r = await fmt.build(payload);
+    return {
+      content: r && r.content != null ? r.content : r,
+      ext: (r && r.ext) || fmt.ext,
+      mime: (r && r.mime) || fmt.mime,
+      assetCount: (r && r.assetCount) || 0,
+      missing: (r && r.missing) || 0
+    };
   }
 
   /* ---------------- 浏览器外壳 ---------------- */
@@ -259,8 +290,8 @@
 
   function chooseFormat(count, kindLabel) {
     return new Promise((resolve) => {
-      const radios = FORMATS.map((f, i) =>
-        '<div class="checkbox-row"><input type="radio" id="exp-fmt-' + f.id + '" name="exp-fmt" value="' + f.id + '"' + (i === 0 ? ' checked' : '') + '>' +
+      const radios = FORMATS.map((f) =>
+        '<div class="checkbox-row"><input type="radio" id="exp-fmt-' + f.id + '" name="exp-fmt" value="' + f.id + '"' + (f.id === 'json' ? ' checked' : '') + '>' +
         '<label for="exp-fmt-' + f.id + '">' + QB.escapeHtml(f.label) + '</label></div>').join('');
       QB.UIRenderer.openModal(
         '<h3>导出' + QB.escapeHtml(kindLabel) + '</h3>' +
@@ -302,19 +333,22 @@
 
     let built;
     try {
-      built = buildContent(formatId, payload);
+      built = await buildAsync(formatId, payload);
     } catch (e) {
       QB.UIRenderer.toast('导出失败：' + e.message, 'err');
       return null;
     }
     const filename = safeName(opts.bank.name) + '-' + def.label + '-' + payload.entries.length + '题-' + stamp() + '.' + built.ext;
     download(filename, built.mime, built.content);
-    QB.UIRenderer.toast('已导出' + def.label + ' ' + payload.entries.length + ' 题（' + formatId.toUpperCase() + '）', 'ok');
-    return { kind: opts.kind, format: formatId, count: payload.entries.length, filename: filename };
+    const imgNote = built.assetCount ? '，含图片 ' + built.assetCount + ' 张' : '';
+    QB.UIRenderer.toast('已导出' + def.label + ' ' + payload.entries.length + ' 题（' + formatId.toUpperCase() + imgNote + '）',
+      built.missing ? 'err' : 'ok');
+    if (built.missing) QB.UIRenderer.toast('有 ' + built.missing + ' 张引用图片缺失（未找到本地资产），仅导出占位标记', 'err');
+    return { kind: opts.kind, format: formatId, count: payload.entries.length, filename: filename, assetCount: built.assetCount };
   }
 
   QB.Exporters = {
-    KINDS, FORMATS, collect, buildContent, openFlow, download,
+    KINDS, FORMATS, collect, buildContent, buildAsync, openFlow, download,
     _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines
   };
 })(window);

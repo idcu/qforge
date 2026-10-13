@@ -220,7 +220,7 @@ const wrongPayload = {
   const docLines = QB.Exporters._toDocLines(wrongPayload);
   ok(docLines.some((l) => l.indexOf('错误次数：2') === 0), '错题 docx：含错误次数行');
 }
-eq(QB.Exporters.FORMATS.length, 6, '已注册导出格式数 = 6（json/csv/xlsx/docx/md/txt）');
+eq(QB.Exporters.FORMATS.length, 7, '已注册导出格式数 = 7（qbk/json/csv/xlsx/docx/md/txt）');
 ok(QB.Exporters.FORMATS.some((f) => f.id === 'xlsx' && f.binary), 'xlsx 标记为二进制格式');
 ok(QB.Exporters.FORMATS.some((f) => f.id === 'docx' && f.binary), 'docx 标记为二进制格式');
 {

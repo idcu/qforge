@@ -12,7 +12,7 @@
   const QB = (global.QB = global.QB || {});
   const UI = QB.UIRenderer;
 
-  const ACCEPT = '.json,.csv,.tsv,.txt,.md,.markdown,.xlsx,.docx';
+  const ACCEPT = '.json,.csv,.tsv,.txt,.md,.markdown,.xlsx,.docx,.qbk';
 
   function pickFile() {
     return new Promise((resolve) => {
