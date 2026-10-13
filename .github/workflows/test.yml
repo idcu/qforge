@@ -36,7 +36,9 @@ jobs:
         run: node scripts/editor.test.mjs
       - name: 组卷蓝图测试
         run: node scripts/blueprint.test.mjs
-      - name: SRS 间隔重复测试
+      - name: FSRS 调度器测试
+        run: node scripts/fsrs.test.mjs
+      - name: SRS 到期/存储测试
         run: node scripts/srs.test.mjs
       - name: 备份恢复测试
         run: node scripts/backup.test.mjs

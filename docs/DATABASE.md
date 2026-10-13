@@ -116,7 +116,7 @@ CREATE TABLE sessions (
 ```
 > 每用户每库至多一条有效会话（本期单用户全局一条，存 `qb:user:session`）。
 
-### 2.7 review_schedule（SRS 间隔重复）
+### 2.7 review_schedule（SRS 间隔重复，FSRS-4.5）
 ```sql
 CREATE TABLE review_schedule (
   id          VARCHAR(32) PRIMARY KEY,
@@ -124,14 +124,16 @@ CREATE TABLE review_schedule (
   bank_id     VARCHAR(32) REFERENCES banks(id) ON DELETE CASCADE,
   content_hash VARCHAR(16) NOT NULL,             -- 与题目去重键一致
   due_at      BIGINT NOT NULL,                   -- 下次到期时间戳
-  interval_d  INT NOT NULL DEFAULT 0,            -- 间隔（天）
-  ease        REAL NOT NULL DEFAULT 2.3,
+  algo        VARCHAR(8) NOT NULL DEFAULT 'fsrs',-- 算法标记（旧数据为 SM-2 行，首次评分自动迁移）
+  stability   REAL NOT NULL DEFAULT 0,           -- FSRS 稳定度（天）；0=未初始化
+  difficulty  REAL NOT NULL DEFAULT 0,           -- FSRS 难度 1..10；0=未初始化
   reps        INT NOT NULL DEFAULT 0,
   lapses      INT NOT NULL DEFAULT 0,
   last_at     BIGINT NOT NULL DEFAULT 0,
   UNIQUE INDEX uq_review_user_bank_hash (user_id, bank_id, content_hash)
 );
 ```
+> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last}`。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。
 
 ## 3. LocalStorage ↔ 数据库映射
 
@@ -141,7 +143,7 @@ CREATE TABLE review_schedule (
 | `qb:questions:<bankId>` | `questions` | 按库分键；字段名 camelCase ↔ snake_case |
 | `qb:user:wrong:<bankId>` | `wrong_questions` | `{questionKey, wrongCount, lastAt}` |
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
-| `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{due, interval, ease, reps, lapses, last}`（SRS） |
+| `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{algo:'fsrs', due, stability, difficulty, reps, lapses, last}` |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
 | `qb:user:session` | `sessions` | 单条会话快照 |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |

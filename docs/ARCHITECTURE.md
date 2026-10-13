@@ -93,8 +93,9 @@
 | `modules/statistics.js` | `overview`/`typePerformance`/`suggestions` |
 | `modules/search-filter.js` | `search`/`filter`/`highlight`/`categories` |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
-| `modules/srs.js` | **间隔重复纯调度器（SM-2 简化）**：`review/isDue/isDueToday/dueQuestions` |
-| `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday` |
+| `modules/fsrs.js` | **FSRS-4.5 纯调度器**（17 个官方默认权重）：`review/initialState`、稳定度/难度/目标保留率，无 DOM/存储依赖 |
+| `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
+| `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移 |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |
 | `modules/data-io.js` | `pickFile`/`importFlow`（预览弹窗） |
 | `modules/office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包（与导入端对称） |

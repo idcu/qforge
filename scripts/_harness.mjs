@@ -37,6 +37,7 @@ const MODULES = [
   'js/modules/history.js',
   'js/modules/statistics.js',
   'js/modules/search-filter.js',
+  'js/modules/fsrs.js',
   'js/modules/srs.js',
   'js/modules/srs-store.js',
   'js/modules/progress-saver.js',

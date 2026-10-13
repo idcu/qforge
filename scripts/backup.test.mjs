@@ -45,7 +45,7 @@ const qs = await QB.DB.questions.list(bank.id, {});
 eq(qs.items.length, 1, '恢复后题目 1 道');
 eq(qs.items[0].question, '备份题', '题目内容一致');
 const srs = QB.SRSStore.getState(bank.id, qs.items[0]);
-ok(srs && srs.interval === 1, 'SRS 复习状态一并恢复');
+ok(srs && srs.algo === 'fsrs' && srs.stability > 0, 'SRS（FSRS）复习状态一并恢复');
 
 section('合并恢复');
 clearAll();
