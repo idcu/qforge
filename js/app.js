@@ -717,6 +717,16 @@
     State.view = State.bankId ? 'home' : 'banks';
     await render();
     await maybeResume();
+    registerSW();
+  }
+
+  /** 注册 Service Worker（仅 http(s) 环境；file:// 与不支持的浏览器静默跳过） */
+  function registerSW() {
+    const isHttp = location.protocol === 'https:' || location.protocol === 'http:';
+    if (!isHttp || !('serviceWorker' in navigator)) return;
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => { /* 离线/受限环境忽略 */ });
+    });
   }
 
   if (document.readyState === 'loading') {

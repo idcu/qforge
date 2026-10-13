@@ -129,3 +129,4 @@
 
 - `.xlsx` / `.docx` 解析依赖浏览器 `DecompressionStream`；过老浏览器可能不支持。
 - LocalStorage 容量有限（通常 5–10MB），超大题库建议分库或迁往后端。
+- 应用支持 **PWA**：通过 https 访问（如 GitHub Pages）时可用浏览器「安装到主屏幕/桌面」，Service Worker 缓存后可离线打开；`file://` 双击场景不启用离线缓存。

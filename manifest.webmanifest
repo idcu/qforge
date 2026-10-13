@@ -1,0 +1,15 @@
+{
+  "name": "qforge 题库系统",
+  "short_name": "qforge",
+  "description": "零依赖、可离线使用的题库与刷题系统：多题型、错题、SRS 间隔重复、导入导出。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f7f7f8",
+  "theme_color": "#0fae6a",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
