@@ -13,7 +13,7 @@
 - **题目 CRUD**：题库内可视化新增 / 编辑 / 单删 / 勾选批删，按题型与关键词筛选、分页浏览。
 - **多题库**：新建 / 重命名 / 删除（级联）/ 切换，题目与用户数据按题库隔离。
 - **批量导入**：JSON、CSV/TSV、Markdown(.md)、Excel(.xlsx)、Word(.docx) —— 全部**原生解析，零第三方库**；Markdown 与导出格式互通、可往返。
-- **多格式导出**：题库 / 错题本可导出为 JSON、CSV、Markdown（三者均可再次导入往返）、TXT；kind × format 注册表，易扩展。
+- **多格式导出**：题库 / 错题本 / 收藏夹可导出为 JSON、CSV、**Excel(.xlsx)**、**Word(.docx)**、Markdown、TXT —— 前五者均可再次导入往返；kind × format 正交注册表，二进制 OOXML 经原生 ZipWriter（CRC32）零依赖打包。
 - **选项乱序**：练习/考试时单选/多选/不定项选项随机排列、答案自动重映射（只影响当次作答，不改库存数据）。
 - **组卷蓝图**：按「题型 × 分类 × 难度区间 × 数量」精确抽题，题量不足时给出缺口明细；支持练习/考试两种落位。
 - **刷题功能**：练习模式、考试模式（计时/交卷/自动交卷）、答题卡跳转与未答确认、随机出题。
@@ -56,14 +56,14 @@ qb/
 │   │   ├── db.js              # 门面：按 config 选择适配器，暴露三个 Repo
 │   │   └── sample-data.js     # 内置 15 题样例（判断/单选/多选/填空/简答各 3）
 │   ├── utils/                 # 公共抽象：helpers / storage / shuffle / answer-normalize
-│   │                          #   / judge-answer / question-id / zip-reader
+│   │                          #   / judge-answer / question-id / zip-reader / zip-writer(CRC32)
 │   ├── importers/             # registry / adapters / line-parser / json / csv / md / xlsx / docx
 │   └── modules/               # quiz-engine / ui-renderer / bank-manager / question-editor
 │                              #   / wrong-book / favorites / history / statistics
 │                              #   / search-filter / progress-saver / exam-timer
 │                              #   / data-io（导入） / exporter（多格式导出）
 │                              #   / blueprint（组卷蓝图） / srs + srs-store（间隔重复）
-│                              #   / backup（全量备份恢复）
+│                              #   / office-writer（xlsx/docx 部件）/ backup（全量备份恢复）
 │   └── app.js                 # 主应用，初始化与模块协调
 ├── sw.js                      # Service Worker（离线缓存，SWR 策略）
 ├── manifest.webmanifest       # PWA 清单
@@ -81,8 +81,9 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 8777） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（177 项断言：六题型判分/元数据/乱序/真实 541 题/三格式往返/CRUD/答题卡） |
-| `node scripts/exporter.test.mjs` | 导出功能单元测试（102 项断言，六题型/转义/难度标签列/Markdown 往返） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（179 项断言：六题型判分/元数据/乱序/真实 541 题/三格式往返/CRUD/答题卡/xlsx·docx 二进制结构） |
+| `node scripts/exporter.test.mjs` | 导出功能单元测试（103 项断言，六题型/转义/难度标签列/Markdown 往返） |
+| `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/538 题双格式全量判分自洽） |
 | `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
 | `node scripts/blueprint.test.mjs` | 组卷蓝图筛选/抽题/缺口测试（18 项断言） |
 | `node scripts/srs.test.mjs` | SRS 间隔调度（SM-2 简化）测试（29 项断言） |
@@ -97,11 +98,12 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 ```
 
 **实测数据（Node v24.14.0，2026-10-13 全量回归，详见 `CHANGELOG.internal.md`）**：
-- 7 个逻辑层测试套件 **388 / 388 通过**：冒烟 177、导出 102、编辑器 29、SRS 29、组卷 18、PWA 18、备份 15。
+- 8 个逻辑层测试套件 **1539 / 1539 通过**：冒烟 179、导出 103、Office 导出 1148、编辑器 29、SRS 29、组卷 18、PWA 18、备份 15。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
+- Office 导出：538 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验（539 行 × 16 列）。
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
-- 首屏静态体积（index.html + css + 全部 39 个 js + sw/manifest/icon，共 44 个文件，gzip -9 实测）：**78.8 KB（gzip）** / 223.7 KB（原始）。
-- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 1.51ms、落库 1.68ms、检索 0.55ms、50 题整卷判分 0.10ms、选项乱序 538 题 0.51ms、四格式导出构建 2.43ms、Markdown 538 题再解析 3.10ms；heapUsed 增量 7.92 MB。
+- 首屏静态体积（index.html + css + 全部 41 个 js + sw/manifest/icon，共 46 个文件，gzip -9 实测）：**83.3 KB gzip / 236.1 KB raw**。
+- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 2.16ms、落库 2.49ms、检索 0.62ms、50 题整卷判分 0.10ms、538 题乱序 0.50ms、文本四格式导出 3.42ms、**XLSX 构建 7.14ms（665 KB）**、**DOCX 构建 2.98ms（258 KB）**、Markdown 538 题再解析 4.51ms。
 
 ## 远端仓库
 

@@ -18,6 +18,12 @@ import { createHarness } from './_harness.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
 const ROOT = path.resolve(QB_DIR, '..');
+// 真实夹具：优先仓外原始抓取文件（本机开发），缺失时回退仓内 samples 副本（CI 环境）
+function fixturePath(externalName, repoName) {
+  const external = path.join(ROOT, externalName);
+  if (fs.existsSync(external)) return external;
+  return path.join(QB_DIR, 'samples', repoName);
+}
 
 const { QB, hasDomParser } = await createHarness(QB_DIR, { domParser: process.env.QB_DOMPARSER });
 if (process.env.QB_DOMPARSER && hasDomParser) console.log('[测试] DOMParser 已就绪：' + process.env.QB_DOMPARSER);
@@ -177,8 +183,8 @@ eq(QB.Adapters.normalizeType('不定项选择'), 'indefinite', '题型名「不�
 }
 
 section('真实数据导入（541 题）');
-const flatText = fs.readFileSync(path.join(ROOT, '题库-背题模式.json'), 'utf8');
-const nestedText = fs.readFileSync(path.join(ROOT, '题库-分类.json'), 'utf8');
+const flatText = fs.readFileSync(fixturePath('题库-背题模式.json', '真实-541题-背题模式.json'), 'utf8');
+const nestedText = fs.readFileSync(fixturePath('题库-分类.json', '真实-541题-分类.json'), 'utf8');
 
 let flat, nested;
 try {
@@ -439,7 +445,7 @@ if (!hasDomParser) {
 }
 
 /* ================= 9.5 导出（多格式/多对象） ================= */
-section('导出 Exporters（题库 / 错题，JSON/CSV/Markdown/TXT）');
+section('导出 Exporters（题库 / 错题，JSON/CSV/XLSX/DOCX/Markdown/TXT）');
 const expBank = await QB.Exporters.collect('bank', bankA);
 eq(expBank.entries.length, 538, '导出收集：题库 538 条');
 
@@ -502,10 +508,13 @@ eq(expFav.entries.length, 0, '收藏夹导出收集器可调用（当前 0 条�
 let threw = false;
 try { await QB.Exporters.collect('history', bankA); } catch (e) { threw = true; }
 ok(threw, '不支持的 kind（history 预留）抛错');
-threw = false;
-try { QB.Exporters.buildContent('xlsx', expBank); } catch (e) { threw = true; }
-ok(threw, '不支持的格式（xlsx 预留）抛错');
-eq(QB.Exporters.FORMATS.length, 4, '已注册导出格式数 = 4');
+// xlsx / docx 已注册为二进制格式（完整往返见 office-export.test.mjs）
+const xlsxBuilt = QB.Exporters.buildContent('xlsx', expBank);
+ok(xlsxBuilt.content instanceof ArrayBuffer && xlsxBuilt.content.byteLength > 0, 'xlsx 导出为二进制 ArrayBuffer');
+ok(new Uint8Array(xlsxBuilt.content)[0] === 0x50 && new Uint8Array(xlsxBuilt.content)[1] === 0x4b, 'xlsx ZIP 头 PK');
+const docxBuilt = QB.Exporters.buildContent('docx', expBank);
+ok(docxBuilt.content instanceof ArrayBuffer && docxBuilt.content.byteLength > 0, 'docx 导出为二进制 ArrayBuffer');
+eq(QB.Exporters.FORMATS.length, 6, '已注册导出格式数 = 6（json/csv/xlsx/docx/markdown/txt）');
 
 /* ================= 10. 级联删除 ================= */
 section('级联删除');

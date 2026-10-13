@@ -347,6 +347,7 @@
   function renderFavoritesList(items) {
     if (!items.length) return emptyState('收藏夹是空的。答题时可点击「收藏」加入。');
     let html = '<div class="toolbar"><button class="btn" data-action="start-favorite">收藏练习</button>' +
+      '<button class="btn btn-ghost" data-action="export-fav">导出收藏</button>' +
       '<button class="btn btn-ghost" data-action="fav-clear">清空收藏夹</button></div>';
     items.forEach((it) => {
       const q = it.question;

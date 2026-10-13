@@ -8,7 +8,7 @@
  *   - insertMany 落库（localStorage 序列化）
  *   - buildIndex（contentHash 索引）
  *   - SearchFilter 关键词检索 / Statistics 汇总
- *   - 选项乱序 / 多格式导出构建
+ *   - 选项乱序 / 多格式导出构建（文本四格式 + xlsx/docx 二进制）
  *   - heapUsed 增量 / localStorage 载荷字节
  */
 import fs from 'node:fs';
@@ -51,7 +51,8 @@ function row(name, timeTriple, extra) {
 const heapBefore = process.memoryUsage().heapUsed;
 
 /* ---------- 1. JSON 解析 + 适配 ---------- */
-const flatText = fs.readFileSync(path.join(ROOT, '题库-背题模式.json'), 'utf8');
+const fixturePath = [path.join(ROOT, '题库-背题模式.json'), path.join(QB_DIR, 'samples', '真实-541题-背题模式.json')].find(fs.existsSync);
+const flatText = fs.readFileSync(fixturePath, 'utf8');
 let parsed;
 row('JSON.parse + 适配（541 题 → 去重 538）', await timed(async () => {
   parsed = await QB.JsonImporter.parse({ text: flatText, fileName: '题库-背题模式.json' });
@@ -127,11 +128,20 @@ row('shuffleOptions 选项乱序（538 题）', await timed(() => {
 
 /* ---------- 9. 多格式导出构建 ---------- */
 const exportPayload = await QB.Exporters.collect('bank', benchBank);
+const sizeOf = (c) => (typeof c === 'string' ? Buffer.byteLength(c, 'utf8') : c.byteLength);
 let expBytes = 0;
 row('导出构建（JSON+CSV+MD+TXT，538 题）', await timed(() => {
   expBytes = 0;
-  QB.Exporters.FORMATS.forEach((f) => { expBytes += f.build(exportPayload).length; });
+  QB.Exporters.FORMATS.filter((f) => !f.binary).forEach((f) => { expBytes += sizeOf(f.build(exportPayload)); });
 }, 10), '单次合计 ' + (expBytes / 1024).toFixed(1) + ' KB');
+let xlsxBytes = 0;
+row('XLSX 导出构建（stored ZIP，538 题）', await timed(() => {
+  xlsxBytes = QB.Exporters.buildContent('xlsx', exportPayload).content.byteLength;
+}, 10), '包体积 ' + (xlsxBytes / 1024).toFixed(1) + ' KB');
+let docxBytes = 0;
+row('DOCX 导出构建（stored ZIP，538 题）', await timed(() => {
+  docxBytes = QB.Exporters.buildContent('docx', exportPayload).content.byteLength;
+}, 10), '包体积 ' + (docxBytes / 1024).toFixed(1) + ' KB');
 
 /* ---------- 10. Markdown 导入解析（导出 md → 解析） ---------- */
 const mdText = QB.Exporters.buildContent('markdown', exportPayload).content;

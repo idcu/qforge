@@ -18,6 +18,7 @@ const MODULES = [
   'js/utils/judge-answer.js',
   'js/utils/question-id.js',
   'js/utils/zip-reader.js',
+  'js/utils/zip-writer.js',
   'js/data/contracts.js',
   'js/data/local-adapter.js',
   'js/data/api-adapter.js',
@@ -40,6 +41,7 @@ const MODULES = [
   'js/modules/srs-store.js',
   'js/modules/progress-saver.js',
   'js/modules/question-editor.js',
+  'js/modules/office-writer.js',
   'js/modules/exporter.js',
   'js/modules/backup.js',
   'js/modules/blueprint.js'

@@ -56,7 +56,8 @@
 | `utils/answer-normalize.js` | `QB.normalizeAnswer`/`QB.parseBoolean`/`QB.normalizeLetters` | 全角转半角、去空白、去标点、大小写归一；布尔归一 |
 | `utils/judge-answer.js` | `QB.judgeAnswer` | 按 `type` 策略表判分 |
 | `utils/question-id.js` | `QB.makeContentHash`/`QB.makeQuestionKey` | FNV-1a 去重键 |
-| `utils/zip-reader.js` | `QB.ZipReader`/`QB.decodeUtf8` | 原生 ZIP 读取（EOCD→中央目录→本地头）+ `DecompressionStream('deflate-raw')` |
+| `utils/zip-reader.js` | `QB.ZipReader`/`QB.decodeUtf8` | 原生 ZIP 读取（EOCD→中央目录→本地头）+ `DecompressionStream('deflate-raw')`；支持 method 0/8 |
+| `utils/zip-writer.js` | `QB.ZipWriter` | 原生 ZIP 打包（stored method=0 + CRC32），与 ZipReader 对称；xlsx/docx 写出共用 |
 
 ### 3.3 数据访问层（data）
 | 文件 | 职责 |
@@ -85,7 +86,7 @@
 | `modules/quiz-engine.js` | 答题状态机：装载/作答/进度/判分/`gradeAll`/`byType`/`restore` |
 | `modules/ui-renderer.js` | 渲染首页/答题/结果/列表/统计/搜索，以及 `toast`/`openModal`/`confirmDialog` |
 | `modules/bank-manager.js` | `create/rename/remove(级联)/importSample` |
-| `modules/question-editor.js` | 题目 CRUD 接口对接（走 QuestionRepo，UI 入口预留） |
+| `modules/question-editor.js` | 题目 CRUD：`buildQuestion` 纯函数 + 编辑器/管理器界面（走 QuestionRepo） |
 | `modules/wrong-book.js` | 错题本薄封装（`QB.DB.progress` + `buildIndex`） |
 | `modules/favorites.js` | 收藏夹薄封装 |
 | `modules/history.js` | 历史记录 + `stats` 聚合 |
@@ -96,7 +97,8 @@
 | `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday` |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |
 | `modules/data-io.js` | `pickFile`/`importFlow`（预览弹窗） |
-| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`openFlow`，JSON/CSV/Markdown/TXT，题库/错题（收藏预留），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
+| `modules/office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包（与导入端对称） |
+| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`openFlow`，JSON/CSV/XLSX/DOCX/Markdown/TXT 六格式，题库/错题/收藏，见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
 
 ## 4. 关键数据流
 

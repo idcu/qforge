@@ -266,11 +266,12 @@ eq(exportedSingle.answer, FIXTURES[1].answer, '导出答案保持库内原值');
 
 /* ================= 10. 注册表与异常输入 ================= */
 section('注册表与异常');
-eq(QB.Exporters.FORMATS.length, 4, '注册格式数 = 4（json/csv/markdown/txt）');
+eq(QB.Exporters.FORMATS.length, 6, '注册格式数 = 6（json/csv/xlsx/docx/markdown/txt）');
 eq(QB.Exporters.KINDS.bank.label, '题库', 'KINDS.bank 存在');
 eq(Object.keys(QB.Exporters.KINDS).length, 3, '已注册对象数 = 3（bank/wrong/favorites）');
 await throwsAsync(() => QB.Exporters.collect('history', bank), '未注册 kind（history）抛错');
-throws(() => QB.Exporters.buildContent('xlsx', payload), '未注册格式（xlsx）抛错');
+ok(QB.Exporters.buildContent('xlsx', payload).content instanceof ArrayBuffer, 'xlsx 已注册（二进制往返详见 office-export.test）');
+throws(() => QB.Exporters.buildContent('pdf', payload), '未注册格式（pdf）抛错');
 
 /* ================= 汇总 ================= */
 console.log('\n================ 汇总 ================');

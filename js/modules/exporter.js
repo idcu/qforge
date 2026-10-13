@@ -7,7 +7,8 @@
  *
  * 已支持 kind：bank（题库）、wrong（错题本）、favorites（收藏夹，UI 预留）
  * 预留 kind：history（答题历史，非题集结构，需专用 builder）
- * 预留格式：xlsx/docx（需 zip-writer，可在 FORMATS 注册，不影响现有格式）
+ * 已支持格式：json / csv / xlsx / docx / markdown / txt，六种均可再次导入往返
+ * （xlsx/docx 为二进制，经 OfficeWriter + ZipWriter 原生打包，零依赖）。
  */
 (function (global) {
   'use strict';
@@ -101,27 +102,66 @@
     return JSON.stringify(out, null, 2);
   }
 
-  function buildCSV(payload) {
-    const header = ['题型', '题目', '选项A', '选项B', '选项C', '选项D', '选项E', '选项F', '选项G', '选项H', '答案', '解析', '分类', '难度', '标签', '来源'];
+  const TABLE_HEADER = ['题型', '题目', '选项A', '选项B', '选项C', '选项D', '选项E', '选项F', '选项G', '选项H', '答案', '解析', '分类', '难度', '标签', '来源'];
+
+  /** 单题 → 表格行（CSV 与 XLSX 共用，保证两格式内容一致、可同样往返） */
+  function entryToRow(e, withWrong) {
+    const q = e.question;
+    const row = new Array(16).fill('');
+    row[0] = QB.typeLabel(q.type);
+    row[1] = q.question || '';
+    (q.options || []).slice(0, 8).forEach((o, i) => { row[2 + i] = o.text || ''; });
+    row[10] = answerLine(q);
+    row[11] = q.analysis || '';
+    row[12] = q.category || '';
+    row[13] = Number(q.difficulty) || 0;
+    row[14] = (q.tags || []).join('、');
+    row[15] = q.source || '';
+    if (withWrong) row.push(String(e.meta.wrongCount || 1));
+    return row;
+  }
+
+  /** 统一表格模型：第 1 行表头，其余数据行（CSV 构建与 XLSX 写入共用） */
+  function toTable(payload) {
     const withWrong = payload.kind === 'wrong';
+    const header = TABLE_HEADER.slice();
     if (withWrong) header.push('错误次数');
-    const lines = [header.map(csvCell).join(',')];
-    payload.entries.forEach((e) => {
-      const q = e.question;
-      const row = new Array(16).fill('');
-      row[0] = QB.typeLabel(q.type);
-      row[1] = q.question || '';
-      (q.options || []).slice(0, 8).forEach((o, i) => { row[2 + i] = o.text || ''; });
-      row[10] = answerLine(q);
-      row[11] = q.analysis || '';
-      row[12] = q.category || '';
-      row[13] = Number(q.difficulty) || 0;
-      row[14] = (q.tags || []).join('、');
-      row[15] = q.source || '';
-      if (withWrong) row.push(String(e.meta.wrongCount || 1));
-      lines.push(row.map(csvCell).join(','));
-    });
+    const rows = payload.entries.map((e) => entryToRow(e, withWrong));
+    return [header].concat(rows);
+  }
+
+  function buildCSV(payload) {
+    const lines = toTable(payload).map((row) => row.map(csvCell).join(','));
     return BOM + lines.join('\r\n'); // UTF-8 BOM，Excel 直接打开不乱码
+  }
+
+  /**
+   * 统一文档行模型：行式排版，与 LineParser 规范一致，
+   * DOCX 段落写入与（测试中的）逐题校验共用同一行源。
+   */
+  function toDocLines(payload) {
+    const kindLabel = (KINDS[payload.kind] && KINDS[payload.kind].label) || '导出';
+    const L = [];
+    L.push('《' + payload.bank.name + '》' + kindLabel + '（' + payload.entries.length + ' 题）');
+    L.push('导出时间：' + new Date().toLocaleString());
+    L.push('');
+    payload.entries.forEach((e, i) => {
+      const q = e.question;
+      L.push((i + 1) + '. [' + typeTag(q) + '] ' + (q.question || ''));
+      optionLines(q, (letter, text) => L.push(letter + '. ' + text));
+      L.push('答案：' + answerLine(q));
+      metaLines(e, q, (k, v) => k + '：' + v).forEach((x) => L.push(x));
+      L.push('');
+    });
+    return L;
+  }
+
+  function buildXLSX(payload) {
+    return QB.OfficeWriter.buildXlsx(toTable(payload));
+  }
+
+  function buildDOCX(payload) {
+    return QB.OfficeWriter.buildDocx(toDocLines(payload));
   }
 
   function optionLines(q, render) {
@@ -182,9 +222,10 @@
   const FORMATS = [
     { id: 'json', label: 'JSON 备份（标准结构，可再次导入）', ext: 'json', mime: 'application/json;charset=utf-8', build: buildJSON },
     { id: 'csv', label: 'CSV 表格（Excel 可直接打开，可再次导入）', ext: 'csv', mime: 'text/csv;charset=utf-8', build: buildCSV },
+    { id: 'xlsx', label: 'Excel 工作簿（.xlsx，可再次导入）', ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', build: buildXLSX, binary: true },
+    { id: 'docx', label: 'Word 文档（.docx，可再次导入）', ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', build: buildDOCX, binary: true },
     { id: 'markdown', label: 'Markdown 题单（含答案解析，.md）', ext: 'md', mime: 'text/markdown;charset=utf-8', build: buildMarkdown },
     { id: 'txt', label: '纯文本试卷（.txt）', ext: 'txt', mime: 'text/plain;charset=utf-8', build: buildTXT }
-    // 预留：{ id:'xlsx', ... 需 zip-writer } / { id:'docx', ... }
   ];
 
   /* ---------------- 纯函数入口（可测试） ---------------- */
@@ -272,5 +313,8 @@
     return { kind: opts.kind, format: formatId, count: payload.entries.length, filename: filename };
   }
 
-  QB.Exporters = { KINDS, FORMATS, collect, buildContent, openFlow, download, _toPlain: toPlain };
+  QB.Exporters = {
+    KINDS, FORMATS, collect, buildContent, openFlow, download,
+    _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines
+  };
 })(window);
