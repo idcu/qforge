@@ -464,24 +464,46 @@
   }
 
   function openMixedDialog() {
-    const boxes = QB.CONFIG.TYPES.map((t) =>
-      '<div class="checkbox-row"><input type="checkbox" id="mix-' + t + '" value="' + t + '" checked>' +
-      '<label for="mix-' + t + '">' + esc(QB.typeLabel(t)) + '</label></div>').join('');
+    const avail = QB.Blueprint.availability(State.allQuestions, {});
+    const cats = QB.SearchFilter.categories(State.allQuestions);
+    const rows = QB.CONFIG.TYPES.map((t) =>
+      '<div class="bp-row"><label class="bp-name">' + esc(QB.typeLabel(t)) +
+      ' <span class="li-meta">（可选 ' + avail[t] + '）</span></label>' +
+      '<input type="number" min="0" class="bp-n" data-bp-type="' + t + '" value="0" /></div>').join('');
+    const catOpts = '<option value="">全部分类</option>' +
+      cats.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
     UI.openModal(
-      '<h3>混合练习</h3>' +
-      '<p class="li-meta">勾选题型，并设置本次题量。</p>' + boxes +
-      '<div class="field"><label>题量</label><input id="mix-n" type="number" min="1" value="' + (QB.CONFIG.QUESTIONS_PER_QUIZ || 50) + '" /></div>' +
+      '<h3>组卷</h3>' +
+      '<p class="li-meta">按题型设置题量（0=不选），可再按分类与难度区间抽题。题量不足时按实际数量组卷并提示。</p>' + rows +
+      '<div class="qe-grid"><div><label class="qe-label">分类</label><select data-bp-cat>' + catOpts + '</select></div>' +
+      '<div><label class="qe-label">难度下限</label><select data-bp-min">' +
+      [0, 1, 2, 3, 4, 5].map((d) => '<option value="' + d + '">' + (d === 0 ? '不限' : d) + '</option>').join('') +
+      '</select></div>' +
+      '<div><label class="qe-label">难度上限</label><select data-bp-max">' +
+      [0, 1, 2, 3, 4, 5].map((d) => '<option value="' + d + '"' + (d === 0 ? ' selected' : '') + '>' + (d === 0 ? '不限' : d) + '</option>').join('') +
+      '</select></div></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="bp-exam" /><label for="bp-exam">以考试模式开始（计时、交卷整卷判分）</label></div>' +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
       '<button class="btn" data-action="modal-ok">开始</button></div>',
       (modal) => {
         modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
         modal.querySelector('[data-action="modal-ok"]').onclick = () => {
-          const types = Array.from(modal.querySelectorAll('input[type=checkbox]:checked')).map((c) => c.value);
-          const n = parseInt(modal.querySelector('#mix-n').value, 10) || (QB.CONFIG.QUESTIONS_PER_QUIZ || 50);
+          const items = Array.prototype.map.call(modal.querySelectorAll('.bp-n'), (el) =>
+            ({ type: el.getAttribute('data-bp-type'), count: parseInt(el.value, 10) || 0 }));
+          const category = modal.querySelector('[data-bp-cat]').value;
+          const minDifficulty = parseInt(modal.querySelector('[data-bp-min]').value, 10) || 0;
+          const maxDifficulty = parseInt(modal.querySelector('[data-bp-max]').value, 10) || 0;
+          const asExam = modal.querySelector('#bp-exam').checked;
           UI.closeModal();
-          if (!types.length) { UI.toast('请至少选择一种题型', 'err'); return; }
-          const list = QB.shuffle(State.allQuestions.filter((q) => types.indexOf(q.type) >= 0)).slice(0, n);
-          beginQuiz(list, 'practice', '混合练习');
+          const spec = { items: items, category: category || undefined };
+          if (minDifficulty) spec.minDifficulty = minDifficulty;
+          if (maxDifficulty) spec.maxDifficulty = maxDifficulty;
+          const { questions, shortages } = QB.Blueprint.compose(State.allQuestions, spec);
+          if (!questions.length) { UI.toast('按当前蓝图没有可组卷的题目', 'err'); return; }
+          if (shortages.length) {
+            UI.toast('部分题型题量不足，实际组卷 ' + questions.length + ' 题', 'err');
+          }
+          beginQuiz(questions, asExam ? 'exam' : 'practice', asExam ? '组卷考试' : '组卷练习');
         };
       }
     );

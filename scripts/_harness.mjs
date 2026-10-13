@@ -38,7 +38,8 @@ const MODULES = [
   'js/modules/search-filter.js',
   'js/modules/progress-saver.js',
   'js/modules/question-editor.js',
-  'js/modules/exporter.js'
+  'js/modules/exporter.js',
+  'js/modules/blueprint.js'
 ];
 
 /**

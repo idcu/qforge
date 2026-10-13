@@ -472,6 +472,9 @@ body {
 }
 .tag-chip.tag-soft { background: var(--surface-muted); color: var(--text-muted); }
 .diff-badge { color: var(--warning); font-size: 12px; letter-spacing: 1px; }
+.bp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
+.bp-name { flex: 1; font-size: 14px; }
+.bp-n { width: 90px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
 
 @media (max-width: 560px) {
   .view { padding: 14px 10px 30px; }
