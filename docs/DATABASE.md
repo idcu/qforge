@@ -25,10 +25,15 @@ CREATE TABLE banks (
   name        VARCHAR(128) NOT NULL,
   description TEXT,
   category    VARCHAR(64),
+  source_kind    VARCHAR(8)  NOT NULL DEFAULT 'local', -- local/file/paste/drop/url
+  source_uri     TEXT,                               -- 文件名 / '剪贴板' / 远端 URL
+  source_checksum CHAR(8),                           -- 上次拉取内容 FNV-1a，仅 url
+  source_fetched_at BIGINT,                          -- 上次拉取时间，仅 url
   created_at  BIGINT       NOT NULL,
   updated_at  BIGINT       NOT NULL
 );
 ```
+> 前端 bank.source 为嵌套对象 `{kind, uri, fetchedAt, checksum, refreshable}`；无该字段的旧题库按 `local` 兜底（读取时归一，不写迁移）。注意区分：来源（题目从哪进入本地）与存储后端（`DATA_BACKEND` local/api）是两个维度。
 
 ### 2.2 questions（题目）
 ```sql

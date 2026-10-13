@@ -84,20 +84,39 @@
       ' <button type="button" class="btn btn-sm btn-ghost" data-action="backup-manage">备份与恢复</button></div></div>';
   }
 
+  /** 来源徽章（provenance） */
+  function sourceChip(bank) {
+    const s = QB.Source ? QB.Source.normalize(bank && bank.source) : null;
+    if (!s || s.kind === QB.Source.KINDS.LOCAL) {
+      return '<span class="src-chip" title="题目在本浏览器内创建">📁 本地创建</span>';
+    }
+    const map = { file: '📄 文件导入', paste: '📋 粘贴导入', drop: '🖱️ 拖拽导入', url: '🌐 网络导入' };
+    const title = s.uri + (s.fetchedAt ? '（拉取于 ' + QB.Helpers.formatDate(s.fetchedAt) + '）' : '');
+    return '<span class="src-chip" title="' + esc(title) + '">' + esc(map[s.kind] || s.kind) +
+      (s.uri && s.kind === 'url' ? '：' + esc(shortHost(s.uri)) : '') + '</span>';
+  }
+  function shortHost(uri) {
+    try { const u = new URL(uri); return u.host + (u.pathname.length > 18 ? u.pathname.slice(-18) : u.pathname); }
+    catch (e) { return String(uri).slice(0, 36); }
+  }
+
   function renderHome(bank, counts) {
     if (!bank) return renderBanks([], null);
     const total = counts.total || 0;
+    const isHttp = location.protocol === 'http:' || location.protocol === 'https:';
+    const src = QB.Source.normalize(bank.source);
     let html = '<div class="card"><h3 class="card-title">' + esc(bank.name) + '</h3>' +
       '<div class="bank-meta">' + (bank.description ? esc(bank.description) + '<br>' : '') +
       '题目总数：<b>' + total + '</b>　' +
       QB.CONFIG.TYPES.map((t) => QB.typeLabel(t) + ' ' + (counts.byType[t] || 0)).join('　') +
-      '</div></div>';
+      '</div><div style="margin-top:8px">' + sourceChip(bank) + '</div></div>';
 
     if (!total) {
-      return html + emptyState('该题库还没有题目。',
-        '<button class="btn" data-action="bank-import">导入题目</button> ' +
+      const emptyBtns = '<button class="btn" data-action="bank-import">导入题目</button> ' +
         '<button class="btn btn-ghost" data-action="bank-import-text">粘贴文本导入</button> ' +
-        '<button class="btn btn-ghost" data-action="bank-import-sample">导入示例题目</button>') + renderStorageHealth();
+        (isHttp ? '<button class="btn btn-ghost" data-action="bank-import-url">网络地址导入</button> ' : '') +
+        '<button class="btn btn-ghost" data-action="bank-import-sample">导入示例题目</button>';
+      return html + emptyState('该题库还没有题目。', emptyBtns) + renderStorageHealth();
     }
 
     const due = counts.dueReview || 0;
@@ -121,10 +140,14 @@
     });
     html += '</div>';
 
+    const urlImportBtn = isHttp ? '<button class="btn btn-ghost" data-action="bank-import-url">网络地址导入</button>' : '';
+    const refreshBtn = (isHttp && src.refreshable)
+      ? '<button class="btn btn-ghost" data-action="bank-refresh-url" title="重新拉取来源 URL 并去重合并">↻ 刷新网络来源</button>' : '';
     html += '<div class="section-title">数据管理</div>' +
       '<div class="toolbar">' +
       '<button class="btn btn-ghost" data-action="bank-import">导入题目</button>' +
       '<button class="btn btn-ghost" data-action="bank-import-text">粘贴文本导入</button>' +
+      urlImportBtn + refreshBtn +
       '<button class="btn btn-ghost" data-action="bank-export">导出题目</button>' +
       '<button class="btn btn-ghost" data-action="backup-manage">备份与恢复</button>' +
       '<button class="btn btn-ghost" data-action="questions-manage">题目管理（新增/编辑/删除）</button>' +

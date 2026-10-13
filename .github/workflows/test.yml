@@ -36,6 +36,8 @@ jobs:
         run: node scripts/editor.test.mjs
       - name: 组卷蓝图测试
         run: node scripts/blueprint.test.mjs
+      - name: 来源与网络导入测试
+        run: node scripts/source.test.mjs
       - name: FSRS 调度器测试
         run: node scripts/fsrs.test.mjs
       - name: SRS 到期/存储测试

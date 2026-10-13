@@ -97,7 +97,8 @@
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
 | `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移 |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |
-| `modules/data-io.js` | `pickFile`/`importFlow`（预览弹窗） |
+| `modules/source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入测试） |
+| `modules/data-io.js` | 文件/粘贴/拖拽/**URL** 导入编排，统一「解析→预览→insertMany→记录来源」；`refreshUrlFlow` 按 checksum 刷新 |
 | `modules/office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包（与导入端对称） |
 | `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`openFlow`，JSON/CSV/XLSX/DOCX/Markdown/TXT 六格式，题库/错题/收藏，见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
 

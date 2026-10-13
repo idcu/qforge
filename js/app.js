@@ -363,6 +363,15 @@
         await QB.DataIO.importTextFlow(State.bank);
         return render();
       }
+      case 'bank-import-url': {
+        if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
+        await QB.DataIO.importUrlFlow(State.bank);
+        return render();
+      }
+      case 'bank-refresh-url': {
+        await QB.DataIO.refreshUrlFlow(State.bank);
+        return render();
+      }
       case 'bank-export': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
         return QB.Exporters.openFlow({ kind: 'bank', bank: State.bank });
@@ -760,7 +769,7 @@
       if (!file) return;
       if (!State.bank) { UI.toast('请先创建或选择题库', 'err'); return; }
       if (State.engine) { UI.toast('答题中不能导入，请先交卷或退出', 'err'); return; }
-      await QB.DataIO.importFile(State.bank, file);
+      await QB.DataIO.importFile(State.bank, file, QB.Source.KINDS.DROP);
       render();
     });
 

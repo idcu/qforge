@@ -33,19 +33,34 @@
 
   /**
    * 执行导入解析
-   * @returns {Promise<{questions:Array, warnings:Array, format:string, stats:Object}>}
+   * 入参兼容三种形态（文件选择、拖拽、网络拉取的快照）：
+   *   - File 对象（含 .name，内部 FileReader 读取）
+   *   - {name, file: File}
+   *   - {name, text}            文本格式快照
+   *   - {name, arrayBuffer}     二进制格式快照（xlsx/docx）
+   * @returns {Promise<{questions:Array, warnings:Array, format:string, stats:Object, ext:string}>}
    */
   async function runImport(file) {
-    const ext = extOf(file.name);
+    const name = file && file.name ? file.name : '';
+    const ext = extOf(name);
     const parser = parsers[ext];
     if (!parser) {
       throw new Error('不支持的文件类型 .' + ext + '（支持：json / csv / md / xlsx / docx）');
     }
     const asBinary = BINARY_EXTS.indexOf(ext) >= 0;
-    const content = await readFile(file, asBinary);
-    const input = asBinary
-      ? { arrayBuffer: content, fileName: file.name }
-      : { text: content, fileName: file.name };
+    let input;
+    // 已是内存快照（网络导入/测试注入）：直接构造 parser 入参
+    if (file && (file.text != null || file.arrayBuffer != null)) {
+      input = asBinary
+        ? { arrayBuffer: file.arrayBuffer, fileName: name }
+        : { text: file.text, fileName: name };
+    } else {
+      const realFile = file.file || file;
+      const content = await readFile(realFile, asBinary);
+      input = asBinary
+        ? { arrayBuffer: content, fileName: name }
+        : { text: content, fileName: name };
+    }
 
     const result = await parser.parse(input);
     const validated = QB.Adapters.validateQuestions(result.questions || []);
@@ -53,7 +68,8 @@
       questions: result.questions || [],
       warnings: (result.warnings || []).concat(validated.warnings || []),
       format: result.format || ext,
-      stats: validated.stats
+      stats: validated.stats,
+      ext: ext
     };
   }
 

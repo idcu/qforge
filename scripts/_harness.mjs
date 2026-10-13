@@ -31,6 +31,7 @@ const MODULES = [
   'js/importers/docx-importer.js',
   'js/importers/md-importer.js',
   'js/importers/registry.js',
+  'js/modules/source.js',
   'js/modules/data-io.js',
   'js/modules/quiz-engine.js',
   'js/modules/wrong-book.js',

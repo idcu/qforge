@@ -553,3 +553,6 @@ body.drag-over::after { content: "松开以导入到当前题库"; position: fix
 .cal-cell.future { opacity: .3; }
 .cal-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 12px; color: var(--text-muted); }
 .cal-legend .cal-cell { margin: 0 1px; }
+
+/* ===== 题库来源徽章 ===== */
+.src-chip { display: inline-block; font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--surface-muted); border: 1px solid var(--border); color: var(--text-muted); }
