@@ -1,6 +1,6 @@
 # 题库系统（qb）
 
-一个**零依赖、无构建、纯前端静态单页**的题库系统，支持 5 种题型、多题库管理、多种格式批量导入与完整的刷题功能。
+一个**零依赖、无构建、纯前端静态单页**的题库系统，支持 6 种题型、多题库管理、题目可视化 CRUD、多种格式批量导入、间隔重复复习与完整的刷题/组卷功能，并可作为 PWA 离线安装。
 
 参考开源仓库 [`idcu/ai-trainer/qb`](https://gitee.com/idcu/ai-trainer/tree/master/qb) 的模块划分思路，去掉了后端，补强了**题型覆盖**、**多题库**与**导入能力**；同时为**后续前后端分离 + 数据库**预留了完整的扩展位。
 
@@ -8,13 +8,20 @@
 
 ## 特性
 
-- **5 种题型**：判断题 / 单选题 / 多选题 / 填空题 / 简答题，统一判分策略。
+- **6 种题型**：判断题 / 单选题 / 多选题 / **不定项（少选半分、错选 0 分）** / 填空题 / 简答题，统一判分策略表。
+- **题目元数据**：每题支持难度（1–5 级）与多标签，导入/导出/组卷/成绩分析全链路贯通。
+- **题目 CRUD**：题库内可视化新增 / 编辑 / 单删 / 勾选批删，按题型与关键词筛选、分页浏览。
 - **多题库**：新建 / 重命名 / 删除（级联）/ 切换，题目与用户数据按题库隔离。
 - **批量导入**：JSON、CSV/TSV、Markdown(.md)、Excel(.xlsx)、Word(.docx) —— 全部**原生解析，零第三方库**；Markdown 与导出格式互通、可往返。
 - **多格式导出**：题库 / 错题本可导出为 JSON、CSV、Markdown（三者均可再次导入往返）、TXT；kind × format 注册表，易扩展。
-- **选项乱序**：练习/考试时单选/多选选项随机排列、答案自动重映射（只影响当次作答，不改库存数据）。
-- **刷题功能**：练习模式、考试模式（计时/交卷/自动交卷）、混合出题、随机出题。
+- **选项乱序**：练习/考试时单选/多选/不定项选项随机排列、答案自动重映射（只影响当次作答，不改库存数据）。
+- **组卷蓝图**：按「题型 × 分类 × 难度区间 × 数量」精确抽题，题量不足时给出缺口明细；支持练习/考试两种落位。
+- **刷题功能**：练习模式、考试模式（计时/交卷/自动交卷）、答题卡跳转与未答确认、随机出题。
+- **成绩报告**：交卷后按题型 / 分类 / 难度三个维度给出正确率分布与逐题回顾。
+- **间隔重复（SRS）**：内置 SM-2 简化调度器，按作答表现（又忘了/困难/良好/简单）安排复习，首页「今日复习」一键开练。
 - **学习数据**：错题本、收藏夹、历史记录与统计、关键词搜索（高亮）与筛选。
+- **备份与恢复**：单文件全量备份（含全部题库与学习数据），支持覆盖/合并恢复与存储占用提示。
+- **PWA**：manifest + service worker（stale-while-revalidate），可安装到桌面、离线打开壳应用。
 - **体验**：答题进度自动保存与恢复、键盘快捷键、深浅色主题、响应式布局。
 - **可迁移架构**：UI 只依赖数据访问层接口（Repository），一行配置即可从 LocalStorage 切到 REST 后端。
 
@@ -55,10 +62,16 @@ qb/
 │                              #   / wrong-book / favorites / history / statistics
 │                              #   / search-filter / progress-saver / exam-timer
 │                              #   / data-io（导入） / exporter（多格式导出）
+│                              #   / blueprint（组卷蓝图） / srs + srs-store（间隔重复）
+│                              #   / backup（全量备份恢复）
 │   └── app.js                 # 主应用，初始化与模块协调
+├── sw.js                      # Service Worker（离线缓存，SWR 策略）
+├── manifest.webmanifest       # PWA 清单
+├── icon.svg                   # PWA 图标
 ├── docs/                      # ARCHITECTURE / API-CONTRACT / DATABASE / user-guide / IMPORT-FORMAT / EXPORT-FORMAT
-├── samples/                   # 各格式导入样例（含真实 541 题）
+├── samples/                   # 各格式导入样例（含去重后真实 538 题题库）
 ├── scripts/                   # 开发工具（不随应用发布）：serve / smoke-test / bench / gen_fixtures
+│                              #   及各 *.test.mjs 逻辑层单元测试
 ├── CHANGELOG.internal.md      # 内部变更追溯（不对外发布）
 └── README.md
 ```
@@ -68,8 +81,13 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 8777） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（160 项断言，含真实 541 题与三格式往返） |
-| `node scripts/exporter.test.mjs` | 导出功能独立单元测试（96 项断言，五题型/转义/Markdown 往返） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（177 项断言：六题型判分/元数据/乱序/真实 541 题/三格式往返/CRUD/答题卡） |
+| `node scripts/exporter.test.mjs` | 导出功能单元测试（102 项断言，六题型/转义/难度标签列/Markdown 往返） |
+| `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
+| `node scripts/blueprint.test.mjs` | 组卷蓝图筛选/抽题/缺口测试（18 项断言） |
+| `node scripts/srs.test.mjs` | SRS 间隔调度（SM-2 简化）测试（29 项断言） |
+| `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（15 项断言） |
+| `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源校验（18 项断言） |
 | `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出 的耗时与内存） |
 | `python scripts/gen_fixtures.py` | 重新生成 xlsx / docx 样例（需 openpyxl） |
 
@@ -78,12 +96,12 @@ qb/
 QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 ```
 
-**实测数据（Node v24.14.0，详见 `CHANGELOG.internal.md`）**：
-- 冒烟测试：**160 / 160 通过**（含 xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返）。
-- 导出单元测试：**96 / 96 通过**（`scripts/exporter.test.mjs`，五题型/CSV 转义/BOM/错题）。
+**实测数据（Node v24.14.0，2026-10-13 全量回归，详见 `CHANGELOG.internal.md`）**：
+- 7 个逻辑层测试套件 **388 / 388 通过**：冒烟 177、导出 102、编辑器 29、SRS 29、组卷 18、PWA 18、备份 15。
+- 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
-- 首屏静态体积：**41.1 KB（gzip）** / 157.8 KB（原始），共 34 个静态文件。
-- 关键耗时中位数：JSON 解析 1.90ms、落库 1.75ms、检索 0.64ms、50 题整卷判分 0.10ms、选项乱序 538 题 0.77ms、四格式导出构建 3.01ms、Markdown 538 题再解析 3.20ms。
+- 首屏静态体积（index.html + css + 全部 39 个 js + sw/manifest/icon，共 44 个文件，gzip -9 实测）：**78.8 KB（gzip）** / 223.7 KB（原始）。
+- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 1.51ms、落库 1.68ms、检索 0.55ms、50 题整卷判分 0.10ms、选项乱序 538 题 0.51ms、四格式导出构建 2.43ms、Markdown 538 题再解析 3.10ms；heapUsed 增量 7.92 MB。
 
 ## 远端仓库
 
