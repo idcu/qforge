@@ -129,7 +129,7 @@
 
 ---
 
-## <本条> · test(verify): 冒烟测试、性能打点与真实数据样例
+## 5c22e22 · test(verify): 冒烟测试、性能打点与真实数据样例
 
 **核心改动**
 - `scripts/smoke-test.mjs`（逻辑层冒烟，含可选 DOMParser 注入）、`scripts/bench.mjs`（性能打点）、`scripts/serve.mjs`（静态服务）。
@@ -159,3 +159,11 @@
 3. 交互式浏览器 E2E 未自动化跑通（逻辑层已覆盖）。
 4. xlsx 仅读第一个工作表；DOCX 依赖排版规范。
 5. LocalStorage 容量受限，超大题库需后端或分库。
+
+---
+
+> 各 Commit Hash 一览（`git log --oneline`）：
+> `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
+> `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test
+>
+> 本文件后续若有「回填 Commit Hash」的文档提交，其 Hash 以 `git log -1` 为准（避免自引用循环）。
