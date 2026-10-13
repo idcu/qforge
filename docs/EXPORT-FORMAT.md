@@ -18,7 +18,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `json` | JSON 备份 | `.json` | application/json | 标准结构（含 bank 元信息、kind、时间戳） | ✅ 直接再导入 |
 | `csv` | CSV 表格 | `.csv` | text/csv | **UTF-8 BOM**（Excel 直开不乱码），表头与导入规范一致 | ✅ 直接再导入 |
-| `markdown` | Markdown 题单 | `.md` | text/markdown | 含题型角标、选项、答案、解析、分类，便于阅读/打印 | ❌（阅读用） |
+| `markdown` | Markdown 题单 | `.md` | text/markdown | 含题型角标、选项、答案、解析、分类，便于阅读/打印 | ✅ 可再导入（行式解析，见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §6） |
 | `txt` | 纯文本试卷 | `.txt` | text/plain | 等宽排版，含答案 | ❌（阅读用） |
 
 **预留格式**：`xlsx` / `docx`（需 zip-writer 写入端，注册到 `FORMATS` 即可接入，不影响现有格式）。
@@ -75,11 +75,17 @@ QB.Exporters.openFlow({ kind, bank })
 
 - **加格式**：写一个 `build(payload) → string`，往 `FORMATS` 追加 `{ id, label, ext, mime, build }`，弹窗自动出现单选项。
 - **加对象**：在 `KINDS` 追加 `{ label, collect(bank) → entries }`；若不是题集结构（如历史记录），需在各 builder 内分支处理。
-- **往返保证**：JSON / CSV 的字段与 `docs/IMPORT-FORMAT.md` 对齐，冒烟测试断言「导出 → 再导入」题量与题型分布不变。
+- **往返保证**：JSON / CSV / Markdown 的字段与排版分别对齐 `docs/IMPORT-FORMAT.md`；冒烟测试断言三种格式「导出 → 再导入」题量、题型分布、contentHash 集合不变（Markdown 538 题全量往返一致；TXT 为阅读格式不保证解析）。
 
 ## 6. 实测性能（Node v24.14.0，538 题）
 
 | 操作 | 中位数耗时 |
 | --- | --- |
-| 四种格式全部构建一遍（合计约 416 KB 文本） | 2.72 ms |
-| `shuffleOptions` 选项乱序 538 题（其中 455 题为单选/多选） | 0.76 ms |
+| 四种格式全部构建一遍（合计约 416 KB 文本） | 3.01 ms |
+| Markdown 导出文本再解析（538 题，含 toStandard 适配） | 3.20 ms |
+| `shuffleOptions` 选项乱序 538 题（其中 455 题为单选/多选） | 0.77 ms |
+
+## 7. 测试
+
+- `scripts/exporter.test.mjs`：导出功能独立单元测试（96 项断言），覆盖五题型、CSV 转义、BOM、JSON/CSV/MD 往返、错题 wrongCount、收藏、乱序隔离、注册表异常。
+- `scripts/smoke-test.mjs`：含 538 题真实数据的 JSON/CSV/Markdown 全量往返断言。

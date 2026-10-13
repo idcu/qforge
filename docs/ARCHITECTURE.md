@@ -71,11 +71,13 @@
 | 文件 | 职责 |
 | --- | --- |
 | `importers/adapters.js` | **公共适配器**：`toStandard`/`sniffAndAdapt`/`adaptArray`/`adaptNested`/`tableToQuestions`/`validateQuestions`；题型映射、表头别名 |
-| `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 JSON/CSV/XLSX/DOCX |
+| `importers/line-parser.js` | **行式切题公共解析器**：`parseLines`/`blocksToQuestions`（题号/选项/答案/解析/分类标记识别 + 题型推断），docx 与 md 共用 |
+| `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 JSON/CSV/MD/XLSX/DOCX |
 | `importers/json-importer.js` | JSON 结构嗅探（数组/导出/中文嵌套） |
-| `importers/csv-importer.js` | CSV/TSV 表头映射 |
+| `importers/csv-importer.js` | CSV/TSV 表头映射（自动识别逗号/制表符/分号、BOM、引号转义） |
+| `importers/md-importer.js` | Markdown 清洗（标题/列表/加粗/反引号/引用，保护 `____`）后复用 LineParser |
 | `importers/xlsx-importer.js` | 原生 zip + DOMParser 读第一个工作表 |
-| `importers/docx-importer.js` | 原生 zip 读 `word/document.xml`，段落正则切题 |
+| `importers/docx-importer.js` | 原生 zip 读 `word/document.xml` 成段落行后复用 LineParser |
 
 ### 3.5 业务模块（modules）
 | 文件 | 职责 |
@@ -100,6 +102,8 @@
 ```
 文件 → runImport(file)
      → 扩展名分派 → Importer.parse(input)
+         · JSON/CSV/XLSX → Adapters 直接建模
+         · DOCX（zip→段落行）/ Markdown（清洗行）→ LineParser.parseLines → blocksToQuestions → Adapters.toStandard
      → Adapters.toStandard（统一标准模型）
      → validateQuestions（总数/各题型/警告/文件内重复）
      → 预览弹窗（显示统计，选目标题库 + 合并/覆盖）
@@ -149,6 +153,7 @@ Exporters.openFlow({kind, bank})
 | `QB.Storage` | 内存缓存 + 防抖批写 + `forceSync()` | local-adapter 及所有持久化 |
 | `QB.DB` + Repo 接口 | 数据访问统一入口，屏蔽后端差异 | 全部业务模块 |
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
+| `LineParser.parseLines/blocksToQuestions` | 文本行（DOCX 段落 / Markdown 行）→ 题目块 → 标准题目 | docx-importer、md-importer |
 | `Exporters`（KINDS × FORMATS 注册表） | 题集收集与多格式文本构建解耦 | 题库/错题/收藏导出 |
 
 **影响范围说明（重要）**：
@@ -158,6 +163,7 @@ Exporters.openFlow({kind, bank})
 - `QB.parseBoolean` 与 `QB.normalizeLetters` 由 `answer-normalize.js` 单点提供，`judge-answer` / `adapters` / `shuffleOptions` / 测试均复用，禁止各自实现。
 - 选项乱序只在引擎装载时**派生出克隆题**（`shuffleOptions`），落库原题保持原序；因 contentHash 只含「题型+题干」，乱序不影响错题/收藏/去重键。
 - 旧的 `DataIO.exportBank`（只支持 JSON 单格式）已删除，所有导出统一走 `QB.Exporters.openFlow`，禁止再写专用下载逻辑。
+- 行式切题逻辑从 `docx-importer` 抽到 `LineParser`（**影响范围：docx-importer 一处**，对外仍是 `DocxImporter.parse`，输入输出不变）；md-importer 直接复用，禁止在 md 导入器里复制切题正则。
 
 ## 6. 题型与判分策略表
 

@@ -7,7 +7,7 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const TEXT_EXTS = ['json', 'csv', 'tsv', 'txt'];
+  const TEXT_EXTS = ['json', 'csv', 'tsv', 'txt', 'md', 'markdown'];
   const BINARY_EXTS = ['xlsx', 'docx'];
 
   const parsers = {};
@@ -39,7 +39,7 @@
     const ext = extOf(file.name);
     const parser = parsers[ext];
     if (!parser) {
-      throw new Error('不支持的文件类型 .' + ext + '（支持：json / csv / xlsx / docx）');
+      throw new Error('不支持的文件类型 .' + ext + '（支持：json / csv / md / xlsx / docx）');
     }
     const asBinary = BINARY_EXTS.indexOf(ext) >= 0;
     const content = await readFile(file, asBinary);
@@ -59,6 +59,7 @@
 
   register(QB.JsonImporter);
   register(QB.CsvImporter);
+  register(QB.MdImporter);
   register(QB.XlsxImporter);
   register(QB.DocxImporter);
 

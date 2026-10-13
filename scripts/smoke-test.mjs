@@ -2,92 +2,25 @@
  * 逻辑层冒烟测试（Node，无浏览器）
  * 用真实数据（题库-背题模式.json / 题库-分类.json，共 541 题）验证：
  *   - 答案规范化 / 判分策略（5 种题型）
- *   - contentHash 去重键稳定性
- *   - JSON 导入（扁平中文格式 + 嵌套分类格式）
- *   - CSV 导入
+ *   - contentHash 去重键稳定性 / 选项乱序与答案重映射
+ *   - JSON / CSV / Markdown 导入
  *   - 数据访问层 CRUD / 批量增删 / 多题库隔离 / 级联删除
  *   - 错题本 / 收藏 / 历史 / 进度会话
- *   - 答题引擎（练习 + 考试）与统计
- * 运行：node qb/scripts/smoke-test.mjs
+ *   - 答题引擎（练习 + 考试）、统计、多格式导出
+ * 运行：node scripts/smoke-test.mjs
+ * xlsx/docx 需：QB_DOMPARSER=<@xmldom/xmldom/lib/index.js 路径> node scripts/smoke-test.mjs
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHarness } from './_harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
 const ROOT = path.resolve(QB_DIR, '..');
 
-/* ---------- 浏览器环境垫片 ---------- */
-const raw = new Map();
-const localStorage = {
-  get length() { return raw.size; },
-  key(i) { return Array.from(raw.keys())[i]; },
-  getItem(k) { return raw.has(k) ? raw.get(k) : null; },
-  setItem(k, v) { raw.set(k, String(v)); },
-  removeItem(k) { raw.delete(k); }
-};
-const window = { localStorage, addEventListener() {}, removeEventListener() {}, console };
-window.window = window;
-
-function load(rel) {
-  const file = path.join(QB_DIR, rel);
-  const code = fs.readFileSync(file, 'utf8');
-  // 以 window 作为 global 执行 IIFE
-  new Function('window', 'globalThis', code)(window, window);
-}
-
-/* 按 index.html 的依赖顺序加载（跳过 app.js 与仅 DOM 使用的模块） */
-[
-  'js/data/sample-data.js',
-  'js/config.js',
-  'js/utils/helpers.js',
-  'js/utils/storage.js',
-  'js/utils/shuffle.js',
-  'js/utils/answer-normalize.js',
-  'js/utils/judge-answer.js',
-  'js/utils/question-id.js',
-  'js/utils/zip-reader.js',
-  'js/data/contracts.js',
-  'js/data/local-adapter.js',
-  'js/data/api-adapter.js',
-  'js/data/db.js',
-  'js/importers/adapters.js',
-  'js/importers/json-importer.js',
-  'js/importers/csv-importer.js',
-  'js/importers/xlsx-importer.js',
-  'js/importers/docx-importer.js',
-  'js/importers/registry.js',
-  'js/modules/quiz-engine.js',
-  'js/modules/wrong-book.js',
-  'js/modules/favorites.js',
-  'js/modules/history.js',
-  'js/modules/statistics.js',
-  'js/modules/search-filter.js',
-  'js/modules/progress-saver.js',
-  'js/modules/question-editor.js',
-  'js/modules/exporter.js'
-].forEach(load);
-
-const QB = window.QB;
-
-/* 可选：注入 DOMParser 以在浏览器外验证 xlsx/docx 原生解析
- * 用法：QB_DOMPARSER=@xmldom/xmldom node scripts/smoke-test.mjs
- *      （或传入绝对路径）
- */
-let hasDomParser = typeof globalThis.DOMParser !== 'undefined';
-if (!hasDomParser && process.env.QB_DOMPARSER) {
-  try {
-    let spec = process.env.QB_DOMPARSER;
-    if (/[\\/]/.test(spec) || /^[A-Za-z]:/.test(spec)) {
-      const { pathToFileURL } = await import('node:url');
-      spec = pathToFileURL(spec).href;
-    }
-    const mod = await import(spec);
-    const DP = mod.DOMParser || (mod.default && mod.default.DOMParser);
-    if (DP) { globalThis.DOMParser = DP; hasDomParser = true; console.log('[测试] 已注入 DOMParser：' + process.env.QB_DOMPARSER); }
-  } catch (e) { console.log('[测试] DOMParser 注入失败：' + e.message); }
-}
+const { QB, hasDomParser } = await createHarness(QB_DIR, { domParser: process.env.QB_DOMPARSER });
+if (process.env.QB_DOMPARSER && hasDomParser) console.log('[测试] DOMParser 已就绪：' + process.env.QB_DOMPARSER);
 function toArrayBuffer(buf) { return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength); }
 
 /* ---------- 断言工具 ---------- */
@@ -458,6 +391,19 @@ ok(expMd.indexOf('# 《物业题库A》题库') === 0, 'Markdown：标题含题�
 ok(expMd.indexOf('**答案：') > 0, 'Markdown：含答案行');
 const expTxt = QB.Exporters.buildContent('txt', expBank).content;
 ok(expTxt.indexOf('《物业题库A》题库') === 0 && expTxt.indexOf('答案：') > 0, 'TXT：含标题与答案');
+
+// Markdown 导出 → 再导入（真实 538 题全量往返）
+const mdRtAll = (await QB.MdImporter.parse({ text: expMd, fileName: 'rt.md' })).questions;
+eq(mdRtAll.length, 538, 'Markdown 往返：再导入仍 538 题');
+const mdRtTypes = QB.Adapters.validateQuestions(mdRtAll).stats.byType;
+eq(mdRtTypes.judge, 83, 'Markdown 往返：判断题 83');
+eq(mdRtTypes.single, 330, 'Markdown 往返：单选题 330');
+eq(mdRtTypes.multi, 125, 'Markdown 往返：多选题 125');
+const mdRtHashes = new Set(mdRtAll.map((q) => QB.makeContentHash(q)));
+const expBankHashes = new Set(expBank.entries.map((e) => QB.makeContentHash(e.question)));
+let mdInter = 0;
+mdRtHashes.forEach((h) => { if (expBankHashes.has(h)) mdInter++; });
+eq(mdInter, 538, 'Markdown 往返：contentHash 集合与原库完全一致');
 
 // 错题导出：含 wrongCount 列与计数
 const expWrong = await QB.Exporters.collect('wrong', bankA);

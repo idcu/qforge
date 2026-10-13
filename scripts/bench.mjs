@@ -1,73 +1,26 @@
 /**
  * 性能打点（Node，无浏览器）
  * 用真实 541 题数据测量核心链路的耗时与内存占用，输出可复核的数据。
- * 运行：node qb/scripts/bench.mjs
+ * 运行：node scripts/bench.mjs
  *
  * 打点项：
- *   - JSON.parse + 适配（541 → 538 去重）
+ *   - JSON.parse + 适配（541 → 538 去重）/ Markdown 解析
  *   - insertMany 落库（localStorage 序列化）
  *   - buildIndex（contentHash 索引）
- *   - SearchFilter 关键词检索
- *   - Statistics 汇总
+ *   - SearchFilter 关键词检索 / Statistics 汇总
+ *   - 选项乱序 / 多格式导出构建
  *   - heapUsed 增量 / localStorage 载荷字节
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHarness } from './_harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
 const ROOT = path.resolve(QB_DIR, '..');
 
-/* ---------- 浏览器环境垫片（与 smoke-test 一致） ---------- */
-const raw = new Map();
-const localStorage = {
-  get length() { return raw.size; },
-  key(i) { return Array.from(raw.keys())[i]; },
-  getItem(k) { return raw.has(k) ? raw.get(k) : null; },
-  setItem(k, v) { raw.set(k, String(v)); },
-  removeItem(k) { raw.delete(k); }
-};
-const window = { localStorage, addEventListener() {}, removeEventListener() {}, console };
-window.window = window;
-
-function load(rel) {
-  const code = fs.readFileSync(path.join(QB_DIR, rel), 'utf8');
-  new Function('window', 'globalThis', code)(window, window);
-}
-
-[
-  'js/data/sample-data.js',
-  'js/config.js',
-  'js/utils/helpers.js',
-  'js/utils/storage.js',
-  'js/utils/shuffle.js',
-  'js/utils/answer-normalize.js',
-  'js/utils/judge-answer.js',
-  'js/utils/question-id.js',
-  'js/utils/zip-reader.js',
-  'js/data/contracts.js',
-  'js/data/local-adapter.js',
-  'js/data/api-adapter.js',
-  'js/data/db.js',
-  'js/importers/adapters.js',
-  'js/importers/json-importer.js',
-  'js/importers/csv-importer.js',
-  'js/importers/xlsx-importer.js',
-  'js/importers/docx-importer.js',
-  'js/importers/registry.js',
-  'js/modules/quiz-engine.js',
-  'js/modules/wrong-book.js',
-  'js/modules/favorites.js',
-  'js/modules/history.js',
-  'js/modules/statistics.js',
-  'js/modules/search-filter.js',
-  'js/modules/progress-saver.js',
-  'js/modules/question-editor.js',
-  'js/modules/exporter.js'
-].forEach(load);
-
-const QB = window.QB;
+const { QB } = await createHarness(QB_DIR);
 
 /* ---------- 计时与内存工具 ---------- */
 const N = 10; // 每项重复次数，取中位数以抵消抖动
@@ -179,6 +132,14 @@ row('导出构建（JSON+CSV+MD+TXT，538 题）', await timed(() => {
   expBytes = 0;
   QB.Exporters.FORMATS.forEach((f) => { expBytes += f.build(exportPayload).length; });
 }, 10), '单次合计 ' + (expBytes / 1024).toFixed(1) + ' KB');
+
+/* ---------- 10. Markdown 导入解析（导出 md → 解析） ---------- */
+const mdText = QB.Exporters.buildContent('markdown', exportPayload).content;
+let mdParsedCount = 0;
+row('Markdown 导入解析（538 题 md 文本）', await timed(async () => {
+  const r = await QB.MdImporter.parse({ text: mdText, fileName: 'rt.md' });
+  mdParsedCount = r.questions.length;
+}, 10), '解析出 ' + mdParsedCount + ' 题');
 
 const heapAfter = process.memoryUsage().heapUsed;
 

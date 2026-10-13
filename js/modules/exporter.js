@@ -142,11 +142,8 @@
       const q = e.question;
       L.push('## ' + (i + 1) + '. [' + typeTag(q) + '] ' + q.question);
       optionLines(q, (letter, text) => L.push('- **' + letter + '.** ' + text));
-      if (q.type === 'fill' && Array.isArray(q.blanks)) {
-        q.blanks.forEach((b, bi) => L.push('- 空' + (bi + 1) + '：`' + (b.answer || '') + '`'));
-      } else {
-        L.push('**答案：' + answerLine(q) + '**');
-      }
+      // 统一答案行（填空各空以 ；连接），与 Markdown 导入器对齐以支持导出→再导入往返
+      L.push('**答案：' + answerLine(q) + '**');
       metaLines(e, q, (k, v) => '> ' + k + '：' + v).forEach((x) => L.push(x));
       L.push('');
     });

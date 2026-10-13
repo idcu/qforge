@@ -10,8 +10,8 @@
 
 - **5 种题型**：判断题 / 单选题 / 多选题 / 填空题 / 简答题，统一判分策略。
 - **多题库**：新建 / 重命名 / 删除（级联）/ 切换，题目与用户数据按题库隔离。
-- **批量导入**：JSON、CSV/TSV、Excel(.xlsx)、Word(.docx) —— 全部**原生解析，零第三方库**。
-- **多格式导出**：题库 / 错题本可导出为 JSON（可再导入）、CSV（Excel 直开）、Markdown、TXT；kind × format 注册表，易扩展。
+- **批量导入**：JSON、CSV/TSV、Markdown(.md)、Excel(.xlsx)、Word(.docx) —— 全部**原生解析，零第三方库**；Markdown 与导出格式互通、可往返。
+- **多格式导出**：题库 / 错题本可导出为 JSON、CSV、Markdown（三者均可再次导入往返）、TXT；kind × format 注册表，易扩展。
 - **选项乱序**：练习/考试时单选/多选选项随机排列、答案自动重映射（只影响当次作答，不改库存数据）。
 - **刷题功能**：练习模式、考试模式（计时/交卷/自动交卷）、混合出题、随机出题。
 - **学习数据**：错题本、收藏夹、历史记录与统计、关键词搜索（高亮）与筛选。
@@ -50,7 +50,7 @@ qb/
 │   │   └── sample-data.js     # 内置 15 题样例（判断/单选/多选/填空/简答各 3）
 │   ├── utils/                 # 公共抽象：helpers / storage / shuffle / answer-normalize
 │   │                          #   / judge-answer / question-id / zip-reader
-│   ├── importers/             # registry / adapters / json / csv / xlsx / docx
+│   ├── importers/             # registry / adapters / line-parser / json / csv / md / xlsx / docx
 │   └── modules/               # quiz-engine / ui-renderer / bank-manager / question-editor
 │                              #   / wrong-book / favorites / history / statistics
 │                              #   / search-filter / progress-saver / exam-timer
@@ -68,8 +68,9 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 8777） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（119 项断言，含真实 541 题） |
-| `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算 的耗时与内存） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（160 项断言，含真实 541 题与三格式往返） |
+| `node scripts/exporter.test.mjs` | 导出功能独立单元测试（96 项断言，五题型/转义/Markdown 往返） |
+| `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出 的耗时与内存） |
 | `python scripts/gen_fixtures.py` | 重新生成 xlsx / docx 样例（需 openpyxl） |
 
 带 xlsx/docx 解析验证（Node 无内置 DOMParser，可注入 `@xmldom/xmldom`）：
@@ -78,10 +79,11 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 ```
 
 **实测数据（Node v24.14.0，详见 `CHANGELOG.internal.md`）**：
-- 冒烟测试：**155 / 155 通过**（含 xlsx/docx 原生解析、选项乱序重映射、多格式导出往返）。
+- 冒烟测试：**160 / 160 通过**（含 xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返）。
+- 导出单元测试：**96 / 96 通过**（`scripts/exporter.test.mjs`，五题型/CSV 转义/BOM/错题）。
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
 - 首屏静态体积：**41.1 KB（gzip）** / 157.8 KB（原始），共 34 个静态文件。
-- 关键耗时中位数：JSON 解析 1.58ms、落库 1.83ms、检索 0.62ms、50 题整卷判分 0.10ms、选项乱序 538 题 0.76ms、四格式导出构建 2.72ms（约 416KB 文本）。
+- 关键耗时中位数：JSON 解析 1.90ms、落库 1.75ms、检索 0.64ms、50 题整卷判分 0.10ms、选项乱序 538 题 0.77ms、四格式导出构建 3.01ms、Markdown 538 题再解析 3.20ms。
 
 ## 远端仓库
 
