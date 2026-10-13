@@ -455,7 +455,7 @@
 
 ---
 
-## 待回填 hash · fix(srs): 修复 CI（UTC 时区）下自然日到期断言误失败
+## d8ba2d6 · fix(srs): 修复 CI（UTC 时区）下自然日到期断言误失败
 
 **现象**：GitHub Actions `logic-tests` Node 20/24 两个 job 均在 srs.test.mjs 第 25 项失败（28 通过 1 失败：「明天到期的题在次日 23:59 前算今日到期」），本地 UTC+8 29/29 通过。
 
@@ -481,7 +481,7 @@
 > 优化批次 f1–f8：`1543f1e` 元数据 · `8ede41c` CRUD UI · `467c553` 组卷蓝图 · `48adb18` 答题卡/报告 ·
 > `cce9a0d` SRS · `7511ac4` 备份恢复 · `5c4f855` PWA · `7010208` 不定项 ·
 > `4d00e2f` docs(本批 README/CHANGELOG) · `b90bafa` 品牌定名「淬题 qforge」
-> 未标注项批次：`b041b6b` xlsx/docx 双向导出+收藏导出 · `2ad0dc5` 组卷单场乱序开关 · `28871d2` ci(GitHub Actions)
+> 未标注项批次：`b041b6b` xlsx/docx 双向导出+收藏导出 · `2ad0dc5` 组卷单场乱序开关 · `28871d2` ci(GitHub Actions) · `d8ba2d6` fix(srs 时区断言/CI 双时区矩阵)
 >
-> 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（优化批次与品牌提交已 push；未标注项批次仅本地提交），镜像同步 GitHub。
+> 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `ea48d35` 已 push；`d8ba2d6` 及本回填提交待 push），镜像同步 GitHub。
 > 本文件后续若有「回填 Commit Hash」的文档提交，其 Hash 以 `git log -1` 为准（避免自引用循环）。
