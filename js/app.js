@@ -183,10 +183,10 @@
 
   /* ---------------- 答题流程 ---------------- */
 
-  function beginQuiz(questions, mode, title) {
+  function beginQuiz(questions, mode, title, opts) {
     if (!questions || !questions.length) { UI.toast('没有可作答的题目', 'err'); return; }
     const engine = new QB.QuizEngine();
-    engine.loadQuestions(questions, 'mixed');
+    engine.loadQuestions(questions, 'mixed', opts || {});
     engine.mode = mode || 'practice';
     State.engine = engine;
     State.quizMeta = { startTs: Date.now(), title: title || '' };
@@ -532,6 +532,7 @@
       '<div><label class="qe-label">难度上限</label><select data-bp-max">' +
       [0, 1, 2, 3, 4, 5].map((d) => '<option value="' + d + '"' + (d === 0 ? ' selected' : '') + '>' + (d === 0 ? '不限' : d) + '</option>').join('') +
       '</select></div></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="bp-shuffle"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="bp-shuffle">选项乱序（单选/多选/不定项，答案自动重映射，仅影响本场）</label></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-exam" /><label for="bp-exam">以考试模式开始（计时、交卷整卷判分）</label></div>' +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
       '<button class="btn" data-action="modal-ok">开始</button></div>',
@@ -544,6 +545,7 @@
           const minDifficulty = parseInt(modal.querySelector('[data-bp-min]').value, 10) || 0;
           const maxDifficulty = parseInt(modal.querySelector('[data-bp-max]').value, 10) || 0;
           const asExam = modal.querySelector('#bp-exam').checked;
+          const shuffleOpts = modal.querySelector('#bp-shuffle').checked;
           UI.closeModal();
           const spec = { items: items, category: category || undefined };
           if (minDifficulty) spec.minDifficulty = minDifficulty;
@@ -553,7 +555,7 @@
           if (shortages.length) {
             UI.toast('部分题型题量不足，实际组卷 ' + questions.length + ' 题', 'err');
           }
-          beginQuiz(questions, asExam ? 'exam' : 'practice', asExam ? '组卷考试' : '组卷练习');
+          beginQuiz(questions, asExam ? 'exam' : 'practice', asExam ? '组卷考试' : '组卷练习', { shuffleOptions: shuffleOpts });
         };
       }
     );
