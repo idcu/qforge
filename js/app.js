@@ -150,7 +150,13 @@
       }
       case 'stats': {
         const fc = State.bankId ? QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
-        html = UI.renderStats(await QB.History.list(State.bankId), fc);
+        const diag = QB.FSRSOpt.diagnose();
+        const fsrsInfo = {
+          samples: diag.samples,
+          threshold: QB.FSRSOpt.MIN_SAMPLES,
+          trained: QB.FSRSOpt.getWeightsMeta()
+        };
+        html = UI.renderStats(await QB.History.list(State.bankId), fc, fsrsInfo);
         break;
       }
       case 'search': {
@@ -538,6 +544,28 @@
         const key = el.getAttribute('data-action') === 'page-wrong' ? 'wrong' :
           el.getAttribute('data-action') === 'page-fav' ? 'favorites' : 'search';
         State.listPage[key] = parseInt(el.getAttribute('data-page'), 10) || 0;
+        return render();
+      }
+
+      /* —— FSRS 参数优化 —— */
+      case 'fsrs-train': {
+        UI.toast('正在训练（约需数秒）…');
+        let res;
+        try {
+          res = await new Promise((resolve) => setTimeout(() => resolve(QB.FSRSOpt.train()), 30));
+        } catch (e) { UI.toast('训练失败：' + e.message, 'err'); return render(); }
+        if (res.ok) {
+          UI.toast('训练完成：logloss 改善 ' + (res.improvement * 100).toFixed(1) + '%，已对后续评分生效', 'ok');
+        } else {
+          UI.toast(res.reason || '训练未采纳', 'err');
+        }
+        return render();
+      }
+      case 'fsrs-reset': {
+        if (await UI.confirmDialog('恢复为官方默认权重？个性化参数将被清除。', '恢复')) {
+          QB.FSRSOpt.resetWeights();
+          UI.toast('已恢复官方默认权重', 'ok');
+        }
         return render();
       }
 

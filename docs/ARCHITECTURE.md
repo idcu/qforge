@@ -94,6 +94,7 @@
 | `modules/search-filter.js` | `search`/`filter`/`highlight`/`categories` |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
 | `modules/fsrs.js` | **FSRS-4.5 纯调度器**（17 个官方默认权重）：`review/initialState`、稳定度/难度/目标保留率，无 DOM/存储依赖 |
+| `modules/fsrs-opt.js` | **个性化参数优化器**：revlog 采集（FIFO 2 万条）、样本构造、伯努利 NLL、数值梯度+Adam；门控 100 样本/≥3 again/3 档位/0.2% 改善 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
 | `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移 |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |

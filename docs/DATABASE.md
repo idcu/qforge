@@ -141,6 +141,19 @@ CREATE TABLE review_schedule (
 ```
 > 前端状态 `{algo,due,stability,difficulty,reps,lapses,last}`。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。
 
+### 2.8 review_log（FSRS 评分日志，参数优化用）
+```sql
+CREATE TABLE review_log (
+  id          VARCHAR(32) PRIMARY KEY,
+  user_id     VARCHAR(32),
+  content_hash VARCHAR(16) NOT NULL,             -- 跨题库（参数按人）
+  rating      TINYINT NOT NULL,                  -- 1 again | 2 hard | 3 good | 4 easy
+  reviewed_at BIGINT NOT NULL,
+  INDEX idx_revlog_user_time (user_id, reviewed_at)
+);
+```
+> 前端 FIFO 上限 20,000 条，存 `qb:user:revlog`，元素 `{id,h,r,t}`。优化器把同题相邻两次评分组成样本（间隔 + 评分档位），用伯努利负对数似然拟合 17 个权重。个性化权重存 `qb:meta:fsrsWeights`（`{w[],trainedAt,samples,defaultLoss,loss,improvement}`）；无该键时使用官方默认权重。
+
 ## 3. LocalStorage ↔ 数据库映射
 
 | LocalStorage 逻辑键（含前缀 `qb:`） | 对应表 | 说明 |
@@ -152,6 +165,8 @@ CREATE TABLE review_schedule (
 | `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{algo:'fsrs', due, stability, difficulty, reps, lapses, last}` |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
 | `qb:user:session` | `sessions` | 单条会话快照 |
+| `qb:user:revlog` | `review_log` | 全局 FIFO 评分日志，元素 `{id,h,r,t}` |
+| `qb:meta:fsrsWeights` | —（前端偏好） | 个性化 FSRS 权重与训练元数据 |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
 

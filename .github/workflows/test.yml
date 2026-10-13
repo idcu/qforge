@@ -40,6 +40,8 @@ jobs:
         run: node scripts/source.test.mjs
       - name: FSRS 调度器测试
         run: node scripts/fsrs.test.mjs
+      - name: FSRS 参数优化器测试
+        run: node scripts/fsrs-opt.test.mjs
       - name: SRS 到期/存储测试
         run: node scripts/srs.test.mjs
       - name: 备份恢复测试

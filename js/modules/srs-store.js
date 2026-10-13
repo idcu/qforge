@@ -32,22 +32,34 @@
     return map[keyFor(q)] || null;
   }
 
-  /** 应用一次评分，返回新状态并落盘 */
+  /** 应用一次评分，返回新状态并落盘（同时写 revlog 供参数优化） */
   function grade(bankId, q, rating, now) {
+    const ts = now == null ? Date.now() : now;
     const map = readMap(bankId);
     const k = keyFor(q);
-    const next = QB.FSRS.review(map[k], fsrsRating(rating), now);
+    const fr = fsrsRating(rating);
+    const next = QB.FSRS.review(map[k], fr, ts, QB.FSRSOpt.getActiveWeights());
     map[k] = next;
     writeMap(bankId, map);
+    QB.FSRSOpt.appendLog([{ t: ts, h: k, r: fr }]);
     return next;
   }
 
   /** 批量应用：[{question, rating}]（应用层 0–3） */
   function gradeMany(bankId, entries, now) {
     if (!entries || !entries.length) return;
+    const ts = now == null ? Date.now() : now;
     const map = readMap(bankId);
-    entries.forEach((e) => { map[keyFor(e.question)] = QB.FSRS.review(map[keyFor(e.question)], fsrsRating(e.rating), now); });
+    const w = QB.FSRSOpt.getActiveWeights();
+    const logs = [];
+    entries.forEach((e) => {
+      const k = keyFor(e.question);
+      const fr = fsrsRating(e.rating);
+      map[k] = QB.FSRS.review(map[k], fr, ts, w);
+      logs.push({ t: ts, h: k, r: fr });
+    });
     writeMap(bankId, map);
+    QB.FSRSOpt.appendLog(logs);
   }
 
   /** 今日到期题目（未学过的题也算到期） */

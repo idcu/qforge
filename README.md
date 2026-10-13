@@ -17,8 +17,9 @@
 - **选项乱序**：练习/考试时单选/多选/不定项选项随机排列、答案自动重映射（只影响当次作答，不改库存数据）。
 - **组卷蓝图**：按「题型 × 分类 × 难度区间 × 数量」精确抽题，题量不足时给出缺口明细；题目顺序与选项乱序均可单场开关，支持练习/考试两种落位。
 - **刷题功能**：练习模式、考试模式（计时/交卷/自动交卷、切出页面次数记录、交卷前未答/半对明细确认）、答题卡跳转与未答确认、随机出题、**章节顺序练**（按分类保持题序）。
-- **成绩报告与学习统计**：交卷后按题型 / 分类 / 难度给出正确率分布与逐题回顾；统计页含 FSRS 未来 7 天到期分布与近 12 周学习热力日历。
+- **成绩报告与学习统计**：交卷后按题型 / 分类 / 难度给出正确率分布与逐题回顾；统计页含 FSRS 个性化参数卡（训练/恢复）、未来 7 天到期分布与近 12 周学习热力日历。
 - **间隔重复（FSRS-4.5）**：Anki 同源 FSRS 调度器（目标保留率 90%，稳定度/难度双变量），按作答表现（又忘了/困难/良好/简单）安排复习，首页「今日复习」一键开练；旧 SM-2 数据首次评分自动迁移。
+- **FSRS 个性化参数优化器**：本地累积评分日志（revlog），以相邻评分为样本做伯努利负对数似然拟合（数值梯度 + Adam 优化 17 个权重）；冷启动用官方默认权重，样本 ≥100 且 logloss 改善 ≥0.2% 才采纳个性化权重，样本不足或无显著改善时诚实回退，一键训练/恢复，全程不上传任何数据。
 - **学习数据**：错题本、收藏夹、历史记录与统计；关键词搜索覆盖题干/解析/标签（高亮），支持题型/分类/**标签**组合筛选；错题/收藏/搜索均每页 20 条分页。
 - **可观测与可打印**：首页本地存储占用条（70%/85% 两档告警）、`?` 快捷键帮助面板、打印/另存 PDF 样式（自动隐藏外壳与按钮）。
 - **备份与恢复**：单文件全量备份（含全部题库与学习数据），支持覆盖/合并恢复与存储占用提示。
@@ -63,7 +64,8 @@ qb/
 │                              #   / wrong-book / favorites / history / statistics
 │                              #   / search-filter / progress-saver / exam-timer
 │                              #   / data-io（导入） / exporter（多格式导出）
-│                              #   / blueprint（组卷蓝图） / srs + srs-store（间隔重复）
+│                              #   / blueprint（组卷蓝图） / fsrs + fsrs-opt（调度器+参数优化）
+│                              #   / srs + srs-store（间隔重复）
 │                              #   / office-writer（xlsx/docx 部件）/ backup（全量备份恢复）
 │   └── app.js                 # 主应用，初始化与模块协调
 ├── sw.js                      # Service Worker（离线缓存，SWR 策略）
@@ -90,6 +92,7 @@ qb/
 | `node scripts/blueprint.test.mjs` | 组卷蓝图筛选/抽题/缺口测试（18 项断言） |
 | `node scripts/source.test.mjs` | 来源溯源/URL 校验/checksum/快照拉取（29 项断言） |
 | `node scripts/fsrs.test.mjs` | FSRS-4.5 调度器测试（40 项断言：稳定度/难度/保留率/又错惩罚/钳制/迁移） |
+| `node scripts/fsrs-opt.test.mjs` | FSRS 参数优化器测试（22 项断言：revlog/FIFO、门控、合成日志 logloss 改善、确定性复训、默认回退） |
 | `node scripts/srs.test.mjs` | 到期判定、存储与 7 日预报测试（29 项断言，含自然日时区无关校验与 SM-2→FSRS 迁移） |
 | `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（15 项断言） |
 | `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源校验（18 项断言） |
@@ -101,14 +104,15 @@ qb/
 QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 ```
 
-**实测数据（Node v24.14.0，2026-10-13 全量回归，详见 `CHANGELOG.internal.md`）**：
-- 10 个逻辑层测试套件 **1631 / 1631 通过**：冒烟 202（注入 DOMParser 时 222）、导出 103、Office 导出 1148、编辑器 29、组卷 18、来源/网络导入 29、FSRS 40、SRS 29、PWA 18、备份 15。
+**实测数据（Node v24.14.0，2026-10-13 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
+- 11 个逻辑层测试套件 **1653 / 1653 通过**：冒烟 202（注入 DOMParser 时 222）、导出 103、Office 导出 1148、编辑器 29、组卷 18、来源/网络导入 29、FSRS 40、**FSRS 优化器 22**、SRS 29、备份 15、PWA 18。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
+- FSRS 优化器：以 mulberry32 + 伯努利模拟的合成评分日志（420 卡 × 4 次复习 = 1260 个相邻评分样本，含 140 次「又忘了」）验证有效性——当真权重相对默认值扰动 ±25% 时，训练后 logloss 0.3440 < 默认权重 0.3473（改善约 0.97%，超过 0.2% 采纳门控）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果确定一致。套件耗时约 2.6s。
 - Office 导出：538 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验（539 行 × 16 列）。
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
-- 首屏静态体积（index.html + css + 全部 43 个 js + sw/manifest/icon，共 48 个文件，gzip -9 实测）：**98.7 KB gzip / 282.5 KB raw**。
-- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 2.16ms、落库 2.49ms、检索 0.62ms、50 题整卷判分 0.10ms、538 题乱序 0.50ms、文本四格式导出 3.42ms、**XLSX 构建 7.14ms（665 KB）**、**DOCX 构建 2.98ms（258 KB）**、Markdown 538 题再解析 4.51ms。
-- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 10 个套件，防止自然日/时间断言的时区回归。
+- 首屏静态体积（index.html + css + 全部 44 个 js + sw/manifest/icon，共 49 个文件，gzip -9 实测）：**103.3 KB gzip / 294.4 KB raw**。
+- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 1.49ms、落库 1.48ms、检索 0.59ms、50 题整卷判分 0.10ms、538 题乱序 0.46ms、文本四格式导出 2.55ms、**XLSX 构建 6.20ms（665 KB）**、**DOCX 构建 2.42ms（258 KB）**、Markdown 538 题再解析 2.67ms。
+- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 11 个套件，防止自然日/时间断言的时区回归。
 
 ## 远端仓库
 

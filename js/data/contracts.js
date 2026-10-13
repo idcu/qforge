@@ -17,6 +17,8 @@
     review: (bankId) => 'user:review:' + bankId,
     history: 'user:history',
     session: 'user:session',
+    revlog: 'user:revlog',
+    metaFsrsWeights: 'meta:fsrsWeights',
     metaCurrentBank: 'meta:currentBank',
     metaTheme: 'meta:theme'
   };
