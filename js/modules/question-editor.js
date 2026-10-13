@@ -284,18 +284,29 @@
   }
 
   function openManager(bank) {
-    const state = { page: 1, type: '', keyword: '' };
+    const state = { page: 1, type: '', keyword: '', tag: '', difficulty: '' };
 
     return new Promise((resolve) => {
       const finish = () => { UI.closeModal(); resolve(); };
+
+    /** 全量读取后在客户端按 题型/标签/难度/关键词 过滤再分页（与搜索页同一套 SearchFilter） */
     async function fetchPage() {
-      const res = await QB.DB.questions.list(bank.id, {
+      const res = await QB.DB.questions.list(bank.id, {});
+      const all = res.items || [];
+      let list = QB.SearchFilter.filter(all, {
         type: state.type || undefined,
-        keyword: state.keyword || undefined,
-        page: state.page,
-        size: PAGE_SIZE
+        tag: state.tag || undefined,
+        keyword: state.keyword || undefined
       });
-      return res;
+      if (state.difficulty) {
+        const d = Number(state.difficulty);
+        list = list.filter((q) => (Number(q.difficulty) || 0) === d);
+      }
+      const total = list.length;
+      const size = PAGE_SIZE;
+      const page = state.page;
+      const items = list.slice((page - 1) * size, page * size);
+      return { items, total, page, size };
     }
 
     async function render() {
@@ -334,13 +345,26 @@
     }
 
     function show() {
+    // 标签/难度候选项来自当前题库
+    const allTagsPromise = QB.DB.questions.list(bank.id, {}).then((r) => QB.SearchFilter.tags(r.items || []));
+    allTagsPromise.then((allTags) => {
+      const tagSel = document.querySelector('[data-qm="tag"]');
+      if (!tagSel) return;
+      const cur = state.tag;
+      tagSel.innerHTML = '<option value="">全部标签</option>' +
+        allTags.map((t) => '<option value="' + esc(t) + '"' + (t === cur ? ' selected' : '') + '>' + esc(t) + '</option>').join('');
+    });
     UI.openModal(
       '<h3>题目管理 · ' + esc(bank.name) + '</h3>' +
       '<div class="toolbar">' +
       '<button class="btn" data-qm="add">＋ 新增题目</button>' +
       '<select data-qm="type"><option value="">全部题型</option>' +
-      QB.CONFIG.TYPES.map((t) => '<option value="' + t + '">' + QB.typeLabel(t) + '</option>').join('') + '</select>' +
-      '<input type="search" class="grow" data-qm="kw" placeholder="按题干关键词筛选" />' +
+      QB.CONFIG.TYPES.map((t) => '<option value="' + t + '"' + (state.type === t ? ' selected' : '') + '>' + QB.typeLabel(t) + '</option>').join('') + '</select>' +
+      '<select data-qm="diff"><option value="">全部难度</option>' +
+      [0, 1, 2, 3, 4, 5].map((d) => '<option value="' + d + '"' + (String(state.difficulty) === String(d) ? ' selected' : '') + '>' +
+        (d === 0 ? '未设置' : d + ' · ' + QB.difficultyLabel(d)) + '</option>').join('') + '</select>' +
+      '<select data-qm="tag"><option value="">全部标签</option></select>' +
+      '<input type="search" class="grow" data-qm="kw" placeholder="按题干关键词筛选" value="' + esc(state.keyword) + '" />' +
       '<button class="btn btn-ghost" data-qm="close">关闭</button>' +
       '</div>' +
       '<div class="toolbar" data-qm="bar" style="display:none">' +
@@ -351,6 +375,8 @@
         modal.querySelector('[data-qm="close"]').onclick = () => finish();
         modal.querySelector('[data-qm="add"]').onclick = () => openEditor(bank, null, show);
         modal.querySelector('[data-qm="type"]').addEventListener('change', (e) => { state.type = e.target.value; state.page = 1; render(); });
+        modal.querySelector('[data-qm="diff"]').addEventListener('change', (e) => { state.difficulty = e.target.value; state.page = 1; render(); });
+        modal.querySelector('[data-qm="tag"]').addEventListener('change', (e) => { state.tag = e.target.value; state.page = 1; render(); });
         let kwTimer = null;
         modal.querySelector('[data-qm="kw"]').addEventListener('input', (e) => {
           clearTimeout(kwTimer);

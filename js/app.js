@@ -609,6 +609,7 @@
       '<div><label class="qe-label">难度上限</label><select data-bp-max">' +
       [0, 1, 2, 3, 4, 5].map((d) => '<option value="' + d + '"' + (d === 0 ? ' selected' : '') + '>' + (d === 0 ? '不限' : d) + '</option>').join('') +
       '</select></div></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="bp-ordshuf" checked /><label for="bp-ordshuf">题目顺序乱序（取消则按题型分组的原始顺序）</label></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-shuffle"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="bp-shuffle">选项乱序（单选/多选/不定项，答案自动重映射，仅影响本场）</label></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-exam" /><label for="bp-exam">以考试模式开始（计时、交卷整卷判分）</label></div>' +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
@@ -623,8 +624,9 @@
           const maxDifficulty = parseInt(modal.querySelector('[data-bp-max]').value, 10) || 0;
           const asExam = modal.querySelector('#bp-exam').checked;
           const shuffleOpts = modal.querySelector('#bp-shuffle').checked;
+          const orderShuffled = modal.querySelector('#bp-ordshuf').checked;
           UI.closeModal();
-          const spec = { items: items, category: category || undefined };
+          const spec = { items: items, category: category || undefined, keepOrder: !orderShuffled };
           if (minDifficulty) spec.minDifficulty = minDifficulty;
           if (maxDifficulty) spec.maxDifficulty = maxDifficulty;
           const { questions, shortages } = QB.Blueprint.compose(State.allQuestions, spec);

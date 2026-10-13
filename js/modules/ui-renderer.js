@@ -476,6 +476,20 @@
         '<div class="fc-grid">' + fcBars + '</div>' +
         '<div class="li-meta" style="margin-top:6px">未来 7 天每日到期题量（今天含新题与逾期）；到「🧠 今日复习」开始。</div></div>';
     }
+    // 近 12 周学习热力（按答题量）
+    const heat = QB.Statistics.dailyActivity(records, 12);
+    const fmtDay = (ts) => {
+      const d = new Date(ts);
+      return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    };
+    const heatCells = heat.cells.map((c) =>
+      '<i class="cal-cell l' + c.level + (c.future ? ' future' : '') + '" title="' + fmtDay(c.ts) + '：' + c.count + ' 题"></i>').join('');
+    const activeDays = heat.cells.filter((c) => c.count > 0).length;
+    prefix += '<div class="card"><h3 class="card-title">近 12 周学习热力</h3>' +
+      '<div class="li-meta">共 ' + activeDays + ' 个学习日；颜色按当日答题量分级</div>' +
+      '<div class="cal-grid">' + heatCells + '</div>' +
+      '<div class="cal-legend"><span>少</span><i class="cal-cell l0"></i><i class="cal-cell l1"></i>' +
+      '<i class="cal-cell l2"></i><i class="cal-cell l3"></i><i class="cal-cell l4"></i><span>多</span></div></div>';
     const overview = QB.Statistics.overview(records);
     const perf = QB.Statistics.typePerformance(records);
     let html = prefix + '<div class="card"><h3 class="card-title">学习概览</h3><div class="stat-grid">' +

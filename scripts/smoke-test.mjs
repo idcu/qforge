@@ -400,6 +400,29 @@ const perf = QB.Statistics.typePerformance(recs);
 ok(perf.length === 3, '统计：3 个题型有数据', '(' + perf.map((p) => p.type + ':' + p.accuracy + '%').join(', ') + ')');
 ok(QB.Statistics.suggestions(perf).length > 0, '统计：可生成学习建议');
 
+// 学习热力（纯函数）：等级阈值、12 周 84 格、周一列首、按日聚合答题量
+eq(QB.Statistics.activityLevel(0), 0, '热力：0 题等级 0');
+eq(QB.Statistics.activityLevel(9), 1, '热力：9 题等级 1');
+eq(QB.Statistics.activityLevel(30), 3, '热力：30 题等级 3');
+eq(QB.Statistics.activityLevel(120), 4, '热力：120 题等级 4');
+{
+  const T = new Date(2026, 9, 13, 12, 0, 0).getTime(); // 周二
+  const heat = QB.Statistics.dailyActivity([
+    { createdAt: T, correct: 10, wrong: 5 },
+    { createdAt: T - 24 * 3600 * 1000, correct: 3, wrong: 0 } // 周一
+  ], 12, T);
+  eq(heat.cells.length, 84, '热力：12 周 84 格');
+  // 起始为 11 周前的周一；锚点周二位于最后一周的第 2 格
+  const tuesdayIdx = (QB.Statistics._dayStart(T) - heat.start) / (24 * 3600 * 1000);
+  eq(tuesdayIdx, 11 * 7 + 1, '热力：锚点周二位于最后一周第 2 格（周一列首）');
+  eq(heat.cells[tuesdayIdx - 1].count, 3, '热力：前一日（周一）3 题');
+  eq(heat.cells[tuesdayIdx].count, 15, '热力：当日答题量 15（correct+wrong 聚合）');
+  eq(heat.cells[tuesdayIdx].level, 2, '热力：15 题等级 2');
+  ok(!heat.cells[tuesdayIdx].future && heat.cells.some((c) => c.future), '热力：今天非未来格、本周剩余日标记 future');
+  // 时区安全：UTC 下起始仍是本地周一（由测试运行环境日历定义，格数不变）
+  eq(QB.Statistics.dailyActivity([], 4, T).cells.length, 28, '热力：4 周 28 格');
+}
+
 const found = QB.SearchFilter.filter(listA.items, { keyword: '数据' });
 ok(found.length > 0, '搜索：关键词「数据」命中 ' + found.length + ' 题');
 const onlyJudge = QB.SearchFilter.filter(listA.items, { type: 'judge' });

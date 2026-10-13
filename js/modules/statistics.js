@@ -54,6 +54,58 @@
         .filter((x) => x.total > 0);
     },
 
+    /** 自然日 0 点（运行环境本地时区） */
+    _dayStart(ts) {
+      const d = new Date(ts);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    },
+
+    /** 该自然日所在周的周一 0 点 */
+    _mondayStart(ts) {
+      const d = new Date(this._dayStart(ts));
+      const wd = (d.getDay() + 6) % 7; // 周一=0
+      d.setDate(d.getDate() - wd);
+      return d.getTime();
+    },
+
+    /** 答题量 → 热力等级 0..4（固定阈值，跨用户可比） */
+    activityLevel(count) {
+      if (!count) return 0;
+      if (count < 10) return 1;
+      if (count < 30) return 2;
+      if (count < 60) return 3;
+      return 4;
+    },
+
+    /**
+     * 近 N 周日答题热力（纯函数，周一为列首对齐 GitHub 风）
+     * @param {Array} records 历史记录（按 correct+wrong 统计当日答题量）
+     * @returns {{weeks:number, cells:Array<{ts:number,count:number,level:number,future:boolean}>}}
+     */
+    dailyActivity(records, weeks, now) {
+      const w = Math.max(1, Math.min(52, weeks || 12));
+      const DAY = 24 * 60 * 60 * 1000;
+      const end = this._dayStart(now == null ? Date.now() : now);
+      const start = this._mondayStart(end - (w - 1) * 7 * DAY);
+      const total = w * 7;
+      const counts = new Array(total).fill(0);
+      const todayIdx = (end - start) / DAY;
+      (records || []).forEach((r) => {
+        if (!r.createdAt) return;
+        const day = this._dayStart(r.createdAt);
+        const idx = (day - start) / DAY;
+        if (idx >= 0 && idx < total) counts[idx] += (r.correct || 0) + (r.wrong || 0);
+      });
+      const cells = counts.map((count, i) => ({
+        ts: start + i * DAY,
+        count: count,
+        level: this.activityLevel(count),
+        future: i > todayIdx
+      }));
+      return { weeks: w, cells: cells, start: start, end: end };
+    },
+
     /** 依据表现给出学习建议 */
     suggestions(perf) {
       const out = [];

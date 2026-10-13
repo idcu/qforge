@@ -90,7 +90,7 @@
 | `modules/wrong-book.js` | 错题本薄封装（`QB.DB.progress` + `buildIndex`） |
 | `modules/favorites.js` | 收藏夹薄封装 |
 | `modules/history.js` | 历史记录 + `stats` 聚合 |
-| `modules/statistics.js` | `overview`/`typePerformance`/`suggestions` |
+| `modules/statistics.js` | `overview`/`typePerformance`/`suggestions`/`dailyActivity`（近 N 周答题热力，周一列首对齐） |
 | `modules/search-filter.js` | `search`/`filter`/`highlight`/`categories` |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
 | `modules/fsrs.js` | **FSRS-4.5 纯调度器**（17 个官方默认权重）：`review/initialState`、稳定度/难度/目标保留率，无 DOM/存储依赖 |
