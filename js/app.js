@@ -325,7 +325,11 @@
       }
       case 'bank-export': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
-        return QB.DataIO.exportBank(State.bank);
+        return QB.Exporters.openFlow({ kind: 'bank', bank: State.bank });
+      }
+      case 'export-wrong': {
+        if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        return QB.Exporters.openFlow({ kind: 'wrong', bank: State.bank });
       }
       case 'import-sample': {
         const bank = await QB.DB.banks.create({ name: QB.SAMPLE.name, description: QB.SAMPLE.description, category: '示例' });

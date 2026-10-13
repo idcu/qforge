@@ -52,7 +52,7 @@
 | --- | --- | --- |
 | `utils/helpers.js` | `QB.Helpers` | `debounce/throttle/cloneDeep/uid/escapeHtml/formatDate/formatDuration/calculateAccuracy` |
 | `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写 + `forceSync()`；`usageBytes()` 估算占用 |
-| `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN` | mulberry32 种子化洗牌/抽样 |
+| `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions` | mulberry32 种子化洗牌/抽样；选项乱序并同步重映射答案 |
 | `utils/answer-normalize.js` | `QB.normalizeAnswer`/`QB.parseBoolean`/`QB.normalizeLetters` | 全角转半角、去空白、去标点、大小写归一；布尔归一 |
 | `utils/judge-answer.js` | `QB.judgeAnswer` | 按 `type` 策略表判分 |
 | `utils/question-id.js` | `QB.makeContentHash`/`QB.makeQuestionKey` | FNV-1a 去重键 |
@@ -91,7 +91,8 @@
 | `modules/search-filter.js` | `search`/`filter`/`highlight`/`categories` |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |
-| `modules/data-io.js` | `pickFile`/`importFlow`（预览弹窗）/`exportBank` |
+| `modules/data-io.js` | `pickFile`/`importFlow`（预览弹窗） |
+| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`openFlow`，JSON/CSV/Markdown/TXT，题库/错题（收藏预留），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
 
 ## 4. 关键数据流
 
@@ -121,6 +122,22 @@ app.beginQuiz(questions, mode) → new QuizEngine().loadQuestions
 刷新启动 → boot() → maybeResume() → sessionLoad → confirmDialog → engine.restore
 ```
 
+### 4.4 选项乱序（练习/考试）
+```
+engine.loadQuestions(questions, type, opts)
+  → 若 CONFIG.SHUFFLE_OPTIONS（默认开，可用 opts.shuffleOptions 覆盖）
+  → 每题经 QB.shuffleOptions 派生克隆：选项重排、字母重新分配 A..、answer 同步重映射
+  → 仅影响当次作答：库内原题、contentHash（不含选项）均不变；restore() 不二次乱序
+```
+
+### 4.5 导出
+```
+Exporters.openFlow({kind, bank})
+  → KINDS[kind].collect(bank) 得到统一载荷 {kind, bank, entries:[{question, meta}]}
+  → 弹窗在 FORMATS（json/csv/markdown/txt）中选格式
+  → buildContent(formatId, payload) 纯函数构建文本 → download(Blob)
+```
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -128,16 +145,19 @@ app.beginQuiz(questions, mode) → new QuizEngine().loadQuestions
 | `normalizeAnswer(str, opts)` | 全角转半角、去空白、去标点、大小写 | 判分、去重、搜索 |
 | `judgeAnswer(question, userAnswer)` | 按 `type` 策略表统一判分；essay 返回 `null` | quiz-engine、statistics |
 | `makeContentHash(q)` | `hash(type + normalize(question))` 去重键 | 导入去重、Repo、错题/收藏索引 |
-| `shuffle(arr, seed?)` | 随机/种子化洗牌 | 抽题、选项打乱 |
+| `shuffle(arr, seed?)` / `shuffleOptions(q, seed?)` | 随机/种子化洗牌；选项乱序+答案重映射的派生克隆 | 抽题、答题选项乱序 |
 | `QB.Storage` | 内存缓存 + 防抖批写 + `forceSync()` | local-adapter 及所有持久化 |
 | `QB.DB` + Repo 接口 | 数据访问统一入口，屏蔽后端差异 | 全部业务模块 |
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
+| `Exporters`（KINDS × FORMATS 注册表） | 题集收集与多格式文本构建解耦 | 题库/错题/收藏导出 |
 
 **影响范围说明（重要）**：
 - `quiz-engine` / `statistics` 的判分统一改调 `judge-answer`（取代内联 if-else），新增题型只需在策略表加一项。
 - 错题/收藏/历史的题目键统一改用 **contentHash**（不再用裸 `id+type`），避免跨题库 id 冲突、跨导入版本稳定。
 - 导入路径复用 `QuestionRepo.insertMany`，**不另写落库逻辑**；去重、批删同理。
-- `QB.parseBoolean` 与 `QB.normalizeLetters` 由 `answer-normalize.js` 单点提供，`judge-answer` / `adapters` / 测试均复用，禁止各自实现。
+- `QB.parseBoolean` 与 `QB.normalizeLetters` 由 `answer-normalize.js` 单点提供，`judge-answer` / `adapters` / `shuffleOptions` / 测试均复用，禁止各自实现。
+- 选项乱序只在引擎装载时**派生出克隆题**（`shuffleOptions`），落库原题保持原序；因 contentHash 只含「题型+题干」，乱序不影响错题/收藏/去重键。
+- 旧的 `DataIO.exportBank`（只支持 JSON 单格式）已删除，所有导出统一走 `QB.Exporters.openFlow`，禁止再写专用下载逻辑。
 
 ## 6. 题型与判分策略表
 

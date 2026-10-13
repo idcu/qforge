@@ -280,6 +280,7 @@
   function renderWrongList(items) {
     if (!items.length) return emptyState('错题本是空的，继续加油！');
     let html = '<div class="toolbar"><button class="btn" data-action="start-wrong">错题重练</button>' +
+      '<button class="btn btn-ghost" data-action="export-wrong">导出错题</button>' +
       '<button class="btn btn-ghost" data-action="wrong-clear">清空错题本</button></div>';
     items.forEach((it) => {
       const q = it.question;

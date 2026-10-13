@@ -1,7 +1,7 @@
 /**
- * 数据导入 / 导出编排
+ * 数据导入编排
  * 导入：选文件 → 解析(registry) → 预览校验 → QuestionRepo.insertMany 落库（复用数据层，不重复实现落库）
- * 导出：题库 → JSON 文件下载
+ * 导出统一走 js/modules/exporter.js（QB.Exporters，注册表式多格式）。
  */
 (function (global) {
   'use strict';
@@ -104,37 +104,5 @@
     }
   }
 
-  /** 导出题库为 JSON 文件 */
-  async function exportBank(bank) {
-    const { items } = await QB.DB.questions.list(bank.id, {});
-    const payload = {
-      app: QB.CONFIG.APP_NAME,
-      version: QB.CONFIG.VERSION,
-      exportedAt: new Date().toISOString(),
-      bank: { name: bank.name, description: bank.description, category: bank.category },
-      questions: items.map((q) => ({
-        type: q.type,
-        question: q.question,
-        options: q.options || [],
-        answer: q.answer,
-        blanks: q.blanks || [],
-        reference_answer: q.reference_answer || '',
-        analysis: q.analysis || '',
-        category: q.category || '',
-        source: q.source || ''
-      }))
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = (bank.name || '题库') + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    UI.toast('已导出 ' + payload.questions.length + ' 道题', 'ok');
-  }
-
-  QB.DataIO = { pickFile, importFlow, exportBank };
+  QB.DataIO = { pickFile, importFlow };
 })(window);

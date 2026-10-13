@@ -65,8 +65,8 @@ function load(rel) {
   'js/modules/statistics.js',
   'js/modules/search-filter.js',
   'js/modules/progress-saver.js',
-  'js/modules/question-editor.js'
-  // __EXPORTER_LINE__ 'js/modules/exporter.js'
+  'js/modules/question-editor.js',
+  'js/modules/exporter.js'
 ].forEach(load);
 
 const QB = window.QB;
@@ -428,7 +428,6 @@ if (!hasDomParser) {
 }
 
 /* ================= 9.5 导出（多格式/多对象） ================= */
-/* __EXPORTER_SECTION_BEGIN__
 section('导出 Exporters（题库 / 错题，JSON/CSV/Markdown/TXT）');
 const expBank = await QB.Exporters.collect('bank', bankA);
 eq(expBank.entries.length, 538, '导出收集：题库 538 条');
@@ -483,7 +482,6 @@ threw = false;
 try { QB.Exporters.buildContent('xlsx', expBank); } catch (e) { threw = true; }
 ok(threw, '不支持的格式（xlsx 预留）抛错');
 eq(QB.Exporters.FORMATS.length, 4, '已注册导出格式数 = 4');
-__EXPORTER_SECTION_END__ */
 
 /* ================= 10. 级联删除 ================= */
 section('级联删除');

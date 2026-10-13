@@ -63,8 +63,8 @@ function load(rel) {
   'js/modules/statistics.js',
   'js/modules/search-filter.js',
   'js/modules/progress-saver.js',
-  'js/modules/question-editor.js'
-  // __EXPORTER_LINE__ 'js/modules/exporter.js'
+  'js/modules/question-editor.js',
+  'js/modules/exporter.js'
 ].forEach(load);
 
 const QB = window.QB;
@@ -172,14 +172,13 @@ row('shuffleOptions 选项乱序（538 题）', await timed(() => {
   shuffledCount = idx.items.reduce((n, q) => n + (QB.shuffleOptions(q) !== q ? 1 : 0), 0);
 }, 20), '实际乱序 ' + shuffledCount + ' 题（仅单选/多选）');
 
-/* __EXPORTER_BENCH_BEGIN__
+/* ---------- 9. 多格式导出构建 ---------- */
 const exportPayload = await QB.Exporters.collect('bank', benchBank);
 let expBytes = 0;
 row('导出构建（JSON+CSV+MD+TXT，538 题）', await timed(() => {
   expBytes = 0;
   QB.Exporters.FORMATS.forEach((f) => { expBytes += f.build(exportPayload).length; });
 }, 10), '单次合计 ' + (expBytes / 1024).toFixed(1) + ' KB');
-__EXPORTER_BENCH_END__ */
 
 const heapAfter = process.memoryUsage().heapUsed;
 
