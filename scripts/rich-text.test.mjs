@@ -78,6 +78,70 @@ section('图片资产占位');
   eq(qIds.length, 2, 'questionAssetIds 扫描题干/选项/分析去重');
 }
 
+section('编辑器光标插入（insertAtCursor）');
+{
+  const el = {
+    value: '题干ABC', selectionStart: 2, selectionEnd: 2,
+    events: 0, caret: null,
+    dispatchEvent() { this.events++; },
+    setSelectionRange(a) { this.caret = a; },
+    focus() {}
+  };
+  QB.QuestionEditor.insertAtCursor(el, '![](asset:as00000000-1)');
+  eq(el.value, '题干![](asset:as00000000-1)ABC', '插入到光标位置');
+  eq(el.caret, 2 + '![](asset:as00000000-1)'.length, '光标移到插入内容后');
+  eq(el.events, 1, '触发 input 事件');
+  const el2 = { value: 'xyz', selectionStart: undefined, selectionEnd: undefined, dispatchEvent() {}, setSelectionRange() {}, focus() {} };
+  QB.QuestionEditor.insertAtCursor(el2, '[图]');
+  eq(el2.value, 'xyz[图]', '无选区信息时追加到末尾');
+}
+
+section('hydrate：资产绑定与缺失占位（假 DOM）');
+await (async () => {
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  const id = await QB.Assets.put(new TextEncoder().encode('img-bytes'), 'image/png');
+  let revoked = 0;
+  let created = 0;
+  const createdUrls = [];
+  const prevDoc = globalThis.document;
+  const prevCreate = URL.createObjectURL;
+  const prevRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = (blob) => { const u = 'blob:mock/' + (++created); createdUrls.push(u); return u; };
+  URL.revokeObjectURL = () => { revoked++; };
+  globalThis.document = {
+    createElement(tag) {
+      created++;
+      return { tagName: tag, className: '', textContent: '', style: {} };
+    }
+  };
+  try {
+    const replaced = [];
+    const imgOk = { dataset: { asset: id }, alt: '图一', src: '', parentNode: { replaceChild(sp, img) { replaced.push([sp, img]); } } };
+    const imgMiss = { dataset: { asset: 'asffffffff-9' }, alt: '缺图', src: '', parentNode: { replaceChild(sp, img) { replaced.push([sp, img]); } } };
+    const root = { querySelectorAll: () => [imgOk, imgMiss] };
+    await QB.RichText.hydrate(root);
+    ok(/^blob:mock\//.test(imgOk.src), '命中资产：img.src 绑 blob URL（' + imgOk.src + '）');
+    eq(imgMiss.src, '', '缺失资产：不设置 src');
+    eq(replaced.length, 1, '缺失资产：替换 1 个节点');
+    ok(replaced[0] && replaced[0][0] && replaced[0][0].className === 'rt-img-missing', '替换为 .rt-img-missing 占位');
+    ok(replaced[0][0].textContent.indexOf('缺图') >= 0, '占位保留 alt 文案');
+
+    // 第二轮 hydrate 回收上一轮 blob URL
+    const imgOk2 = { dataset: { asset: id }, alt: '二', src: '', parentNode: { replaceChild() {} } };
+    await QB.RichText.hydrate({ querySelectorAll: () => [imgOk2] });
+    eq(revoked, 1, '新一轮 hydrate 回收上一轮 blob URL');
+    ok(/^blob:mock\//.test(imgOk2.src), '第二轮正常绑定');
+
+    // 无图片节点为空操作（且不触发 URL 回收）
+    await QB.RichText.hydrate({ querySelectorAll: () => [] });
+    eq(revoked, 1, '无节点时回收计数不变');
+  } finally {
+    globalThis.document = prevDoc;
+    URL.createObjectURL = prevCreate;
+    URL.revokeObjectURL = prevRevoke;
+  }
+})();
+
 section('与 escapeHtml 的安全组合（列表用法）');
 eq(QB.escapeHtml(toPlain('x^{2}<b>')), 'x2&lt;b&gt;', 'toPlain 后转义可安全入 HTML');
 

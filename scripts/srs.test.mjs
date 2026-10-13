@@ -106,6 +106,39 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
   eq(QB.SRSStore.countDue(b1.id, qs, T0 + 1000), 2, 'clear 后恢复为新题全到期');
 }
 
+section('learning steps：分钟级到期仍在今日复习队列');
+{
+  const bank = await QB.DB.banks.create({ name: '步骤库' });
+  const { items } = await QB.DB.questions.list(bank.id, {});
+  if (!items.length) {
+    await QB.DB.questions.insertMany(bank.id, [
+      { type: 'judge', question: '步骤题甲', options: [], answer: '正确' },
+      { type: 'judge', question: '步骤题乙', options: [], answer: '错误' }
+    ], { dedupe: false });
+  }
+  const qs = (await QB.DB.questions.list(bank.id, {})).items;
+  const q = qs[0];
+
+  const st = QB.SRSStore.grade(bank.id, q, QB.SRS.RATINGS.again, T0);
+  eq(st.learning && st.learning.step, 0, '新卡 again 进入步骤 0');
+  eq(st.due, T0 + 60 * 1000, '1 分钟后到期');
+  ok(!QB.SRS.isDue(st, T0), '刚评完未到 1 分钟：不算到期');
+  ok(QB.SRS.isDue(st, T0 + 61 * 1000), '1 分钟后到期');
+  ok(QB.SRS.isDueToday(st, T0 + 30 * 1000), '步骤卡属于今日复习（自然日桶）');
+  const due = QB.SRSStore.dueToday(bank.id, qs, T0 + 90 * 1000);
+  ok(due.some((x) => x.id === q.id), '今日队列在 1 分钟后再次包含该卡');
+  const fc = QB.SRSStore.forecast(bank.id, qs, 7, T0);
+  eq(fc.days[0].count, qs.length, 'forecast 今日桶含步骤卡与新题（' + fc.days[0].count + '）');
+
+  // 走完两步毕业：不再有 learning 标记，间隔按天
+  let s2 = QB.SRSStore.grade(bank.id, q, QB.SRS.RATINGS.good, st.due);
+  eq(s2.learning.step, 1, 'good → 步骤 1（10m）');
+  let s3 = QB.SRSStore.grade(bank.id, q, QB.SRS.RATINGS.good, s2.due);
+  ok(!s3.learning, '再 good 毕业');
+  ok(s3.due > s2.last + 3600 * 1000, '毕业后 due 为天级（>1 小时）');
+  QB.SRSStore.clear(bank.id);
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

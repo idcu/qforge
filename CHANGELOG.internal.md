@@ -736,6 +736,24 @@
 
 ---
 
+## 待回填 · test(srs/assets): 交互面回归补强（+38 断言）
+
+**背景**：竞品跟进四批次的真机交互面在逻辑层的可自动化部分补测，把"建议人工验证"压缩到纯浏览器 API（canvas/IndexedDB/真实 WebDAV CORS）。
+
+**新增断言（38）**
+- assets.test 45→**54**（+9）：qbk 经 `Importers.runImport` → `insertMany` 落库全链路（占位标记随题保存、资产入库）、同包重复导入 contentHash 去重（inserted=0/duplicates=1）、`DataIO.stampSource` 来源标记。
+- srs.test 29→**39**（+10）：learning 步骤卡分钟级 due（未到 1m 不到期、1m 后到期、isDueToday 入今日桶、dueToday 重含、forecast 今日计数）、good→10m→毕业 due 转天级。
+- fsrs-opt.test 37→**44**（+7）：题库 preset 权重经 `SRSStore.grade` 端到端（w2=4.8/默认 2.4 初始稳定度与 due 序）、全局权重切换不影响已有 preset、第二次评分链与纯函数重放逐位一致（1e-6）。
+- rich-text.test 33→**45**（+12）：`QuestionEditor.insertAtCursor` 光标插入/无选区追加/input 事件；`RichText.hydrate` 假 DOM（命中资产绑 blob URL、缺资产替换 .rt-img-missing 保留 alt、新一轮回收上一轮 URL、无节点空操作）。
+- 配套：`QuestionEditor` 导出 `insertAtCursor`（与 `_toPlain` 同性质的纯逻辑暴露）；assets.test 补 `DB.init()`。
+
+**验证数据（Node v24.14.0）**
+- 14 套件 **1841/1841**，UTC 与 UTC+8 各一遍零失败。
+- bench 热路径持平（50 题 gradeAll 中位数 0.07–0.09ms，四格式导出 2.45ms，XLSX 5.40ms，MD 导入 2.63ms；heapUsed 增量 18.76MB）；首屏体积不变 **54 文件/49 js，119.4 KB gzip / 335.9 KB raw**（仅测试与导出名变化）。
+- 剩余纯人工项：canvas JPEG 压缩画质、真实 IndexedDB 持久化/隐身模式限制、坚果云/Nextcloud 真实 CORS、modal 焦点跟随。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·

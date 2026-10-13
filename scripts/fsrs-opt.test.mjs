@@ -16,6 +16,7 @@ let pass = 0;
 const failures = [];
 function ok(c, l, extra) { if (c) { pass++; console.log('  ✓ ' + l + (extra ? '  ' + extra : '')); } else { failures.push(l); console.log('  ✗ ' + l + (extra ? '  ' + extra : '')); } }
 function eq(a, b, l) { ok(a === b, l, '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
+function approx(a, b, eps, l) { ok(Math.abs(a - b) <= eps, l, '（期望≈ ' + b + '，实际 ' + a + '）'); }
 function section(t) { console.log('\n== ' + t + ' =='); }
 
 const DAY = 24 * 3600 * 1000;
@@ -223,6 +224,47 @@ section('训练可写入题库作用域（revlog 仍全局）');
   ok(Math.abs(O.getActiveWeights('bankPreset')[0] - r.weights[0]) < 1e-9, 'bankPreset 活动权重=训练结果');
   ok(Math.abs(O.getActiveWeights('otherBank')[0] - QB.FSRS.DEFAULT_W[0]) < 1e-9, '其他题库仍用官方默认');
   clearOpt();
+}
+
+section('preset 权重经 grade 端到端生效（srs-store 接线）');
+{
+  clearOpt();
+  const bA = await QB.DB.banks.create({ name: 'preset 库 A' });
+  const bB = await QB.DB.banks.create({ name: 'preset 库 B' });
+  await QB.DB.questions.insertMany(bA.id, [{ type: 'judge', question: 'preset A 题', options: [], answer: '正确' }], { dedupe: false });
+  await QB.DB.questions.insertMany(bB.id, [{ type: 'judge', question: 'preset B 题', options: [], answer: '正确' }], { dedupe: false });
+  const qA = (await QB.DB.questions.list(bA.id, {})).items[0];
+  const qB = (await QB.DB.questions.list(bB.id, {})).items[0];
+
+  // 给 bA 一组显著不同的权重（w2 即 good 初始稳定度 2.4 → 4.8）
+  const wA = QB.FSRS.DEFAULT_W.map((v, i) => (i === 2 ? 4.8 : v));
+  O.saveWeights(wA, { samples: 300, improvement: 0.01, scope: 'bank' }, bA.id);
+
+  const T = Date.UTC(2026, 5, 1);
+  const sA = QB.SRSStore.grade(bA.id, qA, QB.SRS.RATINGS.good, T);
+  const sB = QB.SRSStore.grade(bB.id, qB, QB.SRS.RATINGS.good, T);
+  eq(sA.stability, 4.8, 'bA 评分用 preset 稳定度 4.8');
+  eq(sB.stability, 2.4, 'bB 无 preset 用官方默认 2.4');
+  ok(sA.due > sB.due, 'preset 更稳定 → 到期更远（' + sA.due + ' > ' + sB.due + '）');
+
+  // 全局权重变化不影响已有 preset：bA 第二次 good 的稳定度 = wA 下纯函数重放结果
+  O.saveWeights(QB.FSRS.DEFAULT_W.map((v, i) => (i === 2 ? 8 : v)), { samples: 400 });
+  const sA2 = QB.SRSStore.grade(bA.id, qA, QB.SRS.RATINGS.good, sA.due);
+  const refA2 = QB.FSRS.review(
+    QB.FSRS.review(null, QB.FSRS.RATINGS.good, T, wA), QB.FSRS.RATINGS.good,
+    QB.FSRS.review(null, QB.FSRS.RATINGS.good, T, wA).due, wA);
+  approx(sA2.stability, refA2.stability, 1e-6, 'bA 第二次评分仍严格按 preset 权重（全局 8.0 不影响）');
+  // bB：第一次评分时全局仍是默认权重（sB 已产生），第二次评分时全局已换 8.0
+  const sB2 = QB.SRSStore.grade(bB.id, qB, QB.SRS.RATINGS.good, sB.due);
+  const wGlobalNow = O.getActiveWeights(bB.id); // 8.0 组
+  const refBFirst = QB.FSRS.review(null, QB.FSRS.RATINGS.good, T, QB.FSRS.DEFAULT_W);
+  const refB2 = QB.FSRS.review(refBFirst, QB.FSRS.RATINGS.good, refBFirst.due, wGlobalNow);
+  approx(sB2.stability, refB2.stability, 1e-6, 'bB 第二次按新全局权重（首次默认）');
+  eq(wGlobalNow[2], 8, '当前 bB 活动权重 w2=8');
+  ok(Math.abs(sA2.stability - sB2.stability) > 1e-6, '两库权重链结果可区分');
+  clearOpt();
+  QB.SRSStore.clear(bA.id);
+  QB.SRSStore.clear(bB.id);
 }
 
 console.log('\n================ 汇总 ================');

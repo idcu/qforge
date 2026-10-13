@@ -509,7 +509,7 @@
 
   QB.QuestionEditor = {
     create, update, remove, insertMany, removeMany,
-    buildQuestion,
+    buildQuestion, insertAtCursor,
     openManager, openEditor, openReservedDialog
   };
 })(window);

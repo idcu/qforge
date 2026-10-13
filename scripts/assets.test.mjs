@@ -9,6 +9,7 @@ import { createHarness } from './_harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { QB } = await createHarness(path.resolve(__dirname, '..'));
+QB.DB.init();
 
 let pass = 0;
 const failures = [];
@@ -174,6 +175,42 @@ section('备份包 .qfbk 往返（JSON 与 ZIP 自动识别）');
   await QB.Assets.put(bytes('orphan'), 'image/png');
   const removed = await QB.Assets.removeOrphans([QB.Assets.idFor(bytes('keep'))]);
   ok(removed.indexOf(orphanId) >= 0 && removed.length === 1, '仅删除孤儿 1 个（实际 ' + removed.length + '）');
+}
+
+section('qbk 全链路：导入落库 → 库内可读 → 重复导入去重 → 来源标记');
+{
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  const bank = await QB.DB.banks.create({ name: 'qbk 链路库' });
+  const imgBytes = bytes('roundtrip-image');
+  const imgId = QB.Assets.idFor(imgBytes);
+  const incoming = [{
+    type: 'judge', question: '链路题 ![](asset:' + imgId + ')',
+    options: [], answer: '正确'
+  }];
+  const buf = QB.Qbk.buildBundle('bank.json', JSON.stringify({
+    app: QB.CONFIG.APP_NAME, bank: { name: '外部包' }, questions: incoming
+  }), [{ id: imgId, bytes: imgBytes, mime: 'image/png' }]);
+
+  const parsed = await QB.Importers.runImport({ name: 'ext.qbk', arrayBuffer: buf });
+  eq(parsed.questions.length, 1, 'runImport qbk 解析 1 题');
+  const res1 = await QB.DB.questions.insertMany(bank.id, parsed.questions, { dedupe: true, mode: 'merge' });
+  eq(res1.inserted, 1, '首次落库新增 1');
+  ok(!!(await QB.Assets.get(imgId)), '资产随导入在库');
+  const stored = (await QB.DB.questions.list(bank.id, {})).items;
+  eq(stored.length, 1, '库内 1 题');
+  ok(stored[0].question.indexOf('asset:' + imgId) >= 0, '占位标记随题落库');
+
+  // 重复导入同一包：contentHash 去重
+  const parsed2 = await QB.Importers.runImport({ name: 'ext2.qbk', arrayBuffer: buf });
+  const res2 = await QB.DB.questions.insertMany(bank.id, parsed2.questions, { dedupe: true, mode: 'merge' });
+  eq(res2.inserted, 0, '重复导入新增 0（去重）');
+  eq(res2.duplicates, 1, '重复 1');
+
+  // 来源标记（commitImport 的同一公共函数）
+  await QB.DataIO.stampSource(bank, QB.Source.makeSource('file', { uri: 'ext.qbk' }));
+  const bankBack = await QB.DB.banks.get(bank.id);
+  eq(bankBack.source.kind, 'file', '题库来源标记为 file');
+  eq(bankBack.source.uri, 'ext.qbk', '来源 uri');
 }
 
 section('注册表：qbk 为二进制格式');

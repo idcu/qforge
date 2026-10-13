@@ -91,13 +91,13 @@ qb/
 | `node scripts/exporter.test.mjs` | 导出功能单元测试（103 项断言，六题型/转义/难度标签列/Markdown 往返） |
 | `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/538 题双格式全量判分自洽） |
 | `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
-| `node scripts/rich-text.test.mjs` | 富文本渲染器测试（33 项断言：转义防注入、上下标、图片占位、collectAssets、toPlain） |
-| `node scripts/assets.test.mjs` | 图片资产/题库包测试（45 项断言：IDB 内存驱动、内容寻址去重、qbk/qfbk ZIP 往返、缺图警告、孤儿清理） |
+| `node scripts/rich-text.test.mjs` | 富文本渲染器测试（45 项断言：转义防注入、上下标、图片占位、collectAssets、hydrate 假 DOM、光标插入） |
+| `node scripts/assets.test.mjs` | 图片资产/题库包测试（54 项断言：IDB 内存驱动、内容寻址去重、qbk/qfbk ZIP 往返、缺图警告、孤儿清理、qbk→落库全链路去重） |
 | `node scripts/blueprint.test.mjs` | 组卷蓝图筛选/抽题/缺口测试（18 项断言） |
 | `node scripts/source.test.mjs` | 来源溯源/URL 校验/checksum/快照拉取（29 项断言） |
 | `node scripts/fsrs.test.mjs` | FSRS-4.5 调度器测试（65 项断言：稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps 1m/10m、relearning） |
-| `node scripts/fsrs-opt.test.mjs` | FSRS 参数优化器测试（37 项断言：revlog/FIFO、门控、合成日志 logloss 改善、确定性复训、默认回退、按题库 preset 隔离/旧结构兼容） |
-| `node scripts/srs.test.mjs` | 到期判定、存储与 7 日预报测试（29 项断言，含自然日时区无关校验与 SM-2→FSRS 迁移） |
+| `node scripts/fsrs-opt.test.mjs` | FSRS 参数优化器测试（44 项断言：revlog/FIFO、门控、合成日志 logloss 改善、确定性复训、默认回退、按题库 preset 隔离/旧结构兼容、preset 经 grade 端到端） |
+| `node scripts/srs.test.mjs` | 到期判定、存储与 7 日预报测试（39 项断言，含自然日时区无关校验、SM-2→FSRS 迁移、learning steps 分钟级队列） |
 | `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（15 项断言） |
 | `node scripts/sync-dav.test.mjs` | WebDAV 云备份测试（32 项断言：配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/404） |
 | `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源校验（18 项断言） |
@@ -110,7 +110,7 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 ```
 
 **实测数据（Node v24.14.0，2026-10-14 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
-- 14 个逻辑层测试套件 **1803 / 1803 通过**（UTC / UTC+8 双时区实跑）：冒烟 202（注入 DOMParser 时 222）、导出 103、Office 导出 1148、编辑器 29、**富文本 33**、**图片资产 45**、组卷 18、来源/网络导入 29、FSRS **65**、**FSRS 优化器 37**、SRS 29、备份 15、**WebDAV 32**、PWA 18。
+- 14 个逻辑层测试套件 **1841 / 1841 通过**（UTC / UTC+8 双时区实跑）：冒烟 202（注入 DOMParser 时 222）、导出 103、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **65**、**FSRS 优化器 44**、SRS **39**、备份 15、**WebDAV 32**、PWA 18。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
 - FSRS 优化器：以 mulberry32 + 伯努利模拟的合成评分日志（420 卡 × 4 次复习 = 1260 个相邻评分样本，含 140 次「又忘了」）验证有效性——当真权重相对默认值扰动 ±25% 时，训练后 logloss 0.3440 < 默认权重 0.3473（改善约 0.97%，超过 0.2% 采纳门控）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果确定一致。套件耗时约 2.6s。
 - Office 导出：538 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验（539 行 × 16 列）。
