@@ -19,6 +19,10 @@
 
     // 存储
     STORAGE_PREFIX: 'qb',
+    // LocalStorage 容量按浏览器常见下限 5MB 保守估算；占用率告警阈值
+    STORAGE_QUOTA_BYTES: 5 * 1024 * 1024,
+    STORAGE_WARN_RATIO: 0.7,
+    STORAGE_DANGER_RATIO: 0.85,
 
     // 答题
     QUESTIONS_PER_QUIZ: 50,

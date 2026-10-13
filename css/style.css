@@ -503,3 +503,31 @@ body {
   .topbar { padding: 8px 10px; }
   .tabs { padding: 6px 10px 0; }
 }
+/* ===== 列表分页与标签 ===== */
+.pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 14px 0 4px; }
+.pager-meta { text-align: center; margin: 10px 0 2px; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.tag-chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--surface-muted); color: var(--text-muted); border: 1px solid var(--border); }
+
+/* ===== 存储占用条 ===== */
+.storage-health { margin-top: 16px; }
+.sh-track { height: 8px; border-radius: 999px; background: var(--surface-muted); overflow: hidden; margin: 6px 0 4px; }
+.sh-fill { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
+.sh-fill.warn { background: var(--warning, #efaa17); }
+.sh-fill.danger { background: var(--danger, #e8463a); }
+.storage-health.warn .sh-label { color: var(--warning, #efaa17); }
+.storage-health.danger .sh-label { color: var(--danger, #e8463a); }
+
+/* ===== 快捷键帮助 ===== */
+.kbd { display: inline-block; min-width: 20px; padding: 1px 7px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; background: var(--surface-muted); font: 12px/18px ui-monospace, Consolas, monospace; text-align: center; }
+.shortcut-row { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: 14px; }
+.shortcut-row:last-child { border-bottom: none; }
+
+/* ===== 打印：只保留主体内容 ===== */
+@media print {
+  .topbar, .tabs, .statusbar, .toolbar, .quiz-actions, .li-actions, .answer-card, #toast-wrap, #modal-root, .pager button { display: none !important; }
+  .view { padding: 0; max-width: none; }
+  body { background: #fff; }
+  .card, .list-item, .quiz-card { border: none; box-shadow: none; break-inside: avoid; }
+  .pager, .pager-meta { display: none; }
+}

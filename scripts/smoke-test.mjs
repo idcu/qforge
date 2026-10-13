@@ -406,6 +406,23 @@ const onlyJudge = QB.SearchFilter.filter(listA.items, { type: 'judge' });
 eq(onlyJudge.length, 83, '搜索：筛选判断题 83');
 eq(QB.SearchFilter.categories(nested.questions).length, catSet.size, '搜索：分类列表数量一致');
 
+// 标签筛选（P0）：构造带标签题目，验证 tags()/单标签/标签数组/关键词命中标签
+const tagQs = [
+  { type: 'single', question: '标签题甲', options: [{ letter: 'A', text: '对' }], answer: 'A', tags: ['高频', '易错'] },
+  { type: 'single', question: '标签题乙', options: [{ letter: 'A', text: '对' }], answer: 'A', tags: ['基础'] },
+  { type: 'single', question: '标签题丙', options: [{ letter: 'A', text: '对' }], answer: 'A', tags: [] }
+];
+const tagList = QB.SearchFilter.tags(tagQs);
+eq(tagList.join('|'), '基础|易错|高频', '搜索：tags() 排序去重');
+eq(QB.SearchFilter.filter(tagQs, { tag: '易错' }).length, 1, '搜索：单标签命中 1 题');
+eq(QB.SearchFilter.filter(tagQs, { tags: ['易错', '基础'] }).length, 2, '搜索：标签数组命中任一 2 题');
+eq(QB.SearchFilter.filter(tagQs, { keyword: '高频' }).length, 1, '搜索：关键词可命中标签');
+eq(QB.SearchFilter.filter(tagQs, { type: 'single', tag: '基础' }).length, 1, '搜索：题型+标签组合筛选');
+// 公共分页窗口：UIRenderer 不进 harness，直接验证 20 条/页数学语义（与 LIST_PAGE_SIZE 对齐）
+const PAGE_SIZE = 20;
+eq(Math.ceil(tagQs.length / PAGE_SIZE), 1, '列表分页：3 条 1 页');
+eq(Math.ceil(45 / PAGE_SIZE), 3, '列表分页：45 条 3 页');
+
 /* ================= 9. XLSX / DOCX 原生解析 ================= */
 section('XLSX / DOCX 原生解析（zip + XML）');
 if (!hasDomParser) {

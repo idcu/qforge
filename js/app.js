@@ -24,7 +24,8 @@
     timerText: '',
     quizMeta: {},
     resultMeta: {},
-    search: { keyword: '', type: '', category: '' }
+    search: { keyword: '', type: '', category: '', tag: '' },
+    listPage: { wrong: 0, favorites: 0, search: 0 }
   };
 
   const TABS = [
@@ -137,10 +138,10 @@
         html = UI.renderResult(State.engine, State.bank, State.resultMeta);
         break;
       case 'wrong':
-        html = UI.renderWrongList(await QB.WrongBook.list(State.bankId));
+        html = UI.renderWrongList(await QB.WrongBook.list(State.bankId), State.listPage.wrong);
         break;
       case 'favorites':
-        html = UI.renderFavoritesList(await QB.Favorites.list(State.bankId));
+        html = UI.renderFavoritesList(await QB.Favorites.list(State.bankId), State.listPage.favorites);
         break;
       case 'history': {
         const recs = await QB.History.list(State.bankId);
@@ -154,14 +155,17 @@
         const results = QB.SearchFilter.filter(State.allQuestions, {
           type: State.search.type,
           category: State.search.category,
+          tag: State.search.tag,
           keyword: State.search.keyword
         });
         html = UI.renderSearch(State.bank, State.allQuestions.length, results, {
           keyword: State.search.keyword,
           type: State.search.type,
           category: State.search.category,
-          categories: QB.SearchFilter.categories(State.allQuestions)
-        });
+          tag: State.search.tag,
+          categories: QB.SearchFilter.categories(State.allQuestions),
+          tags: QB.SearchFilter.tags(State.allQuestions)
+        }, State.listPage.search);
         break;
       }
       default:
@@ -496,10 +500,20 @@
         return render();
       }
 
+      /* —— 列表分页 —— */
+      case 'page-wrong':
+      case 'page-fav':
+      case 'page-search': {
+        const key = el.getAttribute('data-action') === 'page-wrong' ? 'wrong' :
+          el.getAttribute('data-action') === 'page-fav' ? 'favorites' : 'search';
+        State.listPage[key] = parseInt(el.getAttribute('data-page'), 10) || 0;
+        return render();
+      }
+
       /* —— 搜索 —— */
       case 'search-practice': {
         const results = QB.SearchFilter.filter(State.allQuestions, {
-          type: State.search.type, category: State.search.category, keyword: State.search.keyword
+          type: State.search.type, category: State.search.category, tag: State.search.tag, keyword: State.search.keyword
         });
         return beginQuiz(QB.shuffle(results).slice(0, QB.CONFIG.QUESTIONS_PER_QUIZ), 'practice', '搜索练习');
       }
@@ -582,6 +596,7 @@
       const t = e.target;
       if (t.matches('[data-action="search-input"]')) {
         State.search.keyword = t.value;
+        State.listPage.search = 0;
         searchRender();
         return;
       }
@@ -601,18 +616,40 @@
     v.addEventListener('change', (e) => {
       const t = e.target;
       if (t.matches('[data-action="search-type"]')) {
-        State.search.type = t.value;
-        render();
+        State.search.type = t.value; State.listPage.search = 0; render();
       } else if (t.matches('[data-action="search-category"]')) {
-        State.search.category = t.value;
-        render();
+        State.search.category = t.value; State.listPage.search = 0; render();
+      } else if (t.matches('[data-action="search-tag"]')) {
+        State.search.tag = t.value; State.listPage.search = 0; render();
       }
     });
+  }
+
+  /** 快捷键帮助面板 */
+  function openHelp() {
+    const rows = [
+      ['?', '打开本帮助'],
+      ['Esc', '关闭弹窗'],
+      ['← / →', '上一题 / 下一题（答题中）'],
+      ['1 – 8', '选择对应选项（答题中）'],
+      ['Enter', '提交本题 / 下一题 / 交卷']
+    ];
+    UI.openModal(
+      '<h3>快捷键</h3>' +
+      rows.map((r) => '<div class="shortcut-row"><span>' + esc(r[1]) + '</span><span>' +
+        r[0].split(' / ').map((k) => '<span class="kbd">' + esc(k) + '</span>').join(' ') + '</span></div>').join('') +
+      '<div class="modal-actions"><button class="btn" data-action="modal-ok">知道了</button></div>',
+      (modal) => {
+        modal.querySelector('[data-action="modal-ok"]').onclick = () => UI.closeModal();
+      }
+    );
   }
 
   function bindGlobal() {
     const themeBtn = document.getElementById('btn-theme');
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+    const helpBtn = document.getElementById('btn-help');
+    if (helpBtn) helpBtn.addEventListener('click', openHelp);
 
     const manageBtn = document.getElementById('btn-manage-banks');
     if (manageBtn) manageBtn.addEventListener('click', () => { State.view = 'banks'; render(); });
@@ -637,6 +674,10 @@
       const modal = document.getElementById('modal-root');
       if (e.key === 'Escape' && modal && !modal.hidden) { UI.closeModal(); return; }
       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      if ((e.key === '?' || (e.shiftKey && e.key === '/')) && !(e.ctrlKey || e.metaKey || e.altKey)) {
+        if (modal.hidden) { openHelp(); e.preventDefault(); }
+        return;
+      }
       if (State.view !== 'quiz' || !State.engine) return;
       handleQuizKey(e);
     });

@@ -60,6 +60,30 @@
     return html;
   }
 
+  function formatKB(bytes) {
+    return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(2) + ' MB' : Math.round(bytes / 1024) + ' KB';
+  }
+
+  /** 本地存储健康卡（占用条 + 配额告警），纯展示 */
+  function renderStorageHealth() {
+    let used = 0;
+    try { used = QB.Storage.usageBytes() || 0; } catch (e) { used = 0; }
+    const quota = QB.CONFIG.STORAGE_QUOTA_BYTES;
+    const ratio = used / quota;
+    const pct = Math.min(100, Math.round(ratio * 100));
+    const level = ratio >= QB.CONFIG.STORAGE_DANGER_RATIO ? 'danger' :
+      ratio >= QB.CONFIG.STORAGE_WARN_RATIO ? 'warn' : '';
+    const fillCls = level === 'danger' ? ' danger' : level === 'warn' ? ' warn' : '';
+    const hint = level === 'danger' ? '占用过高，建议立即「备份与恢复」导出数据' :
+      level === 'warn' ? '占用偏高，可适时备份' : '数据保存在本浏览器，建议定期备份';
+    return '<div class="card storage-health' + (level ? ' ' + level : '') + '">' +
+      '<h3 class="card-title">本地存储</h3>' +
+      '<div class="sh-track" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' +
+      '<i class="sh-fill' + fillCls + '" style="width:' + pct + '%"></i></div>' +
+      '<div class="li-meta sh-label">已用 ' + formatKB(used) + ' / 约 ' + formatKB(quota) + '（' + pct + '%） · ' + esc(hint) +
+      ' <button type="button" class="btn btn-sm btn-ghost" data-action="backup-manage">备份与恢复</button></div></div>';
+  }
+
   function renderHome(bank, counts) {
     if (!bank) return renderBanks([], null);
     const total = counts.total || 0;
@@ -72,7 +96,7 @@
     if (!total) {
       return html + emptyState('该题库还没有题目。',
         '<button class="btn" data-action="bank-import">导入题目</button> ' +
-        '<button class="btn btn-ghost" data-action="bank-import-sample">导入示例题目</button>');
+        '<button class="btn btn-ghost" data-action="bank-import-sample">导入示例题目</button>') + renderStorageHealth();
     }
 
     const due = counts.dueReview || 0;
@@ -102,6 +126,7 @@
       '<button class="btn btn-ghost" data-action="backup-manage">备份与恢复</button>' +
       '<button class="btn btn-ghost" data-action="questions-manage">题目管理（新增/编辑/删除）</button>' +
       '</div>';
+    html += renderStorageHealth();
     return html;
   }
 
@@ -325,12 +350,34 @@
 
   /* ---------------- 列表视图 ---------------- */
 
-  function renderWrongList(items) {
+  const LIST_PAGE_SIZE = 20;
+
+  /** 通用分页条（仅控制渲染窗口，不改变数据顺序） */
+  function pager(page, pageCount, action, rangeText) {
+    if (pageCount <= 1) return rangeText ? '<div class="li-meta pager-meta">' + rangeText + '</div>' : '';
+    return '<nav class="pager" aria-label="分页">' +
+      (page > 0 ? '<button type="button" class="btn btn-sm btn-ghost" data-action="' + action + '" data-page="' + (page - 1) + '">上一页</button>'
+        : '<span class="btn btn-sm btn-ghost" disabled>上一页</span>') +
+      '<span class="li-meta">' + (page + 1) + ' / ' + pageCount + (rangeText ? '　' + rangeText : '') + '</span>' +
+      (page < pageCount - 1 ? '<button type="button" class="btn btn-sm btn-ghost" data-action="' + action + '" data-page="' + (page + 1) + '">下一页</button>'
+        : '<span class="btn btn-sm btn-ghost" disabled>下一页</span>') +
+      '</nav>';
+  }
+
+  /** 分页窗口（钳制越界页码） */
+  function pageSlice(items, page, size) {
+    const pageCount = Math.max(1, Math.ceil(items.length / size));
+    const p = Math.min(Math.max(0, page || 0), pageCount - 1);
+    return { items: items.slice(p * size, p * size + size), page: p, pageCount: pageCount };
+  }
+
+  function renderWrongList(items, page) {
     if (!items.length) return emptyState('错题本是空的，继续加油！');
+    const win = pageSlice(items, page, LIST_PAGE_SIZE);
     let html = '<div class="toolbar"><button class="btn" data-action="start-wrong">错题重练</button>' +
       '<button class="btn btn-ghost" data-action="export-wrong">导出错题</button>' +
       '<button class="btn btn-ghost" data-action="wrong-clear">清空错题本</button></div>';
-    items.forEach((it) => {
+    win.items.forEach((it) => {
       const q = it.question;
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
@@ -341,15 +388,19 @@
         '<button class="btn btn-sm btn-ghost" data-action="wrong-remove" data-key="' + esc(it.questionKey) + '">移出错题本</button>' +
         '</div></div>';
     });
+    const start = win.page * LIST_PAGE_SIZE + 1;
+    const end = start + win.items.length - 1;
+    html += pager(win.page, win.pageCount, 'page-wrong', start + '–' + end + ' / 共 ' + items.length + ' 题');
     return html;
   }
 
-  function renderFavoritesList(items) {
+  function renderFavoritesList(items, page) {
     if (!items.length) return emptyState('收藏夹是空的。答题时可点击「收藏」加入。');
+    const win = pageSlice(items, page, LIST_PAGE_SIZE);
     let html = '<div class="toolbar"><button class="btn" data-action="start-favorite">收藏练习</button>' +
       '<button class="btn btn-ghost" data-action="export-fav">导出收藏</button>' +
       '<button class="btn btn-ghost" data-action="fav-clear">清空收藏夹</button></div>';
-    items.forEach((it) => {
+    win.items.forEach((it) => {
       const q = it.question;
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
@@ -359,6 +410,9 @@
         '<button class="btn btn-sm btn-ghost" data-action="fav-remove" data-key="' + esc(it.questionKey) + '">取消收藏</button>' +
         '</div></div>';
     });
+    const start = win.page * LIST_PAGE_SIZE + 1;
+    const end = start + win.items.length - 1;
+    html += pager(win.page, win.pageCount, 'page-fav', start + '–' + end + ' / 共 ' + items.length + ' 题');
     return html;
   }
 
@@ -371,6 +425,9 @@
     let s = '<div class="li-meta">答案：' + esc(q.answer) + '</div>';
     s += (q.options || []).map((o) => '<div class="li-meta">' + esc(o.letter) + '. ' + esc(o.text) + '</div>').join('');
     if (q.analysis) s += '<div class="li-meta">解析：' + esc(q.analysis) + '</div>';
+    if (Array.isArray(q.tags) && q.tags.length) {
+      s += '<div class="tag-row">' + q.tags.map((t) => '<span class="tag-chip">' + esc(t) + '</span>').join('') + '</div>';
+    }
     return s;
   }
 
@@ -423,17 +480,21 @@
     return html;
   }
 
-  function renderSearch(bank, allCount, results, criteria) {
+  function renderSearch(bank, allCount, results, criteria, page) {
     criteria = criteria || {};
     let html = '<div class="toolbar">' +
-      '<input type="search" class="grow" data-action="search-input" placeholder="输入关键词搜索题目…" value="' + esc(criteria.keyword || '') + '" />' +
-      '<select data-action="search-type">' +
+      '<input type="search" class="grow" data-action="search-input" placeholder="关键词搜索题目 / 解析 / 标签…" aria-label="关键词搜索" value="' + esc(criteria.keyword || '') + '" />' +
+      '<select data-action="search-type" aria-label="题型筛选">' +
       '<option value="">全部题型</option>' +
       QB.CONFIG.TYPES.map((t) => '<option value="' + t + '"' + (criteria.type === t ? ' selected' : '') + '>' + QB.typeLabel(t) + '</option>').join('') +
       '</select>' +
       (criteria.categories && criteria.categories.length ?
-        '<select data-action="search-category"><option value="">全部分类</option>' +
+        '<select data-action="search-category" aria-label="分类筛选"><option value="">全部分类</option>' +
         criteria.categories.map((c) => '<option value="' + esc(c) + '"' + (criteria.category === c ? ' selected' : '') + '>' + esc(c) + '</option>').join('') +
+        '</select>' : '') +
+      (criteria.tags && criteria.tags.length ?
+        '<select data-action="search-tag" aria-label="标签筛选"><option value="">全部标签</option>' +
+        criteria.tags.map((t) => '<option value="' + esc(t) + '"' + (criteria.tag === t ? ' selected' : '') + '>' + esc(t) + '</option>').join('') +
         '</select>' : '') +
       '</div>';
 
@@ -441,14 +502,17 @@
     if (!results.length) {
       return html + emptyState('没有匹配的题目。');
     }
-    html += '<div class="toolbar"><button class="btn" data-action="search-practice">用搜索结果练习</button></div>';
-    results.slice(0, 200).forEach((q) => {
+    const win = pageSlice(results, page, LIST_PAGE_SIZE);
+    html += '<div class="toolbar"><button class="btn" data-action="search-practice">用搜索结果练习（' + results.length + ' 题，取前 ' + QB.CONFIG.QUESTIONS_PER_QUIZ + '）</button></div>';
+    win.items.forEach((q) => {
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
         '<span class="li-title">' + QB.SearchFilter.highlight(q.question, criteria.keyword) + '</span></div>' +
         renderAnswerText(q) + '</div>';
     });
-    if (results.length > 200) html += '<div class="li-meta">仅显示前 200 条</div>';
+    const start = win.page * LIST_PAGE_SIZE + 1;
+    const end = start + win.items.length - 1;
+    html += pager(win.page, win.pageCount, 'page-search', start + '–' + end + ' / 共 ' + results.length + ' 题');
     return html;
   }
 
@@ -498,4 +562,5 @@
     renderAnswerText, emptyState, progressBar,
     toast, openModal, closeModal, confirmDialog
   };
+  QB.UIRenderer.LIST_PAGE_SIZE = LIST_PAGE_SIZE;
 })(window);
