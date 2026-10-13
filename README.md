@@ -69,7 +69,8 @@ qb/
 ├── manifest.webmanifest       # PWA 清单
 ├── icon.svg                   # PWA 图标
 ├── docs/                      # ARCHITECTURE / API-CONTRACT / DATABASE / user-guide / IMPORT-FORMAT / EXPORT-FORMAT
-├── samples/                   # 各格式导入样例（含去重后真实 538 题题库）
+├── samples/                   # 各格式导入样例（含去重后真实 538 题题库，兼作 CI 真实夹具）
+├── .github/workflows/test.yml  # CI：Node 20/24 跑全部逻辑层测试（零依赖，免 install）
 ├── scripts/                   # 开发工具（不随应用发布）：serve / smoke-test / bench / gen_fixtures
 │                              #   及各 *.test.mjs 逻辑层单元测试
 ├── CHANGELOG.internal.md      # 内部变更追溯（不对外发布）
@@ -104,6 +105,7 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
 - 首屏静态体积（index.html + css + 全部 41 个 js + sw/manifest/icon，共 46 个文件，gzip -9 实测）：**83.3 KB gzip / 236.1 KB raw**。
 - 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 2.16ms、落库 2.49ms、检索 0.62ms、50 题整卷判分 0.10ms、538 题乱序 0.50ms、文本四格式导出 3.42ms、**XLSX 构建 7.14ms（665 KB）**、**DOCX 构建 2.98ms（258 KB）**、Markdown 538 题再解析 4.51ms。
+- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 矩阵零依赖直跑全部 8 个套件。
 
 ## 远端仓库
 

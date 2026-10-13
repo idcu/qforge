@@ -1,0 +1,39 @@
+# 淬题 qforge 逻辑层回归
+# 纯 Node 内置 API 运行，零依赖、无需 npm install。
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  logic-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: 冒烟测试（六题型/真实 541 题/三格式往返/CRUD/答题卡）
+        run: node scripts/smoke-test.mjs
+      - name: 导出单元测试
+        run: node scripts/exporter.test.mjs
+      - name: Office（xlsx/docx）导出往返测试
+        run: node scripts/office-export.test.mjs
+      - name: 题目编辑器测试
+        run: node scripts/editor.test.mjs
+      - name: 组卷蓝图测试
+        run: node scripts/blueprint.test.mjs
+      - name: SRS 间隔重复测试
+        run: node scripts/srs.test.mjs
+      - name: 备份恢复测试
+        run: node scripts/backup.test.mjs
+      - name: PWA 资源校验
+        run: node scripts/pwa.test.mjs
