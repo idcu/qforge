@@ -48,7 +48,7 @@ const FIXTURES = [
   ], answer: 'B', category: '网络' },
   { type: 'multi', question: '以下属于 JavaScript 基本类型的是？', options: [
     { letter: 'A', text: 'string' }, { letter: 'B', text: 'object' }, { letter: 'C', text: 'number' }, { letter: 'D', text: 'boolean' }
-  ], answer: 'ACD', category: '前端基础' },
+  ], answer: 'ACD', category: '前端基础', difficulty: 4, tags: ['基础', '高频考点'] },
   { type: 'fill', question: 'Python 中定义函数用 ____ 关键字，返回值用 ____ 关键字。',
     blanks: [{ answer: 'def' }, { answer: 'return' }], answer: 'def；return', category: 'Python' },
   { type: 'essay', question: '简述什么是事件循环（Event Loop）。', reference_answer: '事件循环是 JS 处理异步任务的机制，负责执行宏任务与微任务队列。', category: '前端基础' },
@@ -179,7 +179,8 @@ eq(csvLines.length, 7, 'CSV 表头 + 6 数据行 = 7 行');
 const csvHeader = csvLines[0].replace(/^\uFEFF/, '').split(',');
 eq(csvHeader[0], '题型', 'CSV 首列「题型」');
 eq(csvHeader[1], '题目', 'CSV 第二列「题目」');
-eq(csvHeader.length, 14, '题库导出 CSV 为 14 列（无「错误次数」）');
+eq(csvHeader.length, 16, '题库导出 CSV 为 16 列（含难度/标签，无「错误次数」）');
+ok(csvHeader.includes('难度') && csvHeader.includes('标签'), 'CSV 表头含 难度/标签');
 // 特殊字符行：应被双引号包裹，内部引号成对转义
 const specialLine = csvLines.find((l) => l.indexOf('CSV 特殊字符题') >= 0);
 ok(specialLine && specialLine.indexOf('"CSV 特殊字符题') >= 0, '含逗号/引号的题干字段被引号包裹');
@@ -192,6 +193,9 @@ eq(specialBack.question, FIXTURES[5].question, 'CSV 往返：题干逗号/引号
 ok(specialBack.options.some((o) => o.text === '选项"甲"'), 'CSV 往返：选项内引号还原');
 ok(specialBack.options.some((o) => o.text === '选项,乙'), 'CSV 往返：选项内逗号还原');
 ok(specialBack.analysis === '解析第一行\n解析第二行', 'CSV 往返：解析中的换行还原');
+const metaMulti = csvRt.find((q) => q.question === '以下属于 JavaScript 基本类型的是？');
+eq(metaMulti.difficulty, 4, 'CSV 往返：难度保留（4）');
+ok(metaMulti.tags.join('、') === '基础、高频考点', 'CSV 往返：标签保留（、分隔）');
 assertSelfConsistent(csvRt, 'CSV 往返');
 
 /* ================= 5. Markdown 导出与往返 ================= */
@@ -208,6 +212,10 @@ eq(byType(mdExportRt).multi, 1, 'MD 往返：多选 1');
 assertSelfConsistent(mdExportRt, 'MD 往返');
 const catKept = mdExportRt.find((q) => q.question === 'HTTP 协议的默认端口是？');
 eq(catKept.category, '网络', 'MD 往返：分类保留');
+const metaMultiMd = mdExportRt.find((q) => q.question === '以下属于 JavaScript 基本类型的是？');
+eq(metaMultiMd.difficulty, 4, 'MD 往返：难度保留（4）');
+ok(metaMultiMd.tags.join('、') === '基础、高频考点', 'MD 往返：标签保留');
+ok(mdBuilt.content.indexOf('难度：4') >= 0 && mdBuilt.content.indexOf('标签：基础') >= 0, 'MD 文本含难度/标签行');
 
 /* ================= 6. TXT 导出 ================= */
 section('TXT 导出');

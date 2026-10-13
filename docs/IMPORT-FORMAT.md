@@ -17,9 +17,12 @@
   "reference_answer": "参考答案文本",
   "analysis": "解析",
   "category": "分类",
-  "source": "来源/原题号"
+  "source": "来源/原题号",
+  "difficulty": 0,
+  "tags": ["标签1", "标签2"]
 }
 ```
+> `difficulty`：0=未设置，1–5 从易到难（中文 易/较易/中等/较难/很难 自动归一）；`tags`：多标签数组（字符串可按 `、,，;；|` 分隔自动拆分）。二者是**题元数据**，不参与 contentHash 去重，编辑它们不影响错题/收藏键。
 
 各题型字段：
 
@@ -97,6 +100,8 @@
 | 来源 | 序号 / 编号 / 来源 / 题号 / source / id / no |
 | 选项 | 选项A–H / optionA–H / A–H（单列多字母同理） |
 | 填空 | 填空 / 空 / blanks |
+| 难度 | 难度 / difficulty / level（1–5 或 易…难） |
+| 标签 | 标签 / 知识点 / 关键词 / tags / keywords（多值用 、,；;｜ 分隔） |
 | 参考答案 | 参考答案 / reference / reference_answer |
 
 **要点**

@@ -78,7 +78,9 @@
       reference_answer: q.reference_answer || '',
       analysis: q.analysis || '',
       category: q.category || '',
-      source: q.source || ''
+      source: q.source || '',
+      difficulty: Number(q.difficulty) || 0,
+      tags: Array.isArray(q.tags) ? q.tags.slice() : []
     };
     // 错题导出附带错误次数；再导入时被适配器忽略，不影响题面
     if (meta && meta.wrongCount) item.wrongCount = meta.wrongCount;
@@ -100,20 +102,22 @@
   }
 
   function buildCSV(payload) {
-    const header = ['题型', '题目', '选项A', '选项B', '选项C', '选项D', '选项E', '选项F', '选项G', '选项H', '答案', '解析', '分类', '来源'];
+    const header = ['题型', '题目', '选项A', '选项B', '选项C', '选项D', '选项E', '选项F', '选项G', '选项H', '答案', '解析', '分类', '难度', '标签', '来源'];
     const withWrong = payload.kind === 'wrong';
     if (withWrong) header.push('错误次数');
     const lines = [header.map(csvCell).join(',')];
     payload.entries.forEach((e) => {
       const q = e.question;
-      const row = new Array(14).fill('');
+      const row = new Array(16).fill('');
       row[0] = QB.typeLabel(q.type);
       row[1] = q.question || '';
       (q.options || []).slice(0, 8).forEach((o, i) => { row[2 + i] = o.text || ''; });
       row[10] = answerLine(q);
       row[11] = q.analysis || '';
       row[12] = q.category || '';
-      row[13] = q.source || '';
+      row[13] = Number(q.difficulty) || 0;
+      row[14] = (q.tags || []).join('、');
+      row[15] = q.source || '';
       if (withWrong) row.push(String(e.meta.wrongCount || 1));
       lines.push(row.map(csvCell).join(','));
     });
@@ -126,8 +130,10 @@
   function metaLines(e, q, render) {
     const out = [];
     if (e.meta.wrongCount) out.push(render('错误次数', String(e.meta.wrongCount)));
-    if (q.analysis) out.push(render('解析', q.analysis));
+    if (Number(q.difficulty) > 0) out.push(render('难度', String(q.difficulty)));
+    if (Array.isArray(q.tags) && q.tags.length) out.push(render('标签', q.tags.join('、')));
     if (q.category) out.push(render('分类', q.category));
+    if (q.analysis) out.push(render('解析', q.analysis));
     return out;
   }
 

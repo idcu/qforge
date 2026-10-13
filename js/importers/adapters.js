@@ -29,6 +29,36 @@
     return '';
   }
 
+  /** 难度归一化：数字 1-5；中文 易/较易/中/较难/难；缺省 0（未设置） */
+  function normalizeDifficulty(v) {
+    if (v === undefined || v === null || v === '') return 0;
+    const n = parseInt(v, 10);
+    if (!isNaN(n)) return Math.max(0, Math.min(5, n));
+    const s = String(v).trim();
+    if (/很易|极易|非常容易|1/.test(s)) return 1;
+    if (/较易|容易|简单|偏易|2/.test(s)) return 2;
+    if (/中等|一般|普通|3/.test(s)) return 3;
+    if (/较难|困难|偏难|4/.test(s)) return 4;
+    if (/很难|极难|非常难|5/.test(s)) return 5;
+    if (/^难$/.test(s)) return 4;
+    if (/易|简单/.test(s)) return 2;
+    return 0;
+  }
+
+  /** 标签归一化：数组或以 、,，;；|/ 分隔的字符串 → 去空去重的字符串数组 */
+  function normalizeTags(v) {
+    let arr = [];
+    if (Array.isArray(v)) arr = v;
+    else if (v !== undefined && v !== null && String(v).trim()) arr = String(v).split(/[、,，;；|/]+/);
+    const out = [];
+    const seen = new Set();
+    arr.forEach((t) => {
+      const s = String(t == null ? '' : t).trim();
+      if (s && !seen.has(s)) { seen.add(s); out.push(s); }
+    });
+    return out;
+  }
+
   /** 统一题型名 → 内部 type */
   function normalizeType(rawType, fallback) {
     if (!rawType) return fallback || '';
@@ -131,7 +161,9 @@
       reference_answer: '',
       analysis: String(firstOf(raw.analysis, raw.解析, raw.答案解析, raw.explanation, '')).trim(),
       category: String(firstOf(raw.category, raw.分类, raw.类别, raw.章节, raw.chapter, '')).trim(),
-      source: String(firstOf(raw.source, raw.序号, raw.编号, raw.来源, raw.id, '')).trim()
+      source: String(firstOf(raw.source, raw.序号, raw.编号, raw.来源, raw.id, '')).trim(),
+      difficulty: normalizeDifficulty(firstOf(raw.difficulty, raw.难度, raw.d, '')),
+      tags: normalizeTags(firstOf(raw.tags, raw.标签, raw.知识点, raw.keywords, []))
     };
 
     if (type === 'judge') {
@@ -215,7 +247,9 @@
     category: ['分类', '类别', '章节', 'category', 'chapter'],
     source: ['序号', '编号', '来源', '题号', 'source', 'id', 'no'],
     reference: ['参考答案', 'reference', 'reference_answer'],
-    blanks: ['填空', '空', 'blanks']
+    blanks: ['填空', '空', 'blanks'],
+    difficulty: ['难度', 'difficulty', 'level'],
+    tags: ['标签', '知识点', '关键词', 'tags', 'keywords']
   };
 
   function matchHeader(name) {
@@ -258,7 +292,9 @@
         analysis: colIndex.analysis !== undefined ? row[colIndex.analysis] : '',
         category: colIndex.category !== undefined ? row[colIndex.category] : '',
         source: colIndex.source !== undefined ? row[colIndex.source] : '',
-        reference_answer: colIndex.reference !== undefined ? row[colIndex.reference] : ''
+        reference_answer: colIndex.reference !== undefined ? row[colIndex.reference] : '',
+        difficulty: colIndex.difficulty !== undefined ? row[colIndex.difficulty] : '',
+        tags: colIndex.tags !== undefined ? row[colIndex.tags] : ''
       };
 
       // 选项列
@@ -285,11 +321,15 @@
   /** 校验并汇总 */
   function validateQuestions(questions) {
     const warnings = [];
-    const stats = { total: questions.length, byType: {} };
+    const stats = { total: questions.length, byType: {}, byDifficulty: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, tagCount: 0 };
     QB.CONFIG.TYPES.forEach((t) => { stats.byType[t] = 0; });
+    const tagSet = new Set();
 
     questions.forEach((q, i) => {
       stats.byType[q.type] = (stats.byType[q.type] || 0) + 1;
+      const d = Number(q.difficulty) || 0;
+      stats.byDifficulty[d === 0 ? 0 : d] = (stats.byDifficulty[d === 0 ? 0 : d] || 0) + 1;
+      (q.tags || []).forEach((t) => tagSet.add(t));
       if (!q.question) warnings.push('第 ' + (i + 1) + ' 题缺少题干');
       if (q.type === 'fill' && !(q.blanks || []).some((b) => b.answer)) {
         warnings.push('第 ' + (i + 1) + ' 题（填空）缺少答案');
@@ -309,11 +349,14 @@
       else seen.add(h);
     });
     stats.inFileDuplicates = dup;
+    stats.tagCount = tagSet.size;
     return { stats, warnings };
   }
 
   QB.Adapters = {
     normalizeType,
+    normalizeDifficulty,
+    normalizeTags,
     parseOptions,
     normalizeJudgeAnswer,
     parseBlanks,

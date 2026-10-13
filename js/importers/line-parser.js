@@ -22,6 +22,8 @@
   const RE_ANSWER = /^\s*(?:答案|参考答案|正确答案)\s*[:：]\s*(.*)$/;
   const RE_ANALYSIS = /^\s*(?:解析|答案解析|试题解析|分析)\s*[:：]\s*(.*)$/;
   const RE_CATEGORY = /^\s*(?:分类|类别|章节)\s*[:：]\s*(.*)$/;
+  const RE_DIFFICULTY = /^\s*(?:难度|difficulty)\s*[:：]\s*(.*)$/;
+  const RE_TAGS = /^\s*(?:标签|知识点|关键词)\s*[:：]\s*(.*)$/;
   const RE_TYPE_INLINE = /[（(【\[]?\s*(判断题|单选题|多选题|填空题|简答题|问答题|单项选择|多项选择|判断|单选|多选|填空|简答)\s*[）)】\]]?/;
 
   function matchQuestionStart(t) {
@@ -57,6 +59,8 @@
       answer: block.answer,
       analysis: block.analysis,
       category: block.category || '',
+      difficulty: block.difficulty || 0,
+      tags: block.tags || [],
       reference_answer: type === 'essay' ? block.answer : ''
     };
   }
@@ -82,13 +86,13 @@
       if (qs) {
         started = true;
         push();
-        cur = { stem: qs.rest.trim(), options: [], answer: '', analysis: '', category: '', typeHint: '' };
+        cur = { stem: qs.rest.trim(), options: [], answer: '', analysis: '', category: '', difficulty: 0, tags: [], typeHint: '' };
         extractTypeInline(cur);
         return;
       }
       // 首道题号之前的前言（Markdown 标题、导出时间等）不计入题目
       if (!started) return;
-      if (!cur) cur = { stem: '', options: [], answer: '', analysis: '', category: '', typeHint: '' };
+      if (!cur) cur = { stem: '', options: [], answer: '', analysis: '', category: '', difficulty: 0, tags: [], typeHint: '' };
 
       let m = t.match(RE_ANSWER);
       if (m) { cur.answer = m[1].trim(); return; }
@@ -96,6 +100,10 @@
       if (m) { cur.analysis = m[1].trim(); return; }
       m = t.match(RE_CATEGORY);
       if (m) { cur.category = m[1].trim(); return; }
+      m = t.match(RE_DIFFICULTY);
+      if (m) { cur.difficulty = QB.Adapters.normalizeDifficulty(m[1].trim()); return; }
+      m = t.match(RE_TAGS);
+      if (m) { cur.tags = QB.Adapters.normalizeTags(m[1].trim()); return; }
       m = t.match(RE_OPTION);
       if (m && cur.options.length < 26) {
         cur.options.push({ letter: m[1].toUpperCase(), text: m[2].trim() });

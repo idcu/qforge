@@ -26,6 +26,8 @@
       analysis: q.analysis || '',
       category: q.category || '',
       source: q.source || '',
+      difficulty: Number(q.difficulty) || 0,
+      tags: Array.isArray(q.tags) ? q.tags.slice() : [],
       createdAt: q.createdAt || t,
       updatedAt: t
     };

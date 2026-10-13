@@ -41,9 +41,11 @@ CREATE TABLE questions (
   answer           TEXT,                            -- judge: "正确"/"错误"; single/multi: "ABD"
   blanks           TEXT,                            -- JSON: [{"answer":"def","accept":["Def"],"hint":""}]
   reference_answer TEXT,                            -- essay 参考答案
-  analysis         TEXT,
+  analysis TEXT,
   category         VARCHAR(64),
   source           VARCHAR(64),
+  difficulty       TINYINT      NOT NULL DEFAULT 0,  -- 0 未设置；1-5 从易到难
+  tags             TEXT,                            -- JSON 字符串数组：["法规","合同"]
   content_hash     VARCHAR(16)  NOT NULL,           -- 去重键：FNV-1a(type|normalize(question))
   created_at       BIGINT       NOT NULL,
   updated_at       BIGINT       NOT NULL

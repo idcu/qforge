@@ -115,7 +115,35 @@ engCfg.loadQuestions([singleQ]);
 ok(engCfg.questions[0] === singleQ, 'CONFIG.SHUFFLE_OPTIONS=false 时默认不乱序');
 QB.CONFIG.SHUFFLE_OPTIONS = true;
 
-/* ================= 3. 真实数据导入 ================= */
+/* ================= 2.6 难度 / 标签元数据 ================= */
+section('题元数据 difficulty / tags');
+eq(QB.Adapters.normalizeDifficulty('难'), 4, '难度「难」→4');
+eq(QB.Adapters.normalizeDifficulty('中等'), 3, '难度「中等」→3');
+eq(QB.Adapters.normalizeDifficulty(5), 5, '难度数字 5 →5');
+eq(QB.Adapters.normalizeDifficulty(9), 5, '难度越界钳制为 5');
+eq(QB.Adapters.normalizeDifficulty(''), 0, '难度缺省 →0');
+const tagA = QB.Adapters.normalizeTags('高频、重点, 易错，计算');
+ok(tagA.join('|') === '高频|重点|易错|计算', '标签按多种分隔符拆分去空');
+const metaRes = QB.Adapters.toStandard({
+  type: 'single', question: '元数据题', options: ['A.甲', 'B.乙'], answer: 'B',
+  难度: '较难', 标签: '法规,合同', category: '物业'
+}).question;
+eq(metaRes.difficulty, 4, 'toStandard：中文难度归一');
+ok(metaRes.tags.join('|') === '法规|合同', 'toStandard：中文标签键归一');
+// 表格表头映射
+const metaRows = QB.Adapters.tableToQuestions([
+  ['题型', '题目', '选项A', '选项B', '答案', '难度', '标签'],
+  ['单选', '表头元数据题', '甲', '乙', 'A', '2', '基础;重点']
+]).questions[0];
+eq(metaRows.difficulty, 2, '表格：难度列映射');
+ok(metaRows.tags.join('|') === '基础|重点', '表格：标签列映射');
+// 校验统计含难度分布与标签数
+const metaVal = QB.Adapters.validateQuestions([metaRes, metaRows]);
+eq(metaVal.stats.byDifficulty[4], 1, '校验：难度 4 计数 1');
+eq(metaVal.stats.byDifficulty[2], 1, '校验：难度 2 计数 1');
+eq(metaVal.stats.tagCount, 4, '校验：去重标签总数 4');
+
+
 section('真实数据导入（541 题）');
 const flatText = fs.readFileSync(path.join(ROOT, '题库-背题模式.json'), 'utf8');
 const nestedText = fs.readFileSync(path.join(ROOT, '题库-分类.json'), 'utf8');

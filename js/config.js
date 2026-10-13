@@ -44,7 +44,11 @@
       multi: '多选',
       fill: '填空',
       essay: '简答'
-    }
+    },
+
+    // 难度定义（唯一事实来源）：1 最简单 … 5 最难；0/缺省 = 未设置
+    DIFFICULTY_LEVELS: [1, 2, 3, 4, 5],
+    DIFFICULTY_LABELS: { 0: '未设置', 1: '很易', 2: '较易', 3: '中等', 4: '较难', 5: '很难' }
   };
 
   /** 题型中文名 */
@@ -55,5 +59,11 @@
   /** 题型短标签 */
   QB.typeBadge = function (type) {
     return QB.CONFIG.TYPE_BADGES[type] || type;
+  };
+
+  /** 难度中文名 */
+  QB.difficultyLabel = function (d) {
+    const n = Number(d) || 0;
+    return QB.CONFIG.DIFFICULTY_LABELS[n] || QB.CONFIG.DIFFICULTY_LABELS[0];
   };
 })(window);
