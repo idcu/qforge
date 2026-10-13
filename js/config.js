@@ -25,6 +25,8 @@
     POINTS_PER_CORRECT: 10,
     DEFAULT_EXAM_MINUTES: 30,
     DEDUPE_ON_IMPORT: true,
+    // 答题时是否随机排列单选/多选题的选项（答案同步重映射；仅影响当次作答，不改落库数据）
+    SHUFFLE_OPTIONS: true,
 
     // 题型定义（唯一事实来源，禁止在各模块里散落硬编码）
     TYPES: TYPES,

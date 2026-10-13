@@ -64,6 +64,7 @@ function load(rel) {
   'js/modules/search-filter.js',
   'js/modules/progress-saver.js',
   'js/modules/question-editor.js'
+  // __EXPORTER_LINE__ 'js/modules/exporter.js'
 ].forEach(load);
 
 const QB = window.QB;
@@ -164,6 +165,21 @@ row('QuizEngine 整卷 gradeAll（50 题）', await timed(() => {
 row('错题本批量写入（100 题）', await timed(async () => {
   for (let i = 0; i < 100; i++) await QB.WrongBook.add(benchBank.id, idx.items[i]);
 }, 3), '错题计数 ' + (await QB.WrongBook.count(benchBank.id)));
+
+/* ---------- 8. 选项乱序 ---------- */
+let shuffledCount = 0;
+row('shuffleOptions 选项乱序（538 题）', await timed(() => {
+  shuffledCount = idx.items.reduce((n, q) => n + (QB.shuffleOptions(q) !== q ? 1 : 0), 0);
+}, 20), '实际乱序 ' + shuffledCount + ' 题（仅单选/多选）');
+
+/* __EXPORTER_BENCH_BEGIN__
+const exportPayload = await QB.Exporters.collect('bank', benchBank);
+let expBytes = 0;
+row('导出构建（JSON+CSV+MD+TXT，538 题）', await timed(() => {
+  expBytes = 0;
+  QB.Exporters.FORMATS.forEach((f) => { expBytes += f.build(exportPayload).length; });
+}, 10), '单次合计 ' + (expBytes / 1024).toFixed(1) + ' KB');
+__EXPORTER_BENCH_END__ */
 
 const heapAfter = process.memoryUsage().heapUsed;
 

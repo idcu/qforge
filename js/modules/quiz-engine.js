@@ -19,8 +19,21 @@
     this.results = [];   // 每题判分结果
   };
 
-  QuizEngine.prototype.loadQuestions = function (questions, type) {
-    this.questions = (questions || []).slice();
+  /**
+   * 装载题目
+   * @param {Array} questions 题目
+   * @param {string} [type] 题型/来源标记
+   * @param {Object} [opts]
+   * @param {boolean} [opts.shuffleOptions] 是否乱序选项（单选/多选），默认取 CONFIG.SHUFFLE_OPTIONS
+   *   说明：乱序只产出派生克隆，不改库里的原题；恢复会话走 restore()，不会二次乱序。
+   */
+  QuizEngine.prototype.loadQuestions = function (questions, type, opts) {
+    let list = (questions || []).slice();
+    const doShuffle = opts && opts.shuffleOptions !== undefined
+      ? !!opts.shuffleOptions
+      : !QB.CONFIG || QB.CONFIG.SHUFFLE_OPTIONS !== false;
+    if (doShuffle) list = list.map((q) => QB.shuffleOptions(q));
+    this.questions = list;
     this.currentType = type || 'mixed';
     this.reset();
   };

@@ -66,6 +66,7 @@ function load(rel) {
   'js/modules/search-filter.js',
   'js/modules/progress-saver.js',
   'js/modules/question-editor.js'
+  // __EXPORTER_LINE__ 'js/modules/exporter.js'
 ].forEach(load);
 
 const QB = window.QB;
@@ -132,6 +133,54 @@ const h4 = QB.makeContentHash({ type: 'judge', question: '下列哪种不是数�
 ok(h1 === h2, '题干相同（尾部空格）→ hash 相同');
 ok(h1 !== h3, '不同题干 → hash 不同');
 ok(h1 !== h4, '不同题型 → hash 不同');
+
+/* ================= 2.5 选项乱序与答案重映射 ================= */
+section('选项乱序 shuffleOptions');
+const singleQ = {
+  type: 'single', question: '选项乱序测试题', contentHash: 'deadbeef',
+  options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }, { letter: 'C', text: '丙' }, { letter: 'D', text: '丁' }],
+  answer: 'C'
+};
+const multiQ = {
+  type: 'multi', question: '多选乱序测试题',
+  options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }, { letter: 'C', text: '丙' }, { letter: 'D', text: '丁' }],
+  answer: 'ABD'
+};
+// 种子可复现
+const s1 = QB.shuffleOptions(singleQ, 42);
+const s2 = QB.shuffleOptions(singleQ, 42);
+eq(s1.options.map((o) => o.letter).join(''), 'ABCD', '乱序后选项字母重新分配为 A..');
+ok(JSON.stringify(s1.options) === JSON.stringify(s2.options), '相同种子排列可复现');
+ok(singleQ.options.map((o) => o.text).join('') === '甲乙丙丁', '原题选项顺序不变（不污染落库数据）');
+ok(singleQ.answer === 'C', '原题答案不变');
+// 文本集合是原选项的一个排列
+const texts = s1.options.map((o) => o.text).sort().join('');
+eq(texts, '丁丙乙甲', '乱序后选项文本集合不变');
+// 重映射答案必须判对（单选）
+eq(QB.judgeAnswer(s1, s1.answer).isCorrect, true, '单选：重映射答案判对');
+const m1 = QB.shuffleOptions(multiQ, 7);
+eq(QB.judgeAnswer(m1, m1.answer.split('')).isCorrect, true, '多选：重映射答案判对');
+eq(m1.answer.length, 3, '多选：答案字母数不变');
+// contentHash 不携带选项，乱序后保持一致
+eq(s1.contentHash, 'deadbeef', '乱序不改变 contentHash（错题/收藏键稳定）');
+// 非选择类题型原样返回（同引用）
+const jq = { type: 'judge', question: '判断', answer: '正确' };
+const fq = { type: 'fill', question: '填空 ___', blanks: [{ answer: 'x' }] };
+ok(QB.shuffleOptions(jq, 1) === jq, '判断题不参与乱序（同引用）');
+ok(QB.shuffleOptions(fq, 1) === fq, '填空题不参与乱序（同引用）');
+// 引擎默认开启乱序；可显式关闭
+const engSh = new QB.QuizEngine();
+engSh.loadQuestions([singleQ, multiQ]);
+ok(engSh.questions[0] !== singleQ, '引擎装载生成派生克隆（默认开启乱序）');
+const engNo = new QB.QuizEngine();
+engNo.loadQuestions([singleQ], 'mixed', { shuffleOptions: false });
+ok(engNo.questions[0] === singleQ, '显式关闭乱序时保持原题引用');
+// 关闭全局开关时默认不乱序
+QB.CONFIG.SHUFFLE_OPTIONS = false;
+const engCfg = new QB.QuizEngine();
+engCfg.loadQuestions([singleQ]);
+ok(engCfg.questions[0] === singleQ, 'CONFIG.SHUFFLE_OPTIONS=false 时默认不乱序');
+QB.CONFIG.SHUFFLE_OPTIONS = true;
 
 /* ================= 3. 真实数据导入 ================= */
 section('真实数据导入（541 题）');
@@ -294,10 +343,11 @@ const fiveQs = [
 eng.loadQuestions(fiveQs, 'mixed');
 eq(eng.questions.length, 5, '引擎装载 5 题');
 
-eng.currentIndex = 0; eng.selectAnswer(!(QB.parseBoolean(fiveQs[0].answer) === true)); // 故意答错判断
+// 选项乱序后，正确答案以引擎内派生题为准（库内原题不变）
+eng.currentIndex = 0; eng.selectAnswer(!(QB.parseBoolean(eng.questions[0].answer) === true)); // 故意答错判断
 eng.submitAnswer();
-eng.currentIndex = 1; eng.selectAnswer(QB.normalizeLetters(fiveQs[1].answer)); eng.submitAnswer();
-eng.currentIndex = 2; eng.selectAnswer(QB.normalizeLetters(fiveQs[2].answer).split('')); eng.submitAnswer();
+eng.currentIndex = 1; eng.selectAnswer(QB.normalizeLetters(eng.questions[1].answer)); eng.submitAnswer();
+eng.currentIndex = 2; eng.selectAnswer(QB.normalizeLetters(eng.questions[2].answer).split('')); eng.submitAnswer();
 eng.currentIndex = 3; eng.setFillAnswer(0, '甲'); eng.setFillAnswer(1, '乙'); eng.submitAnswer();
 eng.currentIndex = 4; eng.setEssayAnswer('我的作答'); eng.submitAnswer();
 const sc = eng.getScore();
@@ -316,7 +366,7 @@ eq(eng.getScore().pending, 0, '简答自评后无待判定');
 const exam = new QB.QuizEngine();
 exam.loadQuestions(fiveQs, 'mixed');
 exam.mode = 'exam';
-exam.currentIndex = 1; exam.selectAnswer(QB.normalizeLetters(fiveQs[1].answer));
+exam.currentIndex = 1; exam.selectAnswer(QB.normalizeLetters(exam.questions[1].answer));
 exam.gradeAll();
 const esc2 = exam.getScore();
 eq(esc2.pending, 0, '考试：交卷后无待判定');
@@ -376,6 +426,64 @@ if (!hasDomParser) {
     eq(dt.essay, 1, 'DOCX：简答题 1');
   }
 }
+
+/* ================= 9.5 导出（多格式/多对象） ================= */
+/* __EXPORTER_SECTION_BEGIN__
+section('导出 Exporters（题库 / 错题，JSON/CSV/Markdown/TXT）');
+const expBank = await QB.Exporters.collect('bank', bankA);
+eq(expBank.entries.length, 538, '导出收集：题库 538 条');
+
+// JSON：结构正确且可再导入（往返）
+const expJson = QB.Exporters.buildContent('json', expBank).content;
+const expJsonObj = JSON.parse(expJson);
+eq(expJsonObj.kind, 'bank', 'JSON：kind=bank');
+eq(expJsonObj.questions.length, 538, 'JSON：538 题');
+const reImport = await QB.JsonImporter.parse({ text: expJson, fileName: 'rt.json' });
+eq(reImport.questions.length, 538, 'JSON 往返：再导入仍 538 题');
+eq(QB.Adapters.validateQuestions(reImport.questions).stats.byType.judge, 83, 'JSON 往返：判断题仍 83');
+
+// CSV：BOM、表头、行数、往返
+const expCsvBuilt = QB.Exporters.buildContent('csv', expBank);
+ok(expCsvBuilt.content.charCodeAt(0) === 0xFEFF, 'CSV：以 UTF-8 BOM 开头（Excel 不乱码）');
+const expCsvLines = expCsvBuilt.content.split(/\r\n/);
+eq(expCsvLines.length, 539, 'CSV：表头 + 538 数据行 = 539 行');
+const expHeader = expCsvLines[0].replace(/^\uFEFF/, '');
+ok(expHeader.indexOf('题型') === 0 && expHeader.indexOf('题目') > 0, 'CSV：表头含 题型/题目');
+const csvRt = await QB.CsvImporter.parse({ text: expCsvBuilt.content.replace(/^\uFEFF/, ''), fileName: 'rt.csv' });
+eq(csvRt.questions.length, 538, 'CSV 往返：再导入仍 538 题');
+eq(QB.Adapters.validateQuestions(csvRt.questions).stats.byType.single, 330, 'CSV 往返：单选题仍 330');
+
+// Markdown / TXT 基本结构
+const expMd = QB.Exporters.buildContent('markdown', expBank).content;
+ok(expMd.indexOf('# 《物业题库A》题库') === 0, 'Markdown：标题含题库名与对象类型');
+ok(expMd.indexOf('**答案：') > 0, 'Markdown：含答案行');
+const expTxt = QB.Exporters.buildContent('txt', expBank).content;
+ok(expTxt.indexOf('《物业题库A》题库') === 0 && expTxt.indexOf('答案：') > 0, 'TXT：含标题与答案');
+
+// 错题导出：含 wrongCount 列与计数
+const expWrong = await QB.Exporters.collect('wrong', bankA);
+eq(expWrong.entries.length, 1, '错题导出：收集 1 条');
+const wrongCsv = QB.Exporters.buildContent('csv', expWrong).content;
+ok(wrongCsv.split(/\r\n/)[0].indexOf('错误次数') >= 0, '错题 CSV：表头含 错误次数');
+const wrongMd = QB.Exporters.buildContent('markdown', expWrong).content;
+ok(wrongMd.indexOf('错题本') >= 0 && wrongMd.indexOf('错误次数：2') >= 0, '错题 MD：含对象名与错误次数（2）');
+const wrongJson = JSON.parse(QB.Exporters.buildContent('json', expWrong).content);
+eq(wrongJson.kind, 'wrong', '错题 JSON：kind=wrong');
+eq(wrongJson.questions[0].wrongCount, 2, '错题 JSON：题目附带 wrongCount=2');
+
+// 收藏夹收集器就绪（UI 预留）
+const expFav = await QB.Exporters.collect('favorites', bankA);
+eq(expFav.entries.length, 0, '收藏夹导出收集器可调用（当前 0 条）');
+
+// 非法 kind / format 抛错
+let threw = false;
+try { await QB.Exporters.collect('history', bankA); } catch (e) { threw = true; }
+ok(threw, '不支持的 kind（history 预留）抛错');
+threw = false;
+try { QB.Exporters.buildContent('xlsx', expBank); } catch (e) { threw = true; }
+ok(threw, '不支持的格式（xlsx 预留）抛错');
+eq(QB.Exporters.FORMATS.length, 4, '已注册导出格式数 = 4');
+__EXPORTER_SECTION_END__ */
 
 /* ================= 10. 级联删除 ================= */
 section('级联删除');

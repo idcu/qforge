@@ -38,4 +38,30 @@
     const s = QB.shuffle(arr, seed);
     return s.slice(0, Math.max(0, Math.min(n, s.length)));
   };
+
+  /**
+   * 选项乱序（公共抽象，仅 single/multi）
+   * 返回题目的浅克隆：选项重排并重新分配字母 A..，答案字母同步重映射。
+   * - 不修改原题（落库数据保持 A/B/C/D 原序）；
+   * - 题干与题型不变，故 contentHash 保持不变，错题/收藏键不受影响；
+   * - judge（渲染层固定 正确/错误）、fill、essay 原样返回；
+   * - 可传 seed 复现同一次排列（测试用）。
+   */
+  QB.shuffleOptions = function shuffleOptions(q, seed) {
+    if (!q || (q.type !== 'single' && q.type !== 'multi')) return q;
+    const opts = Array.isArray(q.options) ? q.options : [];
+    if (opts.length < 2) return q;
+
+    const reordered = QB.shuffle(opts, seed).map((o) => Object.assign({}, o));
+    const oldToNew = {};
+    reordered.forEach((o, i) => {
+      const newLetter = String.fromCharCode(65 + i);
+      oldToNew[String(o.letter).toUpperCase()] = newLetter;
+      o.letter = newLetter;
+    });
+
+    const letters = QB.normalizeLetters ? QB.normalizeLetters(String(q.answer || '')) : String(q.answer || '').toUpperCase();
+    const remapped = letters.split('').map((L) => oldToNew[L]).filter(Boolean).sort().join('');
+    return Object.assign({}, q, { options: reordered, answer: remapped });
+  };
 })(window);
