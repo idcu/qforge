@@ -1,0 +1,396 @@
+/**
+ * 逻辑层冒烟测试（Node，无浏览器）
+ * 用真实数据（题库-背题模式.json / 题库-分类.json，共 541 题）验证：
+ *   - 答案规范化 / 判分策略（5 种题型）
+ *   - contentHash 去重键稳定性
+ *   - JSON 导入（扁平中文格式 + 嵌套分类格式）
+ *   - CSV 导入
+ *   - 数据访问层 CRUD / 批量增删 / 多题库隔离 / 级联删除
+ *   - 错题本 / 收藏 / 历史 / 进度会话
+ *   - 答题引擎（练习 + 考试）与统计
+ * 运行：node qb/scripts/smoke-test.mjs
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const QB_DIR = path.resolve(__dirname, '..');
+const ROOT = path.resolve(QB_DIR, '..');
+
+/* ---------- 浏览器环境垫片 ---------- */
+const raw = new Map();
+const localStorage = {
+  get length() { return raw.size; },
+  key(i) { return Array.from(raw.keys())[i]; },
+  getItem(k) { return raw.has(k) ? raw.get(k) : null; },
+  setItem(k, v) { raw.set(k, String(v)); },
+  removeItem(k) { raw.delete(k); }
+};
+const window = { localStorage, addEventListener() {}, removeEventListener() {}, console };
+window.window = window;
+
+function load(rel) {
+  const file = path.join(QB_DIR, rel);
+  const code = fs.readFileSync(file, 'utf8');
+  // 以 window 作为 global 执行 IIFE
+  new Function('window', 'globalThis', code)(window, window);
+}
+
+/* 按 index.html 的依赖顺序加载（跳过 app.js 与仅 DOM 使用的模块） */
+[
+  'js/data/sample-data.js',
+  'js/config.js',
+  'js/utils/helpers.js',
+  'js/utils/storage.js',
+  'js/utils/shuffle.js',
+  'js/utils/answer-normalize.js',
+  'js/utils/judge-answer.js',
+  'js/utils/question-id.js',
+  'js/utils/zip-reader.js',
+  'js/data/contracts.js',
+  'js/data/local-adapter.js',
+  'js/data/api-adapter.js',
+  'js/data/db.js',
+  'js/importers/adapters.js',
+  'js/importers/json-importer.js',
+  'js/importers/csv-importer.js',
+  'js/importers/xlsx-importer.js',
+  'js/importers/docx-importer.js',
+  'js/importers/registry.js',
+  'js/modules/quiz-engine.js',
+  'js/modules/wrong-book.js',
+  'js/modules/favorites.js',
+  'js/modules/history.js',
+  'js/modules/statistics.js',
+  'js/modules/search-filter.js',
+  'js/modules/progress-saver.js',
+  'js/modules/question-editor.js'
+].forEach(load);
+
+const QB = window.QB;
+
+/* 可选：注入 DOMParser 以在浏览器外验证 xlsx/docx 原生解析
+ * 用法：QB_DOMPARSER=@xmldom/xmldom node scripts/smoke-test.mjs
+ *      （或传入绝对路径）
+ */
+let hasDomParser = typeof globalThis.DOMParser !== 'undefined';
+if (!hasDomParser && process.env.QB_DOMPARSER) {
+  try {
+    let spec = process.env.QB_DOMPARSER;
+    if (/[\\/]/.test(spec) || /^[A-Za-z]:/.test(spec)) {
+      const { pathToFileURL } = await import('node:url');
+      spec = pathToFileURL(spec).href;
+    }
+    const mod = await import(spec);
+    const DP = mod.DOMParser || (mod.default && mod.default.DOMParser);
+    if (DP) { globalThis.DOMParser = DP; hasDomParser = true; console.log('[测试] 已注入 DOMParser：' + process.env.QB_DOMPARSER); }
+  } catch (e) { console.log('[测试] DOMParser 注入失败：' + e.message); }
+}
+function toArrayBuffer(buf) { return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength); }
+
+/* ---------- 断言工具 ---------- */
+let pass = 0;
+const failures = [];
+function ok(cond, label, extra) {
+  if (cond) { pass++; console.log('  ✓ ' + label + (extra ? '  ' + extra : '')); }
+  else { failures.push(label + (extra ? '  ' + extra : '')); console.log('  ✗ ' + label + (extra ? '  ' + extra : '')); }
+}
+function eq(actual, expected, label) {
+  ok(actual === expected, label, '(期望 ' + expected + '，实际 ' + actual + ')');
+}
+function section(t) { console.log('\n== ' + t + ' =='); }
+
+/* ================= 1. 答案规范化 / 判分 ================= */
+section('答案规范化与判分策略');
+eq(QB.normalizeAnswer(' Ａ Ｂ　', {}), 'ab', '全角/空格归一');
+eq(QB.parseBoolean('正确'), true, 'parseBoolean 正确');
+eq(QB.parseBoolean('错'), false, 'parseBoolean 错');
+eq(QB.parseBoolean('√'), true, 'parseBoolean √');
+eq(QB.parseBoolean('B') === null, true, 'parseBoolean 无法识别字母 B → null');
+eq(QB.normalizeLetters('ba'), 'AB', 'normalizeLetters 去重排序大写');
+
+eq(QB.judgeAnswer({ type: 'judge', answer: '正确' }, true).isCorrect, true, '判断：正确');
+eq(QB.judgeAnswer({ type: 'judge', answer: '错误' }, true).isCorrect, false, '判断：错答');
+// 判断题答案为字母 B，选项 ["A.对","B.错"]（真实数据格式）
+eq(QB.judgeAnswer({ type: 'judge', answer: 'B', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }] }, 'B').isCorrect, true, '判断：字母选项 B=错');
+eq(QB.judgeAnswer({ type: 'single', answer: 'C' }, 'c').isCorrect, true, '单选：大小写无关');
+eq(QB.judgeAnswer({ type: 'multi', answer: 'ABD' }, ['D', 'A', 'B']).isCorrect, true, '多选：乱序集合相等');
+eq(QB.judgeAnswer({ type: 'multi', answer: 'ABD' }, ['A', 'B']).isCorrect, false, '多选：漏选判错');
+eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: 'def' }] }, ['def']).isCorrect, true, '填空：单空正确');
+eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: '训练集' }, { answer: '测试集' }] }, ['训练集', '测试集']).isCorrect, true, '填空：多空正确');
+eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: 'def', accept: ['Def', 'DEF'] }] }, ['DEF']).isCorrect, true, '填空：备选答案命中');
+eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: 'def' }] }, ['']).isCorrect, false, '填空：空答案判错');
+eq(QB.judgeAnswer({ type: 'essay', reference_answer: '开放答案' }, '任意作答').isCorrect, null, '简答：返回 null 待自评');
+
+/* ================= 2. contentHash 去重键 ================= */
+section('contentHash 去重键');
+const h1 = QB.makeContentHash({ type: 'single', question: '下列哪种不是数据清洗的常见步骤？' });
+const h2 = QB.makeContentHash({ type: 'single', question: '下列哪种不是数据清洗的常见步骤？ ' });
+const h3 = QB.makeContentHash({ type: 'single', question: '另一道完全不同的题目？' });
+const h4 = QB.makeContentHash({ type: 'judge', question: '下列哪种不是数据清洗的常见步骤？' });
+ok(h1 === h2, '题干相同（尾部空格）→ hash 相同');
+ok(h1 !== h3, '不同题干 → hash 不同');
+ok(h1 !== h4, '不同题型 → hash 不同');
+
+/* ================= 3. 真实数据导入 ================= */
+section('真实数据导入（541 题）');
+const flatText = fs.readFileSync(path.join(ROOT, '题库-背题模式.json'), 'utf8');
+const nestedText = fs.readFileSync(path.join(ROOT, '题库-分类.json'), 'utf8');
+
+let flat, nested;
+try {
+  flat = await QB.JsonImporter.parse({ text: flatText, fileName: '题库-背题模式.json' });
+  ok(true, '扁平格式解析成功');
+} catch (e) { ok(false, '扁平格式解析成功', e.message); throw e; }
+const flatVal = QB.Adapters.validateQuestions(flat.questions);
+eq(flatVal.stats.total, 541, '扁平格式：总题数');
+eq(flatVal.stats.byType.judge, 83, '扁平格式：判断题');
+eq(flatVal.stats.byType.single, 332, '扁平格式：单选题');
+eq(flatVal.stats.byType.multi, 126, '扁平格式：多选题');
+eq(flatVal.stats.byType.fill, 0, '扁平格式：填空题 0');
+eq(flatVal.stats.byType.essay, 0, '扁平格式：简答题 0');
+const flatMissingOpt = flat.questions.filter((q) => (q.type === 'single' || q.type === 'multi') && !q.options.length).length;
+const flatMissingAns = flat.questions.filter((q) => !q.answer).length;
+eq(flatMissingOpt, 0, '扁平格式：无缺选项题目');
+eq(flatMissingAns, 0, '扁平格式：无缺答案题目');
+// 真实数据中存在 3 道重复题（同题型 + 同题干），去重后唯一题 538
+eq(flatVal.stats.inFileDuplicates, 3, '扁平格式：文件内重复 3 题（源数据重复）');
+const uniqFlat = new Set(flat.questions.map((q) => QB.makeContentHash(q)));
+eq(uniqFlat.size, 538, '扁平格式：contentHash 去重后 538 题');
+
+try {
+  nested = await QB.JsonImporter.parse({ text: nestedText, fileName: '题库-分类.json' });
+  ok(true, '嵌套分类格式解析成功');
+} catch (e) { ok(false, '嵌套分类格式解析成功', e.message); throw e; }
+const nestedVal = QB.Adapters.validateQuestions(nested.questions);
+eq(nestedVal.stats.total, 541, '嵌套格式：总题数');
+eq(nestedVal.stats.byType.judge, 83, '嵌套格式：判断题');
+eq(nestedVal.stats.byType.single, 332, '嵌套格式：单选题');
+eq(nestedVal.stats.byType.multi, 126, '嵌套格式：多选题');
+const withCat = nested.questions.filter((q) => q.category).length;
+eq(withCat, 541, '嵌套格式：全部带分类');
+const catSet = new Set(nested.questions.map((q) => q.category));
+console.log('    嵌套格式分类数: ' + catSet.size + ' → ' + Array.from(catSet).slice(0, 4).join('、') + ' …');
+
+// 两种格式题目集合应一致（按 contentHash 比对）
+const setFlat = new Set(flat.questions.map((q) => QB.makeContentHash(q)));
+const setNested = new Set(nested.questions.map((q) => QB.makeContentHash(q)));
+let inter = 0; setNested.forEach((h) => { if (setFlat.has(h)) inter++; });
+eq(inter, 538, '两种来源题目 contentHash 完全一致（538 唯一题）');
+
+/* ================= 4. CSV 导入 ================= */
+section('CSV 导入');
+const csv = [
+  '题型,题目,选项A,选项B,选项C,选项D,答案,解析',
+  '单选,数据清洗的第一步是？,采集,清洗,建模,评估,B,先清洗再建模',
+  '多选,以下属于数据质量维度的是？,完整性,准确性,一致性,及时性,ABCD,四项均是',
+  '判断,SQL 用于查询的关键字是 SELECT。,对,错,,,A,SELECT 查询',
+  '填空,Python 定义函数用 ____ 关键字。,,,,,def,def',
+  '简答,简述事务 ACID。,,,,,原子性;一致性;隔离性;持久性,见参考答案'
+].join('\n');
+let csvRes;
+try { csvRes = await QB.CsvImporter.parse({ text: csv, fileName: 't.csv' }); ok(true, 'CSV 解析成功'); }
+catch (e) { ok(false, 'CSV 解析成功', e.message); throw e; }
+eq(csvRes.questions.length, 5, 'CSV：5 题');
+eq(csvRes.questions[0].type, 'single', 'CSV：单选题型');
+eq(csvRes.questions[0].options.length, 4, 'CSV：选项拆列 4 项');
+eq(csvRes.questions[2].type, 'judge', 'CSV：判断题');
+eq(csvRes.questions[2].answer, '正确', 'CSV：判断题答案归一为「正确」');
+eq(csvRes.questions[3].type, 'fill', 'CSV：填空题');
+eq(csvRes.questions[4].type, 'essay', 'CSV：简答题');
+
+/* ================= 5. 数据访问层 ================= */
+section('数据访问层 CRUD 与多题库隔离');
+QB.DB.init();
+eq(QB.DB.backend, 'local', 'DB.backend = local');
+
+const bankA = await QB.DB.banks.create({ name: '物业题库A', category: '物业' });
+const bankB = await QB.DB.banks.create({ name: '题库B', category: '测试' });
+eq((await QB.DB.banks.list()).length, 2, '创建 2 个题库');
+
+const ins1 = await QB.DB.questions.insertMany(bankA.id, flat.questions, { dedupe: true, mode: 'merge' });
+eq(ins1.inserted, 538, '题库A 首次导入新增 538（源数据含 3 重复被去重）');
+eq(ins1.duplicates, 3, '题库A 首次导入跳过重复 3');
+eq(ins1.total, 538, '题库A 库内总数 538');
+const ins2 = await QB.DB.questions.insertMany(bankA.id, flat.questions, { dedupe: true, mode: 'merge' });
+eq(ins2.inserted, 0, '题库A 重复导入新增 0');
+eq(ins2.duplicates, 541, '题库A 重复导入跳过 541');
+const ins3 = await QB.DB.questions.insertMany(bankA.id, flat.questions, { dedupe: true, mode: 'overwrite' });
+eq(ins3.total, 538, '题库A 覆盖导入后仍 538');
+
+const listA = await QB.DB.questions.list(bankA.id, {});
+eq(listA.items.length, 538, '题库A 查询 538');
+const typeCounts = {};
+listA.items.forEach((q) => { typeCounts[q.type] = (typeCounts[q.type] || 0) + 1; });
+eq(typeCounts.judge, 83, '题库A 落库后 判断 83');
+eq(typeCounts.single, 330, '题库A 落库后 单选 330（源数据含 2 重复）');
+eq(typeCounts.multi, 125, '题库A 落库后 多选 125（源数据含 1 重复）');
+
+// 题库B 隔离
+await QB.DB.questions.insertMany(bankB.id, QB.SAMPLE.questions, { dedupe: true });
+eq((await QB.DB.questions.list(bankB.id, {})).items.length, QB.SAMPLE.questions.length, '题库B 独立写入样例题');
+eq((await QB.DB.questions.list(bankA.id, {})).items.length, 538, '题库B 写入不影响题库A');
+
+// 单题增改删（QuestionEditor 契约）
+const created = await QB.QuestionEditor.create(bankB.id, { type: 'single', question: '临时题', options: [{ letter: 'A', text: 'x' }], answer: 'A' });
+ok(!!created.id, '新增单题返回 id');
+const updated = await QB.QuestionEditor.update(created.id, { question: '临时题(改)' });
+eq(updated.question, '临时题(改)', '修改单题生效');
+const beforeDel = (await QB.DB.questions.list(bankB.id, {})).items.length;
+await QB.QuestionEditor.remove(created.id);
+eq((await QB.DB.questions.list(bankB.id, {})).items.length, beforeDel - 1, '删除单题生效');
+
+// 批量删除
+const bList = (await QB.DB.questions.list(bankB.id, {})).items;
+const delIds = bList.slice(0, 3).map((q) => q.id);
+await QB.QuestionEditor.removeMany(delIds);
+eq((await QB.DB.questions.list(bankB.id, {})).items.length, beforeDel - 1 - 3, '批量删除 3 题生效');
+
+/* ================= 6. 用户数据 ================= */
+section('错题本 / 收藏 / 历史 / 进度');
+const q0 = listA.items[0];
+await QB.WrongBook.add(bankA.id, q0);
+await QB.WrongBook.add(bankA.id, q0);
+eq(await QB.WrongBook.count(bankA.id), 1, '错题本去重计数 1');
+const wl = await QB.WrongBook.list(bankA.id);
+eq(wl[0].wrongCount, 2, '错题累加 wrongCount=2');
+eq(wl[0].question.contentHash, q0.contentHash, '错题可关联回题目');
+eq(await QB.WrongBook.count(bankB.id), 0, '错题本按题库隔离');
+
+const fav = await QB.Favorites.toggle(bankA.id, listA.items[1]);
+eq(fav.added, true, '收藏加入');
+eq(await QB.Favorites.count(bankA.id), 1, '收藏计数 1');
+eq(await QB.Favorites.has(bankA.id, listA.items[1]), true, '收藏存在性判断');
+const fav2 = await QB.Favorites.toggle(bankA.id, listA.items[1]);
+eq(fav2.added, false, '再次切换 = 取消收藏');
+eq(await QB.Favorites.count(bankA.id), 0, '取消后收藏计数 0');
+
+await QB.History.add({ bankId: bankA.id, bankName: '物业题库A', mode: 'practice', total: 10, correct: 8, wrong: 2, score: 80, accuracy: 80, byType: { judge: { correct: 3, total: 3 }, single: { correct: 5, total: 7 } }, durationMs: 60000 });
+await QB.History.add({ bankId: bankA.id, bankName: '物业题库A', mode: 'exam', total: 20, correct: 15, wrong: 5, score: 150, accuracy: 75, byType: { multi: { correct: 5, total: 8 } }, durationMs: 90000 });
+const hs = await QB.History.stats(bankA.id);
+eq(hs.total, 2, '历史记录 2 条');
+eq(hs.bestScore, 150, '历史最高分 150');
+eq(hs.avgAccuracy, 78, '历史平均正确率 78');
+eq((await QB.History.list(bankB.id)).length, 0, '历史按题库隔离');
+
+const engine0 = new QB.QuizEngine();
+engine0.loadQuestions(listA.items.slice(0, 3), 'mixed');
+await QB.ProgressSaver.save(bankA.id, engine0);
+const savedSession = await QB.ProgressSaver.load();
+eq(savedSession.bankId, bankA.id, '进度会话已保存');
+eq(savedSession.questions.length, 3, '进度会话题目数 3');
+
+/* ================= 7. 答题引擎 ================= */
+section('答题引擎（练习 + 考试）');
+const eng = new QB.QuizEngine();
+const fiveQs = [
+  listA.items.find((q) => q.type === 'judge'),
+  listA.items.find((q) => q.type === 'single'),
+  listA.items.find((q) => q.type === 'multi'),
+  { type: 'fill', question: '填空测试', blanks: [{ answer: '甲' }, { answer: '乙' }], answer: '甲；乙' },
+  { type: 'essay', question: '简答测试', reference_answer: '参考答案' }
+].map((q) => Object.assign({}, q, { id: q.id || QB.uid('q'), contentHash: q.contentHash || QB.makeContentHash(q) }));
+eng.loadQuestions(fiveQs, 'mixed');
+eq(eng.questions.length, 5, '引擎装载 5 题');
+
+eng.currentIndex = 0; eng.selectAnswer(!(QB.parseBoolean(fiveQs[0].answer) === true)); // 故意答错判断
+eng.submitAnswer();
+eng.currentIndex = 1; eng.selectAnswer(QB.normalizeLetters(fiveQs[1].answer)); eng.submitAnswer();
+eng.currentIndex = 2; eng.selectAnswer(QB.normalizeLetters(fiveQs[2].answer).split('')); eng.submitAnswer();
+eng.currentIndex = 3; eng.setFillAnswer(0, '甲'); eng.setFillAnswer(1, '乙'); eng.submitAnswer();
+eng.currentIndex = 4; eng.setEssayAnswer('我的作答'); eng.submitAnswer();
+const sc = eng.getScore();
+eq(sc.correct, 3, '练习：正确 3 题');
+eq(sc.wrong, 1, '练习：错误 1 题');
+eq(sc.pending, 1, '练习：待自评 1 题（简答）');
+eq(sc.score, 30, '练习：得分 30');
+eq(sc.accuracy, 75, '练习：正确率 75%（不含待自评）');
+const bt = eng.byType();
+eq(bt.judge.correct, 0, '按题型：判断 0/1');
+eq(bt.fill.correct, 1, '按题型：填空 1/1');
+eng.selfAssess(true);
+eq(eng.getScore().pending, 0, '简答自评后无待判定');
+
+// 考试模式：整卷判分，未作答计为错误
+const exam = new QB.QuizEngine();
+exam.loadQuestions(fiveQs, 'mixed');
+exam.mode = 'exam';
+exam.currentIndex = 1; exam.selectAnswer(QB.normalizeLetters(fiveQs[1].answer));
+exam.gradeAll();
+const esc2 = exam.getScore();
+eq(esc2.pending, 0, '考试：交卷后无待判定');
+eq(esc2.correct, 1, '考试：仅第 2 题正确');
+eq(esc2.wrong, 4, '考试：其余 4 题计错（含未作答）');
+
+/* ================= 8. 统计与搜索 ================= */
+section('统计与搜索');
+const recs = await QB.History.list(bankA.id);
+const ov = QB.Statistics.overview(recs);
+eq(ov.totalQuizzes, 2, '统计：测试次数 2');
+eq(ov.totalAnswered, 30, '统计：答题数 30');
+const perf = QB.Statistics.typePerformance(recs);
+ok(perf.length === 3, '统计：3 个题型有数据', '(' + perf.map((p) => p.type + ':' + p.accuracy + '%').join(', ') + ')');
+ok(QB.Statistics.suggestions(perf).length > 0, '统计：可生成学习建议');
+
+const found = QB.SearchFilter.filter(listA.items, { keyword: '数据' });
+ok(found.length > 0, '搜索：关键词「数据」命中 ' + found.length + ' 题');
+const onlyJudge = QB.SearchFilter.filter(listA.items, { type: 'judge' });
+eq(onlyJudge.length, 83, '搜索：筛选判断题 83');
+eq(QB.SearchFilter.categories(nested.questions).length, catSet.size, '搜索：分类列表数量一致');
+
+/* ================= 9. XLSX / DOCX 原生解析 ================= */
+section('XLSX / DOCX 原生解析（zip + XML）');
+if (!hasDomParser) {
+  console.log('  SKIPPED：当前 Node 无 DOMParser，未验证 xlsx/docx。');
+  console.log('  提示：QB_DOMPARSER=@xmldom/xmldom node scripts/smoke-test.mjs 可完整验证。');
+} else {
+  const xlsxBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-表格导入.xlsx'));
+  const docxBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-文档导入.docx'));
+
+  let xlsxRes, docxRes;
+  try { xlsxRes = await QB.XlsxImporter.parse({ arrayBuffer: toArrayBuffer(xlsxBuf), fileName: '示例-表格导入.xlsx' }); ok(true, 'XLSX 原生解析成功'); }
+  catch (e) { ok(false, 'XLSX 原生解析成功', e.message); }
+  if (xlsxRes) {
+    eq(xlsxRes.format, 'xlsx', 'XLSX：format = xlsx');
+    eq(xlsxRes.questions.length, 5, 'XLSX：5 题');
+    const xt = QB.Adapters.validateQuestions(xlsxRes.questions).stats.byType;
+    eq(xt.judge, 1, 'XLSX：判断题 1');
+    eq(xt.single, 1, 'XLSX：单选题 1');
+    eq(xt.multi, 1, 'XLSX：多选题 1');
+    eq(xt.fill, 1, 'XLSX：填空题 1');
+    eq(xt.essay, 1, 'XLSX：简答题 1');
+    eq(xlsxRes.questions[1].options.length, 4, 'XLSX：单选题拆出 4 个选项');
+  }
+
+  try { docxRes = await QB.DocxImporter.parse({ arrayBuffer: toArrayBuffer(docxBuf), fileName: '示例-文档导入.docx' }); ok(true, 'DOCX 原生解析成功'); }
+  catch (e) { ok(false, 'DOCX 原生解析成功', e.message); }
+  if (docxRes) {
+    eq(docxRes.format, 'docx', 'DOCX：format = docx');
+    eq(docxRes.questions.length, 5, 'DOCX：5 题');
+    const dt = QB.Adapters.validateQuestions(docxRes.questions).stats.byType;
+    eq(dt.judge, 1, 'DOCX：判断题 1');
+    eq(dt.single, 1, 'DOCX：单选题 1');
+    eq(dt.multi, 1, 'DOCX：多选题 1');
+    eq(dt.fill, 1, 'DOCX：填空题 1');
+    eq(dt.essay, 1, 'DOCX：简答题 1');
+  }
+}
+
+/* ================= 10. 级联删除 ================= */
+section('级联删除');
+await QB.DB.banks.remove(bankA.id, { cascade: true });
+eq((await QB.DB.banks.list()).length, 1, '删除后剩余 1 个题库');
+eq((await QB.DB.questions.list(bankA.id, {})).items.length, 0, '级联删除题目');
+eq(await QB.WrongBook.count(bankA.id), 0, '级联删除错题本');
+eq((await QB.History.list(bankA.id)).length, 0, '级联删除历史');
+
+/* ================= 汇总 ================= */
+console.log('\n================ 汇总 ================');
+console.log('通过: ' + pass + '，失败: ' + failures.length);
+if (failures.length) {
+  console.log('失败项:');
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exit(1);
+}
+console.log('全部通过 ✅');
