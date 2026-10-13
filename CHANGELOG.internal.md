@@ -736,7 +736,7 @@
 
 ---
 
-## 待回填 · test(srs/assets): 交互面回归补强（+38 断言）
+## 531e9e9 · test(srs/assets): 交互面回归补强（+38 断言）
 
 **背景**：竞品跟进四批次的真机交互面在逻辑层的可自动化部分补测，把"建议人工验证"压缩到纯浏览器 API（canvas/IndexedDB/真实 WebDAV CORS）。
 
