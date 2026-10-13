@@ -41,6 +41,7 @@ const MODULES = [
   'js/modules/progress-saver.js',
   'js/modules/question-editor.js',
   'js/modules/exporter.js',
+  'js/modules/backup.js',
   'js/modules/blueprint.js'
 ];
 

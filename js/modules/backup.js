@@ -1,0 +1,138 @@
+/**
+ * 全量备份 / 恢复（跨设备、跨浏览器迁移本地数据）
+ * 纯函数 buildBackup/applyBackup 不依赖 DOM（可单测）；openFlow 负责文件下载/选择。
+ * 备份内容：Storage 中以应用前缀开头的全部逻辑键（题库、题目、错题、收藏、SRS、历史、偏好）。
+ */
+(function (global) {
+  'use strict';
+  const QB = (global.QB = global.QB || {});
+  const MAGIC = 'qforge-backup';
+
+  /** 读取全部应用数据 → 备份对象（值为已解析的 JS 对象） */
+  function buildBackup(now) {
+    QB.Storage.forceSync(); // 确保防抖写入的数据已落盘
+    const keys = QB.Storage.keys();
+    const data = {};
+    keys.forEach((k) => { data[k] = QB.Storage.get(k); });
+    return {
+      app: MAGIC,
+      version: QB.CONFIG.VERSION,
+      exportedAt: new Date(now == null ? Date.now() : now).toISOString(),
+      data: data
+    };
+  }
+
+  function isBackup(obj) {
+    return obj && typeof obj === 'object' && obj.app === MAGIC && obj.data && typeof obj.data === 'object';
+  }
+
+  /**
+   * 恢复备份
+   * @param {Object} backup 备份对象
+   * @param {{mode?:'replace'|'merge'}} opts replace（默认）= 清空后写入；merge = 合并覆盖
+   * @returns {{keys:number}}
+   */
+  function applyBackup(backup, opts) {
+    if (!isBackup(backup)) throw new Error('不是有效的 qforge 备份文件');
+    opts = opts || {};
+    const mode = opts.mode === 'merge' ? 'merge' : 'replace';
+    if (mode === 'replace') {
+      QB.Storage.keys().forEach((k) => QB.Storage.remove(k));
+    }
+    Object.keys(backup.data).forEach((k) => QB.Storage.set(k, backup.data[k]));
+    return { keys: Object.keys(backup.data).length, mode: mode };
+  }
+
+  /* ---------------- 浏览器外壳 ---------------- */
+
+  function download(filename) {
+    const payload = buildBackup();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || ('qforge-backup-' + new Date().toISOString().slice(0, 10) + '.json');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function pickAndRestore() {
+    return new Promise((resolve, reject) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json,application/json';
+      input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (!file) return resolve(null);
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const backup = JSON.parse(reader.result);
+            const used = QB.Storage.usageBytes();
+            const keys = Object.keys(backup.data || {});
+            QB.UIRenderer.openModal(
+              '<h3>恢复备份</h3>' +
+              '<p>备份包含 <b>' + keys.length + '</b> 个数据键，导出时间：' +
+              QB.Helpers.escapeHtml(backup.exportedAt || '未知') + '</p>' +
+              '<div class="checkbox-row"><input type="radio" name="bk-mode" id="bk-replace" value="replace" checked>' +
+              '<label for="bk-replace">覆盖恢复（清空现有全部数据后写入，推荐）</label></div>' +
+              '<div class="checkbox-row"><input type="radio" name="bk-mode" id="bk-merge" value="merge">' +
+              '<label for="bk-merge">合并恢复（同名键覆盖，保留其余现有数据）</label></div>' +
+              '<p class="li-meta">当前已用约 ' + Math.round(used / 1024) + ' KB。恢复后建议刷新页面。</p>' +
+              '<div class="modal-actions"><button class="btn btn-ghost" data-bk="cancel">取消</button>' +
+              '<button class="btn btn-danger" data-bk="ok">确认恢复</button></div>',
+              (modal) => {
+                modal.querySelector('[data-bk="cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
+                modal.querySelector('[data-bk="ok"]').onclick = () => {
+                  const mode = modal.querySelector('#bk-merge').checked ? 'merge' : 'replace';
+                  try {
+                    const r = applyBackup(backup, { mode: mode });
+                    QB.UIRenderer.closeModal();
+                    QB.UIRenderer.toast('已恢复 ' + r.keys + ' 个数据键', 'ok');
+                    resolve(r);
+                  } catch (e) {
+                    QB.UIRenderer.toast('恢复失败：' + e.message, 'err');
+                    reject(e);
+                  }
+                };
+              }
+            );
+          } catch (e) { reject(e); }
+        };
+        reader.onerror = () => reject(new Error('读取文件失败'));
+        reader.readAsText(file, 'utf-8');
+      };
+      document.body.appendChild(input);
+      input.click();
+      document.body.removeChild(input);
+    });
+  }
+
+  /** 备份/恢复管理弹窗（含容量显示） */
+  function openFlow() {
+    const used = QB.Storage.usageBytes();
+    const KB = Math.round(used / 1024);
+    const warn = used > 4 * 1024 * 1024;
+    QB.UIRenderer.openModal(
+      '<h3>备份与恢复</h3>' +
+      '<div class="card" style="margin:10px 0"><div class="li-meta">本地存储占用</div>' +
+      '<div style="font-size:20px;font-weight:600;margin:4px 0">' + KB + ' KB' +
+      (warn ? ' <span style="color:var(--warning);font-size:13px">（已超约 4MB，建议尽快备份并分库）</span>' : '') +
+      '</div></div>' +
+      '<p class="li-meta">备份文件包含全部题库、题目、错题、收藏、复习计划、历史记录与偏好，可在另一台设备/浏览器恢复。</p>' +
+      '<div class="modal-actions" style="justify-content:flex-start;flex-wrap:wrap">' +
+      '<button class="btn" data-bk="export">下载全量备份</button>' +
+      '<button class="btn btn-ghost" data-bk="import">从备份恢复</button>' +
+      '<button class="btn btn-ghost" data-bk="close">关闭</button></div>',
+      (modal) => {
+        modal.querySelector('[data-bk="close"]').onclick = () => QB.UIRenderer.closeModal();
+        modal.querySelector('[data-bk="export"]').onclick = () => { download(); QB.UIRenderer.toast('备份已生成', 'ok'); };
+        modal.querySelector('[data-bk="import"]').onclick = () => pickAndRestore();
+      }
+    );
+  }
+
+  QB.Backup = { buildBackup, applyBackup, isBackup, download, pickAndRestore, openFlow };
+})(window);

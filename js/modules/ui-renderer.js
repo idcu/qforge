@@ -99,6 +99,7 @@
       '<div class="toolbar">' +
       '<button class="btn btn-ghost" data-action="bank-import">导入题目</button>' +
       '<button class="btn btn-ghost" data-action="bank-export">导出题目</button>' +
+      '<button class="btn btn-ghost" data-action="backup-manage">备份与恢复</button>' +
       '<button class="btn btn-ghost" data-action="questions-manage">题目管理（新增/编辑/删除）</button>' +
       '</div>';
     return html;

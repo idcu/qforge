@@ -367,6 +367,8 @@
       case 'questions-manage':
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
         return QB.QuestionEditor.openManager(State.bank).then(() => loadBankData());
+      case 'backup-manage':
+        return QB.Backup.openFlow();
 
       /* —— 练习入口 —— */
       case 'start-review':

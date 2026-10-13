@@ -54,18 +54,20 @@
       return true;
     },
 
-    /** 列出所有逻辑键（去前缀） */
+    /** 列出所有逻辑键（去前缀；合并磁盘与内存缓存，避免防抖未落盘时漏键） */
     keys() {
-      const out = [];
+      const out = new Set();
       try {
         for (let i = 0; i < global.localStorage.length; i++) {
           const k = global.localStorage.key(i);
-          if (k && k.indexOf(PREFIX + ':') === 0) out.push(k.slice(PREFIX.length + 1));
+          if (k && k.indexOf(PREFIX + ':') === 0) out.add(k.slice(PREFIX.length + 1));
         }
       } catch (e) {
         /* ignore */
       }
-      return out;
+      this._cache.forEach((v, k) => { if (v !== undefined) out.add(k); });
+      this._pending.forEach((v, k) => { if (v !== undefined) out.add(k); });
+      return Array.from(out);
     },
 
     _scheduleFlush() {
