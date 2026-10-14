@@ -817,6 +817,36 @@
 
 ---
 
+## 43bbd1a · feat(import): DOCX 内嵌图片导入（rels/media → IndexedDB）
+
+**背景**：F2 批次（F1 低债快清后的下一候选）。CHANGELOG 28d6c72 遗留「xlsx/docx 内嵌图片不解析」中的 DOCX 半边；XLSX 图片（drawing anchor 定位）技术风险高，本批明确不做。
+
+**核心改动**
+- `docx-importer.js`：新增 `parseImageRels`（解析 `word/_rels/document.xml.rels` 的 image 关系，rId→`word/media/*`；外链 `TargetMode=External` 跳过）；`docToLines(xml, ridToMarker)` 每段收集 DrawingML `a:blip@r:embed` 与旧版 VML `v:imagedata@r:id`；`resolveImages` 经 `QB.Assets.idFor/putEntries` 内容寻址入库（与 qbk-importer 同构），占位 `![](asset:<id>)` 随段落文本走 LineParser。
+- 归属语义：图片内联于哪段就随哪段（题干/选项/答案/解析）；独立图片段落由 LineParser 续行就近归题干；缺 rels/缺 media 跳过+警告不阻断；无图文档零 IDB 访问（纯文本 docx 行为完全不变）。
+- 夹具：`gen_fixtures.py --docx-image`（独立参数，stdlib zlib 构造 2×2 合法 PNG + DrawingML），产出 `samples/示例-文档导入-含图.docx`（2 题 1 图，1995 字节），不重写既有样例。
+- 文档：user-guide §3/§3.3、IMPORT-FORMAT 新增 §5.1 + §9/§10、EXPORT-FORMAT docx 行（导入带图/导出仍纯文本的不对称已写明）、ARCHITECTURE §3.4、DEVELOPMENT §2/§5.2/§5.5、README 导入特性行。
+
+**验证数据（2026-10-14，Node v24.14.0）**
+- 无注入基线：14 套件 **1879/1879**（smoke 207，新增断言全在 DOMParser gated 块，基线不增）。
+- 注入 `@xmldom/xmldom`（临时装在仓库外 Temp 目录、验证后删除，仓库零依赖不变）：smoke **247/247**（227→247，+20：占位在题干/不污染选项与下题、asset id 内容寻址 `asd63469a0-76`、mime image/png、76 字节一致、重复导入去重仍 1 条、缺 rId 文档警告且无占位残留、无图文档 assetCount=0）。
+- 过程中如实记录两个缺陷并修复，未掩盖：① Python 夹具元组判分错误把图片段写成字面文本 "None"（首跑 245/247 暴露）；② `rids` 数组声明在段落循环外导致 rId 跨段累积、占位污染后续每行（选项/答案/下题，245/247 的另 1 个失败）。
+- bench 覆盖路径无代码改动（docx 解析依赖 DOMParser，不在 bench）：gradeAll(50) 0.09ms、四格式导出 3.42ms、heapUsed +18.46MB，噪声范围内。
+- 首屏体积：仍 54 文件/49 js，**122.7 KB gzip / 346.1 KB raw**（+1.7 KB gzip：rels 解析与图片解析逻辑）。
+
+**本次新增/调整的公共抽象清单**
+- 复用未新造：图片入库完全复用 `QB.Assets.idFor/putEntries/mimeOfExt`（与 .qbk 同一管线，未产生第二套资产写入逻辑）；切题复用 `LineParser`；zip 复用 `ZipReader`（method 8 deflate 早已支持，零改动）。
+- 影响范围：`DocxImporter.docToLines` 导出签名由 `string[]` 改为 `{lines, rids}` 且新增第二参 ridToMarker——仅 smoke 与本模块使用（office-export.test 内有同名本地函数，互不引用）；`DocxImporter.parse` 返回新增 `assetCount` 字段（qbk 同字段，registry/validate 链路忽略多余字段）。
+
+**遗留 TODO / 风险**
+- 真机 Word/WPS 含图文档（浮动图片、文本框、SmartArt、嵌套表格、页眉页脚图）归属可能不精确，需人工验收；逻辑层只覆盖标准 inline DrawingML 与 VML 两种。
+- DOCX 导出端仍不嵌图（OfficeWriter 只写文本部件）；带图往返请走 .qbk，文档已如实标注不对称。
+- XLSX 内嵌图片仍不做（drawing anchor 定位复杂），维持 CHANGELOG 28d6c72 的标注。
+- DOMParser 注入路径 247 项仅本机临时验证，CI 常规环境仍跑 207 项（无 xmldom 依赖）。
+- 下一批候选：F3 FSRS 训练 Worker 化。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
@@ -829,6 +859,7 @@
 > 竞品跟进批次（2026-10-14）：`a57a1b8` 富文本/上下标公式 · `28d6c72` 图片题（IDB/.qbk/.qfbk） · `0a0532c` FSRS learning steps/按题库 preset · `44ea8e0` WebDAV 云备份
 > 文档重组批次（2026-10-14）：`4f00cea` docs(formats) 使用侧事实修复 · `ef680a8` docs(arch) 工程侧对齐+SRS 专章 · `0942b6b` docs(competitors) 竞品对比 · `7ea9e43` docs(dev) 开发指南+README 门户
 > F1 功能批次（2026-10-14）：`5d1c8f3` feat(sample) 样例补不定项 · `f8c5799` feat(export) 历史记录导出四格式（1879 断言/121.0KB gzip）
+> F2 功能批次（2026-10-14）：`43bbd1a` feat(import) DOCX 内嵌图片导入（注入路径 smoke 247/122.7KB gzip） · README 测试表同步 `489d572`
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
