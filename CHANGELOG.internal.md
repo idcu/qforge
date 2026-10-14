@@ -754,6 +754,40 @@
 
 ---
 
+## 4f00cea / ef680a8 / 0942b6b / 7ea9e43 · docs：全维度梳理——文档事实修复、拆分重组与竞品对比
+
+**背景**：全文档重写式梳理。先实跑全量测试与 bench 取得当日数据，再逐条核对文档与代码，按「事实修复 → 专章拆分 → 竞品对比 → 门户重组」四个原子提交落地；纯文档批次，唯一代码改动是 xlsx-importer.js 一行过期文件头注释。
+
+**核查发现并修复的事实漂移（均有代码依据）**
+- ARCHITECTURE：§1「5 种题型」→6 种（补 indefinite）；§3.4 xlsx「读第一个工作表」→全部工作表合并（`resolveAllSheets` 早已落地）；§4.5 导出流只写 4 种文本格式 → 补 qbk/xlsx/docx 异步二进制路径；§6 判分策略表补不定项行与 partial 联动语义（半分/不进错题本/SRS hard，依据 app.js L248-284 与 quiz-engine.js L63-79）。
+- DATABASE：questions.type 注释补 indefinite；§5 迁移步骤引用的 `QB.DataIO.exportBank` 已删除 → 改 `Exporters.collect/buildContent`。
+- API-CONTRACT：Question 枚举补 indefinite/difficulty/tags；Bank 补 source_*（含 PATCH）；AttemptRecord 补 partial/focus_leaves；新增 §6 SRS、§7 备份、§8 资产建议契约，并**诚实标注这三组当前未进 `QB.CONTRACTS`**（SRSStore/Assets 直连 Storage/IDB）。
+- IMPORT-FORMAT：模型 type 枚举补 indefinite；URL 扩展名补 qbk；样例表补已存在但漏列的「示例-多工作表.xlsx」；难度中文归一按 `normalizeDifficulty` 实际正则写全。
+- EXPORT-FORMAT / DATABASE：实测数字以当日 bench 重测刷新（见下）。
+- user-guide §3 导入表补 .qbk 行。
+
+**拆分重组（6 篇 → 9 篇）**
+- 新增 `docs/SRS.md`：FSRS-4.5 公式/17 默认权重/1m-10m 学习步骤状态机/0–3→1–4 映射（含 partial→hard）/SM-2 迁移/优化器 revlog+Bernoulli-NLL+Adam+四门控+preset 回退/存储键/已知边界，收敛散落在四处的算法描述；README/ARCHITECTURE/user-guide/DATABASE 改为引用。
+- 新增 `docs/DEVELOPMENT.md`：测试矩阵、bench 方法与数据、CI、扩展指南（加题型/导入器/导出格式/接后端）、公共抽象速查、提交与文档规约——从 README 拆出。
+- 新增 `docs/COMPETITORS.md`：Anki/Quizlet/考试宝/粉笔五组全维度矩阵（形态主权/答题/格式进出/学习科学/工程）、差异化定位、**10 项诚实差距**（含样例未覆盖不定项、无真实 Office GUI 验收等内部短板）、附来源。
+- README 重写为门户页（文档地图 9 篇、实测摘要）。
+
+**验证数据（2026-10-14，Node v24.14.0，本机实跑）**
+- 14 套件 **1841/1841**：smoke 202 / exporter 103 / office 1148 / editor 29 / rich-text 45 / assets 54 / blueprint 18 / source 29 / fsrs 65 / fsrs-opt 44 / srs 39 / backup 15 / sync-dav 32 / pwa 18（UTC 本地一次；CI 矩阵负责双时区）。
+- bench（采样 10 次中位数）：JSON 解析 1.59ms、落库 1.65ms（载荷 0.27MB/Storage 估算 0.44MB）、索引 0.05ms、检索 0.66ms、gradeAll(50) 0.10ms、乱序 0.56ms(455 题)、文本四格式 2.98ms(673KB)、XLSX 6.60ms(665KB)、DOCX 2.97ms(258.2KB)、MD 再解析 3.35ms；heapUsed +18.74MB（5.26→24.00）。
+- 首屏体积：54 文件/49 js，**119.4 KB gzip / 335.9 KB raw**（独立 gzip -9 脚本复算，与上批 335.8 仅取整差）。
+- xlsx-importer.js 注释修改后：`node --check` 通过、smoke 202/202。
+
+**公共抽象清单**
+- 无新增/调整公共抽象（纯文档批次）。唯一代码变更是 js/importers/xlsx-importer.js 文件头注释，无逻辑改动。
+
+**遗留 TODO / 风险**
+- 竞品价格/功能随厂商变化，COMPETITORS.md 已标注核实日期并提示以官网为准。
+- 差距清单第 6 项（样例补不定项 3 题）留待后续功能批次，本次不夹带代码变更。
+- 注入 DOMParser 的 222 项路径本次未复跑（本机无 @xmldom/xmldom，零依赖约束下不安装）；数值沿用上批记录，已在 DEVELOPMENT 标注为条件路径。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
@@ -764,6 +798,7 @@
 > `4d00e2f` docs(本批 README/CHANGELOG) · `b90bafa` 品牌定名「淬题 qforge」
 > 未标注项批次：`b041b6b` xlsx/docx 双向导出+收藏导出 · `2ad0dc5` 组卷单场乱序开关 · `28871d2` ci(GitHub Actions) · `d8ba2d6` fix(srs 时区断言/CI 双时区矩阵)
 > 竞品跟进批次（2026-10-14）：`a57a1b8` 富文本/上下标公式 · `28d6c72` 图片题（IDB/.qbk/.qfbk） · `0a0532c` FSRS learning steps/按题库 preset · `44ea8e0` WebDAV 云备份
+> 文档重组批次（2026-10-14）：`4f00cea` docs(formats) 使用侧事实修复 · `ef680a8` docs(arch) 工程侧对齐+SRS 专章 · `0942b6b` docs(competitors) 竞品对比 · `7ea9e43` docs(dev) 开发指南+README 门户
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
