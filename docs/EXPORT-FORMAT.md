@@ -10,7 +10,7 @@
 | `bank` | 题库 | 当前题库全部题目 | 题库管理 → 导出 | 已实现 |
 | `wrong` | 错题本 | `WrongBook.list`（题目 + `wrongCount`/`lastAt`） | 错题本工具栏 → 导出错题 | 已实现 |
 | `favorites` | 收藏夹 | `Favorites.list` | 收藏夹工具栏 → 导出收藏 | 已实现 |
-| `history` | 答题历史 | `History.list`（非题集结构） | — | **预留**，需专用 builder |
+| `history` | 答题历史 | `History.list(bankId)`（载荷为 `entries:[{record}]`，非题集） | 历史页工具栏 → 导出历史 | 已实现，仅 json/csv/xlsx/txt（统计归档，不可导回），见 §2.3 |
 
 ## 2. 文件格式（format）
 
@@ -25,6 +25,7 @@
 | `txt` | 纯文本试卷 | `.txt` | text/plain | 等宽排版，含答案 | ❌（阅读用） |
 
 - xlsx/docx/qbk 为二进制格式（注册表项带 `binary: true`），`content` 是 `ArrayBuffer`；四种文本格式返回字符串。
+- **格式按对象白名单过滤**：KINDS 项可带 `formats` 数组（如 history 只注册 `['json','csv','xlsx','txt']`）；`chooseFormat` 据此过滤弹窗选项，绕过弹窗直接 `buildContent('md', historyPayload)` 会得到明确的「不支持」抛错。题集三类（bank/wrong/favorites）不设白名单，开放全部 7 格式。
 - qbk 为 `async: true`（需异步读 IndexedDB），统一入口是 `Exporters.buildAsync(id, payload)`；同步 `buildContent` 对 qbk 明确抛错。图片文件名 = 资产 id（`as<FNV1ahex>-<字节长度>`），缺图时 toast 报缺失数，占位标记仍随 bank.json 导出。
 - 打包经公共模块 `QB.ZipWriter`（`js/utils/zip-writer.js`，stored 不压缩 + CRC32）与 `QB.OfficeWriter`（`js/modules/office-writer.js`，OOXML 部件生成）；采用 stored 是为了让自家 `ZipReader` 在无 `DecompressionStream` 的环境也能闭环回读，代价是体积大于 deflate（538 题 XLSX 约 0.65 MB，对应该库 JSON 载荷约 0.27 MB，见 §6 实测）。
 
@@ -53,12 +54,43 @@
 - 仅 `kind=wrong` 追加最后一列「错误次数」。
 - 字段内含逗号/引号/换行时按 RFC 4180 用双引号包裹并把 `"` 转义为 `""`。
 
+### 2.3 历史记录导出（kind=history，非题集）
+
+历史记录是**成绩归档**而非题集，走独立 builder（`historyRecordToRow`/`buildHistoryJSON`/`buildHistoryTXT`），不经过题面表格，也不做导回。
+
+JSON 结构：
+
+```json
+{
+  "app": "淬题", "version": "1.0.0", "exportedAt": "...", "kind": "history",
+  "bank": { "name": "…", "description": "", "category": "" },
+  "records": [
+    { "id": "h_xxx", "bankId": "…", "bankName": "…", "mode": "exam",
+      "total": 20, "correct": 15, "wrong": 4, "partial": 1, "score": 155,
+      "accuracy": 75, "byType": { }, "durationMs": 750000,
+      "focusLeaves": 2, "createdAt": 0 }
+  ]
+}
+```
+
+CSV/XLSX 为同一张 11 列表（首行表头）：
+
+```
+时间, 题库, 模式, 总题数, 正确, 错误, 半对, 得分, 正确率(%), 用时(分钟), 切出次数
+```
+
+- 模式：`exam→考试`、`practice→练习`；半对为不定项少选题数（旧记录无该字段时为 0）。
+- 用时：`durationMs` 转分钟、保留 1 位小数（12 分 30 秒 = 12.5）；无用时留空。切出次数仅考试行输出，练习行为空。
+- TXT 为逐条可读清单（时间/模式/题库/对错半对/得分/正确率/用时/切出）。
+
 ## 3. 文件命名
 
 ```
-<题库名>-<对象名>-<题数>题-<YYYYMMDD-HHMM>.<ext>
+<题库名>-<对象名>-<数量><单位>-<YYYYMMDD-HHMM>.<ext>
 例：物业题库A-错题本-36题-20261013-1830.csv
+    物业题库A-历史记录-12条-20261014-1015.csv
 ```
+单位由 KINDS 定义（题集为「题」，history 为「条」）。
 题库名中的非法文件名字符（`\ / : * ? " < > |`）会被替换为 `_`。
 
 ## 4. 内部接口（供扩展/测试）
@@ -66,7 +98,9 @@
 ```js
 // 纯函数，无 DOM 依赖，可在 Node 直接调用
 QB.Exporters.collect(kind, bank)
-  → Promise<{ kind, bank, entries:[{ question, meta }] }>
+  → Promise<{ kind, bank, entries }>
+  // 题集（bank/wrong/favorites）：entries:[{ question, meta }]
+  // 历史（history）：entries:[{ record }]
 QB.Exporters.buildContent(formatId, payload)
   → { content, ext, mime }   // 文本格式 content 为 string；xlsx/docx 为 ArrayBuffer（fmt.binary === true）
 QB.Exporters.FORMATS   // 格式注册表
@@ -79,8 +113,8 @@ QB.Exporters.openFlow({ kind, bank })
 ## 5. 扩展方法
 
 - **加格式**：写一个 `build(payload) → string|ArrayBuffer`（二进制格式追加 `binary: true`），往 `FORMATS` 追加 `{ id, label, ext, mime, build }`，弹窗自动出现单选项。二进制 OOXML 请复用 `QB.OfficeWriter` / `QB.ZipWriter`，不要另写打包逻辑。
-- **加对象**：在 `KINDS` 追加 `{ label, collect(bank) → entries }`；若不是题集结构（如历史记录），需在各 builder 内分支处理。
-- **往返保证**：JSON / CSV / XLSX / DOCX / Markdown 的字段与排版分别对齐 `docs/IMPORT-FORMAT.md`；测试断言「导出 → 再导入」题量、题型分布、contentHash 集合不变（538 题全量往返一致；TXT 为阅读格式不保证解析）。
+- **加对象**：在 `KINDS` 追加 `{ label, unit?, formats?, collect(bank) → entries }`；题集条目为 `{question, meta}`，非题集（参考已实现的 `history`）用自定义条目形状并在对应 builder 顶部按 `payload.kind` 分支，`formats` 白名单限定可导出格式。
+- **往返保证**：题集三类的 JSON / CSV / XLSX / DOCX / Markdown 字段与排版分别对齐 `docs/IMPORT-FORMAT.md`；测试断言「导出 → 再导入」题量、题型分布、contentHash 集合不变（538 题全量往返一致；TXT 为阅读格式不保证解析；history 为归档不导回）。
 
 ## 6. 实测性能（Node v24.14.0，538 题）
 
@@ -96,7 +130,7 @@ QB.Exporters.openFlow({ kind, bank })
 
 ## 7. 测试
 
-- `scripts/exporter.test.mjs`：导出功能单元测试（**103** 项断言），覆盖六题型、CSV 转义、BOM、JSON/CSV/MD 往返、错题 wrongCount、收藏、乱序隔离、注册表异常。
+- `scripts/exporter.test.mjs`：导出功能单元测试（**136** 项断言），覆盖六题型、CSV 转义、BOM、JSON/CSV/MD 往返、错题 wrongCount、收藏、乱序隔离、**历史记录四格式（11 列/半对/切出/用时小数/格式白名单拒绝）**、注册表异常。
 - `scripts/office-export.test.mjs`：xlsx/docx 二进制导出专项（**1148** 项断言）：CRC32 标准向量、ZIP 部件、表格/文档行往返、538 题两种格式全量判分自洽、错题 17 列、可复现打包、openpyxl 已独立验证可打开（539 行 × 16 列）。
 - `scripts/smoke-test.mjs`：含 538 题真实数据的 JSON/CSV/Markdown 全量往返断言与 xlsx/docx 二进制结构断言。
 - 真实桌面 Office（Word/Excel 客户端）的打开验证不在自动化范围（本机无 GUI 环境），结构对齐 OOXML 最小集且经 Python openpyxl/zipfile 校验，已在本文件如实标注。

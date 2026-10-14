@@ -399,6 +399,10 @@
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
         return QB.Exporters.openFlow({ kind: 'favorites', bank: State.bank });
       }
+      case 'export-history': {
+        if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        return QB.Exporters.openFlow({ kind: 'history', bank: State.bank });
+      }
       case 'import-sample': {
         const bank = await QB.DB.banks.create({ name: QB.SAMPLE.name, description: QB.SAMPLE.description, category: '示例' });
         await QB.BankManager.importSample(bank.id);

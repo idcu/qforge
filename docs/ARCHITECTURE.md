@@ -108,7 +108,7 @@
 | `modules/backup.js` | 全量备份/恢复（Storage 全量枚举，覆盖/合并；有图自动 ZIP .qfbk；`confirmRestore` 供文件与 WebDAV 共用） |
 | `modules/sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象异步备份（Basic Auth，fetch 可注入测试）；CORS 受限如实报错 |
 | `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |
-| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT 七格式（qbk 异步读 IndexedDB），题库/错题/收藏，见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
+| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT 七格式（qbk 异步读 IndexedDB），题库/错题/收藏；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
 
 ## 4. 关键数据流
 

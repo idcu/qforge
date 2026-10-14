@@ -587,8 +587,8 @@ eq(expFav.entries.length, 0, '收藏夹导出收集器可调用（当前 0 条�
 
 // 非法 kind / format 抛错
 let threw = false;
-try { await QB.Exporters.collect('history', bankA); } catch (e) { threw = true; }
-ok(threw, '不支持的 kind（history 预留）抛错');
+try { await QB.Exporters.collect('cards', bankA); } catch (e) { threw = true; }
+ok(threw, '不支持的 kind（未注册名 cards）抛错');
 // xlsx / docx 已注册为二进制格式（完整往返见 office-export.test.mjs）
 const xlsxBuilt = QB.Exporters.buildContent('xlsx', expBank);
 ok(xlsxBuilt.content instanceof ArrayBuffer && xlsxBuilt.content.byteLength > 0, 'xlsx 导出为二进制 ArrayBuffer');

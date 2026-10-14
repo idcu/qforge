@@ -472,7 +472,7 @@
       '<div class="stat-box"><div class="st-num">' + stats.avgAccuracy + '%</div><div class="st-label">平均正确率</div></div>' +
       '<div class="stat-box"><div class="st-num">' + stats.bestScore + '</div><div class="st-label">最高分</div></div>' +
       '</div></div>';
-    html += '<div class="toolbar"><button class="btn btn-ghost" data-action="history-clear">清空历史</button></div>';
+    html += '<div class="toolbar"><button class="btn btn-ghost" data-action="export-history">导出历史</button><button class="btn btn-ghost" data-action="history-clear">清空历史</button></div>';
     records.forEach((r) => {
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + (r.mode === 'exam' ? '考试' : '练习') + '</span>' +

@@ -264,12 +264,73 @@ const exportedSingle = freshPayload.entries.find((e) => e.question.question === 
 eq(exportedSingle.options.map((o) => o.text).join('|'), FIXTURES[1].options.map((o) => o.text).join('|'), '导出题目保持库内原序');
 eq(exportedSingle.answer, FIXTURES[1].answer, '导出答案保持库内原值');
 
+/* ================= 9.5 历史记录导出（非题集） ================= */
+section('历史记录导出');
+// historyAdd 为 unshift（新记录在前），先加练习、后加考试，使首条为考试
+await QB.History.add({
+  bankId: bank.id, bankName: '导出单测库', mode: 'practice',
+  total: 10, correct: 8, wrong: 2, partial: 0, score: 80, accuracy: 80, durationMs: 0
+});
+await QB.History.add({
+  bankId: bank.id, bankName: '导出单测库', mode: 'exam',
+  total: 20, correct: 15, wrong: 4, partial: 1, score: 155, accuracy: 75,
+  byType: { indefinite: { correct: 0, total: 1 } }, durationMs: 12 * 60 * 1000 + 30 * 1000, focusLeaves: 2
+});
+const histPayload = await QB.Exporters.collect('history', bank);
+eq(histPayload.entries.length, 2, '历史收集 2 条');
+eq(histPayload.kind, 'history', 'payload.kind = history');
+ok(!!histPayload.entries[0].record && !histPayload.entries[0].question, '历史载荷条目为 {record} 而非题集结构');
+eq(QB.Exporters.KINDS.history.unit, '条', 'history 单位为「条」');
+ok(JSON.stringify(QB.Exporters.KINDS.history.formats) === '["json","csv","xlsx","txt"]', 'history 仅开放 json/csv/xlsx/txt');
+{
+  const table = QB.Exporters._historyToTable(histPayload);
+  eq(table.length, 3, '历史表格：表头 + 2 行');
+  eq(table[0].length, 11, '历史表格 11 列');
+  eq(table[0][6], '半对', '历史表头含「半对」列');
+  eq(table[0][10], '切出次数', '历史表头末列「切出次数」');
+  // unshift 新记录在前：第一条为考试
+  eq(table[1][2], '考试', '考试记录模式文案');
+  eq(table[1][6], 1, '考试行半对=1');
+  eq(table[1][9], '12.5', '用时 12 分 30 秒 = 12.5 分钟（1 位小数）');
+  eq(table[1][10], 2, '考试行切出次数=2');
+  eq(table[2][2], '练习', '练习记录模式文案');
+  eq(table[2][10], '', '练习行不计切出次数（空）');
+  eq(table[2][9], '', '无用时时长留空');
+}
+{
+  const j = JSON.parse(QB.Exporters.buildContent('json', histPayload).content);
+  eq(j.kind, 'history', '历史 JSON kind=history');
+  eq(j.records.length, 2, '历史 JSON 含 2 条 records');
+  ok(j.questions === undefined, '历史 JSON 不含 questions 题集字段');
+  eq(j.records[0].partial, 1, '历史 JSON 保留 partial');
+  eq(j.records[0].focusLeaves, 2, '历史 JSON 保留 focusLeaves');
+}
+{
+  const csv = QB.Exporters.buildContent('csv', histPayload).content;
+  ok(csv.charCodeAt(0) === 0xFEFF, '历史 CSV 带 BOM');
+  const lines = csv.split(/\r\n/).filter((l) => l.length);
+  eq(lines.length, 3, '历史 CSV 表头 + 2 行');
+  ok(lines[0].indexOf('半对') >= 0 && lines[0].indexOf('切出次数') >= 0, '历史 CSV 表头含半对/切出次数');
+  ok(lines.some((l) => l.indexOf('导出单测库') >= 0 && l.indexOf('考试') >= 0), '历史 CSV 含考试记录行');
+}
+ok(QB.Exporters.buildContent('xlsx', histPayload).content instanceof ArrayBuffer, '历史 XLSX 构建为 ArrayBuffer');
+{
+  const txt = QB.Exporters.buildContent('txt', histPayload).content;
+  ok(txt.indexOf('历史记录（共 2 条）') >= 0, '历史 TXT 含条数标题');
+  ok(/\[.+\] 考试 · 导出单测库/.test(txt), '历史 TXT 含考试行');
+  ok(txt.indexOf('半对 1') >= 0 && txt.indexOf('切出 2 次') >= 0, '历史 TXT 含半对与切出信息');
+  ok(txt.indexOf('练习 · 导出单测库') >= 0, '历史 TXT 含练习行');
+}
+throws(() => QB.Exporters.buildContent('markdown', histPayload), '历史不支持 markdown（明确抛错）');
+throws(() => QB.Exporters.buildContent('docx', histPayload), '历史不支持 docx（明确抛错）');
+await throwsAsync(() => QB.Exporters.buildAsync('qbk', histPayload), '历史不支持 qbk（异步构建明确拒绝）');
+
 /* ================= 10. 注册表与异常输入 ================= */
 section('注册表与异常');
 eq(QB.Exporters.FORMATS.length, 7, '注册格式数 = 7（qbk/json/csv/xlsx/docx/markdown/txt）');
 eq(QB.Exporters.KINDS.bank.label, '题库', 'KINDS.bank 存在');
-eq(Object.keys(QB.Exporters.KINDS).length, 3, '已注册对象数 = 3（bank/wrong/favorites）');
-await throwsAsync(() => QB.Exporters.collect('history', bank), '未注册 kind（history）抛错');
+eq(Object.keys(QB.Exporters.KINDS).length, 4, '已注册对象数 = 4（bank/wrong/favorites/history）');
+await throwsAsync(() => QB.Exporters.collect('cards', bank), '未注册 kind（cards）抛错');
 ok(QB.Exporters.buildContent('xlsx', payload).content instanceof ArrayBuffer, 'xlsx 已注册（二进制往返详见 office-export.test）');
 throws(() => QB.Exporters.buildContent('pdf', payload), '未注册格式（pdf）抛错');
 

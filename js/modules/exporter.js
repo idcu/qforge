@@ -5,9 +5,10 @@
  *   - 纯构建函数 buildContent(formatId, payload) 不依赖 DOM，可在 Node 直接测试；
  *   - 下载/弹窗为浏览器外壳，openFlow 仅在页面环境使用。
  *
- * 已支持 kind：bank（题库）、wrong（错题本）、favorites（收藏夹，UI 预留）
- * 预留 kind：history（答题历史，非题集结构，需专用 builder）
- * 已支持格式：json / csv / xlsx / docx / markdown / txt，六种均可再次导入往返
+ * 已支持 kind：bank（题库）、wrong（错题本）、favorites（收藏夹）、history（答题历史）
+ *   - 前三种为题集（entries:[{question,meta}]），支持全部 7 格式；
+ *   - history 为非题集结构（entries:[{record}]），仅支持 json/csv/xlsx/txt（统计归档，不导回）。
+ * 已支持格式：qbk / json / csv / xlsx / docx / markdown / txt，题集六格式可再次导入往返
  * （xlsx/docx 为二进制，经 OfficeWriter + ZipWriter 原生打包，零依赖）。
  */
 (function (global) {
@@ -33,12 +34,21 @@
         return list.map((w) => ({ question: w.question, meta: { wrongCount: w.wrongCount || 1, lastAt: w.lastAt || 0 } }));
       }
     },
-    // UI 入口预留：收集逻辑已就绪，后续挂按钮即可
     favorites: {
       label: '收藏夹',
       async collect(bank) {
         const list = await QB.Favorites.list(bank.id);
         return list.map((f) => ({ question: f.question, meta: { addedAt: f.addedAt || 0 } }));
+      }
+    },
+    // 非题集：entries 为 [{record}]；formats 限定可导出格式（统计归档，不做导回）
+    history: {
+      label: '历史记录',
+      unit: '条',
+      formats: ['json', 'csv', 'xlsx', 'txt'],
+      async collect(bank) {
+        const records = await QB.History.list(bank.id);
+        return records.map((record) => ({ record: record }));
       }
     }
   };
@@ -91,6 +101,7 @@
   /* ---------------- 格式构建器 ---------------- */
 
   function buildJSON(payload) {
+    if (payload.kind === 'history') return buildHistoryJSON(payload);
     const out = {
       app: QB.CONFIG.APP_NAME,
       version: QB.CONFIG.VERSION,
@@ -131,6 +142,10 @@
   }
 
   function buildCSV(payload) {
+    if (payload.kind === 'history') {
+      const lines = historyToTable(payload).map((row) => row.map(csvCell).join(','));
+      return BOM + lines.join('\r\n');
+    }
     const lines = toTable(payload).map((row) => row.map(csvCell).join(','));
     return BOM + lines.join('\r\n'); // UTF-8 BOM，Excel 直接打开不乱码
   }
@@ -157,10 +172,11 @@
   }
 
   function buildXLSX(payload) {
-    return QB.OfficeWriter.buildXlsx(toTable(payload));
+    return QB.OfficeWriter.buildXlsx(payload.kind === 'history' ? historyToTable(payload) : toTable(payload));
   }
 
   function buildDOCX(payload) {
+    if (payload.kind === 'history') throw new Error('历史记录不支持 DOCX 导出（支持 JSON/CSV/XLSX/TXT）');
     return QB.OfficeWriter.buildDocx(toDocLines(payload));
   }
 
@@ -178,6 +194,7 @@
   }
 
   function buildMarkdown(payload) {
+    if (payload.kind === 'history') throw new Error('历史记录不支持 Markdown 导出（支持 JSON/CSV/XLSX/TXT）');
     const kindLabel = (KINDS[payload.kind] && KINDS[payload.kind].label) || '导出';
     const L = [];
     L.push('# 《' + payload.bank.name + '》' + kindLabel + '（' + payload.entries.length + ' 题）');
@@ -197,6 +214,7 @@
   }
 
   function buildTXT(payload) {
+    if (payload.kind === 'history') return buildHistoryTXT(payload);
     const kindLabel = (KINDS[payload.kind] && KINDS[payload.kind].label) || '导出';
     const L = [];
     L.push('《' + payload.bank.name + '》' + kindLabel + '（共 ' + payload.entries.length + ' 题）');
@@ -218,8 +236,73 @@
     return L.join('\r\n');
   }
 
+  /* ---------------- 历史记录专用构建（非题集，统计归档不导回） ---------------- */
+
+  const HISTORY_HEADER = ['时间', '题库', '模式', '总题数', '正确', '错误', '半对', '得分', '正确率(%)', '用时(分钟)', '切出次数'];
+
+  function historyModeLabel(m) { return m === 'exam' ? '考试' : '练习'; }
+  /** 用时转分钟（1 位小数）；无记录为空，避免表格里出现误导性 0 */
+  function historyMinutes(ms) {
+    if (!ms) return '';
+    return String(Math.round(ms / 60000 * 10) / 10);
+  }
+
+  /** 单条历史 → 表格行（CSV 与 XLSX 共用） */
+  function historyRecordToRow(r) {
+    r = r || {};
+    return [
+      QB.Helpers.formatDate(r.createdAt),
+      r.bankName || '',
+      historyModeLabel(r.mode),
+      r.total || 0,
+      r.correct || 0,
+      r.wrong || 0,
+      r.partial || 0,
+      r.score || 0,
+      r.accuracy || 0,
+      historyMinutes(r.durationMs),
+      r.mode === 'exam' ? (r.focusLeaves || 0) : ''
+    ];
+  }
+
+  function historyToTable(payload) {
+    return [HISTORY_HEADER.slice()].concat(payload.entries.map((e) => historyRecordToRow(e.record)));
+  }
+
+  function buildHistoryJSON(payload) {
+    return JSON.stringify({
+      app: QB.CONFIG.APP_NAME,
+      version: QB.CONFIG.VERSION,
+      exportedAt: new Date().toISOString(),
+      kind: 'history',
+      bank: { name: payload.bank.name, description: payload.bank.description || '', category: payload.bank.category || '' },
+      records: payload.entries.map((e) => e.record)
+    }, null, 2);
+  }
+
+  function buildHistoryTXT(payload) {
+    const L = [];
+    L.push('《' + payload.bank.name + '》历史记录（共 ' + payload.entries.length + ' 条）');
+    L.push('导出时间：' + new Date().toLocaleString());
+    L.push('='.repeat(48));
+    L.push('');
+    payload.entries.forEach((e, i) => {
+      const r = e.record || {};
+      L.push((i + 1) + '. [' + QB.Helpers.formatDate(r.createdAt) + '] ' + historyModeLabel(r.mode) + ' · ' + (r.bankName || ''));
+      L.push('   总题 ' + (r.total || 0) + ' · 对 ' + (r.correct || 0) + ' · 错 ' + (r.wrong || 0) +
+        ' · 半对 ' + (r.partial || 0) + ' · 得分 ' + (r.score || 0) + ' · 正确率 ' + (r.accuracy || 0) + '%');
+      const tail = [];
+      if (r.durationMs) tail.push('用时 ' + historyMinutes(r.durationMs) + ' 分钟');
+      if (r.mode === 'exam') tail.push('切出 ' + (r.focusLeaves || 0) + ' 次');
+      if (tail.length) L.push('   ' + tail.join(' · '));
+      L.push('');
+    });
+    return L.join('\r\n');
+  }
+
   /** 题库包 .qbk（stored ZIP：bank.json + assets/*），需异步读取 IndexedDB */
   async function buildQBK(payload) {
+    if (payload.kind === 'history') throw new Error('历史记录不支持题库包导出（支持 JSON/CSV/XLSX/TXT）');
     const ids = QB.Qbk.referencedIds(payload.entries.map((e) => e.question));
     const map = await QB.Assets.getMap(ids);
     const assets = ids.filter((id) => map.has(id)).map((id) => {
@@ -288,14 +371,16 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function chooseFormat(count, kindLabel) {
+  function chooseFormat(count, kindLabel, allowedIds, unit) {
+    unit = unit || '题';
+    const formats = allowedIds ? FORMATS.filter((f) => allowedIds.indexOf(f.id) >= 0) : FORMATS;
     return new Promise((resolve) => {
-      const radios = FORMATS.map((f) =>
+      const radios = formats.map((f) =>
         '<div class="checkbox-row"><input type="radio" id="exp-fmt-' + f.id + '" name="exp-fmt" value="' + f.id + '"' + (f.id === 'json' ? ' checked' : '') + '>' +
         '<label for="exp-fmt-' + f.id + '">' + QB.escapeHtml(f.label) + '</label></div>').join('');
       QB.UIRenderer.openModal(
         '<h3>导出' + QB.escapeHtml(kindLabel) + '</h3>' +
-        '<div class="li-meta">共 ' + count + ' 题，请选择导出格式：</div>' + radios +
+        '<div class="li-meta">共 ' + count + ' ' + unit + '，请选择导出格式：</div>' + radios +
         '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
         '<button class="btn" data-action="modal-ok">导出</button></div>',
         (modal) => {
@@ -328,7 +413,8 @@
     }
     if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
 
-    const formatId = await chooseFormat(payload.entries.length, def.label);
+    const unit = def.unit || '题';
+    const formatId = await chooseFormat(payload.entries.length, def.label, def.formats, unit);
     if (!formatId) return null;
 
     let built;
@@ -338,10 +424,10 @@
       QB.UIRenderer.toast('导出失败：' + e.message, 'err');
       return null;
     }
-    const filename = safeName(opts.bank.name) + '-' + def.label + '-' + payload.entries.length + '题-' + stamp() + '.' + built.ext;
+    const filename = safeName(opts.bank.name) + '-' + def.label + '-' + payload.entries.length + unit + '-' + stamp() + '.' + built.ext;
     download(filename, built.mime, built.content);
     const imgNote = built.assetCount ? '，含图片 ' + built.assetCount + ' 张' : '';
-    QB.UIRenderer.toast('已导出' + def.label + ' ' + payload.entries.length + ' 题（' + formatId.toUpperCase() + imgNote + '）',
+    QB.UIRenderer.toast('已导出' + def.label + ' ' + payload.entries.length + ' ' + unit + '（' + formatId.toUpperCase() + imgNote + '）',
       built.missing ? 'err' : 'ok');
     if (built.missing) QB.UIRenderer.toast('有 ' + built.missing + ' 张引用图片缺失（未找到本地资产），仅导出占位标记', 'err');
     return { kind: opts.kind, format: formatId, count: payload.entries.length, filename: filename, assetCount: built.assetCount };
@@ -349,6 +435,6 @@
 
   QB.Exporters = {
     KINDS, FORMATS, collect, buildContent, buildAsync, openFlow, download,
-    _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines
+    _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines, _historyToTable: historyToTable
   };
 })(window);
