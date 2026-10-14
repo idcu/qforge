@@ -181,6 +181,16 @@ eq(QB.Adapters.normalizeType('不定项选择'), 'indefinite', '题型名「不�
   eq(s.correct, 0, '引擎：半对不计 correct');
   eq(e.results[0].partial, true, '引擎：结果保留 partial');
 }
+{
+  // 内置样例必须覆盖不定项（差距项回归：样例与六题型保持一致）
+  const sampleIndef = QB.SAMPLE.questions.filter((q) => q.type === 'indefinite');
+  eq(sampleIndef.length, 3, '内置样例：含 3 道不定项');
+  eq(QB.SAMPLE.questions.length, 18, '内置样例：总题数 18（六题型）');
+  const q0 = sampleIndef[0]; // 答案 ABD
+  eq(QB.judgeAnswer(q0, ['A', 'B', 'D']).isCorrect, true, '样例不定项：全对满分');
+  eq(QB.judgeAnswer(q0, ['A', 'B']).partial, true, '样例不定项：少选半分');
+  ok(!QB.judgeAnswer(q0, ['A', 'C']).partial, '样例不定项：错选 0 分无 partial');
+}
 
 section('真实数据导入（541 题）');
 const flatText = fs.readFileSync(fixturePath('题库-背题模式.json', '真实-541题-背题模式.json'), 'utf8');

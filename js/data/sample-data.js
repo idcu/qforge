@@ -8,7 +8,7 @@
 
   QB.SAMPLE = {
     name: '示例题库',
-    description: '系统内置样例，覆盖判断/单选/多选/填空/简答五种题型',
+    description: '系统内置样例，覆盖判断/单选/多选/不定项/填空/简答六种题型',
     questions: [
       // 判断题
       { type: 'judge', question: '串联电路中，各处的电流相等。', options: [], answer: '正确', analysis: '串联电路电流处处相等。' },
@@ -67,6 +67,38 @@
           { letter: 'C', text: '隔离性' }, { letter: 'D', text: '持久性' }
         ],
         answer: 'ABCD', analysis: 'ACID 即原子性、一致性、隔离性、持久性。'
+      },
+
+      // 不定项（答案 1～多个；全对满分、少选半分、错选 0 分）
+      {
+        type: 'indefinite', question: '下列关于 HTTP 缓存的说法，正确的有？',
+        options: [
+          { letter: 'A', text: 'Cache-Control 可指定 max-age 缓存有效期' },
+          { letter: 'B', text: 'ETag 用于条件请求校验资源是否变化' },
+          { letter: 'C', text: '设置了缓存就不会再向服务器发任何请求' },
+          { letter: 'D', text: 'no-store 表示完全不缓存响应' }
+        ],
+        answer: 'ABD', analysis: '过期后可用 ETag/Last-Modified 发条件请求，C 错误；其余三项正确。'
+      },
+      {
+        type: 'indefinite', question: '下列 Python 对象中，属于可变对象的有？',
+        options: [
+          { letter: 'A', text: 'list 列表' },
+          { letter: 'B', text: 'dict 字典' },
+          { letter: 'C', text: 'tuple 元组' },
+          { letter: 'D', text: 'str 字符串' }
+        ],
+        answer: 'AB', analysis: '列表与字典可变；元组、字符串是不可变对象。'
+      },
+      {
+        type: 'indefinite', question: '关于关系型数据库索引，正确的说法有？',
+        options: [
+          { letter: 'A', text: '索引能加快多数查询的检索速度' },
+          { letter: 'B', text: '索引会占用额外存储空间' },
+          { letter: 'C', text: '索引越多写入一定越快' },
+          { letter: 'D', text: '唯一索引可约束列值不重复' }
+        ],
+        answer: 'ABD', analysis: '索引会降低写入性能（需同步维护），C 错误；其余正确。'
       },
 
       // 填空题

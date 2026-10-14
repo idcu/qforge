@@ -4,7 +4,7 @@
   "exportedAt": "2026-10-13T00:00:00.000Z",
   "bank": {
     "name": "示例题库",
-    "description": "标准 JSON 导入格式示例，覆盖判断/单选/多选/填空/简答五种题型",
+    "description": "标准 JSON 导入格式示例，覆盖判断/单选/多选/不定项/填空/简答六种题型",
     "category": "示例"
   },
   "questions": [
@@ -49,6 +49,19 @@
       "answer": "ABCD",
       "analysis": "完整性、准确性、一致性、及时性均为常见数据质量维度。",
       "category": "数据质量"
+    },
+    {
+      "type": "indefinite",
+      "question": "下列 Python 对象中，属于可变对象的有？",
+      "options": [
+        { "letter": "A", "text": "list 列表" },
+        { "letter": "B", "text": "dict 字典" },
+        { "letter": "C", "text": "tuple 元组" },
+        { "letter": "D", "text": "str 字符串" }
+      ],
+      "answer": "AB",
+      "analysis": "列表与字典可变；元组、字符串是不可变对象。",
+      "category": "Python"
     },
     {
       "type": "fill",

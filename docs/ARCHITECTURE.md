@@ -68,7 +68,7 @@
 | `data/local-adapter.js` | 三个 Repository 的 LocalStorage 实现；`insertMany` 是导入落库唯一入口 |
 | `data/api-adapter.js` | REST 实现骨架（`notImplemented`），定义方法签名供后续填充 |
 | `data/db.js` | 门面：`init()` 按 `DATA_BACKEND` 选适配器；`buildIndex(bankId)` 建 contentHash 索引 |
-| `data/sample-data.js` | `QB.SAMPLE`：15 道内置样例（5 题型各 3 题） |
+| `data/sample-data.js` | `QB.SAMPLE`：18 道内置样例（判断/单选/多选/填空/简答各 3 + 不定项 3，覆盖六题型） |
 
 ### 3.4 导入器（importers）
 | 文件 | 职责 |
