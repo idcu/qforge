@@ -113,7 +113,7 @@ python scripts/gen_fixtures.py --docx-image    # 仅生成含内嵌 PNG 的 docx
 | --- | --- |
 | 判分 | `QB.judgeAnswer`（策略表） |
 | 答案/字母/布尔归一 | `QB.normalizeAnswer / normalizeLetters / parseBoolean` |
-| 去重键 | `QB.makeContentHash / makeQuestionKey`（FNV-1a） |
+| 去重键 | `QB.makeContentHash / makeQuestionKey / isCurrentHash`（v2：FNV-1a，题型+题干+选项+答案，`2:` 前缀；迁移见 `QB.Migration.run`） |
 | 洗牌/抽样/选项乱序 | `QB.shuffle / sampleN / shuffleOptions`（mulberry32） |
 | 持久化 | `QB.Storage`（防抖批写）或 Repository，禁止直连 localStorage |
 | 模型内容上屏 | `QB.RichText.render()`，禁止直接拼 `escapeHtml` |

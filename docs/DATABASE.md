@@ -53,7 +53,7 @@ CREATE TABLE questions (
   tags             TEXT,                            -- 字符串数组：["法规","合同"]
   material         TEXT,                            -- 仅 material：共享材料文本；子问题在 children JSON
   children         TEXT,                            -- 仅 material：标准子题目数组 JSON（2–10 个，不可再嵌套）
-  content_hash     VARCHAR(16)  NOT NULL,           -- FNV-1a：普通题 type|题干；material 含材料+子问题语义归一
+  content_hash     VARCHAR(16)  NOT NULL,           -- v2：'2:'+FNV-1a（题型|题干|选项|答案）；material 含材料+子问题语义归一
   created_at       BIGINT       NOT NULL,
   updated_at       BIGINT       NOT NULL
 );
@@ -185,14 +185,16 @@ CREATE TABLE assets (
 | `qb:meta:dav` | —（前端偏好） | WebDAV 配置（目录 URL/账号/应用密码/上次同步时间），仅本机 |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
+| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 2（v2 contentHash），启动时由 `Migration.run` 幂等升级 |
 
 **字段命名转换**：前端 camelCase（`contentHash`/`createdAt`）↔ 数据库 snake_case（`content_hash`/`created_at`）。迁移脚本按此映射批量 POST 到 `/api/banks/{id}/questions/batch`。
 
 ## 4. 索引与去重策略
 
-- **去重唯一键**：`UNIQUE(bank_id, content_hash)`。`content_hash` 由前端 `QB.makeContentHash(q)`（FNV-1a，输入 `type | normalize(question)`）计算，题干仅尾部空格差异会被视为同题。
+- **去重唯一键**：`UNIQUE(bank_id, content_hash)`。`content_hash` 由前端 `QB.makeContentHash(q)` 计算：**v2（当前，前缀 `2:`）= FNV-1a(题型 + 规范化题干 + 选项文本集合 + 正确答案语义)**，选择类答案取选中文本（对选项乱序/字母重映射不变），判断取布尔语义，填空取各空答案，简答取参考答案；分类/难度/标签/解析等组织属性不进 hash。题干仅尾部空格/标点差异视为同题；**通用题干但选项或答案不同的题不再误并**（v1 仅 `type|题干` 的缺陷修复，评估报告高优先级#3）。
+- **v1→v2 存量迁移**：`js/modules/migrate.js` 在启动时按 `meta:schemaVersion` 幂等执行：题目 hash 重算后，`review/wrong/fav/revlog` 中以 contentHash 为键/字段的数据同步重映射（冲突时复习状态取最近、错题计数相加）；旧 `.qbk`/手工数据携带的裸 hash 落库时强制重算。
 - **查询索引**：`(bank_id, type)`、`(bank_id, category)` 支撑列表筛选；`attempts(bank_id, created_at)` 支撑历史分页。
-- **导入幂等**：`insertMany` 的 `mode=merge` 依赖上述唯一键跳过重复；`mode=overwrite` 先清库再写。
+- **导入幂等**：`insertMany` 的 `mode=merge` 依赖上述唯一键跳过重复；`mode=overwrite` 先清库再写。更新来源题库时同题干的**答案修正**因 hash 变化会作为新题插入（旧题保留），不做静默覆盖。
 
 ## 5. 迁移步骤（LocalStorage → DB）
 

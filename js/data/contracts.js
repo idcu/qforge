@@ -21,7 +21,8 @@
     metaFsrsWeights: 'meta:fsrsWeights',
     metaDav: 'meta:dav',
     metaCurrentBank: 'meta:currentBank',
-    metaTheme: 'meta:theme'
+    metaTheme: 'meta:theme',
+    metaSchema: 'meta:schemaVersion'
   };
 
   /** 需实现的接口方法名（用于自检与文档一致性） */

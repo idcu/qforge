@@ -84,9 +84,27 @@ const h1 = QB.makeContentHash({ type: 'single', question: '下列哪种不是数
 const h2 = QB.makeContentHash({ type: 'single', question: '下列哪种不是数据清洗的常见步骤？ ' });
 const h3 = QB.makeContentHash({ type: 'single', question: '另一道完全不同的题目？' });
 const h4 = QB.makeContentHash({ type: 'judge', question: '下列哪种不是数据清洗的常见步骤？' });
+// v2 去重键：题型+题干+选项+答案（评估报告高优先级#3）
 ok(h1 === h2, '题干相同（尾部空格）→ hash 相同');
 ok(h1 !== h3, '不同题干 → hash 不同');
 ok(h1 !== h4, '不同题型 → hash 不同');
+ok(h1.indexOf('2:') === 0, 'v2 hash 带版本前缀 2:');
+{
+  const optA = [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }];
+  const sameStem = '下列哪项是正确的？';
+  const qa = { type: 'single', question: sameStem, options: optA, answer: 'A' };
+  const qb2 = { type: 'single', question: sameStem, options: [{ letter: 'A', text: '丙' }, { letter: 'B', text: '丁' }], answer: 'B' };
+  const qc = { type: 'single', question: sameStem, options: optA, answer: 'A', category: '分类甲' };
+  ok(QB.makeContentHash(qa) !== QB.makeContentHash(qb2), '同题干但选项/答案不同 → hash 不同（不再误并有效题）');
+  eq(QB.makeContentHash(qa), QB.makeContentHash(qc), '同内容仅分类不同 → hash 相同（分类不进身份键）');
+  // 练习时选项乱序（文本集合不变、答案重映射）→ hash 稳定，错题/SRS 不断线
+  const shuffled = QB.shuffleOptions(qa, 7);
+  eq(QB.makeContentHash(shuffled), QB.makeContentHash(qa), '乱序克隆语义等价 → hash 不变');
+  // 同题干一道对一道错的判断题也区分
+  const jt = '物业正式进入使用阶段的标志是接管验收完成。';
+  ok(QB.makeContentHash({ type: 'judge', question: jt, options: [], answer: '正确' })
+    !== QB.makeContentHash({ type: 'judge', question: jt, options: [], answer: '错误' }), '判断：同题干正误答案不同 → hash 不同');
+}
 
 /* ================= 2.5 选项乱序与答案重映射 ================= */
 section('选项乱序 shuffleOptions');
@@ -115,7 +133,7 @@ eq(QB.judgeAnswer(s1, s1.answer).isCorrect, true, '单选：重映射答案判�
 const m1 = QB.shuffleOptions(multiQ, 7);
 eq(QB.judgeAnswer(m1, m1.answer.split('')).isCorrect, true, '多选：重映射答案判对');
 eq(m1.answer.length, 3, '多选：答案字母数不变');
-// contentHash 不携带选项，乱序后保持一致
+// contentHash 携带选项/答案语义，乱序仅重排文本与字母映射，hash 仍稳定
 eq(s1.contentHash, 'deadbeef', '乱序不改变 contentHash（错题/收藏键稳定）');
 // 非选择类题型原样返回（同引用）
 const jq = { type: 'judge', question: '判断', answer: '正确' };
@@ -491,10 +509,12 @@ const flatMissingOpt = flat.questions.filter((q) => (q.type === 'single' || q.ty
 const flatMissingAns = flat.questions.filter((q) => !q.answer).length;
 eq(flatMissingOpt, 0, '扁平格式：无缺选项题目');
 eq(flatMissingAns, 0, '扁平格式：无缺答案题目');
-// 真实数据中存在 3 道重复题（同题型 + 同题干），去重后唯一题 538
-eq(flatVal.stats.inFileDuplicates, 3, '扁平格式：文件内重复 3 题（源数据重复）');
+// v2 去重（题型+题干+选项+答案）：541 题中仅 1 道完全重复；另有 2 组同题干
+// 但选项/答案不同的题（单选"接管验收"C/D 两版、多选"工业区物业内容"AD/ABCD），
+// v1 会误并，v2 正确保留——去重后唯一题 540（评估报告高优先级#3 实证）
+eq(flatVal.stats.inFileDuplicates, 1, '扁平格式：文件内完全重复 1 题');
 const uniqFlat = new Set(flat.questions.map((q) => QB.makeContentHash(q)));
-eq(uniqFlat.size, 538, '扁平格式：contentHash 去重后 538 题');
+eq(uniqFlat.size, 540, '扁平格式：contentHash 去重后 540 题（同题干异答案不再误并）');
 
 try {
   nested = await QB.JsonImporter.parse({ text: nestedText, fileName: '题库-分类.json' });
@@ -514,7 +534,7 @@ console.log('    嵌套格式分类数: ' + catSet.size + ' → ' + Array.from(c
 const setFlat = new Set(flat.questions.map((q) => QB.makeContentHash(q)));
 const setNested = new Set(nested.questions.map((q) => QB.makeContentHash(q)));
 let inter = 0; setNested.forEach((h) => { if (setFlat.has(h)) inter++; });
-eq(inter, 538, '两种来源题目 contentHash 完全一致（538 唯一题）');
+eq(inter, 540, '两种来源题目 contentHash 完全一致（540 唯一题）');
 
 /* ================= 4. CSV 导入 ================= */
 section('CSV 导入');
@@ -547,27 +567,27 @@ const bankB = await QB.DB.banks.create({ name: '题库B', category: '测试' });
 eq((await QB.DB.banks.list()).length, 2, '创建 2 个题库');
 
 const ins1 = await QB.DB.questions.insertMany(bankA.id, flat.questions, { dedupe: true, mode: 'merge' });
-eq(ins1.inserted, 538, '题库A 首次导入新增 538（源数据含 3 重复被去重）');
-eq(ins1.duplicates, 3, '题库A 首次导入跳过重复 3');
-eq(ins1.total, 538, '题库A 库内总数 538');
+eq(ins1.inserted, 540, '题库A 首次导入新增 540（源数据仅 1 道完全重复）');
+eq(ins1.duplicates, 1, '题库A 首次导入跳过重复 1（同题干异答案的 2 组不误并）');
+eq(ins1.total, 540, '题库A 库内总数 540');
 const ins2 = await QB.DB.questions.insertMany(bankA.id, flat.questions, { dedupe: true, mode: 'merge' });
 eq(ins2.inserted, 0, '题库A 重复导入新增 0');
 eq(ins2.duplicates, 541, '题库A 重复导入跳过 541');
 const ins3 = await QB.DB.questions.insertMany(bankA.id, flat.questions, { dedupe: true, mode: 'overwrite' });
-eq(ins3.total, 538, '题库A 覆盖导入后仍 538');
+eq(ins3.total, 540, '题库A 覆盖导入后仍 540');
 
 const listA = await QB.DB.questions.list(bankA.id, {});
-eq(listA.items.length, 538, '题库A 查询 538');
+eq(listA.items.length, 540, '题库A 查询 540');
 const typeCounts = {};
 listA.items.forEach((q) => { typeCounts[q.type] = (typeCounts[q.type] || 0) + 1; });
 eq(typeCounts.judge, 83, '题库A 落库后 判断 83');
-eq(typeCounts.single, 330, '题库A 落库后 单选 330（源数据含 2 重复）');
-eq(typeCounts.multi, 125, '题库A 落库后 多选 125（源数据含 1 重复）');
+eq(typeCounts.single, 331, '题库A 落库后 单选 331（源数据 332，仅 1 道完全重复）');
+eq(typeCounts.multi, 126, '题库A 落库后 多选 126（同题干异答案两版均保留）');
 
 // 题库B 隔离
 await QB.DB.questions.insertMany(bankB.id, QB.SAMPLE.questions, { dedupe: true });
 eq((await QB.DB.questions.list(bankB.id, {})).items.length, QB.SAMPLE.questions.length, '题库B 独立写入样例题');
-eq((await QB.DB.questions.list(bankA.id, {})).items.length, 538, '题库B 写入不影响题库A');
+eq((await QB.DB.questions.list(bankA.id, {})).items.length, 540, '题库B 写入不影响题库A');
 
 // 单题增改删（QuestionEditor 契约）
 const created = await QB.QuestionEditor.create(bankB.id, { type: 'single', question: '临时题', options: [{ letter: 'A', text: 'x' }], answer: 'A' });
@@ -888,27 +908,27 @@ section('XLSX / DOCX 原生解析（zip + XML）');
 /* ================= 9.5 导出（多格式/多对象） ================= */
 section('导出 Exporters（题库 / 错题，JSON/CSV/XLSX/DOCX/Markdown/TXT）');
 const expBank = await QB.Exporters.collect('bank', bankA);
-eq(expBank.entries.length, 538, '导出收集：题库 538 条');
+eq(expBank.entries.length, 540, '导出收集：题库 540 条');
 
 // JSON：结构正确且可再导入（往返）
 const expJson = QB.Exporters.buildContent('json', expBank).content;
 const expJsonObj = JSON.parse(expJson);
 eq(expJsonObj.kind, 'bank', 'JSON：kind=bank');
-eq(expJsonObj.questions.length, 538, 'JSON：538 题');
+eq(expJsonObj.questions.length, 540, 'JSON：540 题');
 const reImport = await QB.JsonImporter.parse({ text: expJson, fileName: 'rt.json' });
-eq(reImport.questions.length, 538, 'JSON 往返：再导入仍 538 题');
+eq(reImport.questions.length, 540, 'JSON 往返：再导入仍 540 题');
 eq(QB.Adapters.validateQuestions(reImport.questions).stats.byType.judge, 83, 'JSON 往返：判断题仍 83');
 
 // CSV：BOM、表头、行数、往返
 const expCsvBuilt = QB.Exporters.buildContent('csv', expBank);
 ok(expCsvBuilt.content.charCodeAt(0) === 0xFEFF, 'CSV：以 UTF-8 BOM 开头（Excel 不乱码）');
 const expCsvLines = expCsvBuilt.content.split(/\r\n/);
-eq(expCsvLines.length, 539, 'CSV：表头 + 538 数据行 = 539 行');
+eq(expCsvLines.length, 541, 'CSV：表头 + 540 数据行 = 541 行');
 const expHeader = expCsvLines[0].replace(/^\uFEFF/, '');
 ok(expHeader.indexOf('题型') === 0 && expHeader.indexOf('题目') > 0, 'CSV：表头含 题型/题目');
 const csvRt = await QB.CsvImporter.parse({ text: expCsvBuilt.content.replace(/^\uFEFF/, ''), fileName: 'rt.csv' });
-eq(csvRt.questions.length, 538, 'CSV 往返：再导入仍 538 题');
-eq(QB.Adapters.validateQuestions(csvRt.questions).stats.byType.single, 330, 'CSV 往返：单选题仍 330');
+eq(csvRt.questions.length, 540, 'CSV 往返：再导入仍 540 题');
+eq(QB.Adapters.validateQuestions(csvRt.questions).stats.byType.single, 331, 'CSV 往返：单选题仍 331');
 
 // Markdown / TXT 基本结构
 const expMd = QB.Exporters.buildContent('markdown', expBank).content;
@@ -917,18 +937,18 @@ ok(expMd.indexOf('**答案：') > 0, 'Markdown：含答案行');
 const expTxt = QB.Exporters.buildContent('txt', expBank).content;
 ok(expTxt.indexOf('《物业题库A》题库') === 0 && expTxt.indexOf('答案：') > 0, 'TXT：含标题与答案');
 
-// Markdown 导出 → 再导入（真实 538 题全量往返）
+// Markdown 导出 → 再导入（真实 540 题全量往返）
 const mdRtAll = (await QB.MdImporter.parse({ text: expMd, fileName: 'rt.md' })).questions;
-eq(mdRtAll.length, 538, 'Markdown 往返：再导入仍 538 题');
+eq(mdRtAll.length, 540, 'Markdown 往返：再导入仍 540 题');
 const mdRtTypes = QB.Adapters.validateQuestions(mdRtAll).stats.byType;
 eq(mdRtTypes.judge, 83, 'Markdown 往返：判断题 83');
-eq(mdRtTypes.single, 330, 'Markdown 往返：单选题 330');
-eq(mdRtTypes.multi, 125, 'Markdown 往返：多选题 125');
+eq(mdRtTypes.single, 331, 'Markdown 往返：单选题 331');
+eq(mdRtTypes.multi, 126, 'Markdown 往返：多选题 126');
 const mdRtHashes = new Set(mdRtAll.map((q) => QB.makeContentHash(q)));
 const expBankHashes = new Set(expBank.entries.map((e) => QB.makeContentHash(e.question)));
 let mdInter = 0;
 mdRtHashes.forEach((h) => { if (expBankHashes.has(h)) mdInter++; });
-eq(mdInter, 538, 'Markdown 往返：contentHash 集合与原库完全一致');
+eq(mdInter, 540, 'Markdown 往返：contentHash 集合与原库完全一致');
 
 // 错题导出：含 wrongCount 列与计数
 const expWrong = await QB.Exporters.collect('wrong', bankA);

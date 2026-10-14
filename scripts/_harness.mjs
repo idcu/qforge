@@ -54,6 +54,7 @@ const MODULES = [
   'js/modules/office-writer.js',
   'js/modules/exporter.js',
   'js/modules/backup.js',
+  'js/modules/migrate.js',
   'js/modules/sync-dav.js',
   'js/modules/blueprint.js'
 ];

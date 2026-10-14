@@ -31,7 +31,8 @@
       createdAt: q.createdAt || t,
       updatedAt: t
     };
-    item.contentHash = q.contentHash || QB.makeContentHash(item);
+    // v2 hash（题型+题干+选项+答案）才沿用；旧版裸 hash（v1）或缺失一律重算
+    item.contentHash = QB.isCurrentHash(q.contentHash) ? q.contentHash : QB.makeContentHash(item);
     return item;
   }
 

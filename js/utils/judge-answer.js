@@ -12,7 +12,7 @@
   // 判断值解析统一复用公共实现 QB.parseBoolean，避免重复定义
   const toBool = QB.parseBoolean;
 
-  /** 若 value 是选项字母，则用选项文本解析判断值 */
+  /** 若 value 是选项字母，则用选项文本解析判断值（判分与 contentHash 语义归一共用） */
   function resolveJudge(value, options) {
     let v = toBool(value);
     if (v !== null) return v;
@@ -23,6 +23,8 @@
     }
     return v;
   }
+  /** 公共导出：把 判断答案（布尔/对/错/选项字母文本）解析为 boolean，无法识别返回 null */
+  QB.resolveJudgeValue = resolveJudge;
 
   const Strategies = {
     /** 判断题 */

@@ -941,6 +941,7 @@
 
   async function boot() {
     QB.DB.init();
+    if (QB.Migration) await QB.Migration.run(); // v1→v2 contentHash 存量迁移（幂等）
     applyTheme(QB.Storage.get(QB.KEYS.metaTheme, 'light'));
     bindGlobal();
     bindView();

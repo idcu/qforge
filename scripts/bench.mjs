@@ -4,7 +4,7 @@
  * 运行：node scripts/bench.mjs
  *
  * 打点项：
- *   - JSON.parse + 适配（541 → 538 去重）/ Markdown 解析
+ *   - JSON.parse + 适配（541 → 唯一 540 去重）/ Markdown 解析
  *   - insertMany 落库（localStorage 序列化）
  *   - buildIndex（contentHash 索引）
  *   - SearchFilter 关键词检索 / Statistics 汇总
@@ -54,7 +54,7 @@ const heapBefore = process.memoryUsage().heapUsed;
 const fixturePath = [path.join(ROOT, '题库-背题模式.json'), path.join(QB_DIR, 'samples', '真实-541题-背题模式.json')].find(fs.existsSync);
 const flatText = fs.readFileSync(fixturePath, 'utf8');
 let parsed;
-row('JSON.parse + 适配（541 题 → 去重 538）', await timed(async () => {
+row('JSON.parse + 适配（541 题 → 唯一 540）', await timed(async () => {
   parsed = await QB.JsonImporter.parse({ text: flatText, fileName: '题库-背题模式.json' });
 }), '题数 ' + parsed.questions.length + '，源文本 ' + flatText.length + ' 字符');
 
@@ -77,7 +77,7 @@ report[report.length - 1].extra += '，载荷 ' + mb(questionsJsonBytes) + '（S
 /* ---------- 3. buildIndex ---------- */
 row('buildIndex（contentHash 索引）', await timed(async () => {
   await QB.DB.buildIndex(benchBank.id);
-}), '538 题索引');
+}), '540 题索引');
 
 /* ---------- 4. 检索 ---------- */
 const idx = await QB.DB.buildIndex(benchBank.id);
@@ -122,7 +122,7 @@ row('错题本批量写入（100 题）', await timed(async () => {
 
 /* ---------- 8. 选项乱序 ---------- */
 let shuffledCount = 0;
-row('shuffleOptions 选项乱序（538 题）', await timed(() => {
+row('shuffleOptions 选项乱序（540 题）', await timed(() => {
   shuffledCount = idx.items.reduce((n, q) => n + (QB.shuffleOptions(q) !== q ? 1 : 0), 0);
 }, 20), '实际乱序 ' + shuffledCount + ' 题（仅单选/多选）');
 
@@ -130,23 +130,23 @@ row('shuffleOptions 选项乱序（538 题）', await timed(() => {
 const exportPayload = await QB.Exporters.collect('bank', benchBank);
 const sizeOf = (c) => (typeof c === 'string' ? Buffer.byteLength(c, 'utf8') : c.byteLength);
 let expBytes = 0;
-row('导出构建（JSON+CSV+MD+TXT，538 题）', await timed(() => {
+row('导出构建（JSON+CSV+MD+TXT，540 题）', await timed(() => {
   expBytes = 0;
   QB.Exporters.FORMATS.filter((f) => !f.binary).forEach((f) => { expBytes += sizeOf(f.build(exportPayload)); });
 }, 10), '单次合计 ' + (expBytes / 1024).toFixed(1) + ' KB');
 let xlsxBytes = 0;
-row('XLSX 导出构建（stored ZIP，538 题）', await timed(() => {
+row('XLSX 导出构建（stored ZIP，540 题）', await timed(() => {
   xlsxBytes = QB.Exporters.buildContent('xlsx', exportPayload).content.byteLength;
 }, 10), '包体积 ' + (xlsxBytes / 1024).toFixed(1) + ' KB');
 let docxBytes = 0;
-row('DOCX 导出构建（stored ZIP，538 题）', await timed(() => {
+row('DOCX 导出构建（stored ZIP，540 题）', await timed(() => {
   docxBytes = QB.Exporters.buildContent('docx', exportPayload).content.byteLength;
 }, 10), '包体积 ' + (docxBytes / 1024).toFixed(1) + ' KB');
 
 /* ---------- 10. Markdown 导入解析（导出 md → 解析） ---------- */
 const mdText = QB.Exporters.buildContent('markdown', exportPayload).content;
 let mdParsedCount = 0;
-row('Markdown 导入解析（538 题 md 文本）', await timed(async () => {
+row('Markdown 导入解析（540 题 md 文本）', await timed(async () => {
   const r = await QB.MdImporter.parse({ text: mdText, fileName: 'rt.md' });
   mdParsedCount = r.questions.length;
 }, 10), '解析出 ' + mdParsedCount + ' 题');
