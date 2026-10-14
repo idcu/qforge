@@ -257,11 +257,10 @@
     const q = engine.getCurrentQuestion();
     const r = engine.submitAnswer();
     // SRS：练习即时判分（全对 good / 少选 hard / 错 again；含简答的题待自评，不在此记录）
-    if (r && r.isCorrect !== null && r.isCorrect !== undefined && !r.srsRecorded) {
-      r.srsRecorded = true;
+    const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
+    if (entry) {
       if (r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
-      const rating = r.isCorrect ? QB.SRS.RATINGS.good : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again);
-      QB.SRSStore.grade(State.bankId, q, rating);
+      QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
     }
     QB.ProgressSaver.saveDebounced(State.bankId, engine);
     render();
@@ -276,16 +275,10 @@
       engine.gradeAll();
       await recordWrongs(engine);
     }
-    // SRS：把本次已判定的结果批量写入复习调度（简答未自评跳过）
-    const srsEntries = [];
-    engine.questions.forEach((q, i) => {
-      const r = engine.results[i];
-      // srsRecorded：练习中已即时评分的题不重复记录（含材料题自评后）
-      if (r && r.isCorrect !== null && r.isCorrect !== undefined && !r.srsRecorded) {
-        r.srsRecorded = true;
-        srsEntries.push({ question: q, rating: r.isCorrect ? QB.SRS.RATINGS.good : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again) });
-      }
-    });
+    // SRS：把本次已判定但尚未记录的结果批量写入复习调度（练习即时评过的题、简答待自评均跳过）
+    const srsEntries = QB.SRSStore.collectGraded(
+      engine.questions.map((question, i) => ({ question: question, result: engine.results[i] }))
+    );
     if (srsEntries.length) QB.SRSStore.gradeMany(State.bankId, srsEntries);
     const score = engine.getScore();
     const durationMs = Date.now() - (State.quizMeta.startTs || Date.now());
@@ -486,10 +479,9 @@
           ? State.engine.selfAssess(isOk, parseInt(childAttr, 10))
           : State.engine.selfAssess(isOk);
         // 材料题：只有聚合从 null（待自评）变为已判定时才记一次调度/错题
-        if (r && r.isCorrect !== null && r.isCorrect !== undefined && !r.srsRecorded) {
-          r.srsRecorded = true;
-          const rating = r.isCorrect ? QB.SRS.RATINGS.good : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again);
-          QB.SRSStore.grade(State.bankId, q, rating);
+        const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
+        if (entry) {
+          QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
           if (r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
         }
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);

@@ -45,7 +45,7 @@
 | `good` 2 | 3 | 良好 | 按目标保留率正常增长 |
 | `easy` 3 | 4 | 简单 | 间隔放大（easyBonus = w16）、D 下降、直接毕业 |
 
-**作答到评分的映射（`app.js`）**：客观题全对→good；**不定项少选（partial 半分）→hard**；错选/未答→again；简答题练习中为自评（用户点对/错后才记录），考试整卷评分同样按此映射批量写入。
+**作答到评分的映射（`app.js`）**：客观题全对→good；**不定项少选（partial 半分）→hard**；错选/未答→again；简答题练习中为自评（用户点对/错后才记录），考试整卷评分同样按此映射批量写入。映射与收集的唯一入口是 `SRSStore.ratingForResult(result)` / `SRSStore.collectGraded([{question,result}])`：练习即时提交、交卷批量收集、材料题自评后收集三处共用；收集即标记 `result.srsRecorded`，**保证一次作答只写一条调度与一条 revlog**（待自评的 null 结果不收集也不标记）。
 
 ## 4. 学习步骤状态机（1m / 10m）
 

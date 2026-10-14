@@ -26,6 +26,37 @@
     return r <= 3 ? r + 1 : r;
   }
 
+  /**
+   * 判分结果 → 应用层评分（0–3）；待自评（isCorrect 为 null/undefined）返回 null。
+   * 全对 good；不定项少选（partial）hard；错 again。
+   */
+  function ratingForResult(r) {
+    if (!r || r.isCorrect === null || r.isCorrect === undefined) return null;
+    return r.isCorrect ? QB.SRS.RATINGS.good
+      : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again);
+  }
+
+  /**
+   * 从「题目+判分结果」对中收集尚未写入 SRS 的条目，消费即标记 result.srsRecorded。
+   * 练习提交即时收集、交卷批量收集、材料题自评后收集共用此入口——
+   * 同一结果不会被第二次收集，从根上保证一次作答只写一条评分/一条 revlog
+   * （待自评结果不收集也不标记，材料题多步自评在聚合定论后才计入）。
+   * @param {Array<{question:Object, result:Object}>} pairs
+   * @returns {Array<{question:Object, rating:number}>}
+   */
+  function collectGraded(pairs) {
+    const out = [];
+    (pairs || []).forEach((p) => {
+      const r = p && p.result;
+      if (!r || r.srsRecorded) return;
+      const rating = ratingForResult(r);
+      if (rating === null) return;
+      r.srsRecorded = true;
+      out.push({ question: p.question, rating: rating });
+    });
+    return out;
+  }
+
   /** 取某题状态（无记录返回 null） */
   function getState(bankId, q) {
     const map = readMap(bankId);
@@ -139,5 +170,5 @@
     QB.Storage.remove(keyOf(bankId));
   }
 
-  QB.SRSStore = { getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear, keyFor };
+  QB.SRSStore = { getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear, keyFor, ratingForResult, collectGraded };
 })(window);

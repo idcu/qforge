@@ -139,6 +139,41 @@ section('learning steps：分钟级到期仍在今日复习队列');
   QB.SRSStore.clear(bank.id);
 }
 
+section('一次作答仅一条评分（评估报告高优先级#2 回归契约）');
+{
+  const bank = await QB.DB.banks.create({ name: '单次评分库' });
+  await QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: '单次评分回归题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+  ], { dedupe: false });
+  const q = (await QB.DB.questions.list(bank.id, {})).items[0];
+  const h = QB.SRSStore.keyFor(q);
+
+  // 模拟练习提交：判对 → 收集 1 条并即时 grade
+  const result = { isCorrect: true, partial: false, srsRecorded: false };
+  const first = QB.SRSStore.collectGraded([{ question: q, result }]);
+  eq(first.length, 1, '提交时收集到 1 条待记录');
+  QB.SRSStore.grade(bank.id, first[0].question, first[0].rating, T0);
+  eq(result.srsRecorded, true, '收集后标记 srsRecorded');
+
+  // 模拟交卷：同一结果再次收集 → 0 条，gradeMany 空转
+  const second = QB.SRSStore.collectGraded([{ question: q, result }]);
+  eq(second.length, 0, '交卷时同一结果不再收集');
+  QB.SRSStore.gradeMany(bank.id, second, T0);
+  eq(QB.FSRSOpt.readLog().filter((e) => e.h === h).length, 1, 'revlog 中该题恰 1 条（不出现双评分）');
+
+  // 待自评：不收集、不标记（材料题多步自评在聚合定论前要保持可收集）
+  const pending = { isCorrect: null, srsRecorded: false };
+  eq(QB.SRSStore.collectGraded([{ question: q, result: pending }]).length, 0, '待自评结果不收集');
+  ok(pending.srsRecorded === false, '待自评结果不被标记');
+
+  // 评分映射
+  eq(QB.SRSStore.ratingForResult({ isCorrect: true }), QB.SRS.RATINGS.good, '全对 → good');
+  eq(QB.SRSStore.ratingForResult({ isCorrect: false, partial: true }), QB.SRS.RATINGS.hard, '少选半对 → hard');
+  eq(QB.SRSStore.ratingForResult({ isCorrect: false, partial: false }), QB.SRS.RATINGS.again, '错 → again');
+  eq(QB.SRSStore.ratingForResult({ isCorrect: null }), null, '待自评 → null');
+  QB.SRSStore.clear(bank.id);
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
