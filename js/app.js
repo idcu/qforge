@@ -260,7 +260,9 @@
     const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
     if (entry) {
       if (r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
-      QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
+      try {
+        QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
+      } catch (e) { /* Storage.onError 已提示；不阻断答题 UI */ }
     }
     QB.ProgressSaver.saveDebounced(State.bankId, engine);
     render();
@@ -279,7 +281,10 @@
     const srsEntries = QB.SRSStore.collectGraded(
       engine.questions.map((question, i) => ({ question: question, result: engine.results[i] }))
     );
-    if (srsEntries.length) QB.SRSStore.gradeMany(State.bankId, srsEntries);
+    if (srsEntries.length) {
+      try { QB.SRSStore.gradeMany(State.bankId, srsEntries); }
+      catch (e) { /* Storage.onError 已提示；成绩与历史不受影响 */ }
+    }
     const score = engine.getScore();
     const durationMs = Date.now() - (State.quizMeta.startTs || Date.now());
     await QB.History.add({
@@ -481,7 +486,8 @@
         // 材料题：只有聚合从 null（待自评）变为已判定时才记一次调度/错题
         const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
         if (entry) {
-          QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
+          try { QB.SRSStore.grade(State.bankId, entry.question, entry.rating); }
+          catch (e) { /* Storage.onError 已提示 */ }
           if (r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
         }
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
@@ -944,6 +950,10 @@
   async function boot() {
     QB.DB.init();
     if (QB.Migration) await QB.Migration.run(); // v1→v2 contentHash 存量迁移（幂等）
+    // 本地存储落盘失败（如配额已满）全局可见，不静默吞掉
+    QB.Storage.onError(() => {
+      UI.toast('本地保存失败：浏览器存储可能已满，请尽快在「备份与恢复」导出备份并清理空间', 'err');
+    });
     applyTheme(QB.Storage.get(QB.KEYS.metaTheme, 'light'));
     bindGlobal();
     bindView();

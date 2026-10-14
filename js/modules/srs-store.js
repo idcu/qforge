@@ -15,7 +15,7 @@
   }
 
   function writeMap(bankId, map) {
-    QB.Storage.set(keyOf(bankId), map);
+    QB.Storage.setSync(keyOf(bankId), map); // 学习数据同步落盘：失败立即上抛，不假成功
   }
 
   function keyFor(q) { return q.contentHash || QB.makeContentHash(q); }

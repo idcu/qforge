@@ -50,6 +50,8 @@ jobs:
         run: node scripts/fsrs-opt.test.mjs
       - name: SRS 到期/存储测试
         run: node scripts/srs.test.mjs
+      - name: Storage 可靠性测试
+        run: node scripts/storage.test.mjs
       - name: 备份恢复测试
         run: node scripts/backup.test.mjs
       - name: schema 迁移测试

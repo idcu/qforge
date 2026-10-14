@@ -70,15 +70,26 @@
     async remove(id, options) {
       const cascade = !options || options.cascade !== false;
       const list = (await banks.list()).filter((b) => b.id !== id);
-      Storage.set(K.banks, list);
+      Storage.setSync(K.banks, list);
       if (cascade) {
         Storage.remove(K.questions(id));
         Storage.remove(K.wrong(id));
         Storage.remove(K.favorite(id));
+        Storage.remove(K.review(id)); // 评估报告中优先级#6：旧实现残留 user:review:<bankId>
+        // 该库的 FSRS preset（meta:fsrsWeights.banks[bankId]）
+        const weights = Storage.get(K.metaFsrsWeights, null);
+        if (weights && weights.banks && Object.prototype.hasOwnProperty.call(weights.banks, id)) {
+          delete weights.banks[id];
+          Storage.setSync(K.metaFsrsWeights, weights);
+        }
+        // 该库评分日志（revlog 条目 b=bankId，F4 起记录；旧无 b 日志保留）
+        const revlog = Storage.get(K.revlog, []);
+        const keptRevlog = revlog.filter((e) => !e || e.b !== id);
+        if (keptRevlog.length !== revlog.length) Storage.setSync(K.revlog, keptRevlog);
         const hist = Storage.get(K.history, []).filter((h) => h.bankId !== id);
-        Storage.set(K.history, hist);
+        Storage.setSync(K.history, hist);
         const cur = Storage.get(K.metaCurrentBank, null);
-        if (cur === id) Storage.set(K.metaCurrentBank, null);
+        if (cur === id) Storage.setSync(K.metaCurrentBank, null);
       }
     }
   };

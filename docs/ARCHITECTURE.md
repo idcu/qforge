@@ -52,7 +52,7 @@
 | --- | --- | --- |
 | `utils/helpers.js` | `QB.Helpers` | `debounce/throttle/cloneDeep/uid/escapeHtml/formatDate/formatDuration/calculateAccuracy` |
 | `utils/rich-text.js` | `QB.RichText` | 模型内容上屏统一入口：`render()`（转义 + `^{}`/`_{}` 上下标）、`toPlain()`（去记号，不转义） |
-| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写 + `forceSync()`；`usageBytes()` 估算占用 |
+| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存；visibility/beforeunload 落盘；`usageBytes()` |
 | `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions` | mulberry32 种子化洗牌/抽样；选项乱序并同步重映射答案 |
 | `utils/answer-normalize.js` | `QB.normalizeAnswer`/`QB.parseBoolean`/`QB.normalizeLetters` | 全角转半角、去空白、去标点、大小写归一；布尔归一 |
 | `utils/judge-answer.js` | `QB.judgeAnswer` | 按 `type` 策略表判分 |
@@ -109,7 +109,7 @@
 | `modules/source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入测试） |
 | `modules/data-io.js` | 文件/粘贴/拖拽/**URL** 导入编排，统一「解析→预览→insertMany→记录来源」；`refreshUrlFlow` 按 checksum 刷新 |
 | `modules/office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包（与导入端对称） |
-| `modules/backup.js` | 全量备份/恢复（Storage 全量枚举，覆盖/合并；有图自动 ZIP .qfbk；`confirmRestore` 供文件与 WebDAV 共用） |
+| `modules/backup.js` | 全量备份/恢复（Storage 全量枚举，覆盖/合并；有图自动 ZIP .qfbk；`confirmRestore` 供文件与 WebDAV 共用）；覆盖恢复先快照再写入，失败自动回滚（不先删后写） |
 | `modules/migrate.js` | `QB.Migration.run`：本地 schema 版本化迁移（当前 v1→v2 contentHash），启动时幂等执行，重映射题目/复习/错题/收藏/revlog（见 [DATABASE.md](DATABASE.md) §4） |
 | `modules/sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象异步备份（Basic Auth，fetch 可注入测试）；CORS 受限如实报错 |
 | `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |
@@ -173,7 +173,7 @@ Exporters.openFlow({kind, bank})
 | `judgeAnswer(question, userAnswer)` | 按 `type` 策略表统一判分；essay 返回 `null` | quiz-engine、statistics |
 | `makeContentHash(q)` | v2：`'2:'+FNV1a(题型+题干+选项集合+答案语义)` 去重键 | 导入去重、Repo、错题/收藏索引 |
 | `shuffle(arr, seed?)` / `shuffleOptions(q, seed?)` | 随机/种子化洗牌；选项乱序+答案重映射的派生克隆 | 抽题、答题选项乱序 |
-| `QB.Storage` | 内存缓存 + 防抖批写 + `forceSync()` | local-adapter 及所有持久化 |
+| `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步 | local-adapter 及所有持久化 |
 | `QB.DB` + Repo 接口 | 数据访问统一入口，屏蔽后端差异 | 全部业务模块 |
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
 | `LineParser.parseLines/blocksToQuestions` | 文本行（DOCX 段落 / Markdown 行）→ 题目块 → 标准题目 | docx-importer、md-importer |

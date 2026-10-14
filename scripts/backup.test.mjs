@@ -56,6 +56,33 @@ QB.Backup.applyBackup(backup, { mode: 'merge' });
 ok(QB.Storage.get('test:extra-key').keep === true, '合并模式保留备份外的现有数据');
 eq((await QB.DB.banks.list()).length, beforeBankCount, '同名键（banks）被备份覆盖');
 
+section('覆盖恢复失败回滚（不再先删后写、失败即全丢）');
+clearAll();
+QB.Storage.setSync('roll:shared', { v: 'old' });
+QB.Storage.setSync('roll:onlyOld', { keep: true });
+const failingBackup = {
+  app: 'qforge-backup',
+  version: QB.CONFIG.VERSION,
+  exportedAt: new Date().toISOString(),
+  data: {
+    'roll:shared': { v: 'new' },
+    'roll:onlyNew': { fresh: true }
+  }
+};
+const origRemove = QB.Storage.remove.bind(QB.Storage);
+QB.Storage.remove = (k) => {
+  if (k === 'roll:onlyOld') throw new Error('模拟删除多余旧键失败');
+  return origRemove(k);
+};
+let rollThrew = false;
+try { QB.Backup.applyBackup(failingBackup); } catch (e) { rollThrew = true; }
+QB.Storage.remove = origRemove;
+ok(rollThrew, '恢复过程失败时错误上抛');
+eq(QB.Storage.get('roll:shared') && QB.Storage.get('roll:shared').v, 'old', '已覆盖键回滚到旧值');
+ok(QB.Storage.get('roll:onlyOld') && QB.Storage.get('roll:onlyOld').keep === true, '删除失败的旧键数据仍在');
+eq(QB.Storage.get('roll:onlyNew', null), null, '新写入键被撤销');
+clearAll();
+
 section('异常输入');
 let threw = false;
 try { QB.Backup.applyBackup({ app: 'other', data: {} }); } catch (e) { threw = true; }

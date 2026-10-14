@@ -72,7 +72,7 @@
     /** 删除（级联删除题目与用户数据） */
     async remove(bank) {
       const ok = await UI.confirmDialog(
-        '确定删除题库「' + bank.name + '」吗？该题库下的题目、错题、收藏、历史记录都会被一并删除，且不可恢复。',
+        '确定删除题库「' + bank.name + '」吗？该题库下的题目、复习计划、错题、收藏、该题库训练权重及历史记录都会被一并删除，且不可恢复。',
         '删除'
       );
       if (!ok) return false;

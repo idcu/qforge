@@ -29,18 +29,50 @@
   /**
    * 恢复备份
    * @param {Object} backup 备份对象
-   * @param {{mode?:'replace'|'merge'}} opts replace（默认）= 清空后写入；merge = 合并覆盖
-   * @returns {{keys:number}}
+   * @param {{mode?:'replace'|'merge'}} opts
+   *   replace（默认）= 先内存快照旧数据，全量写入成功后再删除备份中不存在的旧键，
+   *     任一步失败尽力回滚到快照后抛出（不再先删后写、失败即全丢）；
+   *   merge = 同名逻辑键覆盖（保留其余现有数据）。
+   * @returns {{keys:number, mode:string}}
    */
   function applyBackup(backup, opts) {
     if (!isBackup(backup)) throw new Error('不是有效的 qforge 备份文件');
     opts = opts || {};
     const mode = opts.mode === 'merge' ? 'merge' : 'replace';
-    if (mode === 'replace') {
-      QB.Storage.keys().forEach((k) => QB.Storage.remove(k));
+
+    if (mode === 'merge') {
+      Object.keys(backup.data).forEach((k) => QB.Storage.set(k, backup.data[k]));
+      QB.Storage.forceSync();
+      return { keys: Object.keys(backup.data).length, mode };
     }
-    Object.keys(backup.data).forEach((k) => QB.Storage.set(k, backup.data[k]));
-    return { keys: Object.keys(backup.data).length, mode: mode };
+
+    const oldKeys = QB.Storage.keys();
+    const snapshot = oldKeys.map((k) => [k, QB.Storage.get(k)]);
+    const written = [];
+    try {
+      Object.keys(backup.data).forEach((k) => {
+        QB.Storage.set(k, backup.data[k]);
+        written.push(k);
+      });
+      QB.Storage.forceSync();
+      oldKeys.filter((k) => !Object.prototype.hasOwnProperty.call(backup.data, k))
+        .forEach((k) => QB.Storage.remove(k));
+      QB.Storage.forceSync();
+    } catch (e) {
+      console.error('[Backup] 恢复失败，尝试回滚到恢复前快照：', e);
+      try {
+        written.forEach((k) => {
+          const old = snapshot.find((pair) => pair[0] === k);
+          if (old) QB.Storage.set(k, old[1]);
+          else QB.Storage.remove(k);
+        });
+        QB.Storage.forceSync();
+      } catch (rollbackErr) {
+        console.error('[Backup] 回滚也失败：', rollbackErr);
+      }
+      throw e;
+    }
+    return { keys: Object.keys(backup.data).length, mode };
   }
 
   /* ---------------- 含图片资产的备份包（.qfbk：backup.json + assets/*） ---------------- */

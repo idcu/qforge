@@ -45,7 +45,7 @@
       list.push(entry);
     });
     if (list.length > LOG_LIMIT) list.splice(0, list.length - LOG_LIMIT);
-    QB.Storage.set(QB.KEYS.revlog, list);
+    QB.Storage.setSync(QB.KEYS.revlog, list);
   }
 
   /* ---------------- 权重存取（全局 + 按题库 preset） ----------------
@@ -89,7 +89,7 @@
     if (!store.global && !Object.keys(store.banks).length) {
       QB.Storage.remove(QB.KEYS.metaFsrsWeights); // 回到纯默认状态
     } else {
-      QB.Storage.set(QB.KEYS.metaFsrsWeights, store);
+      QB.Storage.setSync(QB.KEYS.metaFsrsWeights, store);
     }
   }
 

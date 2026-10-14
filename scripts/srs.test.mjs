@@ -176,6 +176,38 @@ section('一次作答仅一条评分（评估报告高优先级#2 回归契约�
   QB.SRSStore.clear(bank.id);
 }
 
+section('删库级联清理：复习状态/preset/按库 revlog 不残留（评估报告中优先级#6）');
+{
+  const ca = await QB.DB.banks.create({ name: '级联库A' });
+  const cb = await QB.DB.banks.create({ name: '级联库B' });
+  await QB.DB.questions.insertMany(ca.id, [
+    { type: 'single', question: '级联题甲', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+  ], { dedupe: false });
+  await QB.DB.questions.insertMany(cb.id, [
+    { type: 'single', question: '级联题乙', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+  ], { dedupe: false });
+  const qa = (await QB.DB.questions.list(ca.id, {})).items[0];
+  const qb2 = (await QB.DB.questions.list(cb.id, {})).items[0];
+  QB.SRSStore.grade(ca.id, qa, QB.SRS.RATINGS.good, T0);
+  QB.SRSStore.grade(cb.id, qb2, QB.SRS.RATINGS.good, T0);
+  await QB.WrongBook.add(ca.id, qa);
+  await QB.Favorites.toggle(ca.id, qa);
+  QB.FSRSOpt.saveWeights(QB.FSRS.DEFAULT_W.slice(), { samples: 1, scope: ca.id }, ca.id);
+  ok(!!QB.Storage.get(QB.KEYS.review(ca.id)), '前置：库A 有复习状态');
+  ok(QB.FSRSOpt.readLog().some((e) => e.b === ca.id), '前置：库A 有 revlog');
+  ok(QB.FSRSOpt.getWeightsMeta(ca.id), '前置：库A 有 preset');
+
+  await QB.DB.banks.remove(ca.id);
+  ok(QB.Storage.get(QB.KEYS.review(ca.id)) == null, '删库：user:review:<id> 已清理（旧实现残留）');
+  ok(QB.Storage.get(QB.KEYS.wrong(ca.id)) == null, '删库：wrong 键清理');
+  ok(QB.Storage.get(QB.KEYS.favorite(ca.id)) == null, '删库：fav 键清理');
+  eq(QB.FSRSOpt.getWeightsMeta(ca.id), null, '删库：FSRS preset 清理');
+  ok(!QB.FSRSOpt.readLog().some((e) => e.b === ca.id), '删库：该库 revlog 清理');
+  // 库B 不受影响
+  ok(!!QB.SRSStore.getState(cb.id, qb2), '库B 复习状态保留');
+  ok(QB.FSRSOpt.readLog().some((e) => e.b === cb.id), '库B revlog 保留');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
