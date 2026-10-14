@@ -788,6 +788,35 @@
 
 ---
 
+## 5d1c8f3 / f8c5799 · feat：F1 批次——样例补齐不定项（差距#6）+ 历史记录导出
+
+**背景**：竞品梳理遗留 TODO 的低风险快清批次（F1），两个原子提交；不改公共契约、不新增依赖、不新增文件。
+
+**5d1c8f3 · feat(sample)：样例补齐不定项**
+- `sample-data.js` 15→18 题（+3 道 indefinite，答案 2~3 项，覆盖全对/少选半分/错选三种判分情形），描述文案改六题型；`samples/示例-标准JSON.json` 6→7 题补 1 道不定项。
+- smoke +5 断言（202→207）：样例不定项数量、总数 18、样例题三情形判分。
+- 注：本提交同时包含用户对 README.md 的**有意回退**（回退文档重组批次的门户重写），提交内仅同步了样例计数一行；README 中测试/bench 表为用户保留版本，未追平 1879/新 bench。
+
+**f8c5799 · feat(export)：历史记录导出**
+- exporter KINDS 注册第 4 类对象 `history`（非题集，`entries:[{record}]`），新增 `unit`（条）与 `formats` 白名单机制（`['json','csv','xlsx','txt']`）；弹窗按白名单过滤，题集三类 7 格式行为不变。
+- 专用 builder：`historyRecordToRow`（CSV/XLSX 共用 11 列：时间/题库/模式/总题数/正确/错误/半对/得分/正确率%/用时分钟/切出次数）、`buildHistoryJSON`（records 信封，无 questions 字段）、`buildHistoryTXT`；md/docx/qbk 对 history 明确抛错；时长 1 位小数（12 分 30 秒=12.5）、练习行不输出切出次数。
+- UI：历史工具栏「导出历史」+ app `export-history`；文件名单位随 kind（`题库-历史记录-12条-时间戳`）。
+- 公共抽象：KINDS 定义扩展 `unit?/formats?`（影响范围：chooseFormat/openFlow 两个内部函数读取新字段，未定义时行为与旧版完全一致；exporter.test 断言托底）；题集 builder 与历史 builder 完全分离，无交叉分支污染（仅各 builder 入口 1 行 kind 判断）。
+
+**验证数据（2026-10-14，Node v24.14.0，本机实跑）**
+- 14 套件 **1879/1879**（smoke 207[+5]、exporter 136[+33]，其余 12 套件不变）；首次全量回归时如实抓到 1 个回归（smoke 旧断言「history 预留抛错」与新注册冲突），改为未注册名 cards 后全绿，未掩盖。
+- bench（采样 10 中位数）：gradeAll(50) 0.09ms、四格式导出 3.24ms、XLSX 7.36ms、DOCX 2.90ms、MD 3.40ms、落库 1.78ms——与上批互有抖动，无代码路径级退化；heapUsed +18.65MB（5.28→23.93）。
+- 首屏体积：仍 54 文件/49 js，**121.0 KB gzip / 341.7 KB raw**（较上批 +1.6 KB gzip：3 道样例题 + 历史 builder）。
+- 历史 XLSX 复用既有 `OfficeWriter.buildXlsx(二维表)` 路径（1148 项 office 断言覆盖该路径），未单独做 538 历史行压测（历史上限 500 条、单行宽度远小于题表）。
+
+**遗留 TODO / 风险**
+- 历史导出按**当前题库**过滤（与错题/收藏入口一致）；全局跨题库历史导出未做（History.list 已支持 bankId=null，加一个全局入口即可，列入候选）。
+- 历史 XLSX/TXT 的桌面 Office 打开验证仍属人工验收项（与既有 §7 标注一致）。
+- DOMParser 注入路径 227 项（202 基线 222 + 本批 5 项无条件断言的算术结果）本机未复跑，沿用上批约定。
+- 下一批候选：F2 DOCX 内嵌图片导入（已完成方案评估）。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
@@ -799,6 +828,7 @@
 > 未标注项批次：`b041b6b` xlsx/docx 双向导出+收藏导出 · `2ad0dc5` 组卷单场乱序开关 · `28871d2` ci(GitHub Actions) · `d8ba2d6` fix(srs 时区断言/CI 双时区矩阵)
 > 竞品跟进批次（2026-10-14）：`a57a1b8` 富文本/上下标公式 · `28d6c72` 图片题（IDB/.qbk/.qfbk） · `0a0532c` FSRS learning steps/按题库 preset · `44ea8e0` WebDAV 云备份
 > 文档重组批次（2026-10-14）：`4f00cea` docs(formats) 使用侧事实修复 · `ef680a8` docs(arch) 工程侧对齐+SRS 专章 · `0942b6b` docs(competitors) 竞品对比 · `7ea9e43` docs(dev) 开发指南+README 门户
+> F1 功能批次（2026-10-14）：`5d1c8f3` feat(sample) 样例补不定项 · `f8c5799` feat(export) 历史记录导出四格式（1879 断言/121.0KB gzip）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。

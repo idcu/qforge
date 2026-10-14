@@ -22,8 +22,8 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   
 
 | 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **202**（注入 DOMParser 时 **222**） | 六题型判分（含不定项少选半分）、难度/标签、xlsx/docx 解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
-| `scripts/exporter.test.mjs` | **103** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离 |
+| `scripts/smoke-test.mjs` | **207**（注入 DOMParser 时 **227**） | 六题型判分（含不定项少选半分）、内置 18 题样例含 3 道不定项回归、难度/标签、xlsx/docx 解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
+| `scripts/exporter.test.mjs` | **136** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、538 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
 | `scripts/editor.test.mjs` | **29** | `buildQuestion` 纯函数、增删改 |
 | `scripts/rich-text.test.mjs` | **45** | 转义防注入、上下标、图片占位、collectAssets、hydrate 假 DOM、光标插入 |
@@ -36,7 +36,7 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   
 | `scripts/backup.test.mjs` | **15** | 全量备份、覆盖/合并恢复 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **18** | manifest/SW/离线资源完整性 |
-| **合计** | **1841 / 1841 通过**（UTC 与 Asia/Shanghai 双时区本地实跑） | |
+| **合计** | **1879 / 1879 通过**（UTC 与 Asia/Shanghai 双时区本地实跑） | |
 
 一键全跑（PowerShell）：
 
