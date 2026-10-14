@@ -876,6 +876,20 @@
 
 ---
 
+## test(import): 真机 WPS 回环夹具纳入回归（DOCX 含图）
+
+**背景**：F3 提交后发现工作区 `示例-文档导入-含图.docx` 被真机 WPS 打开并另存（1995→2361 字节）。解包对比：4 个部件 md5 不变（含 76 字节 PNG 与 a:blip），document.xml 被 WPS 重写（DrawingML 加内联命名空间）并在开头插入「含 AI 生成」文本框形状（wps:wsp/txBox，无图片引用）。用户拍板保留为第二夹具。
+
+**改动**
+- WPS 另存版入库为 `samples/示例-文档导入-WPS回环.docx`（2361 字节）；生成器版 `示例-文档导入-含图.docx` 还原为 1995 字节——手写最小包（验证我们自己的 OOXML）与真机回环包（验证真实 Office 生态文档）双覆盖。
+- smoke 注入路径 +7 断言（247→**254**）：WPS 包内原始 PNG 仍在、解析 2 题、资产 1 张、无警告、题干占位保留、AI 标签文本框文字未污染任何题目（首题号前忽略规则）、4 选项完整。
+- 文档：IMPORT-FORMAT §10 样例表、DEVELOPMENT 矩阵（254）。
+
+**验证数据**：注入 @xmldom/xmldom（临时 Temp 目录，验证后删除）smoke **254/254**；无注入基线 207 不变。
+**意义**：关闭 F2 遗留中「真机 Word/WPS 打开验证」的 WPS 半边（WPS 可打开我方 docx 且我方解析器吃 WPS 重写文档）；Word 客户端仍待人工。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·

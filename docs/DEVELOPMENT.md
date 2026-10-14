@@ -15,14 +15,14 @@ node scripts/serve.mjs        # http://localhost:8777
 - Node 环境无内置 `DOMParser`，跑 xlsx/docx 解析断言时可仅测试注入（不进入运行时）：
 
 ```bash
-QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   # 207 → 247 项（xlsx 多表 + docx 含图仅在注入路径验证）
+QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   # 207 → 254 项（xlsx 多表 + docx 含图 + WPS 回环仅在注入路径验证）
 ```
 
 ## 2. 测试矩阵（有数据才算做完）
 
 | 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **207**（注入 DOMParser 时 **247**） | 六题型判分（含不定项少选半分）、内置 18 题样例含 3 道不定项回归、难度/标签、xlsx/docx 解析、**DOCX 内嵌图片（rels/media→asset 占位、IDB 内存驱动入库、去重、缺 rId 警告）**、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
+| `scripts/smoke-test.mjs` | **207**（注入 DOMParser 时 **254**） | 六题型判分（含不定项少选半分）、内置 18 题样例含 3 道不定项回归、难度/标签、xlsx/docx 解析、**DOCX 内嵌图片（rels/media→asset 占位、IDB 内存驱动入库、去重、缺 rId 警告、真机 WPS 回环样本）**、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
 | `scripts/exporter.test.mjs` | **136** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、538 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
 | `scripts/editor.test.mjs` | **29** | `buildQuestion` 纯函数、增删改 |

@@ -588,6 +588,22 @@ if (!hasDomParser) {
     ok(brokenRes.questions[0].question.indexOf('asset:') < 0, 'DOCX 缺图：题面无占位残留');
     ok(brokenRes.warnings.some((w) => w.indexOf('1 张内嵌图片') >= 0), 'DOCX 缺图：警告 1 张图片缺失');
     eq(brokenRes.assetCount, 0, 'DOCX 缺图：无资产写入');
+
+    // 真机 WPS 回环：WPS 打开含图 docx 后另存，会重写 DrawingML 并插入
+    // 「含 AI 生成」文本框形状（wps:wsp，无 a:blip）；解析必须不受影响
+    QB.Assets.useDriver(QB.Assets.memoryDriver());
+    const wpsBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-文档导入-WPS回环.docx'));
+    const wpsEntries = await QB.ZipReader.readEntries(toArrayBuffer(wpsBuf));
+    ok(!!wpsEntries['word/media/image1.png'], 'WPS 回环：原始 PNG 仍在包内');
+    const wpsRes = await QB.DocxImporter.parse({ arrayBuffer: toArrayBuffer(wpsBuf), fileName: 'WPS回环.docx' });
+    eq(wpsRes.questions.length, 2, 'WPS 回环：仍解析 2 题');
+    eq(wpsRes.assetCount, 1, 'WPS 回环：图片资产 1 张');
+    eq(wpsRes.warnings.length, 0, 'WPS 回环：无警告');
+    ok(wpsRes.questions[0].question.indexOf('![](asset:') >= 0, 'WPS 回环：题干图片占位保留');
+    ok(wpsRes.questions.every((q) => q.question.indexOf('AI') < 0 && q.question.indexOf('含 AI 生成') < 0),
+      'WPS 回环：AI 标签文本框文字未污染题目');
+    ok(wpsRes.questions[0].options.length === 4, 'WPS 回环：选项 4 个完整');
+    QB.Assets.useDriver(null);
   } finally {
     QB.Assets.useDriver(null); // 恢复默认 IDB 驱动，避免影响后续套件逻辑
   }
