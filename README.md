@@ -14,8 +14,8 @@
 - **图片题**：题干/选项/解析可插图，图片字节存 **IndexedDB**（不占 5MB localStorage 配额、内容哈希去重、JPEG 自动压缩）；带图题库以 **.qbk 题库包**（stored ZIP）双向迁移，全量备份在有图时自动打包为 .qfbk，缺图有警告、删图可回收。
 - **题目 CRUD**：题库内可视化新增 / 编辑 / 单删 / 勾选批删，按题型/难度/标签/关键词组合筛选、分页浏览。
 - **多题库**：新建 / 重命名 / 删除（级联）/ 切换，题目与用户数据按题库隔离。
-- **批量导入**：**题库包(.qbk，含图片)**、JSON、CSV/TSV、Markdown(.md)、Excel(.xlsx，**多工作表自动合并**)、Word(.docx，**含内嵌图片提取**) —— 全部**原生解析，零第三方库**；Markdown 与导出格式互通、可往返；支持**粘贴文本**、**文件拖拽**、**网络地址（URL）导入**（快照落本地、可按 checksum 刷新合并，8MB/15s/CORS 约束），题库带来源徽章。
-- **多格式导出**：题库 / 错题本 / 收藏夹可导出为 **题库包(.qbk，含图片)**、JSON、CSV、**Excel(.xlsx)**、**Word(.docx)**、Markdown、TXT —— 六者可再次导入往返；kind × format 正交注册表，二进制经原生 ZipWriter（stored + CRC32）零依赖打包。
+- **批量导入**：**题库包(.qbk，含图片)**、JSON、CSV/TSV、Markdown(.md)、Excel(.xlsx，**多工作表自动合并**)、Word(.docx，**含内嵌图片提取**) —— 全部**原生解析，零第三方库**；Markdown 与导出格式互通、可往返；**材料题（综合题）五种文本格式均可无损往返**（MD/DOCX 行式材料块、CSV/XLSX「材料/小问」多行块）；支持**粘贴文本**、**文件拖拽**、**网络地址（URL）导入**（快照落本地、可按 checksum 刷新合并，8MB/15s/CORS 约束），题库带来源徽章。
+- **多格式导出**：题库 / 错题本 / 收藏夹可导出为 **题库包(.qbk，含图片)**、JSON、CSV、**Excel(.xlsx)**、**Word(.docx)**、Markdown、TXT —— 六者可再次导入往返；kind × format 正交注册表，二进制经原生 ZipWriter（stored + CRC32）零依赖打包；CSV 仅在含材料题时追加两列，普通题库表头零变化。
 - **选项乱序**：练习/考试时单选/多选/不定项选项随机排列、答案自动重映射（只影响当次作答，不改库存数据）。
 - **组卷蓝图**：按「题型 × 分类 × 难度区间 × 数量」精确抽题，题量不足时给出缺口明细；题目顺序与选项乱序均可单场开关，支持练习/考试两种落位。
 - **刷题功能**：练习模式、考试模式（计时/交卷/自动交卷、切出页面次数记录、交卷前未答/半对明细确认）、答题卡跳转与未答确认、随机出题、**章节顺序练**（按分类保持题序）。
@@ -87,9 +87,9 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 8777） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（295 项，含材料题综合题、xlsx 多工作表/docx 含图/WPS 回环；零外部依赖） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（396 项，含材料题 M1/M2 五格式往返、xlsx 多工作表/docx 含图/WPS 回环；零外部依赖） |
 | `node scripts/xml-lite.test.mjs` | 自研极简 XML 解析器测试（39 项断言：结构/实体/命名空间/CDATA/畸形报错） |
-| `node scripts/exporter.test.mjs` | 导出功能单元测试（136 项断言，六题型/转义/难度标签列/Markdown 往返/历史记录四格式） |
+| `node scripts/exporter.test.mjs` | 导出功能单元测试（154 项断言，六题型/转义/难度标签列/材料题五格式分流/Markdown 往返/历史记录四格式） |
 | `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/538 题双格式全量判分自洽） |
 | `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
 | `node scripts/rich-text.test.mjs` | 富文本渲染器测试（45 项断言：转义防注入、上下标、图片占位、collectAssets、hydrate 假 DOM、光标插入） |
@@ -103,18 +103,18 @@ qb/
 | `node scripts/sync-dav.test.mjs` | WebDAV 云备份测试（32 项断言：配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/404） |
 | `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源 + FSRS Worker 资源校验（29 项断言） |
 | `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出 的耗时与内存） |
-| `python scripts/gen_fixtures.py` | 重新生成 xlsx / docx 样例（需 openpyxl） |
+| `python scripts/gen_fixtures.py` | 重新生成 xlsx / docx 样例（需 openpyxl）；`--docx-image` 含图 docx、`--material-md` 材料 MD/DOCX、`--material-csv` 材料 CSV/XLSX |
 
 xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖），Node 直接跑全部断言，无需安装任何包。
 
 **实测数据（Node v24.14.0，2026-10-14 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
-- 15 个逻辑层测试套件 **2050 / 2050 通过**（UTC / UTC+8 双时区实跑）：冒烟 **295**、XML 解析器 **39**、导出 136、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **65**、**FSRS 优化器 77**、SRS **39**、备份 15、**WebDAV 32**、PWA 29。
-- 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
+- 15 个逻辑层测试套件 **2169 / 2169 通过**（UTC / UTC+8 双时区实跑）：冒烟 **396**、XML 解析器 **39**、导出 154、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **65**、**FSRS 优化器 77**、SRS **39**、备份 15、**WebDAV 32**、PWA 29。
+- 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、**材料题 M1 判分聚合 + M2 五格式（MD/DOCX/CSV/XLSX/TXT）往返黄金断言**、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返（普通路径零回归）、题库隔离与级联删除、答题卡跳转。
 - FSRS 优化器：以 mulberry32 + 伯努利模拟的合成评分日志（420 卡 × 4 次复习 = 1260 个相邻评分样本，含 140 次「又忘了」）验证有效性——当真权重相对默认值扰动 ±25% 时，训练后 logloss 0.3440 < 默认权重 0.3473（改善约 0.97%，超过 0.2% 采纳门控）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果确定一致。套件耗时约 2.6s。
 - Office 导出：538 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验（539 行 × 16 列）。
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
-- 首屏静态体积（index.html + css + 全部 js + sw/manifest/icon，含 FSRS 训练 Worker，共 58 个文件/53 个 js，gzip -9 实测）：**135.6 KB gzip / 382.6 KB raw**（图片字节存 IndexedDB，不计入首屏包）。
-- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 1.81ms、落库 1.78ms、检索 0.66ms、50 题整卷判分 0.09ms、538 题乱序 0.64ms、文本四格式导出 3.24ms、**XLSX 构建 7.36ms（665 KB）**、**DOCX 构建 2.90ms（258 KB）**、Markdown 538 题再解析 3.40ms。
+- 首屏静态体积（index.html + css + 全部 js + sw/manifest/icon，含 FSRS 训练 Worker，共 58 个文件/53 个 js，gzip -9 实测）：**137.6 KB gzip / 398.8 KB raw**（M2 较 M1 +2.0 KB gzip；图片字节存 IndexedDB，不计入首屏包）。
+- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次，M2 后实测）：JSON 解析 1.73ms、落库 2.31ms、检索 0.64ms、50 题整卷判分 0.11ms、538 题乱序 0.57ms、文本四格式导出 3.19ms、**XLSX 构建 7.39ms（665 KB）**、**DOCX 构建 3.35ms（258 KB）**、Markdown 538 题再解析 3.34ms（与 M1 基线互有 ±0.4ms，均属运行噪声）。
 - CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 15 个套件，防止自然日/时间断言的时区回归。
 
 ## 远端仓库

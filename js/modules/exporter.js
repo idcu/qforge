@@ -114,20 +114,56 @@
   }
 
   const TABLE_HEADER = ['题型', '题目', '选项A', '选项B', '选项C', '选项D', '选项E', '选项F', '选项G', '选项H', '答案', '解析', '分类', '难度', '标签', '来源'];
+  // 仅当本次导出含材料题时追加「材料」「小问」两列（插在题型之后），
+  // 普通题库导出表头保持 16 列不变（M2-B 决策 1，见 SPEC-material-m2-plan §4/§8）。
+  const MATERIAL_TABLE_HEADER = ['题型', '材料', '小问', '题目', '选项A', '选项B', '选项C', '选项D', '选项E', '选项F', '选项G', '选项H', '答案', '解析', '分类', '难度', '标签', '来源'];
 
-  /** 单题 → 表格行（CSV 与 XLSX 共用，保证两格式内容一致、可同样往返） */
-  function entryToRow(e, withWrong) {
-    const q = e.question;
-    const row = new Array(16).fill('');
+  /**
+   * 普通题字段填入表格行（单行一题与材料小问共用同一映射）。
+   * @param {number} shift 列偏移：普通表 0；含材料两列时为 2（题干/选项/答案等整体右移）
+   */
+  function fillQuestionRow(row, q, shift) {
     row[0] = QB.typeLabel(q.type);
-    row[1] = q.question || '';
-    (q.options || []).slice(0, 8).forEach((o, i) => { row[2 + i] = o.text || ''; });
-    row[10] = answerLine(q);
-    row[11] = q.analysis || '';
-    row[12] = q.category || '';
-    row[13] = Number(q.difficulty) || 0;
-    row[14] = (q.tags || []).join('、');
-    row[15] = q.source || '';
+    row[1 + shift] = q.question || '';
+    (q.options || []).slice(0, 8).forEach((o, i) => { row[2 + shift + i] = o.text || ''; });
+    row[10 + shift] = answerLine(q);
+    row[11 + shift] = q.analysis || '';
+    row[12 + shift] = q.category || '';
+    row[13 + shift] = Number(q.difficulty) || 0;
+    row[14 + shift] = (q.tags || []).join('、');
+    row[15 + shift] = q.source || '';
+  }
+
+  /** 材料题 → 1 块首行 + N 小问行（shift=2 的 18 列布局；CSV 与 XLSX 共用） */
+  function materialToRows(e, withWrong) {
+    const q = e.question;
+    const rows = [];
+    const head = new Array(18).fill('');
+    head[0] = QB.typeLabel(q.type); // 材料题
+    head[1] = q.material || '';
+    head[3] = q.question || '';
+    head[13] = q.analysis || '';
+    head[14] = q.category || '';
+    head[15] = Number(q.difficulty) || 0;
+    head[16] = (q.tags || []).join('、');
+    head[17] = q.source || '';
+    if (withWrong) head.push(String((e.meta && e.meta.wrongCount) || 1));
+    rows.push(head);
+    (q.children || []).forEach((c) => {
+      const row = new Array(18).fill('');
+      fillQuestionRow(row, c, 2);
+      row[2] = String(rows.length); // 块首已占 1 行 → 小问序号 1..N
+      if (withWrong) row.push('');
+      rows.push(row);
+    });
+    return rows;
+  }
+
+  /** 单题 → 表格行（普通表 16 列；含材料表 18 列） */
+  function entryToRow(e, withMaterial, withWrong) {
+    const width = withMaterial ? 18 : 16;
+    const row = new Array(width).fill('');
+    fillQuestionRow(row, e.question, withMaterial ? 2 : 0);
     if (withWrong) row.push(String(e.meta.wrongCount || 1));
     return row;
   }
@@ -135,9 +171,17 @@
   /** 统一表格模型：第 1 行表头，其余数据行（CSV 构建与 XLSX 写入共用） */
   function toTable(payload) {
     const withWrong = payload.kind === 'wrong';
-    const header = TABLE_HEADER.slice();
+    const withMaterial = payload.entries.some((en) => en.question && en.question.type === 'material');
+    const header = (withMaterial ? MATERIAL_TABLE_HEADER : TABLE_HEADER).slice();
     if (withWrong) header.push('错误次数');
-    const rows = payload.entries.map((e) => entryToRow(e, withWrong));
+    const rows = [];
+    payload.entries.forEach((en) => {
+      if (withMaterial && en.question.type === 'material') {
+        materialToRows(en, withWrong).forEach((r) => rows.push(r));
+      } else {
+        rows.push(entryToRow(en, withMaterial, withWrong));
+      }
+    });
     return [header].concat(rows);
   }
 

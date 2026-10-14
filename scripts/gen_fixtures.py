@@ -165,6 +165,108 @@ def gen_material_docx(path):
     write_docx(path, MATERIAL_PLAIN_LINES)
 
 
+# ---------------- 材料题（M2-B）表格夹具 ----------------
+# 18 列：题型,材料,小问,题目,选项A..D,答案,解析,分类,难度,标签,来源
+# 与示例-材料题.json 同内容；1 块首 + 5 小问行 + 1 道块后普通题（验证收块边界）。
+MATERIAL_TABLE_ROWS = [
+    ['材料题',
+     '甲公司为增值税一般纳税人，2026 年 3 月购入一台不需安装的生产设备，'
+     '取得增值税专用发票注明价款 10000 元（不含税），另支付运输费 2000 元。设备当月投入使用。',
+     '', '根据上述资料，回答下列问题。', '', '', '', '', '',
+     '不需安装设备初始计量综合题。', '会计基础', '3', '综合题、固定资产', ''],
+    ['单选', '', '1', '（1）该设备的入账价值为（ ）元。', '10000', '12000', '11300', '13560',
+     'B', '不需安装设备入账价值=买价 10000+运输费 2000=12000 元。', '', '', '', ''],
+    ['不定项', '', '2', '（2）下列关于该业务的说法，正确的有（ ）。',
+     '运输费计入固定资产成本', '当月增加的固定资产当月不计提折旧', '增值税进项税额一律计入资产成本',
+     '设备投入使用后按确定的方法计提折旧', 'ABD', '一般纳税人可抵扣进项税不计入成本，C 错误。', '', '', '', ''],
+    ['判断', '', '3', '（3）不需安装的设备购入并达到可使用状态后直接计入“固定资产”科目。',
+     '', '', '', '', '正确', '不需安装，购入即达到预定可使用状态。', '', '', '', ''],
+    ['填空', '', '4', '（4）该设备买价为 ____ 元（不含税）。', '', '', '', '',
+     '10000', '专用发票注明不含税价款 10000 元。', '', '', '', ''],
+    ['简答', '', '5', '（5）简述运输费计入资产成本的理由。', '', '', '', '',
+     '运输费是使固定资产达到预定可使用状态前所发生的必要支出，按准则应计入固定资产成本。',
+     '考查外购固定资产初始计量口径。', '', '', '', ''],
+    ['单选', '', '', '材料块结束后的普通题，验证普通题行自动收尾材料块。',
+     '普通题行收尾', '仍在材料块内', '', '', 'A', '遇两列皆空的普通题行即关闭材料块。', '', '', '', ''],
+]
+MATERIAL_TABLE_HEADER = ['题型', '材料', '小问', '题目', '选项A', '选项B', '选项C', '选项D',
+                        '答案', '解析', '分类', '难度', '标签', '来源']
+
+
+def _csv_quote(v):
+    s = str(v)
+    return ('"' + s.replace('"', '""') + '"') if any(ch in s for ch in ',"\r\n') else s
+
+
+def gen_material_csv(path):
+    lines = [','.join(_csv_quote(v) for v in MATERIAL_TABLE_HEADER)]
+    lines += [','.join(_csv_quote(v) for v in row) for row in MATERIAL_TABLE_ROWS]
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\ufeff' + '\r\n'.join(lines) + '\r\n')  # UTF-8 BOM
+
+
+def gen_material_xlsx(path):
+    """材料表格 xlsx：优先 openpyxl（sharedStrings），缺失时回退 stdlib inlineStr 通用写入器"""
+    all_rows = [MATERIAL_TABLE_HEADER] + MATERIAL_TABLE_ROWS
+    try:
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '材料题'
+        for row in all_rows:
+            ws.append(row)
+        wb.save(path)
+        return 'openpyxl (sharedStrings)'
+    except Exception as e:
+        _write_xlsx_manual(path, all_rows)
+        return 'stdlib (inlineStr): %s' % e
+
+
+def _write_xlsx_manual(path, all_rows):
+    """通用 stdlib 最小 xlsx 写入器（inlineStr；任意列数二维表）"""
+    def col(i):
+        s = ''
+        i += 1
+        while i:
+            i, r = divmod(i - 1, 26)
+            s = chr(65 + r) + s
+        return s
+    rows_xml = []
+    for ri, row in enumerate(all_rows, start=1):
+        cells = ''.join(
+            '<c r="%s%d" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>'
+            % (col(ci), ri, esc(v)) for ci, v in enumerate(row))
+        rows_xml.append('<row r="%d">%s</row>' % (ri, cells))
+    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+             '<sheetData>%s</sheetData></worksheet>' % ''.join(rows_xml))
+    ct = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>'''
+    root_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>'''
+    wb = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+          '<sheets><sheet name="材料题" sheetId="1" r:id="rId1"/></sheets></workbook>')
+    wb_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>'''
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('[Content_Types].xml', ct)
+        z.writestr('_rels/.rels', root_rels)
+        z.writestr('xl/workbook.xml', wb)
+        z.writestr('xl/_rels/workbook.xml.rels', wb_rels)
+        z.writestr('xl/worksheets/sheet1.xml', sheet)
+
+
 DOCX_IMAGE_LINES = [
     ('1. （单选题）下图所示电路符号表示的元件是？', None),
     (None, 'IMAGE'),
@@ -327,6 +429,15 @@ def main():
             else:
                 gen_material_docx(p)
             print('%s  %d bytes' % (os.path.relpath(p), os.path.getsize(p)))
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == '--material-csv':
+        csvp = os.path.join(OUT, '示例-材料题.csv')
+        xlsxp = os.path.join(OUT, '示例-材料题.xlsx')
+        gen_material_csv(csvp)
+        via = gen_material_xlsx(xlsxp)
+        for p in (csvp, xlsxp):
+            print('%s  %d bytes' % (os.path.relpath(p), os.path.getsize(p)))
+        print('xlsx 生成方式:', via)
         return
     xlsx = os.path.join(OUT, '示例-表格导入.xlsx')
     docx = os.path.join(OUT, '示例-文档导入.docx')

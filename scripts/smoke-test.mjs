@@ -39,6 +39,23 @@ function eq(actual, expected, label) {
 }
 function section(t) { console.log('\n== ' + t + ' =='); }
 
+/** 材料题往返黄金断言（M2 共用）：小问数/各 type/各 answer/contentHash 全等，返回材料题 */
+function expectMaterialRoundTrip(qs, hashRef, tag) {
+  const mq = qs.find((q) => q.type === 'material');
+  ok(!!mq, tag + '：含 1 道材料题');
+  if (!mq) return mq;
+  eq(mq.children.length, 5, tag + '：5 个小问');
+  eq(JSON.stringify(mq.children.map((c) => c.type)),
+    JSON.stringify(['single', 'indefinite', 'judge', 'fill', 'essay']), tag + '：小问题型序列');
+  eq(mq.children[0].answer, 'B', tag + '：小问1 答案 B');
+  eq(mq.children[1].answer, 'ABD', tag + '：小问2 答案 ABD');
+  eq(mq.children[2].answer, '正确', tag + '：小问3 答案 正确');
+  eq((mq.children[3].blanks[0] || {}).answer, '10000', tag + '：小问4 填空答案 10000');
+  ok(mq.children[4].reference_answer.indexOf('必要支出') >= 0, tag + '：小问5 简答参考答案');
+  eq(QB.makeContentHash(mq), hashRef, tag + '：contentHash 与 JSON 路径相等');
+  return mq;
+}
+
 /* ================= 1. 答案规范化 / 判分 ================= */
 section('答案规范化与判分策略');
 eq(QB.normalizeAnswer(' Ａ Ｂ　', {}), 'ab', '全角/空格归一');
@@ -295,23 +312,6 @@ section('材料题 M2 行式格式（Markdown/DOCX）导入导出');
   const MQ = matParsed.questions[0];
   const H_JSON = QB.makeContentHash(MQ);
 
-  /** 材料题往返黄金断言：题量/小问数/各小问题型与答案/contentHash 全等 */
-  function expectMaterialRoundTrip(qs, hashRef, tag) {
-    const mq = qs.find((q) => q.type === 'material');
-    ok(!!mq, tag + '：含 1 道材料题');
-    if (!mq) return mq;
-    eq(mq.children.length, 5, tag + '：5 个小问');
-    eq(JSON.stringify(mq.children.map((c) => c.type)),
-      JSON.stringify(['single', 'indefinite', 'judge', 'fill', 'essay']), tag + '：小问题型序列');
-    eq(mq.children[0].answer, 'B', tag + '：小问1 答案 B');
-    eq(mq.children[1].answer, 'ABD', tag + '：小问2 答案 ABD');
-    eq(mq.children[2].answer, '正确', tag + '：小问3 答案 正确');
-    eq((mq.children[3].blanks[0] || {}).answer, '10000', tag + '：小问4 填空答案 10000');
-    ok(mq.children[4].reference_answer.indexOf('必要支出') >= 0, tag + '：小问5 简答参考答案');
-    eq(QB.makeContentHash(mq), hashRef, tag + '：contentHash 与 JSON 路径相等');
-    return mq;
-  }
-
   /* ---- Markdown 夹具（真实文件，含材料块→普通题边界） ---- */
   const mdText = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-材料题.md'), 'utf8');
   let mdRes;
@@ -377,6 +377,98 @@ section('材料题 M2 行式格式（Markdown/DOCX）导入导出');
   ok(lenient.warnings.some((w) => w.indexOf('材料') >= 0), '容错：无「材料：」标记给警告');
   ok(lenient.warnings.some((w) => w.indexOf('不连续') >= 0), '容错：小问序号不连续给警告');
   eq(lenient.questions[0].children.length, 2, '容错：2 个小问');
+}
+
+/* ================= 2.10 材料题 M2-B：表格材料块（CSV/XLSX）往返 ================= */
+section('材料题 M2-B 表格材料块（CSV/XLSX）导入导出');
+{
+  const matParsed = await QB.JsonImporter.parse({
+    text: fs.readFileSync(path.join(QB_DIR, 'samples', '示例-材料题.json'), 'utf8'), fileName: 'x.json'
+  });
+  const MQ = matParsed.questions[0];
+  const H_JSON = QB.makeContentHash(MQ);
+
+  // 表头别名
+  eq(QB.Adapters.matchHeader('共享材料'), 'material', '表头别名：共享材料 → material');
+  eq(QB.Adapters.matchHeader('小问序号'), 'childNo', '表头别名：小问序号 → childNo');
+  eq(QB.Adapters.matchHeader('passage'), 'material', '表头别名：passage → material');
+
+  /* ---- CSV 夹具 ---- */
+  const csvRes = await QB.CsvImporter.parse({
+    text: fs.readFileSync(path.join(QB_DIR, 'samples', '示例-材料题.csv'), 'utf8'), fileName: '示例-材料题.csv'
+  });
+  eq(csvRes.questions.length, 2, '材料 CSV：2 题（材料 + 边界普通题）');
+  eq(csvRes.warnings.length, 0, '材料 CSV：零警告');
+  const csvMq = expectMaterialRoundTrip(csvRes.questions, H_JSON, '材料 CSV');
+  eq(csvMq.category, '会计基础', '材料 CSV：父题分类取块首行');
+  eq(csvMq.difficulty, 3, '材料 CSV：父题难度取块首行');
+  eq(JSON.stringify(csvMq.tags), JSON.stringify(['综合题', '固定资产']), '材料 CSV：父题标签取块首行');
+  eq(csvRes.questions[1].answer, 'A', '材料 CSV：块后普通题答案 A（已收块）');
+
+  /* ---- XLSX 夹具（openpyxl sharedStrings） ---- */
+  const mxBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-材料题.xlsx'));
+  const mxRes = await QB.XlsxImporter.parse({ arrayBuffer: toArrayBuffer(mxBuf), fileName: '示例-材料题.xlsx' });
+  eq(mxRes.questions.length, 2, '材料 XLSX：2 题');
+  eq(mxRes.warnings.length, 0, '材料 XLSX：零警告');
+  expectMaterialRoundTrip(mxRes.questions, H_JSON, '材料 XLSX');
+
+  /* ---- 导出：条件表头（有材料 18 列 / 纯普通 16 列）+ 多行展开 ---- */
+  const normalQ = QB.Adapters.toStandard({
+    type: 'single', question: '混合载荷普通题', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }).question;
+  const mixedPayload = { kind: 'bank', bank: { name: '材料表格往返' }, entries: [{ question: MQ, meta: {} }, { question: normalQ, meta: {} }] };
+  const mixedTable = QB.Exporters._toTable(mixedPayload);
+  eq(mixedTable[0].length, 18, '含材料题：表头 18 列');
+  eq(mixedTable[0][1], '材料', '含材料题：追加「材料」列');
+  eq(mixedTable[0][2], '小问', '含材料题：追加「小问」列');
+  eq(mixedTable.length - 1, 7, '含材料题：1 块首 + 5 小问 + 1 普通 = 7 数据行');
+  eq(mixedTable[1][0], '材料题', '块首行题型=材料题');
+  ok(mixedTable[1][1].indexOf('甲公司') === 0, '块首行材料列含共享材料');
+  eq(mixedTable[2][2], '1', '第 1 小问行序号=1');
+  eq(mixedTable[6][2], '5', '第 5 小问行序号=5');
+  eq(mixedTable[7][2], '', '块后普通题小问列为空');
+  eq(mixedTable[7][3], normalQ.question, '块后普通题题目列正确');
+  const normalTable = QB.Exporters._toTable({
+    kind: 'bank', bank: { name: '纯普通' }, entries: [{ question: normalQ, meta: {} }]
+  });
+  eq(normalTable[0].length, 16, '纯普通题库：表头仍 16 列（决策 1，零变化）');
+  eq(normalTable[0][1], '题目', '纯普通题库：第 2 列仍是题目');
+
+  /* ---- CSV / XLSX 导出 → 再导入 hash 相等 ---- */
+  const csvBack = await QB.CsvImporter.parse({
+    text: QB.Exporters.buildContent('csv', mixedPayload).content, fileName: 'rt.csv'
+  });
+  eq(csvBack.questions.length, 2, 'CSV 导出→再导入：2 题');
+  eq(QB.makeContentHash(csvBack.questions[0]), H_JSON, 'CSV 导出→再导入：材料 hash 相等');
+  eq(QB.makeContentHash(csvBack.questions[1]), QB.makeContentHash(normalQ), 'CSV 导出→再导入：普通题 hash 相等');
+
+  const xBuilt = QB.Exporters.buildContent('xlsx', mixedPayload);
+  const xBack = await QB.XlsxImporter.parse({ arrayBuffer: toArrayBuffer(Buffer.from(xBuilt.content)), fileName: 'rt.xlsx' });
+  eq(xBack.questions.length, 2, 'XLSX 导出→再导入：2 题');
+  eq(QB.makeContentHash(xBack.questions[0]), H_JSON, 'XLSX 导出→再导入：材料 hash 相等');
+  eq(QB.makeContentHash(xBack.questions[1]), QB.makeContentHash(normalQ), 'XLSX 导出→再导入：普通题 hash 相等');
+
+  /* ---- 容错：小问行误带元数据给警告；块外悬空小问号警告并按普通题处理 ---- */
+  const warnRes = QB.Adapters.tableToQuestions([
+    ['题型', '材料', '小问', '题目', '选项A', '选项B', '答案', '分类'],
+    ['材料题', '共享材料', '', '引导语', '', '', '', '父分类'],
+    ['判断', '', '1', '第一小问', '', '', '正确', '小问误带分类'],
+    ['判断', '', '2', '第二小问', '', '', '错误', ''],
+    ['单选', '', '', '收块普通题', '甲', '乙', 'A', ''],
+    ['判断', '', '9', '块外悬空小问号', '', '', '错误', '']
+  ]);
+  eq(warnRes.questions.length, 3, '容错：材料块 + 收块普通题 + 悬空行共 3 题');
+  ok(warnRes.warnings.some((w) => w.indexOf('分类/难度/标签已忽略') >= 0), '容错：小问行元数据忽略警告');
+  ok(warnRes.warnings.some((w) => w.indexOf('材料块之外') >= 0), '容错：悬空小问号警告');
+
+  /* ---- 旧表（无两列）路径零变化 ---- */
+  const legacy = QB.Adapters.tableToQuestions([
+    ['题型', '题目', '答案'],
+    ['判断', '旧表判断题', '正确']
+  ]);
+  eq(legacy.questions.length, 1, '旧表：1 题');
+  eq(legacy.questions[0].answer, '正确', '旧表：路径与答案不变');
+  eq(legacy.warnings.length, 0, '旧表：零警告');
 }
 
 section('真实数据导入（541 题）');

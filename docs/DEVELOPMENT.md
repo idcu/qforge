@@ -18,9 +18,9 @@ node scripts/serve.mjs        # http://localhost:8777
 
 | 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **343** | 六题型判分（含不定项少选半分）、**材料题 M1（模型校验/语义归一哈希/递归判分聚合/小问自评/引擎得分/乱序递归/蓝图单位/考试计错，41 项）**、**材料题 M2-A（MD/DOCX 夹具往返黄金断言、导出→再导入 hash 相等、材料块收块边界、小问号/裸词防误判/容错警告，48 项）**、内置 18 题样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 538 题往返、多题库隔离/级联删除、答题卡 |
+| `scripts/smoke-test.mjs` | **396** | 六题型判分（含不定项少选半分）、**材料题 M1（41 项）**、**材料题 M2-A（MD/DOCX 夹具往返黄金断言、导出→再导入 hash 相等、材料块收块边界、小问号/裸词防误判/容错警告，48 项）**、**材料题 M2-B（CSV/XLSX 夹具往返、18 列条件表头与多行展开、导出→再导入 hash、悬空小问/元数据忽略警告、旧表零变化，53 项）**、内置 18 题样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 538 题往返、多题库隔离/级联删除、答题卡 |
 | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
-| `scripts/exporter.test.mjs` | **136** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
+| `scripts/exporter.test.mjs` | **154** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、**材料题五格式分流/18 列多行块/三格式 hash 往返（18 项）**、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、538 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
 | `scripts/editor.test.mjs` | **29** | `buildQuestion` 纯函数、增删改 |
 | `scripts/rich-text.test.mjs` | **45** | 转义防注入、上下标、图片占位、collectAssets、hydrate 假 DOM、光标插入 |
@@ -33,7 +33,7 @@ node scripts/serve.mjs        # http://localhost:8777
 | `scripts/backup.test.mjs` | **15** | 全量备份、覆盖/合并恢复 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **29** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式 |
-| **合计** | **2098 / 2098 通过 · 15 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2169 / 2169 通过 · 15 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
@@ -86,6 +86,8 @@ bench 全程 heapUsed：5.26 → 24.00 MB（**+18.74 MB**，含全部夹具）�
 在 `js/importers/` 写 parser（`{exts:[...], parse(input)}`）并在 `registry.js` register；文本类行式切题**必须复用** `LineParser`，表格类**必须复用** `Adapters.tableToQuestions`，禁止复制正则。内嵌二进制（图片）**必须复用** `QB.Assets.idFor/putEntries` 内容寻址管线（参考 docx-importer 与 qbk-importer），占位统一为 `![](asset:<id>)`。规范见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md)。
 
 > 材料题行式格式（M2-A）只在 `LineParser.parseLines` 的材料块状态机实现一次（`[材料题]` 强制括号开块、`材料：`、`(i)/1-1` 小问、顶层题号收块），DOCX 自动复用；导出端 MD/DOCX/TXT 共用 `exporter.js` 的 `materialBlock` 内容源，仅样式回调不同。新增行式格式禁止再写一套材料切分。
+>
+> 材料题表格格式（M2-B）只在 `Adapters.tableToQuestions` 块扫描实现一次（材料/小问两列，块首+小问归组），CSV/XLSX 共用；导出端条件表头（仅含材料题追加两列）与多行展开在 `exporter.js` 的 `toTable/materialToRows`，禁止另写归组逻辑。
 
 ### 5.3 加导出格式 / 导出对象
 

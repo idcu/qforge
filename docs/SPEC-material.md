@@ -1,7 +1,7 @@
 # F4 材料题（综合题/组合题）规格（评审稿）
 
-> 状态：5 个决策点已按推荐全部确认（见 [SPEC-material-decisions.md](SPEC-material-decisions.md)）；**M1 已实施（2026-10-14）**，**M2-A 行式材料块（Markdown/DOCX/TXT）已实施（2026-10-14）**，M2-B（CSV/XLSX 多行块）/M3/M4 待开工。本文档是后续里程碑的实现依据。
-> 适用版本：FSRS-4.5 / 七题型（六普通题型 + material）/ 代码基线 15 套件 2098 断言（M2-A 后）。
+> 状态：5 个决策点已按推荐全部确认（见 [SPEC-material-decisions.md](SPEC-material-decisions.md)）；**M1 已实施（2026-10-14）**，**M2 文本格式导入导出（MD/DOCX/TXT + CSV/XLSX）已全部实施（2026-10-14）**，M3/M4 待开工。本文档是后续里程碑的实现依据。
+> 适用版本：FSRS-4.5 / 七题型（六普通题型 + material）/ 代码基线 15 套件 2169 断言（M2 后）。
 >
 > **M1 实施相对本稿的两处落地修正**（以代码为准）：
 > 1. contentHash 子问题归一采用**选项文本排序 + 答案取选中文本集合**（而非原始 options/answer 字段），使练习时选项乱序后材料题去重键保持稳定（§2.2 已更新精神）。
@@ -192,7 +192,7 @@ DOCX 段落映射与之一一对应（材料段/子问题段/选项段）；DOCX
 | **M1 模型与判分** ✅ 2026-10-14 | type/校验/contentHash（语义归一）/递归判分+aggregateMaterial/引擎整题状态与 childIndex API/selfAssess 重算/gradeAll 计错/蓝图单位/JSON 夹具往返/做题 UI（材料卡+小问卡+总评横幅+结果回顾）；编辑器不开放（类型下拉排除 material） | smoke 材料题块 41 项断言，15 套件 2050 全绿 |
 | **M2 文本格式** 📋 [开发计划](SPEC-material-m2-plan.md) | LineParser 材料块（MD/DOCX）、CSV/XLSX 多行约定、导出四格式、夹具 | 三格式往返 + 含图 DOCX 材料题 |
 | └ M2-A 行式材料块 ✅ 2026-10-14 | LineParser 材料块状态机（`[材料题]` 强制括号/`材料：`/`(i)`+`1-1` 容错/顶层题号收块）、exporter MD/DOCX/TXT 分流（公共 `materialBlock`）、`示例-材料题.md/.docx` 夹具、父题元数据归位 | smoke +48 项（343）；MD/DOCX 导出→再导入 contentHash 与 JSON 路径相等（84f2e254）；538 题普通路径零回归 |
-| └ M2-B 表格材料块 ⏳ | `tableToQuestions` 多行归组（材料/小问两列，含材料题才追加表头）、CSV/XLSX 导出展开、夹具 | CSV/XLSX 往返 hash 相等；普通表头不变 |
+| └ M2-B 表格材料块 ✅ 2026-10-14 | `tableToQuestions` 块扫描（材料/小问两列，块首/小问/收块/悬空四类行，提取公共 `rowToRaw`）、CSV/XLSX 导出条件追加两列（16→18 列）与 `materialToRows` 多行展开、`示例-材料题.csv/.xlsx` 夹具 | CSV/XLSX 往返 hash 相等（84f2e254）；纯普通题库表头 16 列零变化；旧表路径零回归 |
 | **M3 管理 UI** | 嵌套编辑器、做题/结果/列表/统计完整 UI | 人工 + 逻辑断言 |
 | **M4 打磨** | 小问乱序开关、每卷材料题上限、子问题权重（若评审通过 §10） | 蓝图/试卷断言 |
 

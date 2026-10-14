@@ -74,7 +74,7 @@
 ### 3.4 导入器（importers）
 | 文件 | 职责 |
 | --- | --- |
-| `importers/adapters.js` | **公共适配器**：`toStandard`/`sniffAndAdapt`/`adaptArray`/`adaptNested`/`tableToQuestions`/`validateQuestions`；题型映射、表头别名 |
+| `importers/adapters.js` | **公共适配器**：`toStandard`/`sniffAndAdapt`/`adaptArray`/`adaptNested`/`tableToQuestions`/`validateQuestions`；题型映射、表头别名；M2-B 起 `tableToQuestions` 含材料多行块扫描（材料/小问两列，块首+小问归组，旧表零变化） |
 | `importers/line-parser.js` | **行式切题公共解析器**：`parseLines`/`blocksToQuestions`（题号/选项/答案/解析/分类标记识别 + 题型推断），docx 与 md 共用；M2 起含材料块状态机（`[材料题]` 开块 / `材料：` / `(i)` 小问 / 顶层题号收块，输出 `isMaterial` 块交 `Adapters.toStandard` 递归） |
 | `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX |
 | `importers/qbk-importer.js` | `.qbk` 题库包：`Qbk.parseBundle` 解包 → 复用 JsonImporter → 资产写 QB.Assets（缺图警告） |

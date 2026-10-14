@@ -313,7 +313,9 @@
     reference: ['参考答案', 'reference', 'reference_answer'],
     blanks: ['填空', '空', 'blanks'],
     difficulty: ['难度', 'difficulty', 'level'],
-    tags: ['标签', '知识点', '关键词', 'tags', 'keywords']
+    tags: ['标签', '知识点', '关键词', 'tags', 'keywords'],
+    material: ['材料', '共享材料', '材料题', '阅读材料', 'material', 'passage'],
+    childNo: ['小问', '小问序号', '小题', '子问题', 'child']
   };
 
   function matchHeader(name) {
@@ -331,6 +333,10 @@
   /**
    * 表格行（二维数组）→ 标准题目[]
    * 表头需含「题目」列；选项可拆成「选项A..H」多列，或合并在一列。
+   * 材料题（M2-B）：表头含「材料」「小问」两列时启用多行块——
+   *   块首行（材料列非空或题型=材料题）+ N 个带「小问」序号的小问行，
+   *   遇下一道普通题行（两列皆空）或新块首行收块（见 SPEC-material-m2-plan §4）。
+   *   旧表无此两列时完全走单行一题路径，行为零变化。
    */
   function tableToQuestions(rows) {
     const warnings = [];
@@ -344,40 +350,111 @@
     if (colIndex.question === undefined) {
       throw new Error('未找到「题目/题干」列，请检查表头');
     }
+    const hasMaterialCol = colIndex.material !== undefined;
+    const hasChildCol = colIndex.childNo !== undefined;
+
+    /** 单元格取值（按逻辑列名；缺列/空单元格 → ''） */
+    function cell(row, key) {
+      const idx = colIndex[key];
+      if (idx === undefined) return '';
+      return String(row[idx] === undefined || row[idx] === null ? '' : row[idx]).trim();
+    }
+
+    /** 数据行 → 普通题 raw（单行一题与材料小问共用，禁止两套字段映射） */
+    function rowToRaw(row) {
+      const raw = {
+        question: cell(row, 'question'),
+        type: cell(row, 'type'),
+        answer: cell(row, 'answer'),
+        analysis: cell(row, 'analysis'),
+        category: cell(row, 'category'),
+        source: cell(row, 'source'),
+        reference_answer: cell(row, 'reference'),
+        difficulty: cell(row, 'difficulty'),
+        tags: cell(row, 'tags')
+      };
+      const opts = [];
+      Object.keys(colIndex).forEach((k) => {
+        if (k.indexOf('option:') === 0) {
+          const val = cell(row, k);
+          if (val !== '') opts.push({ letter: k.slice(7), text: val });
+        }
+      });
+      if (opts.length) raw.options = opts;
+      return raw;
+    }
+
+    // 材料块收集状态：null=普通模式
+    let mt = null;
+    const closeMaterial = () => {
+      if (!mt) return;
+      const res = toStandard({
+        type: 'material', material: mt.material, question: mt.question,
+        analysis: mt.analysis, category: mt.category, difficulty: mt.difficulty,
+        tags: mt.tags, children: mt.childrenRaw
+      });
+      res.warnings.forEach((w) => warnings.push('第 ' + mt.headRow + ' 行（材料块）：' + w));
+      questions.push(res.question);
+      mt = null;
+    };
 
     for (let r = 1; r < rows.length; r++) {
       const row = rows[r];
       if (!row || row.every((c) => String(c === undefined ? '' : c).trim() === '')) continue;
 
-      const raw = {
-        question: row[colIndex.question],
-        type: colIndex.type !== undefined ? row[colIndex.type] : '',
-        answer: colIndex.answer !== undefined ? row[colIndex.answer] : '',
-        analysis: colIndex.analysis !== undefined ? row[colIndex.analysis] : '',
-        category: colIndex.category !== undefined ? row[colIndex.category] : '',
-        source: colIndex.source !== undefined ? row[colIndex.source] : '',
-        reference_answer: colIndex.reference !== undefined ? row[colIndex.reference] : '',
-        difficulty: colIndex.difficulty !== undefined ? row[colIndex.difficulty] : '',
-        tags: colIndex.tags !== undefined ? row[colIndex.tags] : ''
-      };
+      // 无材料/小问列：旧表路径零变化
+      if (!hasMaterialCol && !hasChildCol) {
+        const res = toStandard(rowToRaw(row));
+        res.warnings.forEach((w) => warnings.push('第 ' + r + ' 行：' + w));
+        questions.push(res.question);
+        continue;
+      }
 
-      // 选项列
-      const opts = [];
-      Object.keys(colIndex).forEach((k) => {
-        if (k.indexOf('option:') === 0) {
-          const letter = k.slice(7);
-          const val = row[colIndex[k]];
-          if (String(val === undefined ? '' : val).trim() !== '') {
-            opts.push({ letter: letter, text: String(val).trim() });
-          }
+      const materialText = cell(row, 'material');
+      const childNo = hasChildCol ? cell(row, 'childNo') : '';
+      const typeNorm = normalizeType(cell(row, 'type'), '');
+
+      // 1) 块首行：材料列非空，或题型显式材料题 → 先收旧块再开新块
+      if (materialText !== '' || typeNorm === 'material') {
+        closeMaterial();
+        const head = rowToRaw(row);
+        mt = {
+          material: materialText,
+          question: head.question,
+          analysis: head.analysis,
+          category: head.category,
+          difficulty: head.difficulty,
+          tags: head.tags,
+          childrenRaw: [],
+          headRow: r
+        };
+        if (childNo !== '') warnings.push('第 ' + r + ' 行：材料块首行的「小问」列应为空，已忽略该值');
+        continue;
+      }
+
+      // 2) 小问行：仅材料块内且「小问」列显式带序号才归组（防止吞掉块后普通题）
+      if (mt && childNo !== '') {
+        const child = rowToRaw(row);
+        if (child.category || child.difficulty || child.tags) {
+          warnings.push('第 ' + r + ' 行：小问行的分类/难度/标签已忽略（子问题继承父题）');
         }
-      });
-      if (opts.length) raw.options = opts;
+        child.category = ''; child.difficulty = ''; child.tags = '';
+        mt.childrenRaw.push(child);
+        continue;
+      }
 
-      const res = toStandard(raw);
+      // 3) 悬空小问行（块外带序号）→ 警告后按普通题处理
+      if (!mt && childNo !== '') {
+        warnings.push('第 ' + r + ' 行：「小问」序号出现在材料块之外，已按普通题处理（请检查材料列与块首行）');
+      }
+
+      // 4) 普通题行：关闭已收集的材料块，本行按单行一题处理
+      closeMaterial();
+      const res = toStandard(rowToRaw(row));
       res.warnings.forEach((w) => warnings.push('第 ' + r + ' 行：' + w));
       questions.push(res.question);
     }
+    closeMaterial();
 
     return { questions, warnings, format: 'table' };
   }
