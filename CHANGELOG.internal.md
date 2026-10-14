@@ -951,6 +951,58 @@
 
 ---
 
+## a85deaa · feat(material): M2-A 行式材料块（Markdown/DOCX/TXT）导入导出往返
+
+**核心改动**
+- `line-parser.js` 材料块状态机：`RE_MATERIAL_PREFIX`（材料：）、`RE_CHILD_Q`/`RE_CHILD_Q_DASHED`（(1) 与容错 1-1）、`matchChildStart`；顶层题号内联**强制括号** `[材料题]` 开块（新增 `RE_TYPE_MATERIAL_INLINE`，裸词「材料」不命中——修掉了把「购入材料一批」误开块的隐患）、跨行材料收集、父题 难度/标签/分类/解析 在首个小问前归位、小问内元数据行忽略、下一个顶层题号收块并支持连续材料题；`blocksToQuestions` 材料分支交 `Adapters.toStandard({type:'material',children: blockToRaw…})` 递归，双路警告聚合。普通题路径无 `[材料题]` 不进入新材料逻辑。
+- `exporter.js` 新增公共 `materialBlock(e, idx, sx)` 内容源（head/material/meta/childHead/option/answer 样式回调），`buildMarkdown`/`toDocLines`/`buildTXT` 三格式分流；父题空 options/answer 在分流处 return，不再输出空行；引导行用完整题型名 `[材料题]`，小问统一 `(i)`（即便导入容错 1-1）；错题 wrongCount 行落在最后小问后（不影响 contentHash）。
+- 夹具 `samples/示例-材料题.md`/`示例-材料题.docx`（`gen_fixtures.py --material-md`，提取公共 `write_docx`；材料块 + 1 道边界普通题）。
+- 文档：IMPORT-FORMAT §5.2/§6.1、EXPORT-FORMAT §2.3、ARCHITECTURE、user-guide、DEVELOPMENT、SPEC §9、M2 计划状态。
+
+**验证数据（2026-10-14，Node v24.14.0）**
+- smoke 295→**343**（+48）；15 套件 **2098/2098**。
+- 黄金断言：MD/DOCX 夹具解析 2 题零警告，5 小问 type/answer/options 与 JSON 夹具全等；**导出→再导入 contentHash 与 JSON 路径相等（84f2e254）**；父题 会计基础/3/[综合题,固定资产] 正确回归；边界普通题 answer=A。
+- 容错：无「材料：」标记按正文+警告；序号跳号警告；裸词材料题干保持 single。
+- 性能（stash A/B，采样 10 次中位）：文本四格式导出 3.37→3.37ms 无变化；MD 导入 4.12→4.47ms（同机复测 3.43/3.79，±0.8ms 噪声；普通题开块仅多 1 次括号正则探测）。
+- 首屏 135.6→约 136 KB gzip（当次测量口径漏 icon.svg，B 提交以 58 文件统一口径复测，见下条）。
+
+**公共抽象清单**
+- 新增：`LineParser.matchChildStart` 与 4 个材料正则（导出供测试）、`materialBlock`（MD/DOCX/TXT 共用行源）、`gen_fixtures.write_docx`（普通/材料 docx 共用）。
+- 影响范围：仅 LineParser.parseLines/blocksToQuestions 与三个行式 builder；判分/引擎/去重/表格管线零改动；RE_TYPE_INLINE 移除材料别名（材料识别移至强制括号正则），普通六题型内联识别不变。
+
+**遗留 TODO / 风险**
+- 材料正文行首恰好像 `(数字)` 会被当小问（权威导出不会产生；真实语料待观察，误判有警告）。
+- 填空小问 accept/hint 无行式语法，行式往返仅保留标准答案（hash 不含 accept，不影响去重）；完整字段走 JSON/.qbk。
+- DOCX 材料含图加严夹具未做（F2 图片就近规则已自动覆盖材料/小问段落，留作真机观察）。
+
+---
+
+## fbf1237 · feat(material): M2-B 表格材料块（CSV/XLSX）多行约定导入导出往返
+
+**核心改动**
+- `adapters.js`：HEADER_ALIASES 增 `material`（材料/共享材料/材料题/阅读材料/material/passage）与 `childNo`（小问/小问序号/小题/子问题/child）；`tableToQuestions` 重构为块扫描——块首行（材料列非空或题型=材料题）/小问行（块内显式序号，元数据剥离并警告）/收块（两列皆空的普通题行、新块首、EOF）/悬空序号（块外带号→警告按普通题）；提取公共 `cell(row,key)` 与 `rowToRaw(row)`（单行一题与小问共用字段映射）；旧表无两列走早退分支，行为零变化。
+- `exporter.js`：`toTable` 先扫 `entries.some(type==='material')`，命中才用 18 列 `MATERIAL_TABLE_HEADER`（材料/小问插在题型后），否则原 16 列；新增 `fillQuestionRow(row,q,shift)`（shift 0/2）与 `materialToRows`（1 块首 + N 小问，序号 1..N，父题元数据在首行）；CSV/XLSX 同一二维表零分叉。
+- 夹具 `samples/示例-材料题.csv`/`.xlsx`（`--material-csv`；openpyxl sharedStrings，缺库回退通用 stdlib inlineStr 写入器 `_write_xlsx_manual`）。
+- 文档：IMPORT-FORMAT §3.1/§4/别名表/样例、EXPORT-FORMAT §2.2/§2.3/§7、ARCHITECTURE §3.4、user-guide §3、DEVELOPMENT §2/§5.2、SPEC §9、M2 计划、README。
+
+**验证数据（2026-10-14，Node v24.14.0）**
+- smoke 343→**396**（+53）、exporter.test 136→**154**（+18）；15 套件 **2169/2169**。
+- CSV/XLSX 夹具与「导出→再导入」**contentHash 均=84f2e254**（JSON 路径）；材料+普通混合载荷两题 hash 双等；纯普通题库 `toTable` 表头仍 16 列（决策 1 字节级保持）；含材料 18 列/7 数据行（1+5+1）。
+- 容错：小问行误带分类→忽略警告；块外悬空小问号→警告且按普通题；旧 3 列表解析 1 题零警告。
+- bench（采样 10 次中位，紧接 A/B 后实测）：文本四格式导出 **3.19ms**、XLSX 7.39ms、DOCX 3.35ms、MD 再解析 3.34ms，与 M1/M2-A 互有 ±0.4ms，均属运行噪声；材料不进 538 题热路径。
+- 首屏（58 文件/53 js，gzip -9，含 icon.svg 统一口径）：**137.6 KB gzip / 398.8 KB raw**（M1 135.6，M2 累计 **+2.0 KB gzip**）。
+
+**公共抽象清单**
+- 新增：`Adapters` 表头 material/childNo 别名、`tableToQuestions` 块状态机（cell/rowToRaw/closeMaterial 为函数内公共件）；`Exporters` 的 `MATERIAL_TABLE_HEADER`/`fillQuestionRow`/`materialToRows`（模块内）。
+- 影响范围：`tableToQuestions` 普通行字段映射从内联改为 `rowToRaw`（映射字段与顺序等价，旧表早退分支保持单次 toStandard 语义）；`entryToRow` 签名由 `(e,withWrong)` 变 `(e,withMaterial,withWrong)`（模块内唯一调用点 toTable 已同步，无外部引用）；历史 historyToTable 不经 toTable，零影响。
+
+**遗留 TODO / 风险**
+- 表格小问归组依赖「小问」列显式序号；手写表若完全不填序号，块后第一道普通题即收块（防吞题优先于容错），需要严格按导出模板填序号。
+- 材料 CSV/XLSX 真机用 Excel/WPS 打开的人工验收未做（结构经 openpyxl 生成/回读与自家解析器双验证）。
+- M3/M4 未动：嵌套编辑器、材料正文搜索、内联自评、小问乱序/配分。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
@@ -967,6 +1019,7 @@
 > F3 性能批次（2026-10-14）：`56c0c8b` perf(srs) FSRS 训练 Worker 化（1923 断言/127.1KB gzip）
 > F2.5/F4（2026-10-14）：`b1d8262` feat(import) 自研 XmlLite（15 套件 2009 断言/130.3KB gzip，xlsx/docx 零外部依赖） · `ab6cbc5` docs(spec) 材料题规格评审稿
 > F4-M1（2026-10-14）：`10fc2d7` feat(material) 材料题模型/递归判分/引擎/做题UI/JSON 往返（15 套件 2050 断言/135.6KB gzip）
+> F4-M2（2026-10-14）：`a85deaa` feat(material) M2-A 行式材料块 MD/DOCX/TXT（2098 断言） · `fbf1237` feat(material) M2-B 表格材料块 CSV/XLSX（15 套件 2169 断言/137.6KB gzip）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
