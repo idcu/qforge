@@ -7,7 +7,8 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const TYPES = ['judge', 'single', 'multi', 'indefinite', 'fill', 'essay'];
+  // material 为材料题（一层嵌套，子问题为前六种普通题型；见 docs/SPEC-material.md）
+  const TYPES = ['judge', 'single', 'multi', 'indefinite', 'fill', 'essay', 'material'];
 
   QB.CONFIG = {
     APP_NAME: '淬题',
@@ -40,7 +41,8 @@
       multi: '多选题',
       indefinite: '不定项',
       fill: '填空题',
-      essay: '简答题'
+      essay: '简答题',
+      material: '材料题'
     },
     // 题型短标签（列表/角标用）
     TYPE_BADGES: {
@@ -49,7 +51,8 @@
       multi: '多选',
       indefinite: '不定项',
       fill: '填空',
-      essay: '简答'
+      essay: '简答',
+      material: '材料'
     },
 
     // 难度定义（唯一事实来源）：1 最简单 … 5 最难；0/缺省 = 未设置

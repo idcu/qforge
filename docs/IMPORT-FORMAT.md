@@ -9,7 +9,11 @@
 
 ```json
 {
-  "type": "judge | single | multi | indefinite | fill | essay",
+  "type": "judge | single | multi | indefinite | fill | essay | material",
+  "material": "共享材料（仅材料题，可含图片占位）",
+  "children": [
+    { "type": "single", "question": "（1）小问题干", "options": [], "answer": "B" }
+  ],
   "question": "题干（必填）",
   "options": [{ "letter": "A", "text": "选项内容" }],
   "answer": "B",
@@ -23,6 +27,8 @@
 }
 ```
 > `difficulty`：0=未设置，1–5 从易到难（中文同义词自动归一：1=很易/极易/非常容易，2=较易/容易/简单/偏易，3=中等/一般/普通，4=较难/困难/偏难/难，5=很难/极难/非常难；无法识别记 0）；`tags`：多标签数组（字符串可按 `、,，;；|` 分隔自动拆分）。二者是**题元数据**，不参与 contentHash 去重，编辑它们不影响错题/收藏键。
+>
+> **材料题（type=material，M1）**：`material` 为共享材料、`children` 为 2–10 个标准子题目（字段与六题型一致，但不可再嵌套；子问题不单独设分类/难度/标签，继承父题）。contentHash 含材料与子问题的**语义归一**（选项按文本排序、答案取选中文本集合），故子问题内容变化会改变去重键，而练习时选项乱序不改变。完整规格见 [SPEC-material.md](SPEC-material.md)。M1 仅支持 JSON 导入/导出与做题（MD/DOCX 材料块、CSV 多行块为 M2，嵌套编辑器为 M3）；样例见 §10 `示例-材料题.json`。
 >
 > 轻量公式记号 `x^{2}`（上标）、`a_{n}`（下标）按普通文本进出各格式，上屏时渲染（见 user-guide 3.2）；判分、去重、搜索都基于原始文本，记号不影响匹配。
 
@@ -249,6 +255,7 @@ assets/asyyyyyyyy-456.png
 | 文件 | 说明 |
 | --- | --- |
 | `示例-标准JSON.json` | 标准导出格式，7 题覆盖六题型（含 1 道不定项） |
+| `示例-材料题.json` | 材料题 M1 夹具：1 道 material + 5 小问（单选/不定项/判断/填空/简答） |
 | `示例-表格导入.csv` | CSV 表头映射示例 |
 | `示例-Markdown导入.md` | Markdown 导入示例（与导出格式一致，可往返） |
 | `示例-表格导入.xlsx` | XLSX 原生解析示例（单工作表） |

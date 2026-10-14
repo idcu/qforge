@@ -263,6 +263,12 @@ body {
 
 .question-text { font-size: 17px; font-weight: 600; margin: 4px 0 16px; white-space: pre-wrap; }
 
+/* 材料题（综合题） */
+.material-box { border-left: 4px solid var(--primary, #2563eb); background: rgba(37, 99, 235, 0.06); margin-bottom: 12px; }
+.material-text { white-space: pre-wrap; line-height: 1.7; margin-top: 6px; }
+.material-child { border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+.material-child-head { margin-bottom: 8px; line-height: 1.6; }
+
 /* FSRS 作用域切换 */
 .scope-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 

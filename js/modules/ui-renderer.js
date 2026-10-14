@@ -30,7 +30,7 @@
     if (state.correct) cls.push('correct');
     if (state.wrong) cls.push('wrong');
     return '<div class="' + cls.join(' ') + '" data-action="' + (state.multi ? 'toggle' : 'pick') +
-      '" data-value="' + esc(state.value !== undefined ? state.value : letter) + '">' +
+      '" data-value="' + esc(state.value !== undefined ? state.value : letter) + '"' + (state.childAttr || '') + '>' +
       '<span class="opt-letter">' + esc(letter) + '</span>' +
       '<span class="opt-text">' + rich(text) + '</span></div>';
   }
@@ -161,7 +161,56 @@
 
   /* ---------------- 答题 ---------------- */
 
+  function childAttr(childIndex) {
+    return childIndex === undefined || childIndex === null ? '' : ' data-child="' + childIndex + '"';
+  }
+
+  /** 材料题作答区：每个子问题一个卡片，复用单题渲染，data-child 标明小问下标 */
+  function renderMaterialAnswerArea(q, userAns, result, answered) {
+    const arr = Array.isArray(userAns) ? userAns : [];
+    return (q.children || []).map((cq, i) => {
+      const childResult = result && Array.isArray(result.children) ? result.children[i] : null;
+      const childAns = arr[i];
+      const head = '<div class="material-child-head"><span class="type-badge">' +
+        esc(QB.typeBadge(cq.type)) + '</span><b>（' + (i + 1) + '）</b> ' +
+        rich(cq.question) + '</div>';
+      const feedback = answered ? renderFeedback(cq, childResult, i) : '';
+      return '<div class="material-child">' + head +
+        renderSingleAnswerArea(cq, childAns, childResult, answered, i) + feedback + '</div>';
+    }).join('');
+  }
+
   function renderAnswerArea(q, userAns, result, answered) {
+    if (q.type === 'material') return renderMaterialAnswerArea(q, userAns, result, answered);
+    return renderSingleAnswerArea(q, userAns, result, answered, null);
+  }
+
+  /** 材料题提交后的整题总评横幅（逐小问反馈在各自卡片内） */
+  function renderMaterialOverall(result) {
+    if (!result) return '';
+    const kids = result.children || [];
+    const total = kids.length;
+    const okCount = kids.filter((v) => v.isCorrect === true).length;
+    const halfCount = kids.filter((v) => v.isCorrect === false && v.partial).length;
+    const pendingCount = kids.filter((v) => v.isCorrect === null || v.isCorrect === undefined).length;
+    let cls, title;
+    if (result.isCorrect === null || result.isCorrect === undefined) {
+      cls = 'neutral';
+      title = '📝 还有 ' + pendingCount + ' 个小问待自评（得分暂计 ' + (result.points ? result.points.earned : 0) + ' 分）';
+    } else if (result.isCorrect === true && !result.partial) {
+      cls = 'ok';
+      title = '✅ 全部小问正确（' + okCount + '/' + total + '，' + (result.points ? result.points.earned : 0) + ' 分）';
+    } else if (result.partial) {
+      cls = 'neutral';
+      title = '◐ 含少选半对（对 ' + okCount + ' · 半对 ' + halfCount + '，' + (result.points ? result.points.earned : 0) + ' 分）';
+    } else {
+      cls = 'no';
+      title = '❌ 有小问答错（对 ' + okCount + ' / ' + total + '，' + (result.points ? result.points.earned : 0) + ' 分）';
+    }
+    return '<div class="feedback ' + cls + '"><h4>' + title + '</h4></div>';
+  }
+
+  function renderSingleAnswerArea(q, userAns, result, answered, childIndex) {
     const answeredLocked = answered;
     let html = '';
 
@@ -173,6 +222,7 @@
         html += optionHtml(o.letter, o.text, {
           value: o.value,
           selected: selected,
+          childAttr: childAttr(childIndex),
           correct: answered && correctBool !== null && o.value === correctBool,
           wrong: answered && selected && correctBool !== null && o.value !== correctBool
         });
@@ -192,6 +242,7 @@
           value: o.letter,
           multi: q.type === 'multi' || q.type === 'indefinite',
           selected: isSel,
+          childAttr: childAttr(childIndex),
           correct: isCorrect,
           wrong: answered && isSel && !isCorrect
         });
@@ -210,7 +261,7 @@
         const cls = d ? (d.isCorrect ? ' correct' : ' wrong') : '';
         html += '<div class="blank-row' + cls + '">' +
           '<label>第 ' + (i + 1) + ' 空</label>' +
-          '<input type="text" data-fill-index="' + i + '" value="' + esc(vals[i] || '') + '"' +
+          '<input type="text" data-fill-index="' + i + '"' + childAttr(childIndex) + ' value="' + esc(vals[i] || '') + '"' +
           (answeredLocked ? ' disabled' : '') +
           ' placeholder="' + esc(b.hint || '') + '" />' +
           (d && !d.isCorrect ? '<span class="li-meta">正确答案：' + esc(d.expected) + '</span>' : '') +
@@ -221,13 +272,14 @@
     }
 
     // essay
-    html += '<textarea class="essay-area" data-essay placeholder="请作答…"' +
+    html += '<textarea class="essay-area" data-essay placeholder="请作答…"' + childAttr(childIndex) +
       (answeredLocked ? ' disabled' : '') + '>' + esc(userAns || '') + '</textarea>';
     return html;
   }
 
-  function renderFeedback(q, result) {
+  function renderFeedback(q, result, childIndex) {
     if (!result) return '';
+    const selfAttr = childIndex === undefined || childIndex === null ? '' : ' data-child="' + childIndex + '"';
     if (result.partial) {
       return '<div class="feedback neutral"><h4>◐ 少选，得一半分</h4>' +
         '<div class="fb-line">正确答案：<b>' + rich(result.correctAnswer || '') + '</b></div>' +
@@ -243,8 +295,8 @@
         '<div class="fb-line">参考答案：' + rich(result.correctAnswer) + '</div>' +
         (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') +
         '<div class="quiz-actions">' +
-        '<button class="btn btn-sm" data-action="self-correct">我答对了</button>' +
-        '<button class="btn btn-sm btn-danger" data-action="self-wrong">我答错了</button>' +
+        '<button class="btn btn-sm" data-action="self-correct"' + selfAttr + '>我答对了</button>' +
+        '<button class="btn btn-sm btn-danger" data-action="self-wrong"' + selfAttr + '>我答错了</button>' +
         '</div></div>';
     }
     return '<div class="feedback no"><h4>❌ 回答错误</h4>' +
@@ -274,8 +326,14 @@
       '</div>';
     html += progressBar(prog.percentage);
 
+    // 材料题：共享材料置顶
+    if (q.type === 'material' && q.material) {
+      html += '<div class="card material-box"><div class="li-meta">共享材料</div>' +
+        '<div class="material-text">' + rich(q.material) + '</div></div>';
+    }
+
     html += '<div class="card">' +
-      '<div class="question-text">' + rich(q.question) + '</div>' +
+      (q.type === 'material' && q.question ? '<div class="question-text">' + rich(q.question) + '</div>' : '') +
       renderAnswerArea(q, userAns, result, answered) +
       '</div>';
 
@@ -302,7 +360,9 @@
     // 答题卡（题目较多时才显示，支持点击跳转）
     if (engine.questions.length > 1) html += renderAnswerCard(engine);
 
-    if (!isExam && answered) html += renderFeedback(q, result);
+    if (!isExam && answered) {
+      html += q.type === 'material' ? renderMaterialOverall(result) : renderFeedback(q, result);
+    }
     return html;
   }
 
@@ -366,12 +426,24 @@
       const r = engine.results[i];
       const cls = !r || r.isCorrect === null ? 'neutral' : (r.isCorrect ? 'ok' : (r.partial ? 'neutral' : 'no'));
       const mark = !r || r.isCorrect === null ? '○ 未判定' : (r.isCorrect ? '✔ 正确' : (r.partial ? '◐ 半对' : '✘ 错误'));
+      let childDetail = '';
+      if (q.type === 'material' && r && Array.isArray(r.children)) {
+        childDetail = r.children.map((cv, j) => {
+          const cq = (q.children || [])[j] || {};
+          const cm = cv.isCorrect === true ? '✔' : (cv.isCorrect === null || cv.isCorrect === undefined ? '○' : (cv.partial ? '◐' : '✘'));
+          return '<div class="li-meta">（' + (j + 1) + '）' + cm + ' ' + esc(QB.typeBadge(cq.type)) +
+            ' ' + plain(cq.question).slice(0, 60) +
+            '　正确答案：' + plain(cv.correctAnswer) + '</div>';
+        }).join('');
+      }
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
         '<span class="li-title">' + (i + 1) + '. ' + plain(q.question) + '</span>' +
         '<span class="li-meta">' + mark + '</span></div>' +
-        '<div class="li-meta">正确答案：' + plain(r ? r.correctAnswer : '') +
-        '　你的答案：' + esc(r ? String(r.userAnswer || '（未作答）') : '（未作答）') + '</div>' +
+        (q.type === 'material' ? '<div class="li-meta">共享材料：' + plain(q.material).slice(0, 120) + '</div>' : '') +
+        childDetail +
+        (q.type !== 'material' ? '<div class="li-meta">正确答案：' + plain(r ? r.correctAnswer : '') +
+        '　你的答案：' + esc(r ? String(r.userAnswer || '（未作答）') : '（未作答）') + '</div>' : '') +
         (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '') +
         '</div>';
     });

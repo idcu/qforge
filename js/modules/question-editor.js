@@ -79,7 +79,8 @@
   const DIFF_OPTS = [0, 1, 2, 3, 4, 5];
 
   function typeOptions(cur) {
-    return QB.CONFIG.TYPES.map((t) =>
+    // M1：材料题（material）仅支持 JSON 导入/做题，嵌套编辑器在 M3 开放
+    return QB.CONFIG.TYPES.filter((t) => t !== 'material').map((t) =>
       '<option value="' + t + '"' + (cur === t ? ' selected' : '') + '>' + QB.typeLabel(t) + '</option>').join('');
   }
   function diffOptions(cur) {

@@ -1,7 +1,11 @@
 # F4 材料题（综合题/组合题）规格（评审稿）
 
-> 状态：**待评审，未开工**。本文档是实现前的唯一规格依据；评审通过后按 §9 里程碑拆批次提交。
-> 适用版本：FSRS-4.5 / 六题型（judge/single/multi/indefinite/fill/essay）/ 2026-10-14 代码基线（15 套件 2009 断言）。
+> 状态：5 个决策点已按推荐全部确认（见 [SPEC-material-decisions.md](SPEC-material-decisions.md)）；**M1 已实施（2026-10-14）**，M2/M3/M4 待开工。本文档是后续里程碑的实现依据。
+> 适用版本：FSRS-4.5 / 七题型（六普通题型 + material）/ 代码基线 15 套件 2050 断言。
+>
+> **M1 实施相对本稿的两处落地修正**（以代码为准）：
+> 1. contentHash 子问题归一采用**选项文本排序 + 答案取选中文本集合**（而非原始 options/answer 字段），使练习时选项乱序后材料题去重键保持稳定（§2.2 已更新精神）。
+> 2. 引擎结果新增 `points:{max,earned}` 与 `srsRecorded`（SRS 去重）、`children[i].score/earned`；考试 `gradeAll` 对未自评小问逐问计错后重算聚合。
 
 ## 1. 背景与目标
 
@@ -60,9 +64,11 @@
 `makeContentHash` 对 material 的输入必须包含材料与全部子问题，避免「不同综合题共用相似首问」被误并：
 
 ```
-type='material' → hash 输入 = "material|" + material + "||" + children 的规范化 JSON
-规范化：子问题按数组顺序，取 {type,question,options(letter+text),answer,blanks.answer,reference_answer}
+type='material' → hash 输入 = "material|" + stem + "||" + normalize(material) + "||" + children 的规范化 JSON
+规范化（M1 落地）：子问题按数组顺序，取 {type, question(规范化去标点),
+  options 文本排序, correct（选择题=选中选项文本集合；填空=各空答案；判断/简答=答案/参考答案）}
 ```
+选项按文本排序、答案取选中文本集合而非字母——因此**练习时选项乱序/字母重映射不改变材料题 contentHash**（与普通题去重键稳定性一致），但选项文本、正确答案、材料、小问题干任一处实际内容变化都会使 hash 改变。
 
 旧规则（type+题干）对其余六题型不变。DATABASE/IMPORT/EXPORT 文档需补充该规则。
 
@@ -183,7 +189,7 @@ DOCX 段落映射与之一一对应（材料段/子问题段/选项段）；DOCX
 
 | 里程碑 | 范围 | 可独立验证点 |
 | --- | --- | --- |
-| **M1 模型与判分** | type/校验/contentHash/递归判分/引擎整题状态/蓝图单位/JSON 往返；做题 UI 最小渲染（不做编辑器） | 命令行：JSON 往返、判分、SRS 映射全断言 |
+| **M1 模型与判分** ✅ 2026-10-14 | type/校验/contentHash（语义归一）/递归判分+aggregateMaterial/引擎整题状态与 childIndex API/selfAssess 重算/gradeAll 计错/蓝图单位/JSON 夹具往返/做题 UI（材料卡+小问卡+总评横幅+结果回顾）；编辑器不开放（类型下拉排除 material） | smoke 材料题块 41 项断言，15 套件 2050 全绿 |
 | **M2 文本格式** | LineParser 材料块（MD/DOCX）、CSV/XLSX 多行约定、导出四格式、夹具 | 三格式往返 + 含图 DOCX 材料题 |
 | **M3 管理 UI** | 嵌套编辑器、做题/结果/列表/统计完整 UI | 人工 + 逻辑断言 |
 | **M4 打磨** | 小问乱序开关、每卷材料题上限、子问题权重（若评审通过 §10） | 蓝图/试卷断言 |

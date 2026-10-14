@@ -16,7 +16,8 @@
     多选: 'multi', 多选题: 'multi', 多项选择: 'multi', 多项选择题: 'multi', multi: 'multi', multiple_choice: 'multi',
     不定项: 'indefinite', 不定项选择: 'indefinite', 不定项选择题: 'indefinite', indefinite: 'indefinite',
     填空: 'fill', 填空题: 'fill', fill: 'fill', blank: 'fill',
-    简答: 'essay', 简答题: 'essay', 问答: 'essay', 问答题: 'essay', essay: 'essay', 论述题: 'essay'
+    简答: 'essay', 简答题: 'essay', 问答: 'essay', 问答题: 'essay', essay: 'essay', 论述题: 'essay',
+    材料: 'material', 材料题: 'material', 综合题: 'material', 组合题: 'material', material: 'material'
   };
 
   const BLANK_MARKER = /_{2,}|＿{2,}|（\s*）|\(\s*\)|【\s*】|\[\s*\]/g;
@@ -140,6 +141,10 @@
     return options.length ? 'single' : 'judge';
   }
 
+  /** 材料题子问题数上下限（见 docs/SPEC-material.md §2.1） */
+  const MATERIAL_MIN_CHILDREN = 2;
+  const MATERIAL_MAX_CHILDREN = 10;
+
   /**
    * 单个松散对象 → 标准题目
    * @returns {{question:Object, warnings:string[]}}
@@ -147,6 +152,10 @@
   function toStandard(raw) {
     const warnings = [];
     raw = raw || {};
+
+    // 材料题：递归标准化每个子问题（仅允许一层，子问题不能再是 material）
+    const explicitType = normalizeType(firstOf(raw.type, raw.题型, raw.类型, ''), '');
+    if (explicitType === 'material') return toStandardMaterial(raw, warnings);
 
     const stem = String(firstOf(raw.question, raw.题目, raw.题干, raw.问题, raw.stem, raw.content, '')).trim();
     let options = parseOptions(firstOf(raw.options, raw.选项, raw.option) || []);
@@ -183,6 +192,60 @@
     }
 
     if (!stem) warnings.push('缺少题干');
+    return { question: item, warnings };
+  }
+
+  /**
+   * 材料题标准化：material 共享材料 + children 递归走 toStandard
+   * 子问题不携带独立的 category/difficulty/tags（继承父题）；
+   * 仅允许一层嵌套，子问题 type=material 直接降级警告并按其题干内容当普通题处理（拒绝二层）。
+   */
+  function toStandardMaterial(raw, warnings) {
+    const material = String(firstOf(raw.material, raw.材料, raw.共享材料, raw.passage, '')).trim();
+    const stem = String(firstOf(raw.question, raw.题目, raw.题干, raw.问题, raw.stem, '')).trim();
+    const rawChildren = Array.isArray(raw.children) ? raw.children
+      : (Array.isArray(raw.子问题) ? raw.子问题 : (Array.isArray(raw.questions) ? raw.questions : []));
+
+    const item = {
+      type: 'material',
+      material: material,
+      question: stem,
+      children: [],
+      options: [],
+      answer: '',
+      blanks: [],
+      reference_answer: '',
+      analysis: String(firstOf(raw.analysis, raw.解析, '')).trim(),
+      category: String(firstOf(raw.category, raw.分类, raw.类别, raw.章节, raw.chapter, '')).trim(),
+      source: String(firstOf(raw.source, raw.序号, raw.编号, raw.来源, raw.id, '')).trim(),
+      difficulty: normalizeDifficulty(firstOf(raw.difficulty, raw.难度, raw.d, '')),
+      tags: normalizeTags(firstOf(raw.tags, raw.标签, raw.知识点, raw.keywords, []))
+    };
+
+    rawChildren.forEach((c, i) => {
+      const childRaw = c || {};
+      const childType = normalizeType(firstOf(childRaw.type, childRaw.题型, childRaw.类型, ''), '');
+      if (childType === 'material') {
+        warnings.push('材料题第 ' + (i + 1) + ' 个子问题不能再嵌套材料题，已跳过');
+        return;
+      }
+      const r = toStandard(childRaw);
+      r.warnings.forEach((w) => warnings.push('材料题第 ' + (i + 1) + ' 个子问题：' + w));
+      // 子问题继承父题分类/难度/标签，不保留独立值
+      const child = r.question;
+      child.category = '';
+      child.difficulty = 0;
+      child.tags = [];
+      item.children.push(child);
+    });
+
+    if (!material) warnings.push('材料题缺少共享材料（material）');
+    if (item.children.length < MATERIAL_MIN_CHILDREN) {
+      warnings.push('材料题子问题不足 ' + MATERIAL_MIN_CHILDREN + ' 个（实际 ' + item.children.length + '）');
+    }
+    if (item.children.length > MATERIAL_MAX_CHILDREN) {
+      warnings.push('材料题子问题超过 ' + MATERIAL_MAX_CHILDREN + ' 个（实际 ' + item.children.length + '），请拆分');
+    }
     return { question: item, warnings };
   }
 
@@ -339,6 +402,21 @@
         warnings.push('第 ' + (i + 1) + ' 题缺少选项');
       }
       if (q.type === 'judge' && !q.answer) warnings.push('第 ' + (i + 1) + ' 题（判断）缺少答案');
+      if (q.type === 'material') {
+        const kids = Array.isArray(q.children) ? q.children : [];
+        if (!q.material) warnings.push('第 ' + (i + 1) + ' 题（材料）缺少共享材料');
+        if (kids.length < 2) warnings.push('第 ' + (i + 1) + ' 题（材料）子问题不足 2 个');
+        if (kids.length > 10) warnings.push('第 ' + (i + 1) + ' 题（材料）子问题超过 10 个');
+        kids.forEach((cq, j) => {
+          if (cq.type === 'material') { warnings.push('第 ' + (i + 1) + ' 题材料题嵌套了二层材料（第 ' + (j + 1) + ' 小问）'); return; }
+          if (!cq.question) warnings.push('第 ' + (i + 1) + ' 题第 ' + (j + 1) + ' 小问缺少题干');
+          if (cq.type === 'fill' && !(cq.blanks || []).some((b) => b.answer)) warnings.push('第 ' + (i + 1) + ' 题第 ' + (j + 1) + ' 小问（填空）缺少答案');
+          if ((cq.type === 'single' || cq.type === 'multi' || cq.type === 'indefinite') && !(cq.options || []).length) {
+            warnings.push('第 ' + (i + 1) + ' 题第 ' + (j + 1) + ' 小问缺少选项');
+          }
+          if (cq.type === 'judge' && !cq.answer) warnings.push('第 ' + (i + 1) + ' 题第 ' + (j + 1) + ' 小问（判断）缺少答案');
+        });
+      }
     });
 
     // 题内去重（按 contentHash）
@@ -355,6 +433,8 @@
   }
 
   QB.Adapters = {
+    MATERIAL_MIN_CHILDREN,
+    MATERIAL_MAX_CHILDREN,
     normalizeType,
     normalizeDifficulty,
     normalizeTags,

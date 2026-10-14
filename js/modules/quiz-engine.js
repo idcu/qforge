@@ -61,17 +61,22 @@
     let correct = 0;
     let wrong = 0;
     let partial = 0;
+    let score = 0;
+    const points = (QB.CONFIG && QB.CONFIG.POINTS_PER_CORRECT) || 10;
     this.results.forEach((r) => {
       if (!r) return;
       if (r.isCorrect === true) correct++;
       else if (r.partial) partial++;
       else if (r.isCorrect === false) wrong++;
+      // 材料题按小问累计得分；普通题 10 分 / 半对 5 分
+      if (r.points) score += r.points.earned || 0;
+      else if (r.isCorrect === true) score += points;
+      else if (r.partial) score += Math.round(points * 0.5);
     });
     const total = this.questions.length;
-    const points = (QB.CONFIG && QB.CONFIG.POINTS_PER_CORRECT) || 10;
     const decided = correct + wrong + partial;
     return {
-      score: correct * points + Math.round(partial * points * 0.5),
+      score: score,
       correct: correct,
       partial: partial,
       wrong: wrong,
@@ -91,39 +96,90 @@
     return !!this.results[this.currentIndex];
   };
 
-  QuizEngine.prototype.selectAnswer = function (value) {
+  /** 材料题作答容器：answers[i] 为与 children 对齐的数组 */
+  function materialSlot(engine, q) {
+    let cur = Array.isArray(engine.answers[engine.currentIndex]) ? engine.answers[engine.currentIndex] : [];
+    cur = cur.slice();
+    while (cur.length < (q.children || []).length) cur.push(undefined);
+    return cur;
+  }
+
+  /** 单个子问题是否已有有效作答（用于材料题 canSubmit / 答题卡状态） */
+  function childAnswered(cq, a) {
+    if (!cq) return false;
+    if (cq.type === 'fill') {
+      const blanks = cq.blanks || [];
+      return blanks.length > 0 && Array.isArray(a) && blanks.every((b, i) => String(a[i] == null ? '' : a[i]).trim() !== '');
+    }
+    if (cq.type === 'essay') return String(a || '').trim() !== '';
+    if (cq.type === 'multi' || cq.type === 'indefinite') return Array.isArray(a) && a.length > 0;
+    return a !== undefined && a !== null && String(a) !== '';
+  }
+
+  QuizEngine.prototype.selectAnswer = function (value, childIndex) {
     const q = this.getCurrentQuestion();
     if (!q || this.hasAnswered()) return false;
-    this.answers[this.currentIndex] = q.type === 'judge' ? value : value;
+    if (q.type === 'material') {
+      const cur = materialSlot(this, q);
+      cur[childIndex] = value;
+      this.answers[this.currentIndex] = cur;
+      return true;
+    }
+    this.answers[this.currentIndex] = value;
     return true;
   };
 
-  QuizEngine.prototype.toggleAnswer = function (letter) {
+  QuizEngine.prototype.toggleAnswer = function (letter, childIndex) {
     const q = this.getCurrentQuestion();
     if (!q || this.hasAnswered()) return false;
     letter = String(letter).toUpperCase();
+    if (q.type === 'material') {
+      const cur = materialSlot(this, q);
+      let childAns = Array.isArray(cur[childIndex]) ? cur[childIndex].slice() : [];
+      const idx = childAns.indexOf(letter);
+      if (idx >= 0) childAns.splice(idx, 1);
+      else childAns.push(letter);
+      childAns.sort();
+      cur[childIndex] = childAns;
+      this.answers[this.currentIndex] = cur;
+      return true;
+    }
     let cur = this.answers[this.currentIndex];
     cur = Array.isArray(cur) ? cur.slice() : [];
-    const idx = cur.indexOf(letter);
-    if (idx >= 0) cur.splice(idx, 1);
+    const i = cur.indexOf(letter);
+    if (i >= 0) cur.splice(i, 1);
     else cur.push(letter);
     cur.sort();
     this.answers[this.currentIndex] = cur;
     return true;
   };
 
-  QuizEngine.prototype.setFillAnswer = function (blankIndex, value) {
+  QuizEngine.prototype.setFillAnswer = function (blankIndex, value, childIndex) {
     const q = this.getCurrentQuestion();
     if (!q || this.hasAnswered()) return false;
+    if (q.type === 'material') {
+      const cur = materialSlot(this, q);
+      let childAns = Array.isArray(cur[childIndex]) ? cur[childIndex].slice() : [];
+      childAns[blankIndex] = value;
+      cur[childIndex] = childAns;
+      this.answers[this.currentIndex] = cur;
+      return;
+    }
     const cur = Array.isArray(this.answers[this.currentIndex]) ? this.answers[this.currentIndex].slice() : [];
     cur[blankIndex] = value;
     this.answers[this.currentIndex] = cur;
     return true;
   };
 
-  QuizEngine.prototype.setEssayAnswer = function (value) {
+  QuizEngine.prototype.setEssayAnswer = function (value, childIndex) {
     const q = this.getCurrentQuestion();
     if (!q || this.hasAnswered()) return false;
+    if (q.type === 'material') {
+      const cur = materialSlot(this, q);
+      cur[childIndex] = value;
+      this.answers[this.currentIndex] = cur;
+      return true;
+    }
     this.answers[this.currentIndex] = value;
     return true;
   };
@@ -133,6 +189,11 @@
     const q = this.getCurrentQuestion();
     if (!q) return false;
     const a = this.answers[this.currentIndex];
+    if (q.type === 'material') {
+      // 每个子问题都要有有效作答（含简答文本非空），提交后简答小问再逐个自评
+      const kids = q.children || [];
+      return kids.length >= 2 && kids.every((cq, i) => childAnswered(cq, Array.isArray(a) ? a[i] : undefined));
+    }
     if (q.type === 'fill') {
       const blanks = q.blanks || [];
       return blanks.length > 0 && blanks.every((b, i) => String((a && a[i]) || '').trim() !== '');
@@ -154,6 +215,9 @@
       type: q.type,
       isCorrect: verdict.isCorrect,
       partial: !!verdict.partial,
+      children: verdict.children,
+      points: verdict.points,
+      srsRecorded: false,
       correctAnswer: verdict.correctAnswer,
       userAnswer: verdict.userAnswer,
       detail: verdict.detail,
@@ -163,27 +227,67 @@
     return result;
   };
 
-  /** 简答题自评 */
-  QuizEngine.prototype.selfAssess = function (isCorrect) {
+  /** 从材料题小问判定重算整题聚合（自评后调用） */
+  function recomputeMaterialResult(r) {
+    const agg = QB.aggregateMaterial(r.children || []);
+    r.isCorrect = agg.isCorrect;
+    r.partial = agg.partial;
+    r.points = agg.points;
+    return r;
+  }
+
+  /**
+   * 简答题自评
+   * @param {boolean} isCorrect 用户自评结论
+   * @param {number} [childIndex] 材料题：自评的小问下标
+   * @returns 重算后的 result（材料题聚合可能仍为 null=还有小问待自评）
+   */
+  QuizEngine.prototype.selfAssess = function (isCorrect, childIndex) {
+    const q = this.getCurrentQuestion();
     const r = this.results[this.currentIndex];
-    if (!r || r.type !== 'essay') return null;
+    if (!r) return null;
+    if (q && q.type === 'material') {
+      const cq = (q.children || [])[childIndex];
+      const cv = r.children && r.children[childIndex];
+      if (!cq || cq.type !== 'essay' || !cv) return null;
+      cv.isCorrect = !!isCorrect;
+      cv.earned = isCorrect ? (cv.score || 10) : 0;
+      return recomputeMaterialResult(r);
+    }
+    if (r.type !== 'essay') return null;
     r.isCorrect = !!isCorrect;
     return r;
   };
 
-  /** 整卷判分（考试模式交卷时使用）：未作答的按错误计 */
+  /** 整卷判分（考试模式交卷时使用）：未作答/未自评的按错误计 */
   QuizEngine.prototype.gradeAll = function () {
     for (let i = 0; i < this.questions.length; i++) {
       if (this.results[i]) continue;
       const q = this.questions[i];
       const verdict = QB.judgeAnswer(q, this.answers[i]);
+      let isCorrect = verdict.isCorrect;
+      let points = verdict.points;
+      let children = verdict.children;
+      // 材料题：含未自评简答（null）时，整卷判分把这些小问计错后重算聚合
+      if (q.type === 'material' && children) {
+        children.forEach((cv) => {
+          if (cv.isCorrect === null || cv.isCorrect === undefined) { cv.isCorrect = false; cv.earned = 0; }
+        });
+        const agg = QB.aggregateMaterial(children);
+        isCorrect = agg.isCorrect;
+        points = agg.points;
+      } else if (isCorrect === null) {
+        isCorrect = false; // 普通简答未自评
+      }
       this.results[i] = {
         questionId: q.id,
         contentHash: q.contentHash || QB.makeContentHash(q),
         type: q.type,
-        // 考试整卷判分：简答等需自评的题型（isCorrect === null）在此计为错误，避免悬空待判定
-        isCorrect: verdict.isCorrect === null ? false : verdict.isCorrect,
+        isCorrect: isCorrect,
         partial: !!verdict.partial,
+        children: children,
+        points: points,
+        srsRecorded: false,
         correctAnswer: verdict.correctAnswer,
         userAnswer: verdict.userAnswer,
         detail: verdict.detail,
@@ -233,6 +337,12 @@
     const q = this.questions[i];
     const a = this.answers[i];
     if (!q) return 'empty';
+    if (q.type === 'material') {
+      const kids = q.children || [];
+      const answeredCount = kids.filter((cq, j) => childAnswered(cq, Array.isArray(a) ? a[j] : undefined)).length;
+      if (answeredCount === 0) return 'empty';
+      return answeredCount === kids.length ? 'answered' : 'pending';
+    }
     if (q.type === 'multi') return (Array.isArray(a) && a.length) ? 'answered' : 'empty';
     if (q.type === 'fill') return (Array.isArray(a) && a.length && a.every((x) => String(x == null ? '' : x).trim() !== '')) ? 'answered' : 'empty';
     return (a !== undefined && a !== null && String(a).trim() !== '') ? 'answered' : 'empty';

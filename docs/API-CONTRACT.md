@@ -54,7 +54,9 @@
 ```json
 {
   "id": "q_hash", "bank_id": "bank_xxx",
-  "type": "judge | single | multi | indefinite | fill | essay",
+  "type": "judge | single | multi | indefinite | fill | essay | material",
+  "material": "材料题共享材料（仅 type=material）",
+  "children": [ { "type": "single|multi|…（不可再 material）", "question": "（n）小问题干", "options": [], "answer": "…", "score": 10 } ],
   "question": "题干",
   "options": [{ "letter": "A", "text": "选项内容" }],
   "answer": "B",

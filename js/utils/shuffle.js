@@ -48,7 +48,13 @@
    * - 可传 seed 复现同一次排列（测试用）。
    */
   QB.shuffleOptions = function shuffleOptions(q, seed) {
-    if (!q || (q.type !== 'single' && q.type !== 'multi')) return q;
+    if (!q) return q;
+    // 材料题：父级无选项，递归派生每个子问题（小问顺序不打乱）
+    if (q.type === 'material') {
+      const children = (q.children || []).map((cq, i) => QB.shuffleOptions(cq, seed === undefined ? seed : seed + i + 1));
+      return Object.assign({}, q, { children: children });
+    }
+    if (q.type !== 'single' && q.type !== 'multi') return q;
     const opts = Array.isArray(q.options) ? q.options : [];
     if (opts.length < 2) return q;
 

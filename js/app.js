@@ -256,9 +256,10 @@
     if (!engine || engine.hasAnswered() || !engine.canSubmit()) return;
     const q = engine.getCurrentQuestion();
     const r = engine.submitAnswer();
-    if (r && r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
-    // SRS：练习即时判分（全对 good / 少选 hard / 错 again；简答待自评不在此记录）
-    if (r && r.isCorrect !== null && r.isCorrect !== undefined) {
+    // SRS：练习即时判分（全对 good / 少选 hard / 错 again；含简答的题待自评，不在此记录）
+    if (r && r.isCorrect !== null && r.isCorrect !== undefined && !r.srsRecorded) {
+      r.srsRecorded = true;
+      if (r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
       const rating = r.isCorrect ? QB.SRS.RATINGS.good : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again);
       QB.SRSStore.grade(State.bankId, q, rating);
     }
@@ -279,7 +280,9 @@
     const srsEntries = [];
     engine.questions.forEach((q, i) => {
       const r = engine.results[i];
-      if (r && r.isCorrect !== null && r.isCorrect !== undefined) {
+      // srsRecorded：练习中已即时评分的题不重复记录（含材料题自评后）
+      if (r && r.isCorrect !== null && r.isCorrect !== undefined && !r.srsRecorded) {
+        r.srsRecorded = true;
         srsEntries.push({ question: q, rating: r.isCorrect ? QB.SRS.RATINGS.good : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again) });
       }
     });
@@ -450,27 +453,45 @@
       case 'pick': {
         const q = State.engine.getCurrentQuestion();
         const raw = el.getAttribute('data-value');
-        State.engine.selectAnswer(q && q.type === 'judge' ? raw === 'true' : raw);
+        const childIdx = el.getAttribute('data-child');
+        let value = raw;
+        if (q && q.type === 'material') {
+          const ci = parseInt(childIdx, 10);
+          const cq = (q.children || [])[ci];
+          if (cq && cq.type === 'judge') value = raw === 'true';
+          State.engine.selectAnswer(value, ci);
+        } else {
+          if (q && q.type === 'judge') value = raw === 'true';
+          State.engine.selectAnswer(value);
+        }
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
         return render();
       }
       case 'toggle': {
-        State.engine.toggleAnswer(el.getAttribute('data-value'));
+        const q = State.engine.getCurrentQuestion();
+        const child = el.getAttribute('data-child');
+        if (q && q.type === 'material') State.engine.toggleAnswer(el.getAttribute('data-value'), parseInt(child, 10));
+        else State.engine.toggleAnswer(el.getAttribute('data-value'));
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
         return render();
       }
       case 'submit':
         return submitCurrent();
-      case 'self-correct': {
-        State.engine.selfAssess(true);
-        QB.SRSStore.grade(State.bankId, State.engine.getCurrentQuestion(), QB.SRS.RATINGS.good);
-        QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
-        return render();
-      }
+      case 'self-correct':
       case 'self-wrong': {
-        State.engine.selfAssess(false);
-        await QB.WrongBook.add(State.bankId, State.engine.getCurrentQuestion());
-        QB.SRSStore.grade(State.bankId, State.engine.getCurrentQuestion(), QB.SRS.RATINGS.again);
+        const isOk = action === 'self-correct';
+        const q = State.engine.getCurrentQuestion();
+        const childAttr = el.getAttribute('data-child');
+        const r = (q && q.type === 'material')
+          ? State.engine.selfAssess(isOk, parseInt(childAttr, 10))
+          : State.engine.selfAssess(isOk);
+        // 材料题：只有聚合从 null（待自评）变为已判定时才记一次调度/错题
+        if (r && r.isCorrect !== null && r.isCorrect !== undefined && !r.srsRecorded) {
+          r.srsRecorded = true;
+          const rating = r.isCorrect ? QB.SRS.RATINGS.good : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again);
+          QB.SRSStore.grade(State.bankId, q, rating);
+          if (r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
+        }
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
         return render();
       }
@@ -727,10 +748,14 @@
         return;
       }
       if (!State.engine) return;
+      const q0 = State.engine.getCurrentQuestion();
+      const childIdx = t.getAttribute('data-child');
       if (t.matches('[data-fill-index]')) {
-        State.engine.setFillAnswer(parseInt(t.getAttribute('data-fill-index'), 10), t.value);
+        State.engine.setFillAnswer(parseInt(t.getAttribute('data-fill-index'), 10), t.value,
+          childIdx !== null && q0 && q0.type === 'material' ? parseInt(childIdx, 10) : undefined);
       } else if (t.matches('[data-essay]')) {
-        State.engine.setEssayAnswer(t.value);
+        State.engine.setEssayAnswer(t.value,
+          childIdx !== null && q0 && q0.type === 'material' ? parseInt(childIdx, 10) : undefined);
       } else {
         return;
       }
@@ -867,6 +892,8 @@
       }
       e.preventDefault();
     } else if (/^[1-8]$/.test(e.key)) {
+      const qNow = State.engine && State.engine.getCurrentQuestion();
+      if (qNow && qNow.type === 'material') return; // 材料题多个子问题共用字母/数字键，快捷键禁用，用鼠标点选
       selectByIndex(parseInt(e.key, 10) - 1);
     }
   }
@@ -874,7 +901,7 @@
   function selectByIndex(i) {
     const engine = State.engine;
     const q = engine.getCurrentQuestion();
-    if (!q || engine.hasAnswered()) return;
+    if (!q || engine.hasAnswered() || q.type === 'material') return;
     if (q.type === 'judge') {
       if (i === 0) engine.selectAnswer(true);
       else if (i === 1) engine.selectAnswer(false);

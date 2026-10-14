@@ -40,7 +40,7 @@ CREATE TABLE banks (
 CREATE TABLE questions (
   id               VARCHAR(32)  PRIMARY KEY,
   bank_id          VARCHAR(32)  NOT NULL REFERENCES banks(id) ON DELETE CASCADE,
-  type             VARCHAR(16)  NOT NULL,          -- judge|single|multi|indefinite|fill|essay
+  type             VARCHAR(16)  NOT NULL,          -- judge|single|multi|indefinite|fill|essay|material
   question         TEXT         NOT NULL,
   options          TEXT,                            -- JSON: [{"letter":"A","text":"..."}]
   answer           TEXT,                            -- judge: "正确"/"错误"; single/multi: "ABD"
@@ -50,8 +50,10 @@ CREATE TABLE questions (
   category         VARCHAR(64),
   source           VARCHAR(64),
   difficulty       TINYINT      NOT NULL DEFAULT 0,  -- 0 未设置；1-5 从易到难
-  tags             TEXT,                            -- JSON 字符串数组：["法规","合同"]
-  content_hash     VARCHAR(16)  NOT NULL,           -- 去重键：FNV-1a(type|normalize(question))
+  tags             TEXT,                            -- 字符串数组：["法规","合同"]
+  material         TEXT,                            -- 仅 material：共享材料文本；子问题在 children JSON
+  children         TEXT,                            -- 仅 material：标准子题目数组 JSON（2–10 个，不可再嵌套）
+  content_hash     VARCHAR(16)  NOT NULL,           -- FNV-1a：普通题 type|题干；material 含材料+子问题语义归一
   created_at       BIGINT       NOT NULL,
   updated_at       BIGINT       NOT NULL
 );

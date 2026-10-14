@@ -190,6 +190,103 @@ eq(QB.Adapters.normalizeType('不定项选择'), 'indefinite', '题型名「不�
   ok(!QB.judgeAnswer(q0, ['A', 'C']).partial, '样例不定项：错选 0 分无 partial');
 }
 
+/* ================= 2.8 材料题（综合题，M1） ================= */
+section('材料题模型 / 判分 / 引擎 / 哈希');
+{
+  const matPath = path.join(QB_DIR, 'samples', '示例-材料题.json');
+  const matParsed = await QB.JsonImporter.parse({ text: fs.readFileSync(matPath, 'utf8'), fileName: '示例-材料题.json' });
+  eq(matParsed.questions.length, 1, '材料题夹具：1 道');
+  const MQ = matParsed.questions[0];
+  eq(MQ.type, 'material', '类型 material');
+  eq(MQ.children.length, 5, '5 个小问');
+  eq(QB.Adapters.validateQuestions(matParsed.questions).warnings.length, 0, '材料题校验零警告');
+  eq(MQ.children[0].type, 'single', '小问 1 单选');
+  eq(MQ.children[1].type, 'indefinite', '小问 2 不定项');
+  ok(MQ.children.every((c) => c.type !== 'material'), '无二层嵌套');
+
+  // contentHash：往返稳定；改子问题答案/材料 → hash 必变
+  const h0 = QB.makeContentHash(MQ);
+  const reparsed = await QB.JsonImporter.parse({ text: fs.readFileSync(matPath, 'utf8'), fileName: 'x.json' });
+  eq(h0, QB.makeContentHash(reparsed.questions[0]), '材料题 hash 跨解析稳定');
+  const MQ2 = JSON.parse(JSON.stringify(MQ)); MQ2.children[0].answer = 'C';
+  ok(QB.makeContentHash(MQ2) !== h0, '改小问答案 → hash 变化');
+  const MQ3 = JSON.parse(JSON.stringify(MQ)); MQ3.material = MQ3.material + '补充条款';
+  ok(QB.makeContentHash(MQ3) !== h0, '改共享材料 → hash 变化');
+
+  // 判分聚合：全对 + 简答待自评 → null
+  const ansAll = ['B', 'ABD', true, ['10000'], '运输费是必要支出'];
+  const vPending = QB.judgeAnswer(MQ, ansAll);
+  eq(vPending.isCorrect, null, '含未自评简答：整题 null（待自评）');
+  eq(vPending.children.length, 5, '5 个小问判定');
+  eq(vPending.children[0].isCorrect, true, '小问1 单选正确');
+  eq(vPending.children[3].detail[0].isCorrect, true, '小问4 填空 accept 匹配');
+  eq(vPending.points.max, 50, '满分 50（5×10）');
+  // 简答自评正确后全对
+  vPending.children[4].isCorrect = true; vPending.children[4].earned = 10;
+  const aggOk = QB.aggregateMaterial(vPending.children);
+  eq(aggOk.isCorrect, true, '自评后全对：true');
+  eq(aggOk.points.earned, 50, '自评后得分 50');
+
+  // 不定项少选（AB）→ 整题半对；另含一个错答 → hard error
+  const vHalf = QB.judgeAnswer(MQ, ['C', 'AB', true, ['10000'], 'x']);
+  eq(vHalf.children[1].isCorrect, false, '小问2 少选：isCorrect=false');
+  ok(vHalf.children[1].partial, '小问2 少选：partial=true');
+  vHalf.children[4].isCorrect = true; vHalf.children[4].earned = 10;
+  const aggHalf = QB.aggregateMaterial(vHalf.children);
+  eq(aggHalf.isCorrect, false, '含错误小问：整题 false');
+  ok(!aggHalf.partial, '含硬错误：partial=false');
+  eq(aggHalf.points.earned, 35, '得分=0+5+10+10+10=35');
+
+  // 校验：少于 2 个小问给警告；二层嵌套被拒绝
+  const bad = QB.Adapters.toStandard({ type: 'material', material: 'm', children: [{ type: 'judge', question: 'x', answer: '正确' }] });
+  ok(bad.warnings.some((w) => w.indexOf('不足 2') >= 0), '单子问题材料题警告');
+  const nested = QB.Adapters.toStandard({ type: 'material', material: 'm', children: [{ type: 'material', material: 'x', question: 'y' }, { type: 'judge', question: 'z', answer: '正确' }] });
+  ok(nested.warnings.some((w) => w.indexOf('不能再嵌套') >= 0), '二层嵌套警告并跳过');
+
+  // 引擎：作答收集 / canSubmit / 提交 / 自评 / 得分
+  const E = new QB.QuizEngine();
+  E.loadQuestions([MQ], 'mixed', { shuffleOptions: false });
+  ok(!E.canSubmit(), '材料题未答全：不可提交');
+  E.selectAnswer('B', 0);
+  E.toggleAnswer('A', 1); E.toggleAnswer('B', 1); E.toggleAnswer('D', 1);
+  E.selectAnswer(true, 2);
+  E.setFillAnswer(0, '10000', 3);
+  ok(!E.canSubmit(), '还缺简答小问：不可提交');
+  E.setEssayAnswer('必要支出计入成本', 4);
+  ok(E.canSubmit(), '全部小问答完：可提交');
+  const ER = E.submitAnswer();
+  eq(ER.isCorrect, null, '提交后待自评');
+  ok(!ER.srsRecorded, '提交结果 srsRecorded 初始 false');
+  E.selfAssess(true, 4);
+  eq(E.results[0].isCorrect, true, '自评完成：整题正确');
+  eq(E.getScore().score, 50, '引擎得分 50');
+  eq(E.getScore().correct, 1, '正确题数 1');
+
+  // 选项乱序递归到子问题（contentHash 不变，答案重映射）
+  const Sh = QB.shuffleOptions(MQ, 123);
+  eq(QB.makeContentHash(Sh), h0, '乱序后材料题 contentHash 不变');
+  eq(Sh.children[0].type, 'single', '子问题保留');
+  ok(JSON.stringify(Sh.children[0].options.map((o) => o.letter).sort()) === JSON.stringify(['A', 'B', 'C', 'D']), '子问题选项仍为 A..D');
+
+  // 蓝图：material 作为一个抽题单位
+  const pool = [MQ, QB.Adapters.toStandard({ type: 'judge', question: '普通判断', answer: '正确' }).question];
+  const bp = QB.Blueprint.filterPool(pool, { types: ['material'], classRange: '', difficultyRange: [0, 5] });
+  const comp = QB.Blueprint.compose(bp, { items: [{ type: 'material', count: 1 }], keepOrder: true });
+  eq(comp.questions.length, 1, '蓝图可按 material 抽 1 个单位');
+  eq(comp.questions[0].type, 'material', '抽中的是材料题整题');
+  eq(comp.shortages.length, 0, '材料题无缺口');
+
+  // 整卷判分（考试）：未自评简答强制计错 → 整题错误
+  const E2 = new QB.QuizEngine();
+  E2.loadQuestions([MQ], 'exam', { shuffleOptions: false });
+  E2.selectAnswer('B', 0); E2.toggleAnswer('A', 1); E2.toggleAnswer('B', 1); E2.toggleAnswer('D', 1);
+  E2.selectAnswer(true, 2); E2.setFillAnswer(0, '10000', 3); E2.setEssayAnswer('xxx', 4);
+  E2.gradeAll();
+  eq(E2.results[0].isCorrect, false, '考试交卷：未自评简答计错 → 整题错误');
+  eq(E2.results[0].children[4].isCorrect, false, '小问5 强制为错误');
+  eq(E2.getScore().score, 40, '考试得分 40（简答 0 分）');
+}
+
 section('真实数据导入（541 题）');
 const flatText = fs.readFileSync(fixturePath('题库-背题模式.json', '真实-541题-背题模式.json'), 'utf8');
 const nestedText = fs.readFileSync(fixturePath('题库-分类.json', '真实-541题-分类.json'), 'utf8');

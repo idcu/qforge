@@ -18,7 +18,7 @@ node scripts/serve.mjs        # http://localhost:8777
 
 | 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **254** | 六题型判分（含不定项少选半分）、内置 18 题样例含 3 道不定项回归、难度/标签、xlsx 多工作表/docx 解析（自研 XmlLite，**零外部依赖常跑**）、DOCX 内嵌图片（rels/media→asset 占位、IDB 内存驱动入库、去重、缺 rId 警告、真机 WPS 回环样本）、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
+| `scripts/smoke-test.mjs` | **295** | 六题型判分（含不定项少选半分）、**材料题 M1（模型校验/语义归一哈希/递归判分聚合/小问自评/引擎得分/乱序递归/蓝图单位/考试计错，41 项）**、内置 18 题样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 538 题往返、多题库隔离/级联删除、答题卡 |
 | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
 | `scripts/exporter.test.mjs` | **136** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、538 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
@@ -33,7 +33,7 @@ node scripts/serve.mjs        # http://localhost:8777
 | `scripts/backup.test.mjs` | **15** | 全量备份、覆盖/合并恢复 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **29** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式 |
-| **合计** | **2009 / 2009 通过 · 15 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2050 / 2050 通过 · 15 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
@@ -77,7 +77,7 @@ bench 全程 heapUsed：5.26 → 24.00 MB（**+18.74 MB**，含全部夹具）�
 1. `js/config.js`：`TYPES` 加 id，补 `TYPE_LABELS/TYPE_BADGES`（唯一事实来源，禁止散落硬编码）。
 2. `js/utils/judge-answer.js`：在策略表加一项判分函数（禁止在 quiz-engine/statistics 写内联 if-else）。
 3. `js/importers/adapters.js`：`TYPE_ALIASES` 加中文名/英文别名。
-4. 编辑器、渲染器、导出二维表按题型分支补齐（参考 `indefinite` 的现有改法）。
+4. 编辑器、渲染器、导出二维表按题型分支补齐（参考 `indefinite` 的现有改法；材料题参考 M1：引擎用 `childIndex`、判分走 `judgeAnswer`+`aggregateMaterial`）。
 5. 测试：smoke + exporter + editor 补断言；样例题库补题。
 6. 文档：ARCHITECTURE §6、IMPORT-FORMAT §1、DATABASE §2.2、API-CONTRACT Question 枚举同步。
 
