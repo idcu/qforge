@@ -267,6 +267,151 @@ section('preset 权重经 grade 端到端生效（srs-store 接线）');
   QB.SRSStore.clear(bB.id);
 }
 
+/* ================= F3：纯计算核心 / Worker 选择器 / 回退 ================= */
+// 40 道题各 2 次评分 = 40 个相邻样本（<100 门控），含 again 与多档位，供多个 section 复用
+const shortLog = [];
+for (let i = 0; i < 40; i++) {
+  const r = i % 3 === 0 ? 1 : 3;
+  shortLog.push({ t: i * DAY, h: 'c' + i, r: 3 }, { t: (i + 1) * DAY, h: 'c' + i, r: r });
+}
+
+section('F3 核心拆分：Core 与存储层同源');
+{
+  eq(QB.FSRSTrainCore.MIN_SAMPLES, O.MIN_SAMPLES, 'FSRSOpt.MIN_SAMPLES 透传 Core 常量');
+  eq(QB.FSRSTrainCore.TRAIN_SUBSAMPLE, O.TRAIN_SUBSAMPLE, 'TRAIN_SUBSAMPLE 同源');
+  eq(QB.FSRSTrainCore.ITERATIONS, O.ITERATIONS, 'ITERATIONS 同源');
+  // 门控失败路径：computeTrain（不写盘）与 train（存储包装）返回一致
+  const c1 = QB.FSRSTrainCore.computeTrain(shortLog);
+  const c2 = O.train(shortLog);
+  ok(!c1.ok && !c2.ok, '门控失败：Core 与 train 均拒绝');
+  eq(c1.samples, c2.samples, '门控失败：样本数一致');
+  eq(c1.reason, c2.reason, '门控失败：原因一致');
+}
+
+section('F3 computeTrain 门控失败绝不写盘');
+{
+  clearOpt();
+  const before = QB.Storage.get(QB.KEYS.metaFsrsWeights, null);
+  QB.FSRSTrainCore.computeTrain([]); // 空日志
+  QB.FSRSTrainCore.computeTrain(shortLog);
+  eq(QB.Storage.get(QB.KEYS.metaFsrsWeights, null), before, 'Core 两次拒绝后权重存储不变（仍为 null）');
+  ok(!O.getWeightsMeta(), '无个性化 meta');
+}
+
+section('F3 Worker 支持判定（纯函数）');
+{
+  const S = QB.FSRSTrain.supported;
+  ok(!S({ protocol: 'file:', hasWorker: true }), 'file:// 即便有 Worker 也不走');
+  ok(!S({ protocol: 'http:', hasWorker: false }), 'http 但无 Worker 构造器 → false');
+  ok(S({ protocol: 'http:', hasWorker: true }), 'http + Worker → true');
+  ok(S({ protocol: 'https:', hasWorker: true }), 'https + Worker → true');
+  ok(!S({ protocol: null, hasWorker: true }), '协议未知 → false');
+  ok(!S(), 'Node 测试环境默认判定 false（回退主线程）');
+}
+
+section('F3 run：不支持环境走主线程 compute');
+{
+  let computeCalls = 0;
+  const r = await QB.FSRSTrain.run(shortLog, {
+    env: { protocol: 'file:', hasWorker: true },
+    compute: (log) => { computeCalls++; return QB.FSRSTrainCore.computeTrain(log); }
+  });
+  eq(computeCalls, 1, 'file://：compute 回退被调用 1 次');
+  ok(!r.ok && /样本不足/.test(r.reason), 'file://：回退结果正确');
+}
+
+/** 假 Worker：捕获 postMessage，按 handler 生成回包（模拟 Worker 消息往返） */
+function makeFakeWorker(deps) {
+  const sent = { messages: [], terminated: 0 };
+  const worker = {
+    onmessage: null, onerror: null,
+    postMessage(m) {
+      sent.messages.push(m);
+      Promise.resolve().then(() => {
+        try {
+          const out = deps.respond(m);
+          if (out && worker.onmessage) worker.onmessage({ data: out });
+        } catch (e) {
+          if (worker.onerror) worker.onerror({ message: e.message });
+        }
+      });
+    },
+    terminate() { sent.terminated++; }
+  };
+  return { worker: worker, sent: sent };
+}
+
+section('F3 run：Worker 成功路径（消息协议 + 不走 compute）');
+{
+  const fake = makeFakeWorker({
+    respond: (m) => {
+      eq(m.type, 'train', 'Worker 收到 type=train');
+      eq(m.initWeights, QB.FSRS.DEFAULT_W, 'Worker 收到官方初始权重');
+      eq(m.iterations, QB.FSRSTrainCore.ITERATIONS, 'Worker 收到 iterations');
+      eq(m.subsample, QB.FSRSTrainCore.TRAIN_SUBSAMPLE, 'Worker 收到 subsample');
+      eq(m.revlog, shortLog, 'revlog 原样传入 Worker');
+      // 模拟 worker 端真实计算后回包
+      return { type: 'done', result: QB.FSRSTrainCore.computeTrain(m.revlog, {
+        initWeights: m.initWeights, iterations: m.iterations, subsample: m.subsample
+      }) };
+    }
+  });
+  let computeCalls = 0;
+  const r = await QB.FSRSTrain.run(shortLog, {
+    env: { protocol: 'https:', hasWorker: true },
+    createWorker: () => fake.worker,
+    compute: () => { computeCalls++; return { ok: true, via: 'main' }; }
+  });
+  eq(computeCalls, 0, 'Worker 成功：主线程 compute 未被调用');
+  ok(!r.ok && /样本不足/.test(r.reason), 'Worker 回包结果被透传');
+  eq(fake.sent.terminated, 1, '完成后 terminate Worker');
+}
+
+section('F3 run：Worker 构造失败/运行错误自动回退');
+{
+  let computeCalls = 0;
+  const r1 = await QB.FSRSTrain.run(shortLog, {
+    env: { protocol: 'https:', hasWorker: true },
+    createWorker: () => { throw new Error('boom'); },
+    compute: (log) => { computeCalls++; return QB.FSRSTrainCore.computeTrain(log); }
+  });
+  eq(computeCalls, 1, '构造抛错：回退 compute');
+  ok(!r1.ok, '构造抛错：回退结果正确');
+
+  const fakeErr = makeFakeWorker({ respond: () => { throw new Error('x'); } });
+  // respond 抛错 → fake 的 onerror 路径
+  let computeCalls2 = 0;
+  const r2 = await QB.FSRSTrain.run(shortLog, {
+    env: { protocol: 'https:', hasWorker: true },
+    createWorker: () => fakeErr.worker,
+    compute: (log) => { computeCalls2++; return QB.FSRSTrainCore.computeTrain(log); }
+  });
+  eq(computeCalls2, 1, 'Worker onerror：回退 compute');
+  ok(!r2.ok, 'Worker onerror：回退结果正确');
+}
+
+section('F3 trainAsync：Worker 回包采纳后由主线程写盘到作用域');
+{
+  clearOpt();
+  const fakeOk = makeFakeWorker({
+    respond: (m) => ({ type: 'done', result: {
+      ok: true, samples: 1260, trainedSamples: 1260, defaultLoss: 0.35, loss: 0.34,
+      improvement: 0.028, weights: m.initWeights.map((v, i) => i === 0 ? v + 0.05 : v)
+    } })
+  });
+  const r = await O.trainAsync('workerBank', {
+    env: { protocol: 'https:', hasWorker: true },
+    createWorker: () => fakeOk.worker
+  });
+  ok(r.ok, 'trainAsync：Worker 成功结果返回 ok');
+  const meta = O.getWeightsMeta('workerBank');
+  ok(!!meta, 'trainAsync：权重写入 bank preset');
+  eq(meta.trainedSamples, 1260, 'trainAsync：meta.trainedSamples 落盘');
+  eq(meta.scope, 'bank', 'trainAsync：meta.scope=bank');
+  ok(!O.getWeightsMeta(), 'trainAsync：全局作用域未被污染');
+  clearOpt();
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

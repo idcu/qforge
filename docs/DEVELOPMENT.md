@@ -31,12 +31,12 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   
 | `scripts/blueprint.test.mjs` | **18** | 题型×分类×难度筛选/抽题/缺口、种子可复现 |
 | `scripts/source.test.mjs` | **29** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入） |
 | `scripts/fsrs.test.mjs` | **65** | 稳定度/难度/保留率/又错惩罚/钳制/迁移、1m/10m learning steps、relearning |
-| `scripts/fsrs-opt.test.mjs` | **44** | revlog/FIFO、四门控、合成日志 logloss 改善、确定性复训、默认回退、preset 隔离与端到端 |
+| `scripts/fsrs-opt.test.mjs` | **77** | revlog/FIFO、四门控、合成日志 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
 | `scripts/srs.test.mjs` | **39** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列 |
 | `scripts/backup.test.mjs` | **15** | 全量备份、覆盖/合并恢复 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
-| `scripts/pwa.test.mjs` | **18** | manifest/SW/离线资源完整性 |
-| **合计** | **1879 / 1879 通过**（UTC 与 Asia/Shanghai 双时区本地实跑） | |
+| `scripts/pwa.test.mjs` | **29** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式 |
+| **合计** | **1923 / 1923 通过**（UTC 与 Asia/Shanghai 双时区本地实跑） | |
 
 一键全跑（PowerShell）：
 

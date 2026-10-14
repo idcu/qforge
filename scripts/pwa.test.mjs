@@ -37,6 +37,24 @@ ok(/addEventListener\(['"]fetch['"]/.test(sw), '监听 fetch');
 ok(sw.indexOf('mode === \'navigate\'') >= 0 || sw.indexOf("mode === \"navigate\"") >= 0, '导航请求有离线回退');
 ok(sw.indexOf('http://') < 0 && sw.indexOf('https://') < 0, '不硬编码绝对 URL');
 
+section('FSRS 训练 Worker');
+const workerPath = 'js/workers/fsrs-worker.js';
+ok(fs.existsSync(path.join(ROOT, workerPath)), 'Worker 文件存在：' + workerPath);
+const workerSrc = read(workerPath);
+ok(/importScripts\(['"]\.\.\/modules\/fsrs\.js['"]/.test(workerSrc), 'Worker importScripts 加载 fsrs.js');
+ok(/importScripts\([^)]*fsrs-train-core\.js['"]\)/.test(workerSrc), 'Worker importScripts 加载 fsrs-train-core.js');
+['../modules/fsrs.js', '../modules/fsrs-train-core.js'].forEach((rel) => {
+  const resolved = path.normalize(path.join(path.dirname(workerPath), rel));
+  ok(fs.existsSync(path.join(ROOT, resolved)), 'Worker 依赖文件存在：' + rel);
+});
+ok(/postMessage\(\s*\{\s*type:\s*['"]done['"]/.test(workerSrc), 'Worker 回包协议含 done');
+ok(/type:\s*['"]error['"]/.test(workerSrc), 'Worker 错误协议含 error');
+ok(sw.indexOf('./' + workerPath) >= 0, 'SW 预缓存列表包含 Worker');
+ok(sw.indexOf('./js/modules/fsrs-train-core.js') >= 0, 'SW 预缓存列表包含 train-core');
+const indexHtml = read('index.html');
+ok(indexHtml.indexOf('fsrs-worker.js') < 0, 'Worker 不经 index.html <script> 加载（由 new Worker 构造）');
+ok(indexHtml.indexOf('fsrs-train-core.js') >= 0 && indexHtml.indexOf('fsrs-train-client.js') >= 0, 'index.html 加载 core 与 client');
+
 section('入口引用与注册守卫');
 const index = read('index.html');
 ok(index.indexOf('rel="manifest"') >= 0, 'index.html 引用 manifest');

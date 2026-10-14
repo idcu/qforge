@@ -568,10 +568,14 @@
       case 'fsrs-train': {
         const scope = State.fsrsScope;
         const scopeName = scope ? (State.banks.find((b) => b.id === scope) || {}).name || '本题库' : '全局';
-        UI.toast('正在训练（' + scopeName + '，约需数秒）…');
+        const inWorker = QB.FSRSTrain.supported();
+        UI.toast(inWorker
+          ? '正在后台训练（' + scopeName + '，不影响操作，约需数秒）…'
+          : '正在训练（' + scopeName + '，约需数秒）…');
         let res;
         try {
-          res = await new Promise((resolve) => setTimeout(() => resolve(QB.FSRSOpt.train(undefined, scope)), 30));
+          // http(s) 走 Worker；file:///失败自动回退主线程（client 内部处理）
+          res = await QB.FSRSOpt.trainAsync(scope);
         } catch (e) { UI.toast('训练失败：' + e.message, 'err'); return render(); }
         if (res.ok) {
           UI.toast('训练完成（' + scopeName + '）：logloss 改善 ' + (res.improvement * 100).toFixed(1) + '%，已对后续评分生效', 'ok');

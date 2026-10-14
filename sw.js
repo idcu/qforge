@@ -4,7 +4,13 @@
  * 导航请求离线时回退到 index.html。相对路径注册使其在 GitHub Pages 子路径下同样可用。
  */
 const CACHE = 'qforge-v2';
-const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
+const CORE = [
+  './', './index.html', './manifest.webmanifest', './icon.svg',
+  // FSRS 训练 Worker 链（Worker 不经 <script> 加载，需显式预缓存以支持离线训练）
+  './js/workers/fsrs-worker.js',
+  './js/modules/fsrs.js',
+  './js/modules/fsrs-train-core.js'
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

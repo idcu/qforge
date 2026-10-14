@@ -136,14 +136,25 @@ w = [0.4, 0.6, 2.4, 5.9,        // w0..w3 初始稳定度（again/hard/good/easy
 - 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳}` 到 `qb:user:revlog`。
 - **FIFO 上限 20,000 条**（约 0.8MB），超限丢最旧；revlog 始终全局采集（参数按人，不按库）。
 
-### 8.2 样本与损失
+### 8.2 训练在哪执行（Worker 化）
+
+重计算（样本构造/loss/Adam）抽到零依赖纯模块 `fsrs-train-core.js`（`QB.FSRSTrainCore.computeTrain`，不碰 Storage/DOM/Date），两条执行路径同一份数值逻辑：
+
+| 环境 | 路径 | 行为 |
+| --- | --- | --- |
+| http/https 且有 `Worker` | `js/workers/fsrs-worker.js`（importScripts fsrs.js + core） | 后台线程训练，UI 不卡顿；完成后消息回传，主线程 `FSRSOpt.trainAsync` 统一写盘 |
+| file:// / 无 Worker / Worker 构造失败或运行错误/30s 超时 | 主线程直接 `computeTrain` | 自动回退（console.warn 记录），功能与旧版一致 |
+
+选择逻辑在 `fsrs-train-client.js`（`QB.FSRSTrain.supported/run`，env/createWorker/compute 均可注入单测）；**Worker 不碰 LocalStorage**——revlog 与初始权重由消息传入，权重写盘只有 `FSRSOpt` 一个写入点。SW 预缓存 worker 链（worker/core/fsrs.js），离线可训练。
+
+### 8.3 样本与损失
 
 - 样本 = 同一 contentHash **相邻两次评分**：`(上次评分, 间隔 Δt, 本次评分)`，用 FSRS 公式从上次状态预测本次时刻的保留率，以本次是否 again 为伯努利结果。
 - 损失 = 伯努利**负对数似然（logloss）**；梯度为数值梯度（`EPS_P=1e-4` 中心差分），**Adam**（学习率 `LR=0.04`，`ITERATIONS=150`）。
 - 单次训练确定性抽样上限 `TRAIN_SUBSAMPLE=1500` 个样本（同数据复训结果一致）。
 - 17 个权重各有物理取值边界 `BOUNDS`，优化结果钳制在边界内。
 
-### 8.3 采纳门控（四条件全部满足才写盘）
+### 8.4 采纳门控（四条件全部满足才写盘）
 
 | 门控 | 阈值 | 常量 |
 | --- | --- | --- |
@@ -154,7 +165,7 @@ w = [0.4, 0.6, 2.4, 5.9,        // w0..w3 初始稳定度（again/hard/good/easy
 
 任一不满足则**诚实回退**：不写盘，按钮/返回里给出具体原因（样本不足/改善不足），不会越训越差。
 
-### 8.4 权重作用域与回退
+### 8.5 权重作用域与回退
 
 存储结构 `qb:meta:fsrsWeights`：
 
@@ -165,9 +176,9 @@ w = [0.4, 0.6, 2.4, 5.9,        // w0..w3 初始稳定度（again/hard/good/easy
 
 活动权重回退顺序：**题库 preset → 全局权重 → 官方 17 默认权重**。各作用域可单独「恢复官方默认」；旧版本单组 `{w:[]}` 结构读取时自动归一为 global。训练只影响**之后**的评分，已有复习计划不重算。
 
-### 8.5 有效性验证（自动化，非人工声称）
+### 8.6 有效性验证（自动化，非人工声称）
 
-`fsrs-opt.test.mjs`（44 项断言）用 mulberry32 确定性 PRNG + 伯努利抽样造合成日志：420 张卡 × 4 次复习 = 1260 个相邻评分样本（含 140 次 again）。当真权重相对默认值扰动 ±25% 时，训练后 logloss **0.3440** 优于默认权重 **0.3473**（改善约 0.97%，超过 0.2% 门控）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果逐位一致。套件耗时约 2.6s。
+`fsrs-opt.test.mjs`（**77 项断言**）用 mulberry32 确定性 PRNG + 伯努利抽样造合成日志：420 张卡 × 4 次复习 = 1260 个相邻评分样本（含 140 次 again）。当真权重相对默认值扰动 ±25% 时，训练后 logloss **0.3440** 优于默认权重 **0.3473**（改善约 0.97%，超过 0.2% 门控）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果逐位一致。另含 F3 的 33 项 Worker 化断言（Core 与存储层同源、门控不写盘、supported 判定矩阵、假 Worker 消息协议、构造/onerror 回退、trainAsync 写盘作用域）。合成日志全量套件耗时约 2.6s。
 
 ## 9. 存储键一览
 
@@ -184,13 +195,16 @@ w = [0.4, 0.6, 2.4, 5.9,        // w0..w3 初始稳定度（again/hard/good/easy
 | `fsrs.js` | `QB.FSRS.review(state, rating, now, weights)`、`initialState(rating, now, weights)`、`isLearning(state)`、`DEFAULT_W`、`REQUEST_RETENTION` |
 | `srs.js` | `QB.SRS.RATINGS`、`isDue`、`isDueToday`、`dueQuestions` |
 | `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/...`（0–3→1–4 映射、SM-2 迁移） |
-| `fsrs-opt.js` | `appendLog`、`diagnose`、`train`（门控训练）、`activeWeights(scope)`、`resetWeights(scope)` |
+| `fsrs-opt.js` | revlog/权重存储层：`appendLog`、`diagnose`、`train`（同步）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights` |
+| `fsrs-train-core.js` | 纯计算：`computeTrain(revlog,opts)`、`diagnose`、`buildSequences/loss/gradient/optimize`、门控/边界常量（Worker 与主线程共用） |
+| `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,deps)`（Worker 优先、自动回退，可注入测试） |
+| `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train` → `done/error`（不经 index.html 加载） |
 
-测试（2026-10-14 实跑全绿）：`fsrs.test.mjs` **65** 项（稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps、relearning）、`srs.test.mjs` **39** 项（自然日时区无关、7 日预报、迁移、分钟级队列）、`fsrs-opt.test.mjs` **44** 项。
+测试（2026-10-14 实跑全绿）：`fsrs.test.mjs` **65** 项（稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps、relearning）、`srs.test.mjs` **39** 项（自然日时区无关、7 日预报、迁移、分钟级队列）、`fsrs-opt.test.mjs` **77** 项（优化器 44 + Worker 化 33）。
 
 ## 11. 已知边界（设计取舍）
 
 - 无 Anki 式 fuzz 间隔抖动、无 lapses 手动重学卡的「提前毕业」微调。
-- 优化器只做离线批训练（手动一键），不做在线增量更新。
+- 优化器只做离线批训练（手动一键），不做在线增量更新；http(s) 下计算在专用 Worker、file:// 回退主线程（无共享内存/进度百分比，30s 超时保险）。
 - 历史评分不回填：升级前没有 revlog，需从升级后积累样本。
 - 不做多用户/云协同权重；权重随全量备份迁移（`meta:fsrsWeights`），revlog 同理。

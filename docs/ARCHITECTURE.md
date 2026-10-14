@@ -98,7 +98,10 @@
 | `modules/search-filter.js` | `search`/`filter`/`highlight`/`categories` |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
 | `modules/fsrs.js` | **FSRS-4.5 纯调度器**（17 个官方默认权重）：`review/initialState/isLearning`、稳定度/难度/目标保留率、新卡/重学 learning steps（1m/10m 状态机），无 DOM/存储依赖。公式/状态机/边界见 [SRS.md](SRS.md) |
-| `modules/fsrs-opt.js` | **个性化参数优化器**：revlog 采集（FIFO 2 万条）、样本构造、伯努利 NLL、数值梯度+Adam；门控 100 样本/≥3 again/3 档位/0.2% 改善；权重支持全局 + 按题库 preset（旧单组结构自动归一）。细节见 [SRS.md](SRS.md) §8 |
+| `modules/fsrs-train-core.js` | 训练**纯计算核心**（Storage/DOM 零依赖）：computeTrain/diagnose/序列/NLL/梯度/Adam/门控常量；Worker 与主线程共用同一数值来源，见 [SRS.md](SRS.md) §8.2 |
+| `modules/fsrs-opt.js` | revlog/权重**存储层** + 一键训练：`train`（同步）/`trainAsync`（Worker 优先自动回退）；门控采纳后唯一写盘点；权重支持全局 + 按题库 preset（旧单组结构自动归一）。细节见 [SRS.md](SRS.md) §8 |
+| `modules/fsrs-train-client.js` | 训练执行选择器：`supported(env)` 判定（http(s)+Worker）、`run(revlog,deps)` 消息往返（30s 超时）、构造/运行失败自动回退主线程；env/createWorker/compute 可注入测试 |
+| `workers/fsrs-worker.js` | 训练 Worker（不经 index.html）：importScripts fsrs.js + train-core，收 `train` 消息回 `done/error`；SW 预缓存，离线可用 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
 | `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7） |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |
