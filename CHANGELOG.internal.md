@@ -1003,6 +1003,32 @@
 
 ---
 
+## 3bcf58f · fix(srs): FSRS-4.5 公式对齐官方 v4.5.0 调度器（评估报告高优先级#1）
+
+**背景**：第三方实测评估（2026-10-14，基线 617d1a3）用官方 v4.5.0 标签 `fsrs4anki_scheduler.js` 函数对照：S=10/D=5/R=0.9/good 官方 29.01，qforge 11.62；R=1 时官方稳定度不增长，qforge 增长到 11.4。旧实现 recall 公式不含难度 D、forget 为自定义 powerDecay 式、initDifficulty 用旧版 exp 式（致 good 难度 4.93 被误钳到 1）、默认权重 w3=5.9（官方 5.8）。
+
+**核心改动**（`js/modules/fsrs.js`）
+- `nextStability(d,s,r,rating,w)` 新签名（旧 s,r,rating,w）：recall = S·(1+exp(w8)·(11-D)·S^-w9·(exp((1-R)w10)-1)·hardPenalty·easyBonus)；forget = min(w11·D^-w12·((S+1)^w13-1)·exp((1-R)w14), S)。
+- `nextDifficulty`：next=D-w6(r-3)，D′=clamp(w7·w4+(1-w7)·next)——均值回归目标按 v4.5.0 标签字面固定为 w4。
+- `initDifficulty` 改线性 w4-w5(r-3)；默认权重 w3 5.9→5.8；数值精度 round4→round2（对齐官方 toFixed(2)）。
+- review 顺序改为先 D 后 S（again 同样用新 D）；修复 learning 毕业权重丢失（reviewLearning 透传 w，旧代码传 null 回退默认权重）。
+- 保留率曲线保留 fsrs-rs 幂律（DECAY=-0.5/FACTOR=19/81）：与 scheduler 的 (1+t/9S)^-1 仅曲线形状差异，到期点 R=0.9 重合，SRS.md 已据实说明。
+
+**验证数据（2026-10-14，Node v24.14.0）**
+- 黄金对照：nextStability(5,10,0.9,good)=**29.01**（旧 11.62）；R=1 → **10**（旧 11.4）；初始难度 again **6.81**/hard **5.87**/good **4.93**/easy **3.99**。
+- fsrs.test 65→**77**（新增 12 项官方黄金对照）；fsrs-opt **77**、srs **39** 零回归。
+- bench：50 题 gradeAll 中位 **0.10ms**（旧 0.07–0.09 同量级）；heapUsed +18.83MB（夹具噪声级）。
+
+**公共抽象影响面**
+- `QB.FSRS.nextStability` 参数顺序破坏性修正（s,r,w → d,s,r,rating,w）：全仓调用方仅 fsrs.js 内部 review 与 fsrs.test，已同步；无其他模块引用。
+- 无新增公共抽象；`clampMin` 随旧公式删除（无调用方）。
+- 存量复习状态兼容：状态仅存 S/D 数值，无公式版本字段，下次评分起按新公式演进（旧轨迹不回填，与 SM-2 迁移策略一致）。
+
+**遗留 TODO / 风险**
+- 间隔未含 fuzz 抖动（既有裁剪）；官方 scheduler 的线性 R 曲线未照搬（文档已注明差异）。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
