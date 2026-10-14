@@ -923,6 +923,34 @@
 
 ---
 
+## 10fc2d7 · feat(material): F4-M1 材料题（综合题）模型/判分/引擎/UI/JSON 往返
+
+**背景**：F4 材料题规格 5 个决策点已按推荐全部确认（4b98a77 决策文档），实施 M1（SPEC §9：模型与判分，不做文本格式/嵌套编辑器）。
+
+**核心改动**
+- 模型：config 第七题型 `material`（7 种题型）；`Adapters.toStandardMaterial` 递归标准化 children（2–10 个、拒绝二层嵌套、子题不携带独立分类/难度/标签），validateQuestions 递归校验；题型别名材料/综合题/组合题。
+- 去重键：`makeContentHash` 对 material 纳入材料+全部子问题，按**语义归一**（选项文本排序、选择题答案取选中文本集合、填空取各空答案）——相对 SPEC 原稿的落地修正，使练习时选项乱序/字母重映射不改变材料题 hash（与普通题去重键稳定性一致）。
+- 判分：`Strategies.material` 递归判分 + `QB.aggregateMaterial`（任一硬错 false；无错有半对 false+partial；含未自评简答 null；`points.max/earned`，每小问 `score||10`，预留决策 1 的权重字段）。
+- 引擎：`selectAnswer/toggleAnswer/setFillAnswer/setEssayAnswer` 新增 childIndex；canSubmit 要求全部小问有效；`selfAssess(ok, childIndex)` 重算聚合；gradeAll 未自评小问逐问计错后重算；getScore 按 points 累计；statusAt 支持部分作答；shuffleOptions 递归子问题（小问顺序不打乱）。
+- SRS：整题原子；练习/自评/交卷三处统一在整题「null→已判定」时记录一次（`result.srsRecorded` 去重，修复了材料题多简答小问重复 grade 的隐患）；错题本收整题。
+- UI：共享材料卡 + 小问卡（data-child 事件透传）+ 整题总评横幅（全对/半对/有错/待自评 n）+ 结果页小问明细；材料题禁用字母数字快捷键（多小问共用按键）；题目编辑器类型下拉排除 material（M3 开放）；最小 CSS（material-box/material-child）。
+- 夹具 `samples/示例-材料题.json`（1 道 5 小问：单选/不定项/判断/填空/简答，含 accept 备选与分析）。
+
+**验证数据（2026-10-14，Node v24.14.0）**
+- 15 套件 **2050/2050**（2009 + 材料题块 41 项）：夹具解析零警告、hash 稳定性/改答案/改材料敏感、全对 50 分、少选+错答 35 分聚合、单子问/二层嵌套警告、引擎作答收集与 canSubmit 分阶段、自评后全对、乱序 hash 不变、蓝图 material 抽题、考试未自评计错 40 分。
+- gradeAll(50) 中位 0.11ms（噪声级，材料题不在 538 题热路径）；首屏 58 文件/53 js，**135.6 KB gzip / 382.6 KB raw**（+5.3 KB gzip）。
+
+**公共抽象影响面**
+- 新增：`QB.aggregateMaterial`、judgeAnswer 返回 `children/points`、引擎 childIndex 参数族与 result.srsRecorded/points、Adapters 材料常量 MATERIAL_MIN/MAX_CHILDREN。
+- 影响范围：FSRSOpt/SRS 零改动（评分仍消费 isCorrect/partial）；普通六题型引擎方法签名向后兼容（childIndex 省略即旧行为）；题型枚举消费者（统计 byType、蓝图 availability、编辑器下拉）已逐一处理，编辑器显式排除 material。
+- 复用：判分 100% 走既有 Strategies，SRS 三档映射/错题规则不变，富文本/图片/选项乱序全部沿用。
+
+**遗留 TODO / 风险（M2/M3/M4）**
+- M2：LineParser 材料块（MD/DOCX）、CSV/XLSX「材料/小问」多行约定与导出；M3：嵌套编辑器、做题结果内联自评、搜索索引覆盖材料正文、统计小问维度；M4：小问乱序开关、每卷材料题上限、子问题权重配分 UI。
+- M1 真机人工项：材料题作答/小问自评/考试交卷的浏览器交互（逻辑层已覆盖，UI 待人工过一遍）。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
@@ -938,6 +966,7 @@
 > F2 功能批次（2026-10-14）：`43bbd1a` feat(import) DOCX 内嵌图片导入（注入路径 smoke 247/122.7KB gzip） · README 测试表同步 `489d572`
 > F3 性能批次（2026-10-14）：`56c0c8b` perf(srs) FSRS 训练 Worker 化（1923 断言/127.1KB gzip）
 > F2.5/F4（2026-10-14）：`b1d8262` feat(import) 自研 XmlLite（15 套件 2009 断言/130.3KB gzip，xlsx/docx 零外部依赖） · `ab6cbc5` docs(spec) 材料题规格评审稿
+> F4-M1（2026-10-14）：`10fc2d7` feat(material) 材料题模型/递归判分/引擎/做题UI/JSON 往返（15 套件 2050 断言/135.6KB gzip）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
