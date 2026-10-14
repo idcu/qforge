@@ -847,6 +847,35 @@
 
 ---
 
+## 56c0c8b · perf(srs): FSRS 训练 Worker 化
+
+**背景**：F3 批次，关闭 CHANGELOG e63acbd 遗留「训练主线程同步计算，大数据量卡顿，必要时改 Web Worker」。
+
+**核心改动**
+- 新增 `js/modules/fsrs-train-core.js`（`QB.FSRSTrainCore`）：把 fsrs-opt 的纯计算整体迁出——buildSequences/countSamples/sampleSequences/loss/gradient/optimize/diagnose 与全部常量（MIN_SAMPLES/MIN_IMPROVE/MIN_AGAIN/TRAIN_SUBSAMPLE/ITERATIONS/EPS_P/LR/EPS_LOSS/BOUNDS/WORKER_TIMEOUT_MS）；新增 `computeTrain(revlog,opts)` 做门控+抽样+双 loss+改善判定但**不写盘**；零 Storage/DOM/Date 依赖，IIFE 尾部自适应 window/globalThis，主线程与 Worker 同源。
+- `fsrs-opt.js` 瘦身为存储层：revlog/权重读写保留；`train()` 同步包装（Core.computeTrain + saveWeights，测试与回退路径）；新增 `trainAsync(bankId,deps)`（Worker 结果采纳后写盘）；纯函数与常量自 Core 再导出，**FSRSOpt 对外 API 零变化**。
+- 新增 `js/modules/fsrs-train-client.js`（`QB.FSRSTrain`）：`supported(env)` 仅 http(s) 协议 + Worker 构造器为真；`run(revlog,deps)` 走 Worker 消息往返（30s 保险超时、完成即 terminate），构造抛错/onerror/超时一律回退 Core.computeTrain（console.warn）；env/createWorker/compute 三个注入点供 Node 单测。
+- 新增 `js/workers/fsrs-worker.js`（classic worker，不经 index.html）：`self.window=self` 别名后 importScripts('../modules/fsrs.js','../modules/fsrs-train-core.js')；消息协议 `{type:'train',revlog,initWeights,iterations,subsample}` → `{type:'done',result}` / `{type:'error',message}`；Worker 不碰 Storage，写盘唯一入口仍在 fsrs-opt。
+- 接线：app.js fsrs-train 动作改 `trainAsync`（删除 setTimeout 30ms hack），toast 区分后台/当前页；index.html 加载 core（fsrs-opt 前）+ client；harness MODULES 同步；sw.js CORE 显式预缓存 worker + core + fsrs.js（Worker 请求不经 SWR 首访也离线可用）。
+
+**验证数据（2026-10-14，Node v24.14.0）**
+- 14 套件 **1923/1923**：fsrs-opt 44→**77**（+33：Core/存储常量同源、门控失败 computeTrain 不写盘、supported 六情形矩阵、file:// 回退计数、假 Worker 成功路径协议四字段与 terminate、构造抛错与 onerror 双回退、trainAsync Worker 回包写 bank preset 不污染全局）；pwa 18→**29**（+11：worker 文件/importScripts 两个依赖路径/协议串/SW 预缓存/index 加载方式）；其余 12 套件零回归。
+- 数值零漂移证明：重构后旧 44 项断言全绿——含合成日志（420 卡×4=1260 样本、140 again、扰动 ±25%）logloss 0.3440<0.3473、确定性复训 1e-9、preset 端到端稳定度 4.8/2.4 等关键数值断言。
+- bench 热路径无代码变化：gradeAll(50) 0.09ms、四格式导出 3.42ms、落库 1.52ms；heapUsed +12.95MB（5.30→18.25，批次间噪声）。
+- 首屏体积：**57 文件/52 js，127.1 KB gzip / 354.8 KB raw**（+3 文件/+4.4 KB gzip）。
+
+**本次新增/调整的公共抽象清单**
+- 新增：`QB.FSRSTrainCore`（纯计算 + 常量）、`QB.FSRSTrain`（supported/run/runInWorker/WORKER_URL）、`FSRSOpt.trainAsync`。
+- 影响范围（显式说明）：fsrs-opt 内部实现替换但 FSRSOpt 全部既有导出签名与返回形状不变（调用方仅 app.js 一个训练动作 + srs-store 读 getActiveWeights + 测试，均已适配/通过）；新增 2 个主线程脚本的 index.html/harness 加载顺序要求（core 必须先于 fsrs-opt，client 在其后，已配置）；Worker 仅在 http(s) 构造，file:// 用户无感回退。
+- 复用：Worker 通信不引入任何库；训练消息只传数据不传函数；权重写盘保持单点。
+
+**遗留 TODO / 风险**
+- Worker 真实创建、postMessage 往返、训练期间 UI 可交互、SW 离线加载 worker 为浏览器行为，Node 用假 Worker 覆盖协议层后仍需真机人工验收（列入人工清单）。
+- 无训练进度百分比（消息仅一发一收）；30s 超时为保险值（当前最坏负载约 2~3s）。
+- 下一批候选：F2.5 自研极简 XML/DOM 解析器（消除 CI 的 DOMParser 注入盲区，评估已完成）或 F4 材料题规格。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
@@ -860,6 +889,7 @@
 > 文档重组批次（2026-10-14）：`4f00cea` docs(formats) 使用侧事实修复 · `ef680a8` docs(arch) 工程侧对齐+SRS 专章 · `0942b6b` docs(competitors) 竞品对比 · `7ea9e43` docs(dev) 开发指南+README 门户
 > F1 功能批次（2026-10-14）：`5d1c8f3` feat(sample) 样例补不定项 · `f8c5799` feat(export) 历史记录导出四格式（1879 断言/121.0KB gzip）
 > F2 功能批次（2026-10-14）：`43bbd1a` feat(import) DOCX 内嵌图片导入（注入路径 smoke 247/122.7KB gzip） · README 测试表同步 `489d572`
+> F3 性能批次（2026-10-14）：`56c0c8b` perf(srs) FSRS 训练 Worker 化（1923 断言/127.1KB gzip）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
