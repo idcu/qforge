@@ -35,6 +35,22 @@ ok(QB.Storage.keys().every((k) => dataKeys.indexOf(k) >= 0), '备份覆盖全部
 const bankKey = Object.keys(backup.data).find((k) => k.indexOf('questions:') === 0 || k.indexOf('review:') >= 0);
 ok(!!bankKey, '备份含题库/SRS 数据键');
 
+section('WebDAV 密码脱敏（备份可安全分享，评估报告中优先级#6）');
+{
+  QB.SyncDAV.saveConfig({ baseUrl: 'https://dav.example.com/', user: 'u1', pass: 's3cret', lastAt: 1 });
+  const bp = QB.Backup.buildBackup();
+  const dav = bp.data[QB.KEYS.metaDav];
+  ok(!!dav && dav.pass === undefined, '备份不含 WebDAV 明文密码');
+  eq(dav.baseUrl, 'https://dav.example.com/', '非密字段（地址）保留');
+  eq(dav.user, 'u1', '非密字段（账号）保留');
+  // 本地配置不受备份脱敏影响
+  eq(QB.SyncDAV.getConfig().pass, 's3cret', '脱敏不改本地原配置（纯函数）');
+  // redactSecrets 直接契约
+  const redacted = QB.Backup.redactSecrets({ a: 1, 'meta:dav': { baseUrl: 'x', pass: 'y' } });
+  eq(redacted.a, 1, 'redactSecrets：无关键原样保留');
+  eq(redacted['meta:dav'].pass, undefined, 'redactSecrets：密码字段删除');
+}
+
 section('覆盖恢复');
 clearAll();
 eq((await QB.DB.banks.list()).length, 0, '清空后题库为 0');

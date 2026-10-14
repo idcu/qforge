@@ -8,7 +8,26 @@
   const QB = (global.QB = global.QB || {});
   const MAGIC = 'qforge-backup';
 
-  /** 读取全部应用数据 → 备份对象（值为已解析的 JS 对象） */
+  /**
+   * 敏感字段脱敏（备份可安全分享/外发/上云）：当前覆盖 meta:dav.pass（WebDAV 密码）。
+   * 纯函数、不改输入；非密字段（地址/账号/上次同步信息）保留，恢复后需重填密码。
+   */
+  function redactSecrets(data) {
+    const out = {};
+    Object.keys(data).forEach((k) => {
+      const v = data[k];
+      if (k === QB.KEYS.metaDav && v && typeof v === 'object' && !Array.isArray(v)) {
+        const copy = Object.assign({}, v);
+        delete copy.pass;
+        out[k] = copy;
+      } else {
+        out[k] = v;
+      }
+    });
+    return out;
+  }
+
+  /** 读取全部应用数据 → 备份对象（值为已解析的 JS 对象；敏感密码已脱敏） */
   function buildBackup(now) {
     QB.Storage.forceSync(); // 确保防抖写入的数据已落盘
     const keys = QB.Storage.keys();
@@ -18,7 +37,7 @@
       app: MAGIC,
       version: QB.CONFIG.VERSION,
       exportedAt: new Date(now == null ? Date.now() : now).toISOString(),
-      data: data
+      data: redactSecrets(data)
     };
   }
 
@@ -222,6 +241,7 @@
       (warn ? ' <span style="color:var(--warning);font-size:13px">（已超约 4MB，建议尽快备份并分库）</span>' : '') +
       '</div></div>' +
       '<p class="li-meta">备份包含全部题库、题目、错题、收藏、复习计划、历史记录、偏好与题目图片：无图时导出 .json，含图时自动打包为 .qfbk（ZIP）。可在另一台设备/浏览器恢复。</p>' +
+      '<p class="li-meta" style="color:var(--text-light)">🔒 WebDAV 密码不会写入备份（地址/账号保留，恢复后需重新填写密码），备份文件可安全分享。</p>' +
       '<div class="modal-actions" style="justify-content:flex-start;flex-wrap:wrap">' +
       '<button class="btn" data-bk="export">下载全量备份</button>' +
       '<button class="btn btn-ghost" data-bk="import">从备份恢复</button>' +
@@ -255,7 +275,7 @@
   }
 
   QB.Backup = {
-    buildBackup, applyBackup, isBackup,
+    buildBackup, applyBackup, isBackup, redactSecrets,
     buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,
     confirmRestore,
     download, pickAndRestore, openFlow
