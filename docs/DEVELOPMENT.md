@@ -12,17 +12,14 @@
 node scripts/serve.mjs        # http://localhost:8777
 ```
 
-- Node 环境无内置 `DOMParser`，跑 xlsx/docx 解析断言时可仅测试注入（不进入运行时）：
-
-```bash
-QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   # 207 → 254 项（xlsx 多表 + docx 含图 + WPS 回环仅在注入路径验证）
-```
+- xlsx/docx 解析走自研 `js/utils/xml-lite.js`，Node 零依赖直接跑，**无需注入 DOMParser**（历史上的 `QB_DOMPARSER` 机制已移除）。
 
 ## 2. 测试矩阵（有数据才算做完）
 
 | 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **207**（注入 DOMParser 时 **254**） | 六题型判分（含不定项少选半分）、内置 18 题样例含 3 道不定项回归、难度/标签、xlsx/docx 解析、**DOCX 内嵌图片（rels/media→asset 占位、IDB 内存驱动入库、去重、缺 rId 警告、真机 WPS 回环样本）**、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
+| `scripts/smoke-test.mjs` | **254** | 六题型判分（含不定项少选半分）、内置 18 题样例含 3 道不定项回归、难度/标签、xlsx 多工作表/docx 解析（自研 XmlLite，**零外部依赖常跑**）、DOCX 内嵌图片（rels/media→asset 占位、IDB 内存驱动入库、去重、缺 rId 警告、真机 WPS 回环样本）、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
+| `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
 | `scripts/exporter.test.mjs` | **136** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、538 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
 | `scripts/editor.test.mjs` | **29** | `buildQuestion` 纯函数、增删改 |
@@ -36,7 +33,7 @@ QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   
 | `scripts/backup.test.mjs` | **15** | 全量备份、覆盖/合并恢复 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **29** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式 |
-| **合计** | **1923 / 1923 通过**（UTC 与 Asia/Shanghai 双时区本地实跑） | |
+| **合计** | **2009 / 2009 通过 · 15 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
@@ -102,7 +99,7 @@ bench 全程 heapUsed：5.26 → 24.00 MB（**+18.74 MB**，含全部夹具）�
 python scripts/gen_fixtures.py                 # xlsx（需 openpyxl，无则 stdlib 回退）+ 纯文本 docx
 python scripts/gen_fixtures.py --docx-image    # 仅生成含内嵌 PNG 的 docx（stdlib，不触碰既有样例）
 ```
-> 夹具生成仅用于测试，应用运行时不依赖 Python；含图 docx 断言只在注入 DOMParser 的路径执行。
+> 夹具生成仅用于测试，应用运行时不依赖 Python；含图 docx 断言为基线常跑（XmlLite + 内存资产驱动，无需浏览器/DOMParser）。
 
 ## 6. 公共抽象规约
 
@@ -118,6 +115,8 @@ python scripts/gen_fixtures.py --docx-image    # 仅生成含内嵌 PNG 的 docx
 | 模型内容上屏 | `QB.RichText.render()`，禁止直接拼 `escapeHtml` |
 | 任意来源→题目 | `QB.Adapters.toStandard` / `LineParser` |
 | ZIP | `QB.ZipReader / ZipWriter`（method 0/8，stored + CRC32） |
+| OOXML/XML 解析 | `QB.XmlLite.parse`（自研；导入器禁止新引入 DOMParser/xmldom） |
+| 内嵌二进制（图片） | `QB.Assets.idFor / putEntries`（docx/qbk 同一管线） |
 
 ## 7. 提交与文档规约
 

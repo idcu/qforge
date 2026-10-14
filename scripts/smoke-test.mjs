@@ -7,8 +7,7 @@
  *   - 数据访问层 CRUD / 批量增删 / 多题库隔离 / 级联删除
  *   - 错题本 / 收藏 / 历史 / 进度会话
  *   - 答题引擎（练习 + 考试）、统计、多格式导出
- * 运行：node scripts/smoke-test.mjs
- * xlsx/docx 需：QB_DOMPARSER=<@xmldom/xmldom/lib/index.js 路径> node scripts/smoke-test.mjs
+ * 运行：node scripts/smoke-test.mjs（零依赖；xlsx/docx 走自研 XmlLite，无需外部 DOMParser）
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,8 +24,7 @@ function fixturePath(externalName, repoName) {
   return path.join(QB_DIR, 'samples', repoName);
 }
 
-const { QB, hasDomParser } = await createHarness(QB_DIR, { domParser: process.env.QB_DOMPARSER });
-if (process.env.QB_DOMPARSER && hasDomParser) console.log('[测试] DOMParser 已就绪：' + process.env.QB_DOMPARSER);
+const { QB } = await createHarness(QB_DIR);
 function toArrayBuffer(buf) { return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength); }
 
 /* ---------- 断言工具 ---------- */
@@ -477,12 +475,9 @@ let pasteThrew = false;
 try { await QB.DataIO.parsePastedText('   '); } catch (e) { pasteThrew = true; }
 ok(pasteThrew, '粘贴空白内容抛错');
 
-/* ================= 9. XLSX / DOCX 原生解析 ================= */
+/* ================= 9. XLSX / DOCX 原生解析（自研 XmlLite，无需外部 DOMParser） ================= */
 section('XLSX / DOCX 原生解析（zip + XML）');
-if (!hasDomParser) {
-  console.log('  SKIPPED：当前 Node 无 DOMParser，未验证 xlsx/docx。');
-  console.log('  提示：QB_DOMPARSER=@xmldom/xmldom node scripts/smoke-test.mjs 可完整验证。');
-} else {
+{
   const xlsxBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-表格导入.xlsx'));
   const docxBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-文档导入.docx'));
 

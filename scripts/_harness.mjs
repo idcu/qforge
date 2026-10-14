@@ -6,7 +6,6 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 const MODULES = [
   'js/data/sample-data.js',
@@ -20,6 +19,7 @@ const MODULES = [
   'js/utils/question-id.js',
   'js/utils/zip-reader.js',
   'js/utils/zip-writer.js',
+  'js/utils/xml-lite.js',
   'js/utils/assets.js',
   'js/data/contracts.js',
   'js/data/local-adapter.js',
@@ -60,10 +60,8 @@ const MODULES = [
 
 /**
  * @param {string} qbDir 工程根目录（含 js/ 的目录绝对路径）
- * @param {{domParser?:string}} [opts] domParser: @xmldom/xmldom 路径（Node 验证 xlsx/docx 用）
  */
-export async function createHarness(qbDir, opts) {
-  opts = opts || {};
+export async function createHarness(qbDir) {
   const raw = new Map();
   const localStorage = {
     get length() { return raw.size; },
@@ -84,18 +82,5 @@ export async function createHarness(qbDir, opts) {
 
   MODULES.forEach(load);
 
-  let hasDomParser = typeof globalThis.DOMParser !== 'undefined';
-  if (!hasDomParser && opts.domParser) {
-    try {
-      let spec = opts.domParser;
-      if (/[\\/]/.test(spec) || /^[A-Za-z]:/.test(spec)) spec = pathToFileURL(spec).href;
-      const mod = await import(spec);
-      const DP = mod.DOMParser || (mod.default && mod.default.DOMParser);
-      if (DP) { globalThis.DOMParser = DP; hasDomParser = true; }
-    } catch (e) {
-      console.log('[harness] DOMParser 注入失败：' + e.message);
-    }
-  }
-
-  return { QB: window.QB, window, hasDomParser, modules: MODULES };
+  return { QB: window.QB, window, modules: MODULES };
 }

@@ -59,6 +59,7 @@
 | `utils/question-id.js` | `QB.makeContentHash`/`QB.makeQuestionKey` | FNV-1a 去重键 |
 | `utils/zip-reader.js` | `QB.ZipReader`/`QB.decodeUtf8` | 原生 ZIP 读取（EOCD→中央目录→本地头）+ `DecompressionStream('deflate-raw')`；支持 method 0/8 |
 | `utils/zip-writer.js` | `QB.ZipWriter` | 原生 ZIP 打包（stored method=0 + CRC32），与 ZipReader 对称；xlsx/docx/qbk/qfbk 写出共用 |
+| `utils/xml-lite.js` | `QB.XmlLite.parse` | 自研极简 XML 解析器（OOXML 子集：标签/属性/命名空间/实体/注释/CDATA/DOCTYPE 跳过，深度先序查询；畸形 XML 抛错），替代 DOMParser，Node/浏览器/CI 同路径 |
 | `utils/assets.js` | `QB.Assets` | 图片资产存储（IndexedDB，内容寻址 id=FNV1a-长度，同图去重）；驱动可注入（idbDriver/memoryDriver），与 Repository 双实现同构 |
 
 ### 3.3 数据访问层（data）
@@ -81,7 +82,7 @@
 | `importers/json-importer.js` | JSON 结构嗅探（数组/导出/中文嵌套） |
 | `importers/csv-importer.js` | CSV/TSV 表头映射（自动识别逗号/制表符/分号、BOM、引号转义） |
 | `importers/md-importer.js` | Markdown 清洗（标题/列表/加粗/反引号/引用，保护 `____`）后复用 LineParser |
-| `importers/xlsx-importer.js` | 原生 zip + DOMParser：解析 workbook.xml + rels 取**全部工作表**（空表跳过、按工作簿顺序合并），支持共享字符串/内联字符串/数值单元格 |
+| `importers/xlsx-importer.js` | 原生 zip + **XmlLite**（自研极简 XML，不依赖 DOMParser）：解析 workbook.xml + rels 取**全部工作表**（空表跳过、按工作簿顺序合并），支持共享字符串/内联字符串/数值单元格 |
 | `importers/docx-importer.js` | 原生 zip 读 `word/document.xml` 成段落行后复用 LineParser；解析 `word/_rels/document.xml.rels` + `word/media/*`，段落 a:blip/v:imagedata 引用的图片写 QB.Assets 并插 asset 占位（缺图警告不阻断） |
 
 ### 3.5 业务模块（modules）

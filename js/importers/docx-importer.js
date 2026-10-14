@@ -27,7 +27,7 @@
   function parseImageRels(relsXml) {
     const out = {};
     if (!relsXml) return out;
-    const doc = new DOMParser().parseFromString(relsXml, 'application/xml');
+    const doc = QB.XmlLite.parse(relsXml);
     const rels = doc.getElementsByTagName('Relationship');
     for (let i = 0; i < rels.length; i++) {
       const rel = rels[i];
@@ -52,7 +52,7 @@
    */
   function docToLines(xmlText, ridToMarker) {
     ridToMarker = ridToMarker || {};
-    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const doc = QB.XmlLite.parse(xmlText);
     const paras = doc.getElementsByTagName('w:p');
     const lines = [];
     const allRids = [];

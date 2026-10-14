@@ -87,7 +87,8 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 8777） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（207 项；注入 DOMParser 时 227 项含 xlsx 多工作表合并） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（254 项，含 xlsx 多工作表/docx 含图/WPS 回环；零外部依赖） |
+| `node scripts/xml-lite.test.mjs` | 自研极简 XML 解析器测试（39 项断言：结构/实体/命名空间/CDATA/畸形报错） |
 | `node scripts/exporter.test.mjs` | 导出功能单元测试（136 项断言，六题型/转义/难度标签列/Markdown 往返/历史记录四格式） |
 | `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/538 题双格式全量判分自洽） |
 | `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
@@ -104,20 +105,17 @@ qb/
 | `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出 的耗时与内存） |
 | `python scripts/gen_fixtures.py` | 重新生成 xlsx / docx 样例（需 openpyxl） |
 
-带 xlsx/docx 解析验证（Node 无内置 DOMParser，可注入 `@xmldom/xmldom`）：
-```bash
-QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs
-```
+xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖），Node 直接跑全部断言，无需安装任何包。
 
 **实测数据（Node v24.14.0，2026-10-14 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
-- 14 个逻辑层测试套件 **1923 / 1923 通过**（UTC / UTC+8 双时区实跑）：冒烟 207（注入 DOMParser 时 247）、导出 136、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **65**、**FSRS 优化器 77**、SRS **39**、备份 15、**WebDAV 32**、PWA 29。
+- 15 个逻辑层测试套件 **2009 / 2009 通过**（UTC / UTC+8 双时区实跑）：冒烟 **254**、XML 解析器 **39**、导出 136、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **65**、**FSRS 优化器 77**、SRS **39**、备份 15、**WebDAV 32**、PWA 29。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、题库隔离与级联删除、答题卡跳转。
 - FSRS 优化器：以 mulberry32 + 伯努利模拟的合成评分日志（420 卡 × 4 次复习 = 1260 个相邻评分样本，含 140 次「又忘了」）验证有效性——当真权重相对默认值扰动 ±25% 时，训练后 logloss 0.3440 < 默认权重 0.3473（改善约 0.97%，超过 0.2% 采纳门控）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果确定一致。套件耗时约 2.6s。
 - Office 导出：538 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验（539 行 × 16 列）。
 - 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
-- 首屏静态体积（index.html + css + 全部 js + sw/manifest/icon，含 FSRS 训练 Worker，共 57 个文件/52 个 js，gzip -9 实测）：**127.1 KB gzip / 354.8 KB raw**（图片字节存 IndexedDB，不计入首屏包）。
+- 首屏静态体积（index.html + css + 全部 js + sw/manifest/icon，含 FSRS 训练 Worker，共 58 个文件/53 个 js，gzip -9 实测）：**130.3 KB gzip / 362.9 KB raw**（图片字节存 IndexedDB，不计入首屏包）。
 - 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 1.81ms、落库 1.78ms、检索 0.66ms、50 题整卷判分 0.09ms、538 题乱序 0.64ms、文本四格式导出 3.24ms、**XLSX 构建 7.36ms（665 KB）**、**DOCX 构建 2.90ms（258 KB）**、Markdown 538 题再解析 3.40ms。
-- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 14 个套件，防止自然日/时间断言的时区回归。
+- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 15 个套件，防止自然日/时间断言的时区回归。
 
 ## 远端仓库
 

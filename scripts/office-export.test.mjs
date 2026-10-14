@@ -5,7 +5,7 @@
  *   - 回读走生产代码 ZipReader（method=0 无需 DecompressionStream）；
  *   - xlsx 的 sheet1.xml / docx 的 document.xml 是本项目自有固定结构，
  *     测试内按该结构提取行列，再走真实导入路径 Adapters.tableToQuestions / LineParser 完成往返验证；
- *   - 真实 DOMParser 下的完整导入路径由 smoke-test 的 QB_DOMPARSER 分支覆盖。
+ *   - xlsx/docx 的完整导入路径（含自研 XmlLite 解析）由 smoke-test 第 9 节覆盖。
  * 运行：node scripts/office-export.test.mjs
  */
 import fs from 'node:fs';

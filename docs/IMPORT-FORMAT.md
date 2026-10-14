@@ -119,7 +119,7 @@
 ## 4. Excel（`.xlsx`）
 
 - 读取**全部工作表**：每张表首行须为同一套表头（首行表头 + 数据行），按工作簿标签顺序合并，空表自动跳过；多表时预览警告区给出「N 个工作表合并 M 题」汇总。
-- 原生解析：ZIP（`zip-reader`）→ `workbook.xml` + rels 解析表顺序与路径 → `sharedStrings.xml` / 各 `sheetN.xml` → `DOMParser`。
+- 原生解析：ZIP（`zip-reader`）→ `workbook.xml` + rels 解析表顺序与路径 → `sharedStrings.xml` / 各 `sheetN.xml` → 自研 `XmlLite`（零依赖，不依赖浏览器 DOMParser，Node/CI 同路径）。
 - 支持共享字符串（`t="s"`）、内联字符串（`t="inlineStr"`）与数值单元格。单表工作簿行为与旧版完全一致。
 
 ## 5. Word（`.docx`）

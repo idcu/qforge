@@ -32,6 +32,8 @@ jobs:
         run: node scripts/exporter.test.mjs
       - name: Office（xlsx/docx）导出往返测试
         run: node scripts/office-export.test.mjs
+      - name: 极简 XML 解析器测试
+        run: node scripts/xml-lite.test.mjs
       - name: 题目编辑器测试
         run: node scripts/editor.test.mjs
       - name: 富文本渲染器测试

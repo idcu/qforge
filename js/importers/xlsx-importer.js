@@ -16,10 +16,11 @@
   }
 
   function parseXml(text, label) {
-    const doc = new DOMParser().parseFromString(text, 'application/xml');
-    const err = doc.getElementsByTagName('parsererror');
-    if (err && err.length) throw new Error(label + ' XML 解析失败');
-    return doc;
+    try {
+      return QB.XmlLite.parse(text);
+    } catch (e) {
+      throw new Error(label + ' XML 解析失败：' + e.message);
+    }
   }
 
   function readSharedStrings(xmlText) {
