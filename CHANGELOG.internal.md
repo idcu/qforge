@@ -890,6 +890,39 @@
 
 ---
 
+## b1d8262 · feat(import): 自研极简 XML 解析器 XmlLite（F2.5）
+
+**背景**：消除 xlsx/docx 解析对浏览器 DOMParser 的环境依赖——此前 Node/CI 需仓库外临时注入 @xmldom/xmldom 才能跑 47 项 xlsx 多表/docx 含图/WPS 回环断言。竞品梳理后评估确认使用面仅 5 个 DOM API。
+
+**核心改动**
+- 新增 `js/utils/xml-lite.js`（`QB.XmlLite.parse`，约 220 行零依赖）：单遍扫描 + 微型节点树；支持开闭/自闭合/嵌套（getElementsByTagName 深度先序）、单双引号属性、xmlns/前缀命名空间（getAttributeNS 按 URI 解析，继承父级声明）、五类实体+十进制/十六进制字符引用、注释/PI/CDATA/DOCTYPE（[] 计数整体跳过，不解析 DTD——天然免疫 XXE/实体爆炸）；文本不折叠空白；六类畸形 XML 抛中文错误（标签不匹配/未闭合/注释与 CDATA 未收口/无根元素）。
+- xlsx-importer（parseXml 三处）与 docx-importer（docToLines/parseImageRels）全部替换 DOMParser；index.html 与 harness 加载 xml-lite（zip-writer 之后、assets 之前）。
+- harness 删除 domParser 注入机制（opts/pathToFileURL 动态 import 整段移除）；smoke 解除 `hasDomParser` 门控，原注入块改无条件执行。
+- 新增 `scripts/xml-lite.test.mjs`（39 断言）；CI 增加第 15 个套件步骤。
+
+**验证数据（2026-10-14，Node v24.14.0）**
+- 15 套件 **2009/2009**：smoke 零注入基线 207→**254**（原 47 项注入断言全部进入 CI 常跑，含 538 题 xlsx 三格式、多工作表合并、DOCX 含图、WPS 回环），xml-lite 新套件 39；其余 13 套件零回归。
+- 真实夹具零修改通过：openpyxl 生成的 sharedStrings、stdlib inlineStr、WPS 重写的内联命名空间 DrawingML 均被同一解析路径吃下（双跑对照期合并为单路径的信心来源）。
+- bench 热路径无变化（XmlLite 仅用于导入解析，bench 打点面未覆盖）；heapUsed +12.92MB（噪声级）。
+- 首屏体积：58 文件/53 js，**130.3 KB gzip / 362.9 KB raw**（+3.2 KB gzip）。
+
+**公共抽象影响面**
+- 新增唯一 XML 入口 `QB.XmlLite.parse`，DEVELOPMENT §6 规约明确：导入器禁止再引入 DOMParser/xmldom。
+- 节点 API 仅实现项目消费的子集（tagName/getAttribute/getAttributeNS/getElementsByTagName/textContent），非完整 DOM；后续若有 XPath/写序列化需求需另行评估。
+- 生产代码与 Node 测试从此走**同一份**解析实现，消除浏览器/xmldom 命名空间行为差异风险。
+
+**遗留 TODO / 风险**
+- 自研解析器未做对抗性模糊测试（fuzz）；OOXML 外的任意 XML（如极端实体/超大属性）只保证明确报错不静默。
+- xlsx 超大工作表（数万行）未压测；当前 538 题夹具下解析为亚毫秒级。
+- Word 桌面客户端人工验收仍未完成（WPS 半边已由 b681a25 关闭）。
+
+## ab6cbc5 · docs(spec): F4 材料题规格评审稿
+
+- 新增 `docs/SPEC-material.md`（无功能代码）：type=material 一层嵌套模型（children 2–10 个、复用六题型）、含 children 的 contentHash 规则、递归判分与整题 10n 计分、SRS 映射（全对 good/含 partial hard/任一错 again）、做题/编辑器/蓝图/搜索/统计影响面、JSON 无损 + MD/DOCX 材料块 + CSV/XLSX 多行约定、测试闭环、M1 模型判分 → M2 文本格式 → M3 管理 UI → M4 打磨 的里程碑与 5 个待拍板决策点；COMPETITORS 差距 #5 已链接。
+- 评审通过前不进入实现。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
@@ -904,6 +937,7 @@
 > F1 功能批次（2026-10-14）：`5d1c8f3` feat(sample) 样例补不定项 · `f8c5799` feat(export) 历史记录导出四格式（1879 断言/121.0KB gzip）
 > F2 功能批次（2026-10-14）：`43bbd1a` feat(import) DOCX 内嵌图片导入（注入路径 smoke 247/122.7KB gzip） · README 测试表同步 `489d572`
 > F3 性能批次（2026-10-14）：`56c0c8b` perf(srs) FSRS 训练 Worker 化（1923 断言/127.1KB gzip）
+> F2.5/F4（2026-10-14）：`b1d8262` feat(import) 自研 XmlLite（15 套件 2009 断言/130.3KB gzip，xlsx/docx 零外部依赖） · `ab6cbc5` docs(spec) 材料题规格评审稿
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
