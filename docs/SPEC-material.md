@@ -190,7 +190,7 @@ DOCX 段落映射与之一一对应（材料段/子问题段/选项段）；DOCX
 | 里程碑 | 范围 | 可独立验证点 |
 | --- | --- | --- |
 | **M1 模型与判分** ✅ 2026-10-14 | type/校验/contentHash（语义归一）/递归判分+aggregateMaterial/引擎整题状态与 childIndex API/selfAssess 重算/gradeAll 计错/蓝图单位/JSON 夹具往返/做题 UI（材料卡+小问卡+总评横幅+结果回顾）；编辑器不开放（类型下拉排除 material） | smoke 材料题块 41 项断言，15 套件 2050 全绿 |
-| **M2 文本格式** | LineParser 材料块（MD/DOCX）、CSV/XLSX 多行约定、导出四格式、夹具 | 三格式往返 + 含图 DOCX 材料题 |
+| **M2 文本格式** 📋 [开发计划](SPEC-material-m2-plan.md) | LineParser 材料块（MD/DOCX）、CSV/XLSX 多行约定、导出四格式、夹具 | 三格式往返 + 含图 DOCX 材料题 |
 | **M3 管理 UI** | 嵌套编辑器、做题/结果/列表/统计完整 UI | 人工 + 逻辑断言 |
 | **M4 打磨** | 小问乱序开关、每卷材料题上限、子问题权重（若评审通过 §10） | 蓝图/试卷断言 |
 
