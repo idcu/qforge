@@ -54,7 +54,23 @@
 - 仅 `kind=wrong` 追加最后一列「错误次数」。
 - 字段内含逗号/引号/换行时按 RFC 4180 用双引号包裹并把 `"` 转义为 `""`。
 
-### 2.3 历史记录导出（kind=history，非题集）
+### 2.3 材料题的行式输出（Markdown / DOCX / TXT，M2-A）
+
+材料题（`type=material`）在三种行式格式中由统一的 `materialBlock` 内容源分流（样式不同、内容一致），父题 `options/answer` 恒为空、绝不输出空选项/空答案行：
+
+| 格式 | 输出结构 |
+| --- | --- |
+| Markdown | `## n. [材料题] 引导语` → `材料：…`（内嵌换行保留为续行，图片占位原样）→ 父题 `> 难度/标签/分类/解析`（小问之前）→ 每小问 `(i). [角标] 题干`、`- **A.** …`、`**答案：…**`、`> 解析：…` |
+| DOCX | 与 Markdown 同一行序列，段落即行（无 `##/**/>/-` 装饰）：引导行、`材料：…`、父题元数据、`(i). [角标] …`、`A. …`、`答案：…` |
+| TXT | `═══ n. [材料题] 引导语 ═══` → 缩进材料正文 → 逐小问 `(i) [角标] 题干 / 选项 / 答案`（阅读格式，不导回） |
+
+- 引导语使用完整题型名 `[材料题]`；小问角标用短名（`[单选]` 等），与普通题导出一致；小问序号**统一 `(i)`**（即便导入时容错识别 `1-1`）。
+- 父题分类/难度/标签/解析输出在第一个小问之前，再导入归父题；小问不携带这些字段。
+- 错题本中的材料题，`错误次数` 行附在最后一个小问之后（再导入不影响 contentHash）。
+- 导出 → 再导入：MD/DOCX 均 contentHash 无损（材料跨行空白与标点经语义归一消除）；填空小问的 `accept/hint` 无行式语法，仅保留标准答案（完整字段请用 JSON/.qbk）。
+- JSON/.qbk 不经行式分流，材料题结构化全字段无损（M1 起）。CSV/XLSX 的材料多行块为 M2-B（见 §2.2 与 IMPORT-FORMAT §3）。
+
+### 2.4 历史记录导出（kind=history，非题集）
 
 历史记录是**成绩归档**而非题集，走独立 builder（`historyRecordToRow`/`buildHistoryJSON`/`buildHistoryTXT`），不经过题面表格，也不做导回。
 
@@ -120,17 +136,17 @@ QB.Exporters.openFlow({ kind, bank })
 
 | 操作 | 中位数耗时 | min / max | 备注 |
 | --- | --- | --- | --- |
-| 文本四格式全部构建一遍 | 2.98 ms | 2.45 / 18.47 ms | 单次合计 673.0 KB |
-| XLSX 构建（stored ZIP） | 6.60 ms | 5.76 / 8.56 ms | 包体积 665.0 KB |
-| DOCX 构建（stored ZIP） | 2.97 ms | 2.53 / 5.55 ms | 包体积 258.2 KB |
-| Markdown 导出文本再解析（538 题，含 toStandard 适配） | 3.35 ms | 2.65 / 6.81 ms | 解析出 538 题 |
-| `shuffleOptions` 选项乱序 538 题 | 0.56 ms | 0.48 / 0.99 ms | 实际乱序 455 题（真实夹具为 330 单选 + 125 多选，无不定项） |
+| 文本四格式全部构建一遍 | 3.37 ms | 2.58 / 17.62 ms | 单次合计 673.0 KB |
+| XLSX 构建（stored ZIP） | 7.94 ms | 6.34 / 11.81 ms | 包体积 665.0 KB |
+| DOCX 构建（stored ZIP） | 3.14 ms | 2.40 / 7.38 ms | 包体积 258.2 KB |
+| Markdown 导出文本再解析（538 题，含 toStandard 适配） | 4.47 ms | 2.85 / 10.95 ms | 解析出 538 题（同机复测 3.43/3.79 ms，运行间噪声 ±0.8 ms） |
+| `shuffleOptions` 选项乱序 538 题 | 0.53 ms | 0.48 / 2.05 ms | 实际乱序 455 题（真实夹具为 330 单选 + 125 多选，无不定项） |
 
-> 2026-10-14 重测（Node v24.14.0，`scripts/bench.mjs` 采样 10 次取中位数，min/max 为同批采样极值）。stored 不压缩使 xlsx/docx 体积大于 deflate 方案（538 题 XLSX 665 KB，对应该库 JSON 载荷约 0.27 MB）；若后续需瘦身，可在 ZipWriter 内增加 deflate 压缩（浏览器 CompressionStream），接口不变。
+> 2026-10-14 M2-A 后重测（Node v24.14.0，`scripts/bench.mjs` 采样 10 次取中位数，min/max 为同批采样极值）。同机 stash A/B 对照：普通题库（0 道材料题）导出 3.37→3.37 ms 无变化，MD 解析 4.12→4.47 ms（另两次复测 3.43/3.79，属运行间噪声；材料块仅在普通题开块处多 1 次括号正则探测，无 `[材料题]` 不进入材料分支）。stored 不压缩使 xlsx/docx 体积大于 deflate 方案（538 题 XLSX 665 KB，对应该库 JSON 载荷约 0.27 MB）；若后续需瘦身，可在 ZipWriter 内增加 deflate 压缩（浏览器 CompressionStream），接口不变。
 
 ## 7. 测试
 
 - `scripts/exporter.test.mjs`：导出功能单元测试（**136** 项断言），覆盖六题型、CSV 转义、BOM、JSON/CSV/MD 往返、错题 wrongCount、收藏、乱序隔离、**历史记录四格式（11 列/半对/切出/用时小数/格式白名单拒绝）**、注册表异常。
 - `scripts/office-export.test.mjs`：xlsx/docx 二进制导出专项（**1148** 项断言）：CRC32 标准向量、ZIP 部件、表格/文档行往返、538 题两种格式全量判分自洽、错题 17 列、可复现打包、openpyxl 已独立验证可打开（539 行 × 16 列）。
-- `scripts/smoke-test.mjs`：含 538 题真实数据的 JSON/CSV/Markdown 全量往返断言与 xlsx/docx 二进制结构断言。
+- `scripts/smoke-test.mjs`：含 538 题真实数据的 JSON/CSV/Markdown 全量往返断言与 xlsx/docx 二进制结构断言；§2.9 为材料题 MD/DOCX/TXT 行式往返黄金断言（**343** 项，M2-A 净增 48 项）。
 - 真实桌面 Office（Word/Excel 客户端）的打开验证不在自动化范围（本机无 GUI 环境），结构对齐 OOXML 最小集且经 Python openpyxl/zipfile 校验，已在本文件如实标注。

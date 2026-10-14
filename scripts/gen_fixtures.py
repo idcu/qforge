@@ -7,6 +7,7 @@ xlsx 优先用 openpyxl（可生成 sharedStrings 以覆盖该解析分支），
 输出目录：qb/samples/
 """
 import os
+import re
 import sys
 import zipfile
 
@@ -71,10 +72,11 @@ def esc(s):
     return (str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
 
 
-def gen_docx(path):
+def write_docx(path, lines):
+    """公共：文本行 → 最小 docx（一段一行；空行写空段落，导入端会跳过）"""
     paras = ''.join(
         '<w:p><w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>' % esc(line)
-        for line in DOC_LINES
+        for line in lines
     )
     doc = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
@@ -83,6 +85,84 @@ def gen_docx(path):
         z.writestr('[Content_Types].xml', CT)
         z.writestr('_rels/.rels', RELS)
         z.writestr('word/document.xml', doc)
+
+
+def gen_docx(path):
+    write_docx(path, DOC_LINES)
+
+
+# ---------------- 材料题（M2）行式夹具 ----------------
+# 与 samples/示例-材料题.json 同内容（纯文本行源，docx 段落与 md 行均由此派生）；
+# 末尾追加一道普通题，覆盖「顶层题号收尾材料块」的真实文件边界。
+MATERIAL_PLAIN_LINES = [
+    '1. [材料题] 根据上述资料，回答下列问题。',
+    '材料：甲公司为增值税一般纳税人，2026 年 3 月购入一台不需安装的生产设备，'
+    '取得增值税专用发票注明价款 10000 元（不含税），另支付运输费 2000 元。设备当月投入使用。',
+    '难度：3',
+    '标签：综合题、固定资产',
+    '分类：会计基础',
+    '(1). [单选] （1）该设备的入账价值为（ ）元。',
+    'A. 10000',
+    'B. 12000',
+    'C. 11300',
+    'D. 13560',
+    '答案：B',
+    '解析：不需安装设备入账价值=买价 10000+运输费 2000=12000 元。',
+    '(2). [不定项] （2）下列关于该业务的说法，正确的有（ ）。',
+    'A. 运输费计入固定资产成本',
+    'B. 当月增加的固定资产当月不计提折旧',
+    'C. 增值税进项税额一律计入资产成本',
+    'D. 设备投入使用后按确定的方法计提折旧',
+    '答案：ABD',
+    '解析：一般纳税人可抵扣进项税不计入成本，C 错误。',
+    '(3). [判断] （3）不需安装的设备购入并达到可使用状态后直接计入“固定资产”科目。',
+    '答案：正确',
+    '解析：不需安装，购入即达到预定可使用状态。',
+    '(4). [填空] （4）该设备买价为 ____ 元（不含税）。',
+    '答案：10000',
+    '解析：专用发票注明不含税价款 10000 元。',
+    '(5). [简答] （5）简述运输费计入资产成本的理由。',
+    '答案：运输费是使固定资产达到预定可使用状态前所发生的必要支出，按准则应计入固定资产成本。',
+    '解析：考查外购固定资产初始计量口径。',
+    '',
+    '2. [单选] 材料块结束后的普通题，验证顶层题号自动收尾材料块。',
+    'A. 顶层题号收尾',
+    'B. 仍在材料块内',
+    '答案：A',
+    '解析：遇下一个顶层题号即关闭材料块。',
+]
+
+_RE_MD_HEAD = re.compile(r'^\d+\.\s\[')
+_RE_MD_OPTION = re.compile(r'^([A-H])\.\s(.+)$')
+_RE_MD_META = re.compile(r'^(?:难度|标签|分类|解析)：')
+
+
+def to_md_lines(lines):
+    """纯文本行 → Markdown 排版（与 js/modules/exporter.js buildMarkdown 风格一致）"""
+    out = []
+    for line in lines:
+        if not line:
+            out.append('')
+        elif _RE_MD_HEAD.match(line):
+            out.append('## ' + line)
+        elif _RE_MD_OPTION.match(line):
+            out.append(_RE_MD_OPTION.sub(r'- **\1.** \2', line))
+        elif line.startswith('答案：'):
+            out.append('**' + line + '**')
+        elif _RE_MD_META.match(line):
+            out.append('> ' + line)
+        else:
+            out.append(line)
+    return out
+
+
+def gen_material_md(path):
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(to_md_lines(MATERIAL_PLAIN_LINES)) + '\n')
+
+
+def gen_material_docx(path):
+    write_docx(path, MATERIAL_PLAIN_LINES)
 
 
 DOCX_IMAGE_LINES = [
@@ -231,11 +311,22 @@ def gen_xlsx_manual(path):
 
 
 def main():
-    # 独立参数：仅生成含图 docx，不触碰既有样例
+    # 独立参数：仅生成指定夹具，不触碰既有样例
     if len(sys.argv) > 1 and sys.argv[1] == '--docx-image':
         p = os.path.join(OUT, '示例-文档导入-含图.docx')
         gen_docx_with_image(p)
         print('%s  %d bytes' % (os.path.relpath(p), os.path.getsize(p)))
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == '--material-md':
+        for p in (
+            os.path.join(OUT, '示例-材料题.md'),
+            os.path.join(OUT, '示例-材料题.docx'),
+        ):
+            if p.endswith('.md'):
+                gen_material_md(p)
+            else:
+                gen_material_docx(p)
+            print('%s  %d bytes' % (os.path.relpath(p), os.path.getsize(p)))
         return
     xlsx = os.path.join(OUT, '示例-表格导入.xlsx')
     docx = os.path.join(OUT, '示例-文档导入.docx')

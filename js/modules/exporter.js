@@ -162,6 +162,18 @@
     L.push('');
     payload.entries.forEach((e, i) => {
       const q = e.question;
+      if (q.type === 'material') {
+        materialBlock(e, i, {
+          head: (idx, mq) => (idx + 1) + '. [' + QB.typeLabel(mq.type) + '] ' + (mq.question || ''),
+          material: (line, first) => (first ? '材料：' : '') + line,
+          meta: (k, v) => k + '：' + v,
+          childHead: (no, c) => '(' + no + '). [' + typeTag(c) + '] ' + (c.question || ''),
+          option: (letter, text) => letter + '. ' + text,
+          answer: (t) => '答案：' + t
+        }).forEach((x) => L.push(x));
+        L.push('');
+        return;
+      }
       L.push((i + 1) + '. [' + typeTag(q) + '] ' + (q.question || ''));
       optionLines(q, (letter, text) => L.push(letter + '. ' + text));
       L.push('答案：' + answerLine(q));
@@ -193,6 +205,33 @@
     return out;
   }
 
+  /**
+   * 材料题 → 行式块（Markdown / DOCX / TXT 共用同一内容源，仅样式回调不同）。
+   * 排版与 LineParser 材料块状态机对齐（docs/SPEC-material-m2-plan §3.1）：
+   *   引导行 → 材料行（首行「材料：」，跨行拆多行）→ 父题元数据（小问之前，导回归父题）
+   *   → 逐小问 (i). [角标] / 选项 / 答案 / 解析 → 父题错误次数（仅错题导出，导回时不影响 hash）。
+   * 父题 options/answer 恒为空，严禁走普通题分支输出空答案行。
+   */
+  function materialBlock(e, idx, sx) {
+    const q = e.question;
+    const L = [];
+    L.push(sx.head(idx, q));
+    String(q.material || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+      .forEach((line, k) => L.push(sx.material(line, k === 0)));
+    if (Number(q.difficulty) > 0) L.push(sx.meta('难度', String(q.difficulty)));
+    if (Array.isArray(q.tags) && q.tags.length) L.push(sx.meta('标签', q.tags.join('、')));
+    if (q.category) L.push(sx.meta('分类', q.category));
+    if (q.analysis) L.push(sx.meta('解析', q.analysis));
+    (q.children || []).forEach((c, ci) => {
+      L.push(sx.childHead(ci + 1, c));
+      optionLines(c, (letter, text) => L.push(sx.option(letter, text)));
+      L.push(sx.answer(answerLine(c)));
+      if (c.analysis) L.push(sx.meta('解析', c.analysis));
+    });
+    if (e.meta && e.meta.wrongCount) L.push(sx.meta('错误次数', String(e.meta.wrongCount)));
+    return L;
+  }
+
   function buildMarkdown(payload) {
     if (payload.kind === 'history') throw new Error('历史记录不支持 Markdown 导出（支持 JSON/CSV/XLSX/TXT）');
     const kindLabel = (KINDS[payload.kind] && KINDS[payload.kind].label) || '导出';
@@ -203,6 +242,18 @@
     L.push('');
     payload.entries.forEach((e, i) => {
       const q = e.question;
+      if (q.type === 'material') {
+        materialBlock(e, i, {
+          head: (idx, mq) => '## ' + (idx + 1) + '. [' + QB.typeLabel(mq.type) + '] ' + (mq.question || ''),
+          material: (line, first) => (first ? '材料：' : '') + line,
+          meta: (k, v) => '> ' + k + '：' + v,
+          childHead: (no, c) => '(' + no + '). [' + typeTag(c) + '] ' + (c.question || ''),
+          option: (letter, text) => '- **' + letter + '.** ' + text,
+          answer: (t) => '**答案：' + t + '**'
+        }).forEach((x) => L.push(x));
+        L.push('');
+        return;
+      }
       L.push('## ' + (i + 1) + '. [' + typeTag(q) + '] ' + q.question);
       optionLines(q, (letter, text) => L.push('- **' + letter + '.** ' + text));
       // 统一答案行（填空各空以 ；连接），与 Markdown 导入器对齐以支持导出→再导入往返
@@ -223,6 +274,18 @@
     L.push('');
     payload.entries.forEach((e, i) => {
       const q = e.question;
+      if (q.type === 'material') {
+        materialBlock(e, i, {
+          head: (idx, mq) => '═══ ' + (idx + 1) + '. [' + QB.typeLabel(mq.type) + '] ' + (mq.question || '') + ' ═══',
+          material: (line, first) => '   ' + (first ? '材料：' : '') + line,
+          meta: (k, v) => '   ' + k + '：' + v,
+          childHead: (no, c) => '   (' + no + ') [' + typeTag(c) + '] ' + (c.question || ''),
+          option: (letter, text) => '     ' + letter + '. ' + text,
+          answer: (t) => '     答案：' + t
+        }).forEach((x) => L.push(x));
+        L.push('');
+        return;
+      }
       L.push((i + 1) + '. [' + typeTag(q) + '] ' + q.question);
       optionLines(q, (letter, text) => L.push('   ' + letter + '. ' + text));
       if (q.type === 'fill' && Array.isArray(q.blanks)) {

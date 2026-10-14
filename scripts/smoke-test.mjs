@@ -287,6 +287,98 @@ section('材料题模型 / 判分 / 引擎 / 哈希');
   eq(E2.getScore().score, 40, '考试得分 40（简答 0 分）');
 }
 
+/* ================= 2.9 材料题 M2：行式格式（MD/DOCX/TXT）往返 ================= */
+section('材料题 M2 行式格式（Markdown/DOCX）导入导出');
+{
+  const matPath = path.join(QB_DIR, 'samples', '示例-材料题.json');
+  const matParsed = await QB.JsonImporter.parse({ text: fs.readFileSync(matPath, 'utf8'), fileName: '示例-材料题.json' });
+  const MQ = matParsed.questions[0];
+  const H_JSON = QB.makeContentHash(MQ);
+
+  /** 材料题往返黄金断言：题量/小问数/各小问题型与答案/contentHash 全等 */
+  function expectMaterialRoundTrip(qs, hashRef, tag) {
+    const mq = qs.find((q) => q.type === 'material');
+    ok(!!mq, tag + '：含 1 道材料题');
+    if (!mq) return mq;
+    eq(mq.children.length, 5, tag + '：5 个小问');
+    eq(JSON.stringify(mq.children.map((c) => c.type)),
+      JSON.stringify(['single', 'indefinite', 'judge', 'fill', 'essay']), tag + '：小问题型序列');
+    eq(mq.children[0].answer, 'B', tag + '：小问1 答案 B');
+    eq(mq.children[1].answer, 'ABD', tag + '：小问2 答案 ABD');
+    eq(mq.children[2].answer, '正确', tag + '：小问3 答案 正确');
+    eq((mq.children[3].blanks[0] || {}).answer, '10000', tag + '：小问4 填空答案 10000');
+    ok(mq.children[4].reference_answer.indexOf('必要支出') >= 0, tag + '：小问5 简答参考答案');
+    eq(QB.makeContentHash(mq), hashRef, tag + '：contentHash 与 JSON 路径相等');
+    return mq;
+  }
+
+  /* ---- Markdown 夹具（真实文件，含材料块→普通题边界） ---- */
+  const mdText = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-材料题.md'), 'utf8');
+  let mdRes;
+  try { mdRes = await QB.MdImporter.parse({ text: mdText, fileName: '示例-材料题.md' }); ok(true, '材料 MD：解析成功'); }
+  catch (e) { ok(false, '材料 MD：解析成功', e.message); throw e; }
+  eq(mdRes.questions.length, 2, '材料 MD：2 题（材料 + 边界普通题）');
+  eq(mdRes.warnings.length, 0, '材料 MD：零警告');
+  const mdMq = expectMaterialRoundTrip(mdRes.questions, H_JSON, '材料 MD');
+  eq(mdMq.category, '会计基础', '材料 MD：父题分类回归');
+  eq(mdMq.difficulty, 3, '材料 MD：父题难度回归');
+  eq(JSON.stringify(mdMq.tags), JSON.stringify(['综合题', '固定资产']), '材料 MD：父题标签回归');
+  const mdTail = mdRes.questions[1];
+  eq(mdTail.type, 'single', '材料 MD：边界题是普通单选');
+  eq(mdTail.answer, 'A', '材料 MD：边界题答案 A（材料块已收尾）');
+
+  /* ---- DOCX 夹具（同内容行序列，zip + XmlLite 回读） ---- */
+  const mdocBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-材料题.docx'));
+  let mdocRes;
+  try { mdocRes = await QB.DocxImporter.parse({ arrayBuffer: toArrayBuffer(mdocBuf), fileName: '示例-材料题.docx' }); ok(true, '材料 DOCX：解析成功'); }
+  catch (e) { ok(false, '材料 DOCX：解析成功', e.message); throw e; }
+  eq(mdocRes.questions.length, 2, '材料 DOCX：2 题');
+  eq(mdocRes.warnings.length, 0, '材料 DOCX：零警告');
+  expectMaterialRoundTrip(mdocRes.questions, H_JSON, '材料 DOCX');
+
+  /* ---- 导出 → 再导入（JSON 标准题为源） ---- */
+  const payload = { kind: 'bank', bank: { name: '材料往返' }, entries: [{ question: MQ, meta: {} }] };
+  const expMd = QB.Exporters.buildContent('markdown', payload).content;
+  ok(expMd.indexOf('## 1. [材料题]') >= 0, 'MD 导出：权威引导行 [材料题]');
+  ok(expMd.indexOf('材料：') >= 0, 'MD 导出：含「材料：」行');
+  ok(expMd.indexOf('(1). [单选]') >= 0, 'MD 导出：含 (i). [题型] 小问行');
+  ok(expMd.indexOf('**答案：B**') >= 0, 'MD 导出：小问答案行');
+  const expMdRes = await QB.MdImporter.parse({ text: expMd, fileName: 'rt.md' });
+  eq(QB.makeContentHash(expMdRes.questions[0]), H_JSON, 'MD 导出→再导入：hash 相等');
+
+  const expDocx = QB.Exporters.buildContent('docx', payload);
+  const expDocxRes = await QB.DocxImporter.parse({ arrayBuffer: toArrayBuffer(Buffer.from(expDocx.content)), fileName: 'rt.docx' });
+  eq(expDocxRes.questions.length, 1, 'DOCX 导出→再导入：1 题');
+  eq(QB.makeContentHash(expDocxRes.questions[0]), H_JSON, 'DOCX 导出→再导入：hash 相等');
+
+  const expTxt = QB.Exporters.buildContent('txt', payload).content;
+  ok(expTxt.indexOf('═══') >= 0 && expTxt.indexOf('材料：') >= 0, 'TXT 导出：材料分隔横幅与材料正文');
+
+  /* ---- 解析器单元：小问号识别 / 材料标记括号强制 / 容错警告 ---- */
+  eq(QB.LineParser.matchChildStart('(1). 题干').no, 1, 'matchChildStart：(1). → 1');
+  eq(QB.LineParser.matchChildStart('（2） 题干').no, 2, 'matchChildStart：全角（2） → 2');
+  eq(QB.LineParser.matchChildStart('1-1、题干').no, 1, 'matchChildStart：容错 1-1 → 1');
+  ok(QB.LineParser.matchChildStart('1. 顶层题号') === null, 'matchChildStart：顶层 1. 不识别');
+  ok(QB.LineParser.RE_TYPE_MATERIAL_INLINE.test('[材料题] 引导语'), '材料标记：带括号命中');
+  ok(!QB.LineParser.RE_TYPE_MATERIAL_INLINE.test('企业购入材料一批已入库'), '材料标记：裸词「材料」不命中（防误判）');
+
+  const bare = QB.LineParser.blocksToQuestions(QB.LineParser.parseLines([
+    '1. [单选] 企业购入材料一批，价款 1000 元。', 'A. 对', 'B. 错', '答案：A'
+  ]));
+  eq(bare.questions[0].type, 'single', '裸词材料题干：仍按单选处理');
+
+  const lenient = QB.LineParser.blocksToQuestions(QB.LineParser.parseLines([
+    '1. [材料题] 阅读下文。',
+    '没有材料标记的正文行。',
+    '(1). [判断] 第一小问。', '答案：正确',
+    '(3). [判断] 第三小问（序号跳号）。', '答案：错误'
+  ]));
+  eq(lenient.questions[0].type, 'material', '容错：无材料行仍组材料块');
+  ok(lenient.warnings.some((w) => w.indexOf('材料') >= 0), '容错：无「材料：」标记给警告');
+  ok(lenient.warnings.some((w) => w.indexOf('不连续') >= 0), '容错：小问序号不连续给警告');
+  eq(lenient.questions[0].children.length, 2, '容错：2 个小问');
+}
+
 section('真实数据导入（541 题）');
 const flatText = fs.readFileSync(fixturePath('题库-背题模式.json', '真实-541题-背题模式.json'), 'utf8');
 const nestedText = fs.readFileSync(fixturePath('题库-分类.json', '真实-541题-分类.json'), 'utf8');

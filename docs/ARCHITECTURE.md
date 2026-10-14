@@ -10,7 +10,7 @@
 | 纯前端静态可运行 | classic `<script src>` 顺序加载，挂到 `window.QB`，无 ES module / 无 fetch 本地文件 |
 | 前后端平滑迁移 | UI 只依赖 **Repository 接口**，`qb/js/config.js` 的 `DATA_BACKEND` 切换 `local` / `api` |
 | 多题库 | `Bank` 是一等实体；题目带 `bankId`；用户数据按 `bankId` 分区存储 |
-| 题型可扩展 | 6 种题型集中在 `CONFIG.TYPES`（判断/单选/多选/不定项/填空/简答），判分走策略表 `judge-answer` |
+| 题型可扩展 | 7 种题型集中在 `CONFIG.TYPES`（判断/单选/多选/不定项/填空/简答/材料 material），判分走策略表 `judge-answer`（材料题为一层嵌套，递归判分 + `aggregateMaterial` 聚合） |
 | 不重复实现 | 判分/去重键/洗牌/存储/导入适配 提取为公共抽象（见 §5） |
 
 ## 2. 分层结构
@@ -75,7 +75,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `importers/adapters.js` | **公共适配器**：`toStandard`/`sniffAndAdapt`/`adaptArray`/`adaptNested`/`tableToQuestions`/`validateQuestions`；题型映射、表头别名 |
-| `importers/line-parser.js` | **行式切题公共解析器**：`parseLines`/`blocksToQuestions`（题号/选项/答案/解析/分类标记识别 + 题型推断），docx 与 md 共用 |
+| `importers/line-parser.js` | **行式切题公共解析器**：`parseLines`/`blocksToQuestions`（题号/选项/答案/解析/分类标记识别 + 题型推断），docx 与 md 共用；M2 起含材料块状态机（`[材料题]` 开块 / `材料：` / `(i)` 小问 / 顶层题号收块，输出 `isMaterial` 块交 `Adapters.toStandard` 递归） |
 | `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX |
 | `importers/qbk-importer.js` | `.qbk` 题库包：`Qbk.parseBundle` 解包 → 复用 JsonImporter → 资产写 QB.Assets（缺图警告） |
 | `modules/qbk.js` | `QB.Qbk`：qbk/qfbk 的 stored ZIP 编解码（bank.json/backup.json + assets/*）、PK 头识别、题目引用资产 id 收集 |
@@ -112,7 +112,7 @@
 | `modules/backup.js` | 全量备份/恢复（Storage 全量枚举，覆盖/合并；有图自动 ZIP .qfbk；`confirmRestore` 供文件与 WebDAV 共用） |
 | `modules/sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象异步备份（Basic Auth，fetch 可注入测试）；CORS 受限如实报错 |
 | `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |
-| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT 七格式（qbk 异步读 IndexedDB），题库/错题/收藏；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
+| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT 七格式（qbk 异步读 IndexedDB），题库/错题/收藏；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder）；材料题在 MD/DOCX/TXT 经公共 `materialBlock` 行式分流（M2-A），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
 
 ## 4. 关键数据流
 
