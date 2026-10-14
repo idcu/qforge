@@ -124,6 +124,7 @@
       saveWeights(res.weights, {
         samples: res.samples, trainedSamples: res.trainedSamples,
         defaultLoss: res.defaultLoss, loss: res.loss, improvement: res.improvement,
+        gateBasis: res.gateBasis, holdoutSamples: res.holdoutSamples,
         scope: bankId ? 'bank' : 'global'
       }, bankId);
     }
@@ -143,6 +144,7 @@
       saveWeights(res.weights, {
         samples: res.samples, trainedSamples: res.trainedSamples,
         defaultLoss: res.defaultLoss, loss: res.loss, improvement: res.improvement,
+        gateBasis: res.gateBasis, holdoutSamples: res.holdoutSamples,
         scope: bankId ? 'bank' : 'global'
       }, bankId);
     }

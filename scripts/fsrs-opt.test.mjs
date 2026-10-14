@@ -21,6 +21,7 @@ function section(t) { console.log('\n== ' + t + ' =='); }
 
 const DAY = 24 * 3600 * 1000;
 const O = QB.FSRSOpt;
+let STRONG_LOG = null; // 强信号合成夹具（留出集门控可采纳），作用域 section 复用
 
 function clearOpt() {
   QB.Storage.remove(QB.KEYS.revlog);
@@ -155,27 +156,33 @@ clearOpt();
   ok(!r3.ok && /样本不足/.test(r3.reason), '样本 80 < 100：拒绝');
 }
 
-section('合成日志：优化后 logloss 严格下降并被采纳');
+section('合成日志：留出集门控下优化仍被采纳');
 {
   clearOpt();
+  // ±40% 扰动的"真实权重"、800 卡×5 评：训练/留出均有可检测信号
   const rand = rng(7);
-  const wTrue = QB.FSRS.DEFAULT_W.map((v, i) => {
-    const p = 1 + (rand() - 0.5) * 0.5; // ±25% 扰动
-    return v * p;
-  });
+  const wTrue = QB.FSRS.DEFAULT_W.map((v) => v * (1 + (rand() - 0.5) * 0.8));
   const revlog = [];
-  simulate(revlog, wTrue, { seed: 101, cards: 420, maxReviews: 4 });
+  simulate(revlog, wTrue, { seed: 777, cards: 800, maxReviews: 5 });
+  STRONG_LOG = revlog;
   const diag = O.diagnose(revlog);
-  ok(diag.samples > 1000, '合成日志样本充足（' + diag.samples + '）');
+  ok(diag.samples > 3000, '合成日志样本充足（' + diag.samples + '）');
   ok(diag.again >= 3 && diag.ratingKinds >= 3, '含失败样本与多档位（again=' + diag.again + '）');
-  const r = O.train(revlog);
-  ok(r.ok, '训练被采纳：' + (r.ok ? '改善 ' + (r.improvement * 100).toFixed(1) + '%' : r.reason));
+  const r = O.train(STRONG_LOG);
+  ok(r.ok, '训练被采纳：' + (r.ok ? '留出集改善 ' + (r.improvement * 100).toFixed(1) + '%' : r.reason));
   if (r.ok) {
-    ok(r.improvement >= 0.002, '改善 ≥ 0.2%（实际 ' + (r.improvement * 100).toFixed(2) + '%）');
-    ok(r.loss < r.defaultLoss, '个性化 loss < 默认 loss（' + r.loss.toFixed(4) + ' < ' + r.defaultLoss.toFixed(4) + '）');
+    eq(r.gateBasis, 'holdout', '门控基于独立留出集（不再训练集自证）');
+    ok(r.holdoutSamples > 0, '留出样本数 ' + r.holdoutSamples);
+    ok(r.improvement >= 0.002, '留出改善 ≥ 0.2%（实际 ' + (r.improvement * 100).toFixed(2) + '%）');
+    ok(r.loss < r.defaultLoss, '留出 loss < 默认 holdout loss（' + r.loss.toFixed(4) + ' < ' + r.defaultLoss.toFixed(4) + '）');
+    ok(isFinite(r.trainLoss) && isFinite(r.defaultTrainLoss), '同时返回训练集 loss 供排查');
+    // optimize 返回权重与其声称的训练 loss 自洽（历史最佳快照，非最后一轮）
+    const trainSeqs = O.buildSequences(revlog).filter((_, i) => i % 5 !== 0);
+    approx(Core_loss(r.weights, trainSeqs), r.trainLoss, 1e-9, '采纳权重的训练 loss=历史最低（权重/loss 自洽）');
     // 已落盘且后续读取生效
     const saved = O.getWeightsMeta();
     ok(!!saved && Math.abs(O.getActiveWeights()[0] - r.weights[0]) < 1e-9, '个性化权重已保存并读取');
+    eq(saved.gateBasis, 'holdout', 'meta 记录门控口径');
     // 确定性：同样日志再训练结果一致
     O.resetWeights();
     const r2 = O.train(revlog);
@@ -183,6 +190,11 @@ section('合成日志：优化后 logloss 严格下降并被采纳');
     O.resetWeights();
     ok(!O.getWeightsMeta(), '恢复默认后清除个性化权重');
   }
+}
+
+// 直接重算权重在训练序列上的 NLL（Core.loss 不直接导出，借 computeTrain 同源函数）
+function Core_loss(weights, seqs) {
+  return QB.FSRSTrainCore.loss(weights, seqs);
 }
 
 section('无显著改善时保留默认（不写盘）');
@@ -242,14 +254,11 @@ section('按题库 preset：优先级、隔离、旧结构兼容');
   eq(JSON.stringify(O.getActiveWeights('bankA')), JSON.stringify(QB.FSRS.DEFAULT_W), '回官方默认权重');
 }
 
-section('训练可写入题库作用域（revlog 仍全局）');
+section('训练可写入题库作用域（按库 revlog 隔离 + 留出门控）');
 {
   clearOpt();
-  const rand = rng(11);
-  const wTrue = QB.FSRS.DEFAULT_W.map((v) => v * (1 + (rand() - 0.5) * 0.5));
-  const revlog = [];
-  simulate(revlog, wTrue, { seed: 303, cards: 380, maxReviews: 4 });
-  const r = O.train(revlog, 'bankPreset');
+  // 复用强信号夹具：本 section 只验证保存作用域，不再赌随机数据分布
+  const r = O.train(STRONG_LOG, 'bankPreset');
   ok(r.ok, '题库作用域训练被采纳：' + (r.ok ? '改善 ' + (r.improvement * 100).toFixed(1) + '%' : r.reason));
   ok(!!O.getWeightsMeta('bankPreset'), 'bankPreset 有 meta');
   ok(!O.getWeightsMeta(), '全局 meta 仍为空（样本与权重作用域分离）');

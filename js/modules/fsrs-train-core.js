@@ -7,6 +7,11 @@
  * 唯一算法依赖是 QB.FSRS（powerDecay/review/RATINGS/DEFAULT_W，同为纯函数）。
  *
  * 写盘（revlog/权重存取）仍在 fsrs-opt.js，本文件的 computeTrain 只返回结果。
+ *
+ * 门控口径（评估报告工程项）：computeTrain 把评分序列按整条链确定性切出 20%
+ * 留出集（不参与梯度），采纳判定比较默认/优化权重在留出集上的 NLL；留出集无
+ * again 信号时回退训练集口径（gateBasis='train'）。optimize 返回训练全程
+ * 历史最佳权重快照（非最后一轮），保证权重与其 loss 自洽。
  */
 (function (global) {
   'use strict';
@@ -16,7 +21,9 @@
   const MIN_SAMPLES = 100;          // 最小训练样本数（相邻评分对）
   const MIN_IMPROVE = 0.002;        // logloss 相对改善阈值 0.2%
   const MIN_AGAIN = 3;              // 至少 3 个"忘记"样本，否则没有学习信号
-  const TRAIN_SUBSAMPLE = 1500;     // 单次训练抽样上限（确定性抽样）
+  const TRAIN_SUBSAMPLE = 1500;     // 单次训练抽样上限（个完整序列，整条入训/入留出，不拆链）
+  const HOLDOUT_RATIO = 0.2;        // 确定性留出比例（每第 5 条序列入留出集）
+  const HOLDOUT_MIN_AGAIN = 1;      // 留出集至少含 1 个 again 才用于门控
   const ITERATIONS = 150;
   const EPS_P = 1e-4;
   const LR = 0.04;
@@ -110,14 +117,20 @@
     return w.map((v, i) => Math.min(BOUNDS[i][1], Math.max(BOUNDS[i][0], v)));
   }
 
-  /** Adam 优化，返回 {weights, loss, iterations} */
+  /**
+   * Adam 优化，返回 {weights, loss, iterations}。
+   * weights 是训练过程中【历史最佳】权重（loss 最低点快照），而非最后一轮：
+   * 保证采纳的权重与其声称的 loss 一致（旧实现返回最后一轮、却报历史最低 loss）。
+   */
   function optimize(seqs, opts) {
     opts = opts || {};
     const iters = opts.iterations || ITERATIONS;
     const w = clampWeights((opts.initWeights || QB.FSRS.DEFAULT_W).slice());
+    let bestW = w.slice();
     const m = new Array(w.length).fill(0);
     const v = new Array(w.length).fill(0);
     let cur = loss(w, seqs);
+    let bestLoss = cur;
     for (let it = 1; it <= iters; it++) {
       const g = gradient(w, seqs);
       for (let i = 0; i < w.length; i++) {
@@ -129,9 +142,17 @@
         w[i] = Math.min(BOUNDS[i][1], Math.max(BOUNDS[i][0], nextW));
       }
       const next = loss(w, seqs);
-      if (isFinite(next) && next < cur) cur = next;
+      if (isFinite(next) && next < bestLoss) { bestLoss = next; bestW = w.slice(); }
+      if (isFinite(next)) cur = next;
     }
-    return { weights: w, loss: cur, iterations: iters };
+    return { weights: bestW, loss: bestLoss, iterations: iters };
+  }
+
+  /** 序列中的 again（r=1）总次数（含首次评分；用于判断留出集是否有失败信号） */
+  function againInSeqs(seqs) {
+    let n = 0;
+    seqs.forEach((s) => { s.ratings.forEach((r) => { if (r === QB.FSRS.RATINGS.again) n++; }); });
+    return n;
   }
 
   /** 训练门控信息（纯函数，revlog 必传）：样本数、again 数、评分档位 */
@@ -155,11 +176,15 @@
   }
 
   /**
-   * 纯计算训练：门控 → 抽样 → 默认/优化 loss → 改善判定。**不写盘**。
+   * 纯计算训练：门控 → 训练/留出切分 → 训练集 Adam → 留出集门控。**不写盘**。
+   * 采纳判定基于独立留出集（holdout，整条序列确定性切分，不参与梯度），
+   * 避免在训练集自身损失上自证；留出集无 again 信号时回退训练集口径并标注 gateBasis。
    * @param {Array} revlog 评分日志
    * @param {{initWeights?:number[], iterations?:number, subsample?:number}} [opts]
    * @returns {{ok:boolean, reason?:string, samples:number, trainedSamples?:number,
-   *           defaultLoss?:number, loss?:number, improvement?:number, weights?:number[]}}
+   *           gateBasis?:'holdout'|'train', holdoutSamples?:number,
+   *           defaultLoss?:number, loss?:number, trainLoss?:number, defaultTrainLoss?:number,
+   *           improvement?:number, weights?:number[]}}
    */
   function computeTrain(revlog, opts) {
     opts = opts || {};
@@ -176,27 +201,53 @@
     if (diag.ratingKinds < 3) {
       return { ok: false, reason: '评分档位不足 3 种，请多使用困难/良好/简单区分作答', samples: diag.samples };
     }
-    const trainSeqs = sampleSequences(diag.seqs, subsample);
-    const defaultLoss = loss(initWeights, trainSeqs);
+
+    // 整条序列确定性切分（每第 5 条入留出），训练序列再等距抽样
+    const trainRaw = [];
+    const holdoutSeqs = [];
+    diag.seqs.forEach((s, i) => { (i % Math.round(1 / HOLDOUT_RATIO) === 0 ? holdoutSeqs : trainRaw).push(s); });
+    const trainSeqs = sampleSequences(trainRaw, subsample);
+
+    const defaultTrainLoss = loss(initWeights, trainSeqs);
     const res = optimize(trainSeqs, { initWeights: initWeights, iterations: iterations });
-    const improvement = (defaultLoss - res.loss) / defaultLoss;
-    if (!isFinite(res.loss) || improvement < MIN_IMPROVE) {
+
+    // 门控口径：留出集含 again 时以留出集 NLL 为准（独立验证），否则回退训练集
+    const holdoutSamples = countSamples(holdoutSeqs);
+    const holdoutAgain = againInSeqs(holdoutSeqs);
+    let gateDefault, gateLoss, gateBasis;
+    if (holdoutSamples > 0 && holdoutAgain >= HOLDOUT_MIN_AGAIN) {
+      gateDefault = loss(initWeights, holdoutSeqs);
+      gateLoss = loss(res.weights, holdoutSeqs);
+      gateBasis = 'holdout';
+    } else {
+      gateDefault = defaultTrainLoss;
+      gateLoss = res.loss;
+      gateBasis = 'train';
+    }
+    const improvement = (gateDefault - gateLoss) / gateDefault;
+    if (!isFinite(gateLoss) || improvement < MIN_IMPROVE) {
       return {
         ok: false,
-        reason: '个性化权重未带来 ≥0.2% 的改善（实际 ' + (improvement * 100).toFixed(2) + '%），保留官方默认',
-        samples: diag.samples, defaultLoss: defaultLoss, loss: res.loss, improvement: improvement
+        reason: '个性化权重未在' + (gateBasis === 'holdout' ? '留出集' : '训练集') +
+          '带来 ≥0.2% 的改善（实际 ' + (improvement * 100).toFixed(2) + '%），保留官方默认',
+        samples: diag.samples, gateBasis: gateBasis, holdoutSamples: holdoutSamples,
+        defaultLoss: gateDefault, loss: gateLoss, improvement: improvement,
+        trainLoss: res.loss, defaultTrainLoss: defaultTrainLoss
       };
     }
     return {
       ok: true, samples: diag.samples, trainedSamples: countSamples(trainSeqs),
-      defaultLoss: defaultLoss, loss: res.loss, improvement: improvement, weights: res.weights
+      gateBasis: gateBasis, holdoutSamples: holdoutSamples,
+      defaultLoss: gateDefault, loss: gateLoss,
+      trainLoss: res.loss, defaultTrainLoss: defaultTrainLoss,
+      improvement: improvement, weights: res.weights
     };
   }
 
   QB.FSRSTrainCore = {
-    MIN_SAMPLES, MIN_IMPROVE, MIN_AGAIN, TRAIN_SUBSAMPLE, ITERATIONS, EPS_P, LR, EPS_LOSS,
+    MIN_SAMPLES, MIN_IMPROVE, MIN_AGAIN, TRAIN_SUBSAMPLE, HOLDOUT_RATIO, ITERATIONS, EPS_P, LR, EPS_LOSS,
     WORKER_TIMEOUT_MS, BOUNDS,
     buildSequences, countSamples, sampleSequences, loss, gradient, clampWeights, optimize,
-    diagnose, computeTrain
+    againInSeqs, diagnose, computeTrain
   };
 })(typeof window !== 'undefined' ? window : globalThis);
