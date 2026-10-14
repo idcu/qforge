@@ -150,13 +150,15 @@ CREATE TABLE review_schedule (
 CREATE TABLE review_log (
   id          VARCHAR(32) PRIMARY KEY,
   user_id     VARCHAR(32),
-  content_hash VARCHAR(16) NOT NULL,             -- 跨题库（参数按人）
+  bank_id     VARCHAR(32),                      -- 评分所属题库（按库训练隔离；旧数据可空）
+  content_hash VARCHAR(16) NOT NULL,
   rating      TINYINT NOT NULL,                  -- 1 again | 2 hard | 3 good | 4 easy
   reviewed_at BIGINT NOT NULL,
-  INDEX idx_revlog_user_time (user_id, reviewed_at)
+  INDEX idx_revlog_user_time (user_id, reviewed_at),
+  INDEX idx_revlog_bank (bank_id)
 );
 ```
-> 前端 FIFO 上限 20,000 条，存 `qb:user:revlog`，元素 `{id,h,r,t}`。优化器把同题相邻两次评分组成样本（间隔 + 评分档位），用伯努利负对数似然拟合 17 个权重。个性化权重存 `qb:meta:fsrsWeights`，结构 `{global?:{w[],trainedAt,samples,defaultLoss,loss,improvement,scope}, banks?:{[bankId]: 同结构}}`；活动权重按「题库 preset → 全局 → 官方默认」回退；旧版本单组 `{w[]}` 读取时自动归一为 global。revlog 始终全局采集（参数按人），preset 只决定权重作用域。
+> 前端 FIFO 上限 20,000 条，存 `qb:user:revlog`，元素 `{id,h,r,t,b?}`（`b`=bankId，2026-10 起记录）。优化器把同题相邻两次评分组成样本（间隔 + 评分档位），用伯努利负对数似然拟合 17 个权重。个性化权重存 `qb:meta:fsrsWeights`，结构 `{global?:{w[],trainedAt,samples,defaultLoss,loss,improvement,scope}, banks?:{[bankId]: 同结构}}`；活动权重按「题库 preset → 全局 → 官方默认」回退；旧版本单组 `{w[]}` 读取时自动归一为 global。**训练样本与权重作用域一致**：按库训练只用该库 revlog（`readLogForScope`），全局训练用全部日志；无 `b` 的旧日志只参与全局训练，不静默归入任何题库；v1→v2 迁移时单库归属的旧日志自动回填 `b`（见 §4）。
 
 ### 2.9 assets（题目图片资产，本期落 IndexedDB）
 ```sql

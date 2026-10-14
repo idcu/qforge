@@ -1,11 +1,12 @@
 /**
  * FSRS-4.5 个性化参数优化器（存储层 + 一键训练，零依赖）
  *
- * 数据：每次评分追加 {id,t,h,r} 到 qb:user:revlog（全局、跨题库，参数按人不按库）。
+ * 数据：每次评分追加 {id,t,h,r,b} 到 qb:user:revlog（b=bankId：按题库隔离训练
+ * 数据；2026-10 前的旧日志无 b，只参与全局训练，不静默归入任何题库）。
  * 训练数值逻辑（样本/损失/梯度/Adam/门控）在 fsrs-train-core.js，本模块负责：
  *   - revlog 与权重的 LocalStorage 读写（全局 + 按题库 preset）
  *   - train()：同步包装（测试与回退用）
- *   - trainAsync()：优先 Worker、不满足或失败自动回退主线程（UI 入口用，见 fsrs-train-client.js）
+ *   - trainAsync()：优先 Worker、不满足或失败自动回退主线程（UI 入口，见 fsrs-train-client.js）
  * 冷启动：日志不足或无显著改善时始终使用官方默认权重，绝不伪拟合。
  */
 (function (global) {
@@ -20,17 +21,28 @@
     return QB.Storage.get(QB.KEYS.revlog, []) || [];
   }
 
+  /**
+   * 按作用域取训练日志：bankId 省略=全局（含旧无 b 日志）；
+   * 传 bankId=仅该库评分（严格相等，无 b 的旧日志不计入，避免跨科目串样本）。
+   */
+  function readLogForScope(bankId) {
+    const all = readLog();
+    return bankId ? all.filter((e) => e && e.b === bankId) : all;
+  }
+
   function appendLog(entries) {
     if (!entries || !entries.length) return;
     const list = readLog();
     const now = Date.now();
     entries.forEach((e) => {
-      list.push({
+      const entry = {
         id: QB.uid('rl'),
         t: e.t || now,
         h: e.h,
         r: e.r
-      });
+      };
+      if (e.b) entry.b = e.b; // 题库归属；旧链路无 b 时不写（全局日志/历史数据）
+      list.push(entry);
     });
     if (list.length > LOG_LIMIT) list.splice(0, list.length - LOG_LIMIT);
     QB.Storage.set(QB.KEYS.revlog, list);
@@ -39,7 +51,8 @@
   /* ---------------- 权重存取（全局 + 按题库 preset） ----------------
    * 存储结构：{ global?: {w,...meta}, banks?: { [bankId]: {w,...meta} } }
    * 旧版本 {w,...}（单组全局权重）读取时自动归一为 global，不写迁移。
-   * 训练样本始终来自全局 revlog（参数按人），preset 只决定权重作用域。 */
+   * 训练样本同样按作用域读取（readLogForScope）：按库训练只用该库 revlog，
+   * 全局训练用全部（含旧无 b 日志），preset 与训练数据作用域一致。 */
 
   function normalizeStore(raw) {
     if (!raw || typeof raw !== 'object') return { global: null, banks: {} };
@@ -99,13 +112,13 @@
   /* ---------------- 一键训练 ---------------- */
 
   /**
-   * 同步训练（默认读全局 revlog）：computeTrain 纯计算 + 采纳后写盘。
-   * @param {Array} [revlogInput] 评分日志（默认读全局）
-   * @param {string} [bankId] 权重保存作用域：省略=全局，传 id=该题库 preset
+   * 同步训练：bankId 省略=全局日志；传 bankId=仅该库 revlog（preset 与数据同作用域）。
+   * @param {Array} [revlogInput] 显式日志（测试注入，优先于作用域读取）
+   * @param {string} [bankId] 权重保存与日志过滤作用域：省略=全局，传 id=该题库 preset
    * @returns {{ok:boolean, reason?:string, defaultLoss?:number, loss?:number, improvement?:number, samples:number}}
    */
   function train(revlogInput, bankId) {
-    const log = revlogInput || readLog();
+    const log = revlogInput || readLogForScope(bankId);
     const res = Core.computeTrain(log);
     if (res.ok) {
       saveWeights(res.weights, {
@@ -123,7 +136,7 @@
    * 采纳后的写盘仍在本模块完成（Worker 不碰 Storage）。
    */
   async function trainAsync(bankId, deps) {
-    const log = readLog();
+    const log = readLogForScope(bankId);
     // deps 仅测试注入（env/createWorker/compute），生产调用只传 bankId
     const res = await QB.FSRSTrain.run(log, deps);
     if (res.ok) {
@@ -144,7 +157,7 @@
     TRAIN_SUBSAMPLE: Core.TRAIN_SUBSAMPLE,
     ITERATIONS: Core.ITERATIONS,
     // 存储与训练
-    readLog, appendLog, getActiveWeights, getWeightsMeta, saveWeights, resetWeights,
+    readLog, readLogForScope, appendLog, getActiveWeights, getWeightsMeta, saveWeights, resetWeights,
     train, trainAsync,
     // 纯函数透传（历史调用方/测试用，逻辑唯一来源为 Core）
     buildSequences: Core.buildSequences,

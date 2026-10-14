@@ -114,6 +114,10 @@ section('v1→v2：题目与全部用户数据键跟随重映射');
   eq(byId.rl1.h, n1.contentHash, 'revlog rl1 跟随 q1');
   eq(byId.rl2.h, n2.contentHash, 'revlog rl2 跟随 q2');
   eq(byId.rl3.h, orphan, '已删题目的无主 revlog 保持原值');
+  // b（题库归属）回填：单库归属可确定；无主记录不写 b
+  eq(byId.rl1.b, bank.id, 'revlog rl1 回填 b=本题库');
+  eq(byId.rl2.b, bank.id, 'revlog rl2 回填 b=本题库');
+  ok(byId.rl3.b === undefined, '无主 revlog 不写 b');
 }
 
 section('幂等：再跑一次为空操作，数据不二次变化');

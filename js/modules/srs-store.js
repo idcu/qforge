@@ -72,7 +72,7 @@
     const next = QB.FSRS.review(map[k], fr, ts, QB.FSRSOpt.getActiveWeights(bankId));
     map[k] = next;
     writeMap(bankId, map);
-    QB.FSRSOpt.appendLog([{ t: ts, h: k, r: fr }]);
+    QB.FSRSOpt.appendLog([{ t: ts, h: k, r: fr, b: bankId }]);
     return next;
   }
 
@@ -87,7 +87,7 @@
       const k = keyFor(e.question);
       const fr = fsrsRating(e.rating);
       map[k] = QB.FSRS.review(map[k], fr, ts, w);
-      logs.push({ t: ts, h: k, r: fr });
+      logs.push({ t: ts, h: k, r: fr, b: bankId });
     });
     writeMap(bankId, map);
     QB.FSRSOpt.appendLog(logs);

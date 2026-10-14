@@ -56,16 +56,26 @@
   });
   const mergeFav = (a, b) => Object.assign({}, a, { addedAt: Math.min(a.addedAt || 0, b.addedAt || 0) });
 
-  /** revlog 历史快照 h 字段按全局映射替换（已删题目的无主 hash 保持原值） */
-  function remapRevlog(globalRenamed) {
+  /**
+   * revlog 历史快照 h 字段按全局映射替换（已删题目的无主 hash 保持原值）；
+   * 同时回填 b（题库归属）：旧 revlog 无 b，当旧 hash 在恰好一个题库出现时可确定归属，
+   * 跨库同内容（多库都有该 h）无法判定则保留无 b（只参与全局训练）。
+   */
+  function remapRevlog(globalRenamed, hashOwners) {
     if (!globalRenamed.size) return;
     const key = QB.KEYS.revlog;
     const list = QB.Storage.get(key, null);
     if (!Array.isArray(list)) return;
     let changed = false;
     const next = list.map((e) => {
-      if (e && globalRenamed.has(e.h)) { changed = true; return Object.assign({}, e, { h: globalRenamed.get(e.h) }); }
-      return e;
+      if (!e || !globalRenamed.has(e.h)) return e;
+      const out = Object.assign({}, e, { h: globalRenamed.get(e.h) });
+      if (!out.b) {
+        const owner = hashOwners.get(e.h);
+        if (owner) out.b = owner;
+      }
+      changed = true;
+      return out;
     });
     if (changed) QB.Storage.set(key, next);
   }
@@ -73,6 +83,7 @@
   async function migrateV1ToV2() {
     const banks = await QB.DB.banks.list();
     const globalRenamed = new Map();
+    const hashOwners = new Map(); // 旧 hash → 唯一归属 bankId（跨库冲突置 null）
     let questions = 0;
     let states = 0;
 
@@ -84,9 +95,12 @@
       const renamed = new Map();
       const updated = items.map((q) => {
         if (QB.isCurrentHash(q.contentHash)) return q;
+        const oldHash = q.contentHash;
         const newHash = QB.makeContentHash(q);
-        renamed.set(q.contentHash, newHash);
-        globalRenamed.set(q.contentHash, newHash);
+        renamed.set(oldHash, newHash);
+        globalRenamed.set(oldHash, newHash);
+        if (hashOwners.has(oldHash)) hashOwners.set(oldHash, null);
+        else hashOwners.set(oldHash, bankId);
         return Object.assign({}, q, { contentHash: newHash });
       });
       if (!renamed.size) continue;
@@ -103,7 +117,7 @@
       }
     }
 
-    remapRevlog(globalRenamed);
+    remapRevlog(globalRenamed, hashOwners);
     return { questions, states };
   }
 

@@ -11,7 +11,7 @@
 | 目标保留率 | 0.9（到期时刻预期可提取性 R ≈ 90%） |
 | 核心变量 | 稳定度 S（天）、难度 D（1–10） |
 | 卡片键 | 题目 `contentHash`（与去重/错题/收藏同键，跨导入稳定） |
-| 作用域 | 调度状态按题库隔离；评分日志全局采集（参数按人）；权重支持全局 + 按题库 preset |
+| 作用域 | 调度状态按题库隔离；评分日志按题记录 `b=bankId`（全局训练用全部、按库训练仅该库）；权重支持全局 + 按题库 preset（权重与训练数据作用域一致） |
 | 模块 | `fsrs.js`（纯调度器）/ `srs.js`（到期判定）/ `srs-store.js`（存储与迁移）/ `fsrs-opt.js`（个性化优化器） |
 | 依赖 | 零第三方库、零 DOM、零 Storage 依赖（fsrs/srs 为纯函数，可在 Node 直接测试） |
 
@@ -138,8 +138,9 @@ w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy
 
 ### 8.1 数据采集
 
-- 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳}` 到 `qb:user:revlog`。
-- **FIFO 上限 20,000 条**（约 0.8MB），超限丢最旧；revlog 始终全局采集（参数按人，不按库）。
+- 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳, b:bankId}` 到 `qb:user:revlog`。
+- **FIFO 上限 20,000 条**（约 0.8MB），超限丢最旧。
+- **作用域隔离（评估报告中优先级#4 修复）**：按题库训练只读取 `b === 当前库` 的日志；全局训练读取全部。2026-10 前的旧日志无 `b`，只参与全局训练（不静默归入任何题库）；v1→v2 迁移时，题目仍唯一归属某库的旧日志会自动回填 `b`（见 [DATABASE.md](DATABASE.md) §4）。
 
 ### 8.2 训练在哪执行（Worker 化）
 
@@ -190,7 +191,7 @@ w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy
 | 键 | 内容 | 对应表（见 DATABASE.md） |
 | --- | --- | --- |
 | `qb:user:review:<bankId>` | contentHash → 状态对象 | `review_schedule` |
-| `qb:user:revlog` | 全局 FIFO 评分日志 `{id,h,r,t}[]` | `review_log` |
+| `qb:user:revlog` | 全局 FIFO 评分日志 `{id,h,r,t,b?}[]`（`b`=bankId，按库训练过滤用） | `review_log` |
 | `qb:meta:fsrsWeights` | 全局/按题库权重与训练元数据 | 前端偏好（后端可置 user 设置） |
 
 ## 10. API 与测试
@@ -200,12 +201,12 @@ w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy
 | `fsrs.js` | `QB.FSRS.review(state, rating, now, weights)`、`initialState(rating, now, weights)`、`isLearning(state)`、`DEFAULT_W`、`REQUEST_RETENTION` |
 | `srs.js` | `QB.SRS.RATINGS`、`isDue`、`isDueToday`、`dueQuestions` |
 | `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/...`（0–3→1–4 映射、SM-2 迁移） |
-| `fsrs-opt.js` | revlog/权重存储层：`appendLog`、`diagnose`、`train`（同步）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights` |
+| `fsrs-opt.js` | revlog/权重存储层：`appendLog`、`readLogForScope`、`diagnose`、`train`（同步）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights` |
 | `fsrs-train-core.js` | 纯计算：`computeTrain(revlog,opts)`、`diagnose`、`buildSequences/loss/gradient/optimize`、门控/边界常量（Worker 与主线程共用） |
 | `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,deps)`（Worker 优先、自动回退，可注入测试） |
 | `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train` → `done/error`（不经 index.html 加载） |
 
-测试（2026-10-14 实跑全绿）：`fsrs.test.mjs` **77** 项（含官方 v4.5.0 黄金对照：S10/D5/R0.9/good→29.01、R=1 不增长、难度 6.81/5.87/4.93/3.99；稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps、relearning）、`srs.test.mjs` **39** 项（自然日时区无关、7 日预报、迁移、分钟级队列）、`fsrs-opt.test.mjs` **77** 项（优化器 44 + Worker 化 33）。
+测试（2026-10-14 实跑全绿）：`fsrs.test.mjs` **77** 项（含官方 v4.5.0 黄金对照：S10/D5/R0.9/good→29.01、R=1 不增长、难度 6.81/5.87/4.93/3.99；稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps、relearning）、`srs.test.mjs` **50** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog 契约）、`fsrs-opt.test.mjs` **86** 项（优化器 44 + Worker 化 33 + 按库训练隔离 9）。
 
 ## 11. 已知边界（设计取舍）
 

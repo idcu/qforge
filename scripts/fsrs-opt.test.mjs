@@ -87,6 +87,38 @@ O.appendLog(big);
 ok(O.readLog().length === O.LOG_LIMIT, 'revlog FIFO 裁剪到 ' + O.LOG_LIMIT);
 clearOpt();
 
+section('按题库训练数据隔离（revlog.b 作用域，评估报告中优先级#4）');
+{
+  const bankA = 'bank-scope-a', bankB = 'bank-scope-b';
+  const mk = (n, prefix, b) => {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      out.push({ t: 1, h: prefix + i, r: 3, b: b });
+      out.push({ t: 2, h: prefix + i, r: 1, b: b }); // 每题 2 条 → 1 个相邻样本
+    }
+    return out;
+  };
+  O.appendLog(mk(2, 'a', bankA));   // 库A：2 样本
+  O.appendLog(mk(50, 'b', bankB));  // 库B：50 样本
+  O.appendLog([{ t: 1, h: 'legacy', r: 3 }, { t: 2, h: 'legacy', r: 1 }]); // 旧版无 b 日志
+  eq(O.readLogForScope(bankA).length, 4, 'readLogForScope：库A 4 条');
+  eq(O.readLogForScope(bankB).length, 100, 'readLogForScope：库B 100 条');
+  eq(O.readLog().length, 106, '全局 106 条（4+100+2 旧无 b）');
+  ok(O.readLogForScope(bankA).every((e) => e.b === bankA), '库A 严格只含本库（不含库B/旧日志）');
+  ok(!O.readLogForScope(bankA).some((e) => e.h === 'legacy'), '旧无 b 日志不静默归入题库');
+  eq(O.train(null, bankA).samples, 2, 'train(bankA) 样本 2（修复前读全局=53）');
+  eq(O.train(null, bankB).samples, 50, 'train(bankB) 样本 50');
+  eq(O.train().samples, 53, 'train() 全局样本 53（含旧无 b）');
+  // trainAsync 同一作用域过滤（compute 注入捕获实际入参，不走 Worker）
+  let seen = null;
+  await O.trainAsync(bankB, {
+    env: { protocol: 'file:', hasWorker: false },
+    compute(log) { seen = log; return { ok: false, reason: 'spy', samples: 0 }; }
+  });
+  eq(seen && seen.length, 100, 'trainAsync(bankB) 传入 compute 的日志仅库B 100 条');
+  clearOpt();
+}
+
 section('序列构造');
 {
   const seqs = O.buildSequences([

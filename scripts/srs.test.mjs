@@ -160,6 +160,8 @@ section('一次作答仅一条评分（评估报告高优先级#2 回归契约�
   eq(second.length, 0, '交卷时同一结果不再收集');
   QB.SRSStore.gradeMany(bank.id, second, T0);
   eq(QB.FSRSOpt.readLog().filter((e) => e.h === h).length, 1, 'revlog 中该题恰 1 条（不出现双评分）');
+  const mine = QB.FSRSOpt.readLog().filter((e) => e.h === h);
+  eq(mine[0].b, bank.id, 'revlog 条目带 b=bankId（按库训练隔离用）');
 
   // 待自评：不收集、不标记（材料题多步自评在聚合定论前要保持可收集）
   const pending = { isCorrect: null, srsRecorded: false };
