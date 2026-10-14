@@ -26,6 +26,35 @@ const review = QB.FSRS.review;
 section('常量与权重');
 ok(Array.isArray(QB.FSRS.DEFAULT_W) && QB.FSRS.DEFAULT_W.length === 17, '默认权重 17 个');
 approx(QB.FSRS.FACTOR, 19 / 81, 1e-9, 'FACTOR = 19/81');
+eq(QB.FSRS.DEFAULT_W[3], 5.8, 'w3=5.8（官方 v4.5.0 默认权重，非 5.9）');
+
+section('官方 v4.5.0 scheduler 公式黄金对照（fsrs4anki v4.5.0 标签）');
+{
+  const W = QB.FSRS.DEFAULT_W;
+  // 评估报告基准：S=10、D=5、R=0.9、good → 官方 29.01（旧错误实现为 11.62）
+  eq(QB.FSRS.nextStability(5, 10, 0.9, R.good, W), 29.01, 'recall：S10 D5 R0.9 good → 29.01');
+  // R=1 时官方稳定度不增长（旧实现增长到 11.4）
+  eq(QB.FSRS.nextStability(5, 10, 1, R.good, W), 10, 'recall：R=1 稳定度不增长（=S）');
+  // 评分序：hard 惩罚 < good < easy 奖励（难度也按各自评分先更新）
+  const dHard = QB.FSRS.nextDifficulty(5, R.hard, W);
+  const dEasy = QB.FSRS.nextDifficulty(5, R.easy, W);
+  const sHard = QB.FSRS.nextStability(dHard, 10, 0.9, R.hard, W);
+  const sEasy = QB.FSRS.nextStability(dEasy, 10, 0.9, R.easy, W);
+  ok(sHard < 29.01 && 29.01 < sEasy, 'hard ' + sHard + ' < good 29.01 < easy ' + sEasy);
+  // 遗忘：用 again 更新后的难度，结果不超过旧稳定度
+  const dAgain = QB.FSRS.nextDifficulty(5, R.again, W);
+  const sForget = QB.FSRS.nextStability(dAgain, 10, 0.9, R.again, W);
+  ok(sForget < 10, 'forget：' + sForget + ' < 旧稳定度 10');
+  ok(sForget > 0, 'forget：稳定度为正（' + sForget + '）');
+  // 难度更新官方字面：next = d - w6·(r-3)，D′ = w7·w4 + (1-w7)·next（结果保留 2 位）
+  eq(QB.FSRS.nextDifficulty(5, R.good, W), 5, 'good：均值回归向 w4=4.93（5 → 5.00）');
+  eq(QB.FSRS.nextDifficulty(5, R.again, W), 6.7, 'again：难度先升再回归（→ 6.70）');
+  // 端到端：幂律下到期点（elapsed=S 天）R=0.9，review 输出与官方函数一致
+  const prev = { algo: 'fsrs', stability: 10, difficulty: 5, reps: 3, lapses: 0, last: T0 };
+  const out = review(prev, R.good, T0 + 10 * DAY, W);
+  eq(out.stability, 29.01, 'review 端到端（到期 R=0.9）→ 29.01');
+  eq(out.difficulty, 5, 'review 端到端难度与官方一致（5.00）');
+}
 
 section('首次评分：初始化');
 {
@@ -37,9 +66,11 @@ section('首次评分：初始化');
   ok(a.stability < h.stability && h.stability < g.stability && g.stability < e.stability, '初始稳定度 again<hard<good<easy');
   eq(a.stability, 0.4, 'again 稳定度 0.4 天');
   eq(g.stability, 2.4, 'good 稳定度 2.4 天');
-  ok(a.difficulty > h.difficulty && h.difficulty > g.difficulty, '初始难度 again>hard>good');
-  eq(g.difficulty, 1, 'good 初始难度按 FSRS 公式钳到下限 1');
-  eq(e.difficulty, 1, 'easy 初始难度同样为下限 1');
+  eq(a.difficulty, 6.81, 'again 初始难度 6.81');
+  eq(h.difficulty, 5.87, 'hard 初始难度 5.87');
+  ok(a.difficulty > h.difficulty && h.difficulty > g.difficulty && g.difficulty > e.difficulty, '初始难度 again>hard>good>easy');
+  eq(g.difficulty, 4.93, 'good 初始难度 4.93（官方 w4，不再误钳到 1）');
+  eq(e.difficulty, 3.99, 'easy 初始难度 3.99');
   ok(a.difficulty >= 1 && a.difficulty <= 10, '初始难度在 1..10');
   eq(a.reps, 1, 'reps=1');
   eq(a.lapses, 1, 'again：lapses=1');
@@ -93,7 +124,7 @@ section('新卡 learning steps（1m / 10m）');
   // easy 在任意步骤直接毕业，按 easy 初始化
   const easyOut = review(review(null, R.again, T0), R.easy, T0 + MIN);
   ok(!easyOut.learning, 'learning 中 easy 直接毕业');
-  eq(easyOut.stability, 5.9, 'easy 毕业稳定度 5.9');
+  eq(easyOut.stability, 5.8, 'easy 毕业稳定度 5.8');
 }
 
 section('遗忘后进 relearning（mode=review）');

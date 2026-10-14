@@ -23,7 +23,7 @@
 {
   algo: 'fsrs',          // 算法标记；旧 SM-2 行无此字段，首次评分自动迁移
   due: 1728950400000,    // 下次到期时间戳（学习步骤期间为分钟级）
-  stability: 5.9,        // 稳定度 S（天）；0 = 未初始化
+  stability: 5.8,        // 稳定度 S（天）；0 = 未初始化
   difficulty: 4.5,       // 难度 D，钳制在 1..10
   reps: 7,               // 累计评分次数
   lapses: 1,             // 遗忘（again）次数
@@ -86,34 +86,39 @@ R(t, S) = (1 + FACTOR · t / S) ^ DECAY
 初始状态（新卡首次评分 r）：
 
 ```
-D₀ = clamp(w4 − exp(w5 · (r − 1)) + 1, 1, 10)
+D₀ = clamp(w4 − w5 · (r − 3), 1, 10)
 S₀ = max(w[r−1], 0.1)                       // w0..w3 对应 again/hard/good/easy
 ```
 
-复习后更新：
+复习后更新（**先更新难度 D，再以新 D 计算稳定度 S**；结果保留 2 位小数，与 scheduler 一致）：
 
 ```
-D' = clamp(w7 · D₀(r) + (1 − w7) · (D − w6 · (r − 3)), 1, 10)
+next = D − w6 · (r − 3)
+D'   = clamp(w7 · w4 + (1 − w7) · next, 1, 10)     // 均值回归目标在 v4.5.0 标签源码中固定为 w4
+
 r = again:
-    S' = min(S, clampMin(w11 · (1 + FACTOR·w10/S)^DECAY · exp(w12 · (1 − R)) · hardPenalty · easyBonus))
-其它评分:
-    S' = clampMin(S · (1 + exp(w8 · (1 − R)) · w9 · hardPenalty · easyBonus))
-clampMin(S) = max(S, 0.1)
+    S' = min(S, w11 · D'^(−w12) · ((S+1)^w13 − 1) · exp((1−R) · w14))
+r = hard/good/easy:
+    S' = S · (1 + exp(w8) · (11−D') · S^(−w9) · (exp((1−R) · w10) − 1)
+              · hardPenalty · easyBonus)
+hardPenalty = (r=hard) ? w15 : 1；easyBonus = (r=easy) ? w16 : 1
 ```
+
+黄金对照（默认权重，S=10、D=5、R=0.9、good）：**S'=29.01**；R=1 时稳定度不增长（S'=S）。
 
 下次间隔按 `R(interval, S') = 0.9` 反解（FSRS 标准间隔公式），上限 36500 天。
 
-**17 个官方默认权重（冷启动）**：
+**17 个官方默认权重（冷启动，逐字对齐 v4.5.0 标签默认值）**：
 
 ```
-w = [0.4, 0.6, 2.4, 5.9,        // w0..w3 初始稳定度（again/hard/good/easy）
+w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy）
      4.93, 0.94, 0.86, 0.01,    // w4..w7 初始难度与难度更新
      1.49, 0.14, 0.94, 2.18, 0.05, // w8..w12 稳定度更新/又错惩罚
      0.34, 1.26,                // w13..w14 平均稳定度相关
      0.29, 2.61]                // w15 hard 惩罚 / w16 easy 奖励
 ```
 
-> 与 FSRS-4.5 参考实现一致：稳定度更新不直接含难度 D，D 主要用于统计与个性化拟合。本实现**不包含 Anki 的 fuzz（间隔抖动）与提前/延后复习的双向修正项**，属有意的范围裁剪。
+> 稳定度/难度更新公式与默认权重逐项对齐 [fsrs4anki v4.5.0 标签调度器](https://github.com/open-spaced-repetition/fsrs4anki/blob/v4.5.0/fsrs4anki_scheduler.js)（黄金对照 29.01 有自动化断言）。保留率曲线采用 fsrs-rs 幂律（DECAY=-0.5、FACTOR=19/81）；scheduler 写的 `(1+t/(9S))^-1` 仅曲线形状不同，在到期点 R=0.9 与幂律重合，不影响稳定度更新。本实现**不包含 Anki 的 fuzz（间隔抖动）与提前/延后复习的双向修正项**，属有意的范围裁剪。
 
 ## 6. 到期判定（`srs.js`，与算法解耦）
 
@@ -200,7 +205,7 @@ w = [0.4, 0.6, 2.4, 5.9,        // w0..w3 初始稳定度（again/hard/good/easy
 | `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,deps)`（Worker 优先、自动回退，可注入测试） |
 | `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train` → `done/error`（不经 index.html 加载） |
 
-测试（2026-10-14 实跑全绿）：`fsrs.test.mjs` **65** 项（稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps、relearning）、`srs.test.mjs` **39** 项（自然日时区无关、7 日预报、迁移、分钟级队列）、`fsrs-opt.test.mjs` **77** 项（优化器 44 + Worker 化 33）。
+测试（2026-10-14 实跑全绿）：`fsrs.test.mjs` **77** 项（含官方 v4.5.0 黄金对照：S10/D5/R0.9/good→29.01、R=1 不增长、难度 6.81/5.87/4.93/3.99；稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps、relearning）、`srs.test.mjs` **39** 项（自然日时区无关、7 日预报、迁移、分钟级队列）、`fsrs-opt.test.mjs` **77** 项（优化器 44 + Worker 化 33）。
 
 ## 11. 已知边界（设计取舍）
 
