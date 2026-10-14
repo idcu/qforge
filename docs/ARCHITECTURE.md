@@ -82,7 +82,7 @@
 | `importers/csv-importer.js` | CSV/TSV 表头映射（自动识别逗号/制表符/分号、BOM、引号转义） |
 | `importers/md-importer.js` | Markdown 清洗（标题/列表/加粗/反引号/引用，保护 `____`）后复用 LineParser |
 | `importers/xlsx-importer.js` | 原生 zip + DOMParser：解析 workbook.xml + rels 取**全部工作表**（空表跳过、按工作簿顺序合并），支持共享字符串/内联字符串/数值单元格 |
-| `importers/docx-importer.js` | 原生 zip 读 `word/document.xml` 成段落行后复用 LineParser |
+| `importers/docx-importer.js` | 原生 zip 读 `word/document.xml` 成段落行后复用 LineParser；解析 `word/_rels/document.xml.rels` + `word/media/*`，段落 a:blip/v:imagedata 引用的图片写 QB.Assets 并插 asset 占位（缺图警告不阻断） |
 
 ### 3.5 业务模块（modules）
 | 文件 | 职责 |

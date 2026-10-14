@@ -15,14 +15,14 @@ node scripts/serve.mjs        # http://localhost:8777
 - Node 环境无内置 `DOMParser`，跑 xlsx/docx 解析断言时可仅测试注入（不进入运行时）：
 
 ```bash
-QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   # 202 → 222 项
+QB_DOMPARSER=/path/to/@xmldom/xmldom/lib/index.js node scripts/smoke-test.mjs   # 207 → 247 项（xlsx 多表 + docx 含图仅在注入路径验证）
 ```
 
 ## 2. 测试矩阵（有数据才算做完）
 
 | 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **207**（注入 DOMParser 时 **227**） | 六题型判分（含不定项少选半分）、内置 18 题样例含 3 道不定项回归、难度/标签、xlsx/docx 解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
+| `scripts/smoke-test.mjs` | **207**（注入 DOMParser 时 **247**） | 六题型判分（含不定项少选半分）、内置 18 题样例含 3 道不定项回归、难度/标签、xlsx/docx 解析、**DOCX 内嵌图片（rels/media→asset 占位、IDB 内存驱动入库、去重、缺 rId 警告）**、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返、多题库隔离与级联删除、答题卡 |
 | `scripts/exporter.test.mjs` | **136** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、538 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
 | `scripts/editor.test.mjs` | **29** | `buildQuestion` 纯函数、增删改 |
@@ -86,7 +86,7 @@ bench 全程 heapUsed：5.26 → 24.00 MB（**+18.74 MB**，含全部夹具）�
 
 ### 5.2 加导入来源
 
-在 `js/importers/` 写 parser（`{exts:[...], parse(input)}`）并在 `registry.js` register；文本类行式切题**必须复用** `LineParser`，表格类**必须复用** `Adapters.tableToQuestions`，禁止复制正则。规范见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md)。
+在 `js/importers/` 写 parser（`{exts:[...], parse(input)}`）并在 `registry.js` register；文本类行式切题**必须复用** `LineParser`，表格类**必须复用** `Adapters.tableToQuestions`，禁止复制正则。内嵌二进制（图片）**必须复用** `QB.Assets.idFor/putEntries` 内容寻址管线（参考 docx-importer 与 qbk-importer），占位统一为 `![](asset:<id>)`。规范见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md)。
 
 ### 5.3 加导出格式 / 导出对象
 
@@ -99,8 +99,10 @@ bench 全程 heapUsed：5.26 → 24.00 MB（**+18.74 MB**，含全部夹具）�
 ### 5.5 重新生成 xlsx/docx 夹具
 
 ```bash
-python scripts/gen_fixtures.py    # 需 openpyxl；仅夹具生成，应用运行时不依赖 Python
+python scripts/gen_fixtures.py                 # xlsx（需 openpyxl，无则 stdlib 回退）+ 纯文本 docx
+python scripts/gen_fixtures.py --docx-image    # 仅生成含内嵌 PNG 的 docx（stdlib，不触碰既有样例）
 ```
+> 夹具生成仅用于测试，应用运行时不依赖 Python；含图 docx 断言只在注入 DOMParser 的路径执行。
 
 ## 6. 公共抽象规约
 

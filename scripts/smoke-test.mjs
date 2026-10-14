@@ -522,6 +522,74 @@ if (!hasDomParser) {
     eq(dt.multi, 1, 'DOCX：多选题 1');
     eq(dt.fill, 1, 'DOCX：填空题 1');
     eq(dt.essay, 1, 'DOCX：简答题 1');
+    eq(docxRes.assetCount, 0, 'DOCX：无图文档不触碰资产存储');
+  }
+
+  /* ---- DOCX 内嵌图片（rels/media → asset 占位，内存资产驱动） ---- */
+  section('DOCX 内嵌图片导入');
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  try {
+    const imgDocxBuf = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-文档导入-含图.docx'));
+    const imgZipEntries = await QB.ZipReader.readEntries(toArrayBuffer(imgDocxBuf));
+    const pngBytes = imgZipEntries['word/media/image1.png'];
+    ok(pngBytes && pngBytes.length > 0, 'DOCX 含图包：word/media/image1.png 存在');
+    const expectedAssetId = QB.Assets.idFor(pngBytes);
+
+    const imgRes = await QB.DocxImporter.parse({ arrayBuffer: toArrayBuffer(imgDocxBuf), fileName: '含图.docx' });
+    eq(imgRes.questions.length, 2, 'DOCX 含图：解析 2 题');
+    eq(imgRes.assetCount, 1, 'DOCX 含图：写入 1 张图片资产');
+    eq(imgRes.warnings.length, 0, 'DOCX 含图：无警告');
+    const q0 = imgRes.questions[0];
+    eq(q0.type, 'single', 'DOCX 含图：第 1 题为单选');
+    ok(q0.question.indexOf('![](asset:' + expectedAssetId + ')') >= 0, 'DOCX 含图：题干含图片 asset 占位（内容寻址 id）');
+    ok(/元件是？\s*!\[\]\(asset:/.test(q0.question), 'DOCX 含图：占位挂在题干独立段落（续接到题干）');
+    eq(q0.options.length, 4, 'DOCX 含图：选项仍为 4 个');
+    ok(!q0.options.some((o) => o.text.indexOf('asset:') >= 0), 'DOCX 含图：占位未误入选项');
+    ok(imgRes.questions[1].question.indexOf('asset:') < 0, 'DOCX 含图：第 2 题无图片占位');
+    const assetIds = await QB.Assets.ids();
+    eq(assetIds.length, 1, '资产存储：仅 1 条（内容寻址）');
+    eq(assetIds[0], expectedAssetId, '资产存储：id 为 FNV1a-长度');
+    const rec = await QB.Assets.get(expectedAssetId);
+    eq(rec.mime, 'image/png', '资产存储：mime=image/png');
+    eq(rec.bytes.length, pngBytes.length, '资产存储：字节长度与包内 PNG 一致');
+
+    // 重复导入同一含图 docx：内容寻址去重，不新增资产
+    await QB.DocxImporter.parse({ arrayBuffer: toArrayBuffer(imgDocxBuf), fileName: '含图.docx' });
+    eq((await QB.Assets.ids()).length, 1, 'DOCX 含图重复导入：资产去重仍为 1 条');
+
+    // 损坏文档：blip 引用不存在的 rId 且无 rels 部件 → 警告且不产占位，题目照常解析
+    const brokenDocXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+      'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
+      'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+      'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>' +
+      '<w:p><w:r><w:t>1. 缺失关系的图片题</w:t></w:r></w:p>' +
+      '<w:p><w:r><w:drawing><wp:inline><wp:docPr id="1" name="x"/><a:graphic><a:graphicData>' +
+      '<pic:pic><pic:blipFill><a:blip r:embed="rIdMissing"/></pic:blipFill></pic:pic>' +
+      '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>' +
+      '<w:p><w:r><w:t>答案：缺失图片也应能切题</w:t></w:r></w:p>' +
+      '</w:body></w:document>';
+    const brokenCts = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>';
+    const brokenRootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
+    const brokenBuf = QB.ZipWriter.build([
+      { name: '[Content_Types].xml', text: brokenCts },
+      { name: '_rels/.rels', text: brokenRootRels },
+      { name: 'word/document.xml', text: brokenDocXml }
+    ]);
+    const brokenRes = await QB.DocxImporter.parse({ arrayBuffer: brokenBuf, fileName: 'broken.docx' });
+    eq(brokenRes.questions.length, 1, 'DOCX 缺图：题目仍解析 1 题');
+    ok(brokenRes.questions[0].question.indexOf('asset:') < 0, 'DOCX 缺图：题面无占位残留');
+    ok(brokenRes.warnings.some((w) => w.indexOf('1 张内嵌图片') >= 0), 'DOCX 缺图：警告 1 张图片缺失');
+    eq(brokenRes.assetCount, 0, 'DOCX 缺图：无资产写入');
+  } finally {
+    QB.Assets.useDriver(null); // 恢复默认 IDB 驱动，避免影响后续套件逻辑
   }
 }
 

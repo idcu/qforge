@@ -20,7 +20,7 @@
 | `json` | JSON 备份 | `.json` | application/json | 标准结构（含 bank 元信息、kind、时间戳）；图片只保留占位文本 | ✅ 直接再导入（无图） |
 | `csv` | CSV 表格 | `.csv` | text/csv | **UTF-8 BOM**（Excel 直开不乱码），表头与导入规范一致 | ✅ 直接再导入 |
 | `xlsx` | Excel 工作簿 | `.xlsx` | spreadsheetml.sheet | 原生 ZIP 打包（stored + CRC32，零依赖），inlineStr 单元格，单工作表 | ✅ 直接再导入（首个工作表） |
-| `docx` | Word 文档 | `.docx` | wordprocessingml.document | 原生 ZIP 打包，段落即 LineParser 排版行 | ✅ 可再导入（见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §5） |
+| `docx` | Word 文档 | `.docx` | wordprocessingml.document | 原生 ZIP 打包，段落即 LineParser 排版行（**导出仅文本、不嵌图片**） | ✅ 可再导入（文本往返，见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §5；导入他人含图 DOCX 时图片可提取，见 §5.1） |
 | `markdown` | Markdown 题单 | `.md` | text/markdown | 含题型角标、选项、答案、解析、分类，便于阅读/打印 | ✅ 可再导入（行式解析，见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §6） |
 | `txt` | 纯文本试卷 | `.txt` | text/plain | 等宽排版，含答案 | ❌（阅读用） |
 

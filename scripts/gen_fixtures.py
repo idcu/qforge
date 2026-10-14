@@ -85,6 +85,93 @@ def gen_docx(path):
         z.writestr('word/document.xml', doc)
 
 
+DOCX_IMAGE_LINES = [
+    ('1. （单选题）下图所示电路符号表示的元件是？', None),
+    (None, 'IMAGE'),
+    ('A. 电阻', None),
+    ('B. 电容', None),
+    ('C. 电感', None),
+    ('D. 开关', None),
+    ('答案：A', None),
+    ('解析：该符号为电阻。', None),
+    ('', None),
+    ('2. （判断题）标准大气压下水的沸点是 100℃。', None),
+    ('答案：正确', None),
+]
+
+
+def tiny_png():
+    """构造最小合法 PNG（2×2 RGB，标准库 zlib；仅作导入夹具）"""
+    import struct
+    import zlib
+
+    def chunk(typ, data):
+        c = typ + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+
+    raw = b''
+    for _ in range(2):
+        raw += b'\x00' + bytes([255, 0, 0, 0, 255, 0])  # 每行 filter(0) + 2 像素 RGB
+    return (b'\x89PNG\r\n\x1a\n'
+            + chunk(b'IHDR', struct.pack('>IIBBBBB', 2, 2, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(raw))
+            + chunk(b'IEND', b''))
+
+
+def gen_docx_with_image(path):
+    """含 1 张内嵌 PNG 的 docx：图片在第 1 题题干的独立段落（DrawingML a:blip）"""
+    png = tiny_png()
+
+    def para(item):
+        line, kind = item
+        if kind == 'IMAGE':
+            blip = (
+                '<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
+                '<wp:extent cx="952500" cy="952500"/>'
+                '<wp:docPr id="1" name="图片1"/>'
+                '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+                '<pic:pic>'
+                '<pic:nvPicPr><pic:cNvPr id="1" name="image1.png"/><pic:cNvPicPr/></pic:nvPicPr>'
+                '<pic:blipFill><a:blip r:embed="rIdImg1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+                '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="952500"/></a:xfrm>'
+                '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+                '</pic:pic>'
+                '</a:graphicData></a:graphic>'
+                '</wp:inline></w:drawing></w:r>'
+            )
+            return '<w:p>%s</w:p>' % blip
+        return '<w:p><w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>' % esc(line)
+
+    paras = ''.join(para(item) for item in DOCX_IMAGE_LINES)
+    doc = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document '
+        'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        '<w:body>%s</w:body></w:document>' % paras
+    )
+    ct = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Default Extension="png" ContentType="image/png"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>'''
+    doc_rels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rIdImg1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>'''
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('[Content_Types].xml', ct)
+        z.writestr('_rels/.rels', RELS)
+        z.writestr('word/_rels/document.xml.rels', doc_rels)
+        z.writestr('word/document.xml', doc)
+        z.writestr('word/media/image1.png', png)
+
+
 def gen_xlsx_openpyxl(path):
     from openpyxl import Workbook
     wb = Workbook()
@@ -144,6 +231,12 @@ def gen_xlsx_manual(path):
 
 
 def main():
+    # 独立参数：仅生成含图 docx，不触碰既有样例
+    if len(sys.argv) > 1 and sys.argv[1] == '--docx-image':
+        p = os.path.join(OUT, '示例-文档导入-含图.docx')
+        gen_docx_with_image(p)
+        print('%s  %d bytes' % (os.path.relpath(p), os.path.getsize(p)))
+        return
     xlsx = os.path.join(OUT, '示例-表格导入.xlsx')
     docx = os.path.join(OUT, '示例-文档导入.docx')
     try:
