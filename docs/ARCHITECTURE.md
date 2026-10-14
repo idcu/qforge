@@ -135,7 +135,7 @@
 app.beginQuiz(questions, mode) → new QuizEngine().loadQuestions
   作答：selectAnswer / toggleAnswer / setFillAnswer / setEssayAnswer → submitAnswer
   练习：每题即时 judgeAnswer；简答 isCorrect=null → 自评 selfAssess
-  考试：交卷时 gradeAll()（简答的 null 强制为 false，未作答计错）
+  考试：交卷时 gradeAll()（客观题未作答计错；简答/未自评小问保留 null=待自评，不计分不计错、不写 SRS/错题）
   finishQuiz() → History.add(record) → ProgressSaver.clear → 结果视图
 ```
 
@@ -201,7 +201,7 @@ Exporters.openFlow({kind, bank})
 | `essay` | 简答题 | 文本域 | `reference_answer` | 不自动判分 | **`null`（走自评）** |
 | `material` | 材料题 | 各小问作答数组（对齐 `children`） | 父级无 answer，判分在 `children[]` | 递归判分后 `QB.aggregateMaterial` 聚合：任一硬错→false；无错有半对→false+partial；含未自评简答→null；得分 Σ 小问（`points.earned/max`，默认每小问 10 分，预留 `children[*].score`） | `true`/`false`/`null` + `partial` + `children[]` |
 
-> 考试模式 `gradeAll()` 将 `isCorrect === null` 强制为 `false`（材料题为未自评小问逐个计错后重算聚合），避免交卷后悬空待判定。
+> 考试模式 `gradeAll()` 保留简答题的 `isCorrect=null`（材料题为未自评小问 earned=0 后重算聚合，整题可能仍为 null）：待自评题不给分、不计错、不写 SRS/错题，结果页单列「待自评」（评估报告中优先级#5）；客观题未作答仍计错。
 >
 > **不定项半分的联动语义**：`partial=true` 时成绩按 0.5 题计分（`quiz-engine.byType/gradeAll`）、**不进错题本**（`app.js` 收集错题时显式排除 partial）、SRS 评分记为 **hard**（全对 good / 错 again，见 [SRS.md](SRS.md) §3）。
 >

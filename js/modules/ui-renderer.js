@@ -387,13 +387,19 @@
   function renderResult(engine, bank, meta) {
     const score = engine.getScore();
     meta = meta || {};
+    const pendingBox = score.pending > 0
+      ? '<div class="stat-box"><div class="st-num">' + score.pending + '</div><div class="st-label">待自评</div></div>'
+      : '';
     let html = '<div class="card"><h3 class="card-title">' + (meta.title || '本次结果') + '</h3>' +
       '<div class="stat-grid">' +
-      '<div class="stat-box"><div class="st-num">' + score.score + '</div><div class="st-label">得分</div></div>' +
+      '<div class="stat-box"><div class="st-num">' + score.score + '</div><div class="st-label">得分' + (score.pending > 0 ? '（不含待自评）' : '') + '</div></div>' +
       '<div class="stat-box"><div class="st-num">' + score.correct + '</div><div class="st-label">正确</div></div>' +
       '<div class="stat-box"><div class="st-num">' + score.wrong + '</div><div class="st-label">错误</div></div>' +
-      '<div class="stat-box"><div class="st-num">' + score.accuracy + '%</div><div class="st-label">正确率</div></div>' +
+      pendingBox +
+      '<div class="stat-box"><div class="st-num">' + score.accuracy + '%</div><div class="st-label">正确率' + (score.pending > 0 ? '（不含待自评）' : '') + '</div></div>' +
       '</div>' +
+      (score.pending > 0 ? '<div class="li-meta" style="margin-top:8px">○ ' + score.pending +
+        ' 道简答题（含材料题中的简答小问）待自评，未计入得分与正确率；需要评分请在练习模式作答后点「我答对了/答错了」。</div>' : '') +
       '<div class="li-meta" style="margin-top:10px">题库：' + esc(bank ? bank.name : '') +
       (meta.durationMs ? ' · 用时 ' + esc(QB.Helpers.formatDuration(meta.durationMs)) : '') + '</div>' +
       (meta.isExam ? '<div class="li-meta exam-focus-' + ((meta.focusLeaves || 0) > 0 ? 'warn' : 'ok') +
@@ -424,8 +430,8 @@
     html += '<div class="section-title">逐题回顾</div>';
     engine.questions.forEach((q, i) => {
       const r = engine.results[i];
-      const cls = !r || r.isCorrect === null ? 'neutral' : (r.isCorrect ? 'ok' : (r.partial ? 'neutral' : 'no'));
-      const mark = !r || r.isCorrect === null ? '○ 未判定' : (r.isCorrect ? '✔ 正确' : (r.partial ? '◐ 半对' : '✘ 错误'));
+      const cls = !r ? 'neutral' : (r.isCorrect === null ? 'neutral' : (r.isCorrect ? 'ok' : (r.partial ? 'neutral' : 'no')));
+      const mark = !r ? '○ 未作答' : (r.isCorrect === null ? '○ 待自评（不计分）' : (r.isCorrect ? '✔ 正确' : (r.partial ? '◐ 半对' : '✘ 错误')));
       let childDetail = '';
       if (q.type === 'material' && r && Array.isArray(r.children)) {
         childDetail = r.children.map((cv, j) => {

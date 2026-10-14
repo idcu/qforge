@@ -259,7 +259,11 @@
     return r;
   };
 
-  /** 整卷判分（考试模式交卷时使用）：未作答/未自评的按错误计 */
+  /**
+   * 整卷判分（考试模式交卷时使用）：
+   * 客观题未作答按错误计；简答题（含材料题中的简答小问）无法自动判分，
+   * 保留 isCorrect=null（待自评）：不给分、不计错、不写 SRS/错题，得分仅统计已判定部分。
+   */
   QuizEngine.prototype.gradeAll = function () {
     for (let i = 0; i < this.questions.length; i++) {
       if (this.results[i]) continue;
@@ -268,16 +272,14 @@
       let isCorrect = verdict.isCorrect;
       let points = verdict.points;
       let children = verdict.children;
-      // 材料题：含未自评简答（null）时，整卷判分把这些小问计错后重算聚合
+      // 材料题：未自评的简答小问保留 null（earned=0 不给分），聚合据此可能仍为 null
       if (q.type === 'material' && children) {
         children.forEach((cv) => {
-          if (cv.isCorrect === null || cv.isCorrect === undefined) { cv.isCorrect = false; cv.earned = 0; }
+          if (cv.isCorrect === null || cv.isCorrect === undefined) cv.earned = 0;
         });
         const agg = QB.aggregateMaterial(children);
         isCorrect = agg.isCorrect;
         points = agg.points;
-      } else if (isCorrect === null) {
-        isCorrect = false; // 普通简答未自评
       }
       this.results[i] = {
         questionId: q.id,

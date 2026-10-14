@@ -507,16 +507,18 @@
       }
       case 'finish-exam':
         if (State.engine && State.engine.mode === 'exam') {
-          let unanswered = 0;
-          let partial = 0;
-          State.engine.results.forEach((r) => {
-            if (!r || r.isCorrect === null || r.isCorrect === undefined) unanswered++;
-            else if (r.partial) partial++;
+          let empty = 0;
+          let partialAns = 0; // 材料题部分作答（含未自评简答小问）
+          State.engine.questions.forEach((q, i) => {
+            const st = State.engine.statusAt(i);
+            if (st === 'empty') empty++;
+            else if (st === 'pending') partialAns++;
           });
-          if (unanswered > 0 || partial > 0) {
+          if (empty > 0 || partialAns > 0) {
             const lines = [];
-            if (unanswered > 0) lines.push('· 未作答 ' + unanswered + ' 题（将计为错误）');
-            if (partial > 0) lines.push('· 少选得半分 ' + partial + ' 题（不定项）');
+            if (empty > 0) lines.push('· 未作答 ' + empty + ' 题（客观题将计为错误；简答题不计分也不计错）');
+            if (partialAns > 0) lines.push('· ' + partialAns + ' 道材料题未答全或含待自评小问（未自评部分不计分）');
+            lines.push('· 简答题交卷后为「待自评」，不计入本次得分；需要评分请在练习模式作答后自评。');
             lines.push('确定交卷吗？取消可返回答题卡检查。');
             const ok = await UI.confirmDialog(lines.join('<br>'), '确认交卷');
             if (!ok) return;

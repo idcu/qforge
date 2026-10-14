@@ -311,15 +311,17 @@ section('材料题模型 / 判分 / 引擎 / 哈希');
   eq(comp.questions[0].type, 'material', '抽中的是材料题整题');
   eq(comp.shortages.length, 0, '材料题无缺口');
 
-  // 整卷判分（考试）：未自评简答强制计错 → 整题错误
+  // 整卷判分（考试）：未自评简答保留待自评（null），不给分也不计错
   const E2 = new QB.QuizEngine();
   E2.loadQuestions([MQ], 'exam', { shuffleOptions: false });
   E2.selectAnswer('B', 0); E2.toggleAnswer('A', 1); E2.toggleAnswer('B', 1); E2.toggleAnswer('D', 1);
   E2.selectAnswer(true, 2); E2.setFillAnswer(0, '10000', 3); E2.setEssayAnswer('xxx', 4);
   E2.gradeAll();
-  eq(E2.results[0].isCorrect, false, '考试交卷：未自评简答计错 → 整题错误');
-  eq(E2.results[0].children[4].isCorrect, false, '小问5 强制为错误');
-  eq(E2.getScore().score, 40, '考试得分 40（简答 0 分）');
+  eq(E2.results[0].isCorrect, null, '考试交卷：含未自评简答 → 整题待自评（不再强制计错）');
+  eq(E2.results[0].children[4].isCorrect, null, '小问5 保持 null（earned=0）');
+  eq(E2.results[0].children[4].earned, 0, '小问5 未自评不给分');
+  eq(E2.getScore().score, 40, '考试得分 40（客观 4 小问，简答不计分）');
+  eq(E2.getScore().pending, 1, '待自评 1 题（不计入正确率）');
 }
 
 /* ================= 2.9 材料题 M2：行式格式（MD/DOCX/TXT）往返 ================= */
@@ -670,21 +672,33 @@ eq(bt.fill.correct, 1, '按题型：填空 1/1');
 eng.selfAssess(true);
 eq(eng.getScore().pending, 0, '简答自评后无待判定');
 
-// 考试模式：整卷判分，未作答计为错误
+// 考试模式：整卷判分，客观题未作答计错；简答未自评保留待评（不计分不计错）
 const exam = new QB.QuizEngine();
 exam.loadQuestions(fiveQs, 'mixed');
 exam.mode = 'exam';
 exam.currentIndex = 1; exam.selectAnswer(QB.normalizeLetters(exam.questions[1].answer));
 exam.gradeAll();
 const esc2 = exam.getScore();
-eq(esc2.pending, 0, '考试：交卷后无待判定');
+eq(esc2.pending, 1, '考试：未自评简答 1 题待评（不再强转错误）');
 eq(esc2.correct, 1, '考试：仅第 2 题正确');
-eq(esc2.wrong, 4, '考试：其余 4 题计错（含未作答）');
+eq(esc2.wrong, 3, '考试：其余客观题 3 题计错（含未作答）');
 
 // 答题卡状态 / 跳转 / 多维分布
 eq(exam.statusAt(0), 'wrong', '答题卡：第 1 题未答整卷判定后为 wrong');
 eq(exam.statusAt(1), 'correct', '答题卡：第 2 题为 correct');
+eq(exam.statusAt(4), 'pending', '答题卡：第 5 题简答为 pending');
 eq(exam.answeredCount(), 5, '整卷判定后所有题均有结果（计数 5）');
+// 评估报告中优先级#5：简答即使作答与参考答案一致，考试交卷也不自动判错（保留待自评）
+{
+  const adapted = QB.Adapters.toStandard({ type: 'essay', question: '简述确认条件', reference_answer: '经济利益很可能流入' });
+  const exEng = new QB.QuizEngine();
+  exEng.loadQuestions([adapted.question], 'exam', { shuffleOptions: false });
+  exEng.setEssayAnswer('经济利益很可能流入');
+  exEng.gradeAll();
+  eq(exEng.results[0].isCorrect, null, '考试：简答作答与参考答案一致仍为 null（旧实现强转 false）');
+  eq(exEng.getScore().wrong, 0, '待自评简答不计错误');
+  eq(exEng.getScore().pending, 1, '待自评简答计入 pending');
+}
 ok(exam.jumpTo(3) && exam.currentIndex === 3, 'jumpTo 跳转题目');
 ok(!exam.jumpTo(99), 'jumpTo 越界返回 false');
 const bd2 = exam.breakdown();

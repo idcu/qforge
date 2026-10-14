@@ -5,7 +5,7 @@
 >
 > **M1 实施相对本稿的两处落地修正**（以代码为准）：
 > 1. contentHash 子问题归一采用**选项文本排序 + 答案取选中文本集合**（而非原始 options/answer 字段），使练习时选项乱序后材料题去重键保持稳定（§2.2 已更新精神）。
-> 2. 引擎结果新增 `points:{max,earned}` 与 `srsRecorded`（SRS 去重）、`children[i].score/earned`；考试 `gradeAll` 对未自评小问逐问计错后重算聚合。
+> 2. 引擎结果新增 `points:{max,earned}` 与 `srsRecorded`（SRS 去重）、`children[i].score/earned`。考试 `gradeAll` 初版对未自评小问逐问计错；**2026-10 评估整改后改为保留 null（待自评，earned=0 不给分、整题不计错）**，与普通简答题一致（见 ARCHITECTURE §6）。
 
 ## 1. 背景与目标
 
