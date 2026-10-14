@@ -1,6 +1,6 @@
 /**
  * XLSX 导入器（零依赖）
- * 通过原生 ZipReader 解压 + DOMParser 解析，读取第一个工作表为二维表格，复用表格适配器。
+ * 通过原生 ZipReader 解压 + DOMParser 解析，读取全部工作表为二维表格（空表跳过、按工作簿顺序合并），复用表格适配器。
  */
 (function (global) {
   'use strict';

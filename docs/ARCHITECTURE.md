@@ -10,7 +10,7 @@
 | 纯前端静态可运行 | classic `<script src>` 顺序加载，挂到 `window.QB`，无 ES module / 无 fetch 本地文件 |
 | 前后端平滑迁移 | UI 只依赖 **Repository 接口**，`qb/js/config.js` 的 `DATA_BACKEND` 切换 `local` / `api` |
 | 多题库 | `Bank` 是一等实体；题目带 `bankId`；用户数据按 `bankId` 分区存储 |
-| 题型可扩展 | 5 种题型集中在 `CONFIG.TYPES`，判分走策略表 `judge-answer` |
+| 题型可扩展 | 6 种题型集中在 `CONFIG.TYPES`（判断/单选/多选/不定项/填空/简答），判分走策略表 `judge-answer` |
 | 不重复实现 | 判分/去重键/洗牌/存储/导入适配 提取为公共抽象（见 §5） |
 
 ## 2. 分层结构
@@ -81,7 +81,7 @@
 | `importers/json-importer.js` | JSON 结构嗅探（数组/导出/中文嵌套） |
 | `importers/csv-importer.js` | CSV/TSV 表头映射（自动识别逗号/制表符/分号、BOM、引号转义） |
 | `importers/md-importer.js` | Markdown 清洗（标题/列表/加粗/反引号/引用，保护 `____`）后复用 LineParser |
-| `importers/xlsx-importer.js` | 原生 zip + DOMParser 读第一个工作表 |
+| `importers/xlsx-importer.js` | 原生 zip + DOMParser：解析 workbook.xml + rels 取**全部工作表**（空表跳过、按工作簿顺序合并），支持共享字符串/内联字符串/数值单元格 |
 | `importers/docx-importer.js` | 原生 zip 读 `word/document.xml` 成段落行后复用 LineParser |
 
 ### 3.5 业务模块（modules）
@@ -97,10 +97,10 @@
 | `modules/statistics.js` | `overview`/`typePerformance`/`suggestions`/`dailyActivity`（近 N 周答题热力，周一列首对齐） |
 | `modules/search-filter.js` | `search`/`filter`/`highlight`/`categories` |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
-| `modules/fsrs.js` | **FSRS-4.5 纯调度器**（17 个官方默认权重）：`review/initialState/isLearning`、稳定度/难度/目标保留率、新卡/重学 learning steps（1m/10m 状态机），无 DOM/存储依赖 |
-| `modules/fsrs-opt.js` | **个性化参数优化器**：revlog 采集（FIFO 2 万条）、样本构造、伯努利 NLL、数值梯度+Adam；门控 100 样本/≥3 again/3 档位/0.2% 改善；权重支持全局 + 按题库 preset（旧单组结构自动归一） |
+| `modules/fsrs.js` | **FSRS-4.5 纯调度器**（17 个官方默认权重）：`review/initialState/isLearning`、稳定度/难度/目标保留率、新卡/重学 learning steps（1m/10m 状态机），无 DOM/存储依赖。公式/状态机/边界见 [SRS.md](SRS.md) |
+| `modules/fsrs-opt.js` | **个性化参数优化器**：revlog 采集（FIFO 2 万条）、样本构造、伯努利 NLL、数值梯度+Adam；门控 100 样本/≥3 again/3 档位/0.2% 改善；权重支持全局 + 按题库 preset（旧单组结构自动归一）。细节见 [SRS.md](SRS.md) §8 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
-| `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移 |
+| `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7） |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |
 | `modules/source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入测试） |
 | `modules/data-io.js` | 文件/粘贴/拖拽/**URL** 导入编排，统一「解析→预览→insertMany→记录来源」；`refreshUrlFlow` 按 checksum 刷新 |
@@ -152,9 +152,13 @@ engine.loadQuestions(questions, type, opts)
 ```
 Exporters.openFlow({kind, bank})
   → KINDS[kind].collect(bank) 得到统一载荷 {kind, bank, entries:[{question, meta}]}
-  → 弹窗在 FORMATS（json/csv/markdown/txt）中选格式
-  → buildContent(formatId, payload) 纯函数构建文本 → download(Blob)
+  → 弹窗在 7 种 FORMATS 中选格式：qbk/json/csv/xlsx/docx/markdown/txt
+  → qbk：buildAsync 异步读 IndexedDB 图片 → ZipWriter 打 stored ZIP
+  → xlsx/docx：buildContent → OfficeWriter 生成 OOXML 部件 → ZipWriter 打包（ArrayBuffer）
+  → json/csv/markdown/txt：buildContent 纯函数构建文本
+  → download(Blob)
 ```
+> 注册表（kind × format）与各格式细节见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md)。
 
 ## 5. 公共抽象与影响范围
 
@@ -187,10 +191,13 @@ Exporters.openFlow({kind, bank})
 | `judge` | 判断题 | 正确/错误 二选一 | `"正确"` / `"错误"` | `parseBoolean` 归一后比较 | `true`/`false` |
 | `single` | 单选题 | 单选字母 | `"B"` | 字母归一后相等 | `true`/`false` |
 | `multi` | 多选题 | 多选字母集合 | `"ABD"`（排序去重） | 集合相等 | `true`/`false` |
+| `indefinite` | 不定项 | 多选字母集合（答案可 1～多个） | `"ABD"` | 全对满分；少选且未错选 `partial=true` 半分；错选/多选/未选 0 分 | `true`/`false` + `partial` |
 | `fill` | 填空题 | 多空输入框 | `blanks[]`（`answer`+`accept`） | 逐空比对（忽略大小写/空格/全角） | `true`/`false` |
 | `essay` | 简答题 | 文本域 | `reference_answer` | 不自动判分 | **`null`（走自评）** |
 
 > 考试模式 `gradeAll()` 将 `isCorrect === null` 强制为 `false`，避免交卷后悬空待判定。
+>
+> **不定项半分的联动语义**：`partial=true` 时成绩按 0.5 题计分（`quiz-engine.byType/gradeAll`）、**不进错题本**（`app.js` 收集错题时显式排除 partial）、SRS 评分记为 **hard**（全对 good / 错 again，见 [SRS.md](SRS.md) §3）。
 
 ## 7. 从 LocalStorage 迁移到数据库的路径
 

@@ -40,7 +40,7 @@ CREATE TABLE banks (
 CREATE TABLE questions (
   id               VARCHAR(32)  PRIMARY KEY,
   bank_id          VARCHAR(32)  NOT NULL REFERENCES banks(id) ON DELETE CASCADE,
-  type             VARCHAR(16)  NOT NULL,          -- judge|single|multi|fill|essay
+  type             VARCHAR(16)  NOT NULL,          -- judge|single|multi|indefinite|fill|essay
   question         TEXT         NOT NULL,
   options          TEXT,                            -- JSON: [{"letter":"A","text":"..."}]
   answer           TEXT,                            -- judge: "正确"/"错误"; single/multi: "ABD"
@@ -123,6 +123,8 @@ CREATE TABLE sessions (
 > 每用户每库至多一条有效会话（本期单用户全局一条，存 `qb:user:session`）。
 
 ### 2.7 review_schedule（SRS 间隔重复，FSRS-4.5）
+
+> 算法公式、学习步骤状态机与字段语义的权威说明见 [SRS.md](SRS.md)。
 ```sql
 CREATE TABLE review_schedule (
   id          VARCHAR(32) PRIMARY KEY,
@@ -193,18 +195,21 @@ CREATE TABLE assets (
 ## 5. 迁移步骤（LocalStorage → DB）
 
 1. 后端建表（本文 §2）。
-2. 前端导出：`QB.DataIO.exportBank(bank)` 生成标准 JSON。
-3. 迁移脚本读取 `qb:*` 全量键 → 按映射转换字段名 → `POST /api/banks`、`/api/banks/{id}/questions/batch`、`/api/history`。
+2. 前端导出：`QB.Exporters.collect('bank', bank)` 取载荷后 `QB.Exporters.buildContent('json', payload)` 生成标准 JSON（旧 `DataIO.exportBank` 已删除，所有导出统一走 Exporters 注册表，见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md)）。
+3. 迁移脚本读取 `qb:*` 全量键 → 按映射转换字段名 → `POST /api/banks`、`/api/banks/{id}/questions/batch`、`/api/history`；SRS 三键（review/revlog/weights）见 §2.7–2.8 与 [SRS.md](SRS.md) §9，图片资产为 IndexedDB `assets` 库（§2.9），需单独导出/上传。
 4. 校验：比对 `banks`/`questions` 行数与 `content_hash` 集合。
 5. 前端 `config.js` 切 `DATA_BACKEND='api'`。
 
 ## 6. 容量与性能参考（实测）
 
+Node v24.14.0，`scripts/bench.mjs` 2026-10-14 实跑（采样 10 次取中位数）：
+
 | 项 | 数值 |
 | --- | --- |
-| 538 题题目载荷（localStorage JSON） | 0.26 MB |
-| 单库 538 题全量替代写入耗时（中位数） | 1.76 ms |
-| 538 题 contentHash 索引构建 | 0.04 ms |
-| 关键词检索（538 题，中位数） | 0.59 ms |
+| 538 题题目载荷（JSON 字符串） | 0.27 MB（Storage 全量键估算约 0.44 MB） |
+| 单库 538 题全量替代写入耗时（中位数） | 1.65 ms（min 1.57 / max 2.67 ms） |
+| 538 题 contentHash 索引构建 | 0.05 ms |
+| 关键词检索（538 题，中位数） | 0.66 ms |
+| bench 全程 heapUsed 增量 | +18.74 MB（5.26 → 24.00 MB，含全部套件夹具） |
 
-> 数据来源见 `CHANGELOG.internal.md`；后端选型时以此估算存储与索引规模。
+> 数据来源：2026-10-14 本机实测与 `CHANGELOG.internal.md`；后端选型时以此估算存储与索引规模。
