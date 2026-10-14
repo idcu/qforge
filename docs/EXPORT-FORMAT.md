@@ -26,7 +26,7 @@
 
 - xlsx/docx/qbk 为二进制格式（注册表项带 `binary: true`），`content` 是 `ArrayBuffer`；四种文本格式返回字符串。
 - qbk 为 `async: true`（需异步读 IndexedDB），统一入口是 `Exporters.buildAsync(id, payload)`；同步 `buildContent` 对 qbk 明确抛错。图片文件名 = 资产 id（`as<FNV1ahex>-<字节长度>`），缺图时 toast 报缺失数，占位标记仍随 bank.json 导出。
-- 打包经公共模块 `QB.ZipWriter`（`js/utils/zip-writer.js`，stored 不压缩 + CRC32）与 `QB.OfficeWriter`（`js/modules/office-writer.js`，OOXML 部件生成）；采用 stored 是为了让自家 `ZipReader` 在无 `DecompressionStream` 的环境也能闭环回读，代价是体积大于 deflate（538 题约 0.65 MB / 0.26 MB，见 §6 实测）。
+- 打包经公共模块 `QB.ZipWriter`（`js/utils/zip-writer.js`，stored 不压缩 + CRC32）与 `QB.OfficeWriter`（`js/modules/office-writer.js`，OOXML 部件生成）；采用 stored 是为了让自家 `ZipReader` 在无 `DecompressionStream` 的环境也能闭环回读，代价是体积大于 deflate（538 题 XLSX 约 0.65 MB，对应该库 JSON 载荷约 0.27 MB，见 §6 实测）。
 
 ### 2.1 JSON 结构
 ```json
@@ -84,15 +84,15 @@ QB.Exporters.openFlow({ kind, bank })
 
 ## 6. 实测性能（Node v24.14.0，538 题）
 
-| 操作 | 中位数耗时 | 备注 |
-| --- | --- | --- |
-| 文本四格式全部构建一遍 | 3.42 ms | 合计约 673 KB（含 xlsx/docx 时代码路径不变，实测见 bench） |
-| XLSX 构建（stored ZIP） | 7.14 ms | 包体积 665.0 KB |
-| DOCX 构建（stored ZIP） | 2.98 ms | 包体积 258.2 KB |
-| Markdown 导出文本再解析（538 题，含 toStandard 适配） | 4.51 ms | 解析出 538 题 |
-| `shuffleOptions` 选项乱序 538 题（其中 455 题为单选/多选/不定项） | 0.50 ms | |
+| 操作 | 中位数耗时 | min / max | 备注 |
+| --- | --- | --- | --- |
+| 文本四格式全部构建一遍 | 2.98 ms | 2.45 / 18.47 ms | 单次合计 673.0 KB |
+| XLSX 构建（stored ZIP） | 6.60 ms | 5.76 / 8.56 ms | 包体积 665.0 KB |
+| DOCX 构建（stored ZIP） | 2.97 ms | 2.53 / 5.55 ms | 包体积 258.2 KB |
+| Markdown 导出文本再解析（538 题，含 toStandard 适配） | 3.35 ms | 2.65 / 6.81 ms | 解析出 538 题 |
+| `shuffleOptions` 选项乱序 538 题 | 0.56 ms | 0.48 / 0.99 ms | 实际乱序 455 题（真实夹具为 330 单选 + 125 多选，无不定项） |
 
-> 2026-10-13 重测（Node v24.14.0，采样 10 次取中位数）。stored 不压缩使 xlsx/docx 体积大于 deflate 方案；若后续需瘦身，可在 ZipWriter 内增加 deflate 压缩（浏览器 CompressionStream），接口不变。
+> 2026-10-14 重测（Node v24.14.0，`scripts/bench.mjs` 采样 10 次取中位数，min/max 为同批采样极值）。stored 不压缩使 xlsx/docx 体积大于 deflate 方案（538 题 XLSX 665 KB，对应该库 JSON 载荷约 0.27 MB）；若后续需瘦身，可在 ZipWriter 内增加 deflate 压缩（浏览器 CompressionStream），接口不变。
 
 ## 7. 测试
 
