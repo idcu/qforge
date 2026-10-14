@@ -1029,7 +1029,58 @@
 
 ---
 
+## 644bd41 · fix(srs): 一次作答只写一条评分（评估报告高优先级#2）
+
+**背景**：submitCurrent 即时 grade 后 finishQuiz 又 gradeMany，同一道题两条 revlog；三处评分判定逻辑在 app 复制。10fc2d7 材料题批次已加 srsRecorded 标记但仅材料路径覆盖。
+
+- 新增 `SRSStore.ratingForResult/collectGraded`：判分结果→评分映射与 srsRecorded 消费的唯一入口（练习提交/交卷/材料自评三处复用）。
+- app 三处改为 collectGraded；同步修正 SRS.md §3 映射文案。
+- 验证：srs 49→**50**（一次作答 revlog 恰 1 条）；全绿。公共新增 `ratingForResult/collectGraded`。
+
+## 06c0971 · fix(import): contentHash v2 纳入选项与答案（评估报告高优先级#3）
+
+**背景实证**：真实 541 题样本（`真实-541题-分类.json`，一次性探针逐题核实）中 3 组同题干——仅「写字楼面积」1 组完全重复；「接管验收标志」C/D 两版、「工业区物业内容」AD/ABCD 两组选项答案均不同。v1（题型+题干）误并，v2 唯一 540。
+
+- `question-id.js`：v2 hash = `'2:'+FNV1a(题型+题干+选项文本集合+答案语义)`；选择类取选中文本（乱序不变）、判断取布尔语义（复用新公共导出 `QB.resolveJudgeValue`）、填空取各空答案、简答取参考答案；分类/难度/标签不进身份键；材料子问题共用模块内 semanticPayload（消除旧内联重复）。
+- 新增 `modules/migrate.js`（`QB.Migration.run`，幂等）：启动按 `meta:schemaVersion` 升级，题目重算后 review/wrong/fav/revlog 全部键重映射（冲突状态取 last 最近、错题计数相加），revlog 单库归属回填 b；先写题后映射用户数据，中断重跑安全；旧裸 hash（旧 .qbk）落库强制重算。
+- 验证：16 套 **2226/2226**（smoke 396→401、新增 migrate **30**）；bench 解析 1.90ms/insertMany 中位 4.97ms/buildIndex 0.04ms/heap +18.70MB，无回退。
+- 公共新增 `isCurrentHash/resolveJudgeValue/Migration`；contentHash 形态 8hex→`2:`+8hex，存量由启动迁移兜底。
+
+## 2f0b437 · fix(srs): revlog 记录 bankId，按库训练严格隔离（评估报告中优先级#4）
+
+- grade/gradeMany 追加日志带 `b=bankId`；新增 `FSRSOpt.readLogForScope(bankId)`，train/trainAsync 按作用域读日志（旧无 b 日志只参与全局，不静默归库）；迁移时单库归属旧日志回填 b。
+- 验证：fsrs-opt 77→**86**（+9 作用域断言）、srs 49→**50**、migrate 30→**33**。
+
+## 89a07ec · fix(quiz): 考试简答不再强制计错（评估报告中优先级#5）
+
+- `gradeAll`：普通简答保留 `isCorrect=null`；材料题未自评小问保留 null（earned=0），聚合可为 null；客观题未作答仍计错。null 不进 SRS/错题（既有口径），得分/正确率只统计已判定。
+- 交卷确认按 statusAt 区分未作答/材料部分作答；结果页加「待自评」统计盒、逐题「○ 待自评（不计分）」标记。
+- 验证：smoke 401→**407**（报告原场景：简答与参考答案一致仍为 null，不再判错）。
+
+## cba9dae · fix(storage): 同步落盘/失败上抛/备份回滚/跨标签/删库级联（评估报告中优先级#6）
+
+- Storage：新增 `setSync`（关键学习数据/权重/级联同步穿透，失败即抛）；set 防抖保留给批量；forceSync 失败保留 pending、记 lastError、onError 订阅并重试；storage 事件跨标签同步缓存；visibilitychange 落盘。
+- applyBackup 覆盖恢复改「快照→写入→forceSync→删多余旧键」，失败按快照回滚（旧实现先删后写、失败全丢）。
+- banks.remove 级联补全：删遗留 user:review:<bank>、该库 preset、b=bankId 的 revlog；确认文案补复习计划/权重。
+- 验证：17 套 **2273/2273**；新增 storage.test **14**、backup 15→**19**、srs 50→**60**；bench insertMany 5.38ms/gradeAll 0.12ms/错题批量 1.12ms 无回退。
+
+## 1059fa2 · fix(backup): 备份脱敏 WebDAV 明文密码（评估报告中优先级#6）
+
+- 新增 `Backup.redactSecrets`（纯函数）：meta:dav 删 pass、保留地址/账号；buildBackup 必经，文件备份与 WebDAV PUT 同受益；弹窗/user-guide 明示。
+- 验证：backup 19→**25**；sync-dav 32 零回归。
+
+## 7ecc912 · fix(srs): 历史最佳权重 + 留出集门控（评估报告工程项）
+
+- optimize 返回训练全程 loss 最低点权重快照（旧返回最后一轮却报最低 loss）；computeTrain 整条序列确定性切 20% 留出集，门控比留出 NLL（无 again 回退训练口径，gateBasis 标注）；返回 trainLoss/holdoutSamples 并写入 meta。
+- 如实记录：旧 ±25%/420 卡夹具留出改善 -0.13%（训练集 0.97%），旧门控会采纳过拟合权重；新夹具 ±40%/800 卡×5（3200 样本/640 留出）留出 0.3374<0.3388（0.42%）。
+- 验证：fsrs-opt 86→**91**；权重-训练loss 自洽 1e-9；复训逐位一致。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
+> 评估整改批次：`3bcf58f` FSRS 公式对齐 · `0a594a2` changelog · `644bd41` 一次一评分 ·
+> `06c0971` contentHash v2+迁移 · `2f0b437` revlog 按库隔离 · `89a07ec` 考试待自评 ·
+> `cba9dae` 存储可靠性 · `1059fa2` 备份脱敏 · `7ecc912` 留出门控+最佳权重。
 > `57fb82d` core · `266abd7` data · `3befac9` quiz · `484a4ef` bank ·
 > `aa8087a` import(json/csv) · `7a1673c` import(xlsx/docx) · `f994e96` ui · `5c22e22` test ·
 > `197c2fd`/`1aa1121`/`2d65170` docs(changelog) · `f189fa7` 选项乱序 · `2a3c826` 多格式导出 ·

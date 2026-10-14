@@ -87,19 +87,21 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 8777） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（396 项，含材料题 M1/M2 五格式往返、xlsx 多工作表/docx 含图/WPS 回环；零外部依赖） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（407 项，含材料题 M1/M2 五格式往返、xlsx 多工作表/docx 含图/WPS 回环、contentHash v2、考试简答待自评；零外部依赖） |
 | `node scripts/xml-lite.test.mjs` | 自研极简 XML 解析器测试（39 项断言：结构/实体/命名空间/CDATA/畸形报错） |
 | `node scripts/exporter.test.mjs` | 导出功能单元测试（154 项断言，六题型/转义/难度标签列/材料题五格式分流/Markdown 往返/历史记录四格式） |
-| `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/538 题双格式全量判分自洽） |
+| `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/540 题双格式全量判分自洽） |
 | `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
 | `node scripts/rich-text.test.mjs` | 富文本渲染器测试（45 项断言：转义防注入、上下标、图片占位、collectAssets、hydrate 假 DOM、光标插入） |
 | `node scripts/assets.test.mjs` | 图片资产/题库包测试（54 项断言：IDB 内存驱动、内容寻址去重、qbk/qfbk ZIP 往返、缺图警告、孤儿清理、qbk→落库全链路去重） |
 | `node scripts/blueprint.test.mjs` | 组卷蓝图筛选/抽题/缺口测试（18 项断言） |
 | `node scripts/source.test.mjs` | 来源溯源/URL 校验/checksum/快照拉取（29 项断言） |
-| `node scripts/fsrs.test.mjs` | FSRS-4.5 调度器测试（65 项断言：稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps 1m/10m、relearning） |
-| `node scripts/fsrs-opt.test.mjs` | FSRS 参数优化器测试（77 项断言：revlog/FIFO、门控、合成日志 logloss 改善、确定性复训、preset 隔离/端到端；Worker 化 supported 判定/假 Worker 协议/自动回退/trainAsync 写盘） |
-| `node scripts/srs.test.mjs` | 到期判定、存储与 7 日预报测试（39 项断言，含自然日时区无关校验、SM-2→FSRS 迁移、learning steps 分钟级队列） |
-| `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（15 项断言） |
+| `node scripts/fsrs.test.mjs` | FSRS-4.5 调度器测试（77 项断言：官方 v4.5.0 黄金对照 29.01、稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps 1m/10m、relearning） |
+| `node scripts/fsrs-opt.test.mjs` | FSRS 参数优化器测试（91 项断言：revlog/FIFO/按库隔离、四门控、留出集门控与历史最佳权重、确定性复训、preset 端到端；Worker 化 supported 判定/假 Worker 协议/自动回退/trainAsync 写盘） |
+| `node scripts/srs.test.mjs` | 到期判定、存储与 7 日预报测试（60 项断言，含时区无关、SM-2→FSRS 迁移、一次作答一条 revlog 契约、删库级联清理） |
+| `node scripts/storage.test.mjs` | 本地存储可靠性（14 项断言：setSync 即落盘/配额失败上抛与重试、跨标签 storage 事件、keys 合并待写） |
+| `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（25 项断言，含失败快照回滚、WebDAV 密码脱敏） |
+| `node scripts/migrate.test.mjs` | schema 迁移测试（33 项断言：contentHash v1→v2 与全部用户数据键重映射、幂等） |
 | `node scripts/sync-dav.test.mjs` | WebDAV 云备份测试（32 项断言：配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/404） |
 | `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源 + FSRS Worker 资源校验（29 项断言） |
 | `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出 的耗时与内存） |
@@ -108,14 +110,14 @@ qb/
 xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖），Node 直接跑全部断言，无需安装任何包。
 
 **实测数据（Node v24.14.0，2026-10-14 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
-- 15 个逻辑层测试套件 **2169 / 2169 通过**（UTC / UTC+8 双时区实跑）：冒烟 **396**、XML 解析器 **39**、导出 154、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **65**、**FSRS 优化器 77**、SRS **39**、备份 15、**WebDAV 32**、PWA 29。
-- 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、**材料题 M1 判分聚合 + M2 五格式（MD/DOCX/CSV/XLSX/TXT）往返黄金断言**、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 538 题全量往返（普通路径零回归）、题库隔离与级联删除、答题卡跳转。
-- FSRS 优化器：以 mulberry32 + 伯努利模拟的合成评分日志（420 卡 × 4 次复习 = 1260 个相邻评分样本，含 140 次「又忘了」）验证有效性——当真权重相对默认值扰动 ±25% 时，训练后 logloss 0.3440 < 默认权重 0.3473（改善约 0.97%，超过 0.2% 采纳门控）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果确定一致。套件耗时约 2.6s。
-- Office 导出：538 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验（539 行 × 16 列）。
-- 真实数据：541 题解析 → 去重后 **538**（源数据 3 题重复，非缺陷）。
-- 首屏静态体积（index.html + css + 全部 js + sw/manifest/icon，含 FSRS 训练 Worker，共 58 个文件/53 个 js，gzip -9 实测）：**137.6 KB gzip / 398.8 KB raw**（M2 较 M1 +2.0 KB gzip；图片字节存 IndexedDB，不计入首屏包）。
-- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次，M2 后实测）：JSON 解析 1.73ms、落库 2.31ms、检索 0.64ms、50 题整卷判分 0.11ms、538 题乱序 0.57ms、文本四格式导出 3.19ms、**XLSX 构建 7.39ms（665 KB）**、**DOCX 构建 3.35ms（258 KB）**、Markdown 538 题再解析 3.34ms（与 M1 基线互有 ±0.4ms，均属运行噪声）。
-- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 15 个套件，防止自然日/时间断言的时区回归。
+- 17 个逻辑层测试套件 **2284 / 2284 通过**（UTC / UTC+8 双时区实跑）：冒烟 **407**、XML 解析器 **39**、导出 154、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **77**、**FSRS 优化器 91**、SRS **60**、存储可靠性 14、备份 25、schema 迁移 33、**WebDAV 32**、PWA 29。
+- 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、**材料题 M1 判分聚合 + M2 五格式（MD/DOCX/CSV/XLSX/TXT）往返黄金断言**、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 540 题全量往返、**contentHash v2 不误并同题干异答案题**、**考试简答待自评（不伪造错误）**、题库隔离与级联删除、答题卡跳转。
+- FSRS 优化器：800 卡 × 5 评的确定性合成日志（3200 相邻样本，切出 640 留出样本）验证——真权重扰动 ±40% 时，留出集 logloss 0.3374 < 默认 0.3388（改善 0.42%，超 0.2% 门控）才采纳；门控基于独立留出集（不再训练集自证），返回历史最佳权重；改善不足（含小样本过拟合 -0.13% 场景）诚实拒绝。
+- Office 导出：540 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验。
+- 真实数据：541 题解析 → v2 去重后 **540**（3 组同题干中仅 1 组完全重复；另 2 组选项/答案不同，旧 v1 键会误并——评估报告高优先级#3）。
+- 首屏静态体积（index.html + css + 全部 js + sw/manifest/icon，含 FSRS 训练 Worker，共 59 个文件/54 个 js，gzip -9 实测）：**148.3 KB gzip / 419.2 KB raw**（图片字节存 IndexedDB，不计入首屏包）。
+- 关键耗时中位数（`scripts/bench.mjs`，采样 10 次）：JSON 解析 1.69ms、落库 5.78ms、检索 0.65ms、50 题整卷判分 0.11ms、540 题乱序 0.62ms、文本四格式导出 3.10ms、**XLSX 构建 8.34ms（667 KB）**、**DOCX 构建 2.88ms（259 KB）**、Markdown 540 题再解析 3.71ms。
+- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 17 个套件，防止自然日/时间断言的时区回归。
 
 ## 远端仓库
 

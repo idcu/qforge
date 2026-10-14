@@ -18,22 +18,24 @@ node scripts/serve.mjs        # http://localhost:8777
 
 | 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **396** | 六题型判分（含不定项少选半分）、**材料题 M1（41 项）**、**材料题 M2-A（MD/DOCX 夹具往返黄金断言、导出→再导入 hash 相等、材料块收块边界、小问号/裸词防误判/容错警告，48 项）**、**材料题 M2-B（CSV/XLSX 夹具往返、18 列条件表头与多行展开、导出→再导入 hash、悬空小问/元数据忽略警告、旧表零变化，53 项）**、内置 18 题样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 538 题往返、多题库隔离/级联删除、答题卡 |
+| `scripts/smoke-test.mjs` | **407** | 六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v2（同题干异选项/答案不误并、乱序语义等价、判断题答案入 hash）**、**考试简答待自评（gradeAll 保留 null，7 项）**、内置样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 540 题往返、多题库隔离/级联删除、答题卡 |
 | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
 | `scripts/exporter.test.mjs` | **154** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、**材料题五格式分流/18 列多行块/三格式 hash 往返（18 项）**、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
-| `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、538 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
-| `scripts/editor.test.mjs` | **29** | `buildQuestion` 纯函数、增删改 |
+| `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
+| `scripts/editor.test.mjs` | **29** | `buildQuestion` 纯函数、增删改、编辑元数据不改变 contentHash |
 | `scripts/rich-text.test.mjs` | **45** | 转义防注入、上下标、图片占位、collectAssets、hydrate 假 DOM、光标插入 |
 | `scripts/assets.test.mjs` | **54** | IDB 内存驱动、内容寻址去重、qbk/qfbk ZIP 往返、缺图警告、孤儿清理、qbk 落库去重 |
 | `scripts/blueprint.test.mjs` | **18** | 题型×分类×难度筛选/抽题/缺口、种子可复现 |
 | `scripts/source.test.mjs` | **29** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入） |
-| `scripts/fsrs.test.mjs` | **65** | 稳定度/难度/保留率/又错惩罚/钳制/迁移、1m/10m learning steps、relearning |
-| `scripts/fsrs-opt.test.mjs` | **77** | revlog/FIFO、四门控、合成日志 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
-| `scripts/srs.test.mjs` | **39** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列 |
-| `scripts/backup.test.mjs` | **15** | 全量备份、覆盖/合并恢复 |
+| `scripts/fsrs.test.mjs` | **77** | 官方 v4.5.0 黄金对照（29.01/R=1 不增长/难度 6.81/5.87/4.93/3.99，12 项）、稳定度/难度/保留率/又错惩罚/钳制、1m/10m learning steps、relearning |
+| `scripts/fsrs-opt.test.mjs` | **91** | revlog/FIFO/作用域隔离、四门控、**留出门控（holdout 20%/gateBasis）+历史最佳权重-loss 自洽**、合成日志留出 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
+| `scripts/srs.test.mjs` | **60** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项） |
+| `scripts/storage.test.mjs` | **14** | setSync 即落盘/配额抛错+onError+待写重试、forceSync、跨标签 storage 事件、keys 合并 pending |
+| `scripts/backup.test.mjs` | **25** | 全量备份、覆盖/合并恢复、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项） |
+| `scripts/migrate.test.mjs` | **33** | v1→v2 contentHash 升级、review/wrong/fav/revlog 键重映射、revlog 回填 b、幂等逐字节不变、同题干异答案共存、旧裸 hash 强制重算 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **29** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式 |
-| **合计** | **2169 / 2169 通过 · 15 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2284 / 2284 通过 · 17 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
@@ -51,18 +53,18 @@ node scripts/bench.mjs      # 采样 10 次取中位数，输出耗时与 heapUs
 
 | 打点项 | 中位数 | min / max |
 | --- | --- | --- |
-| JSON 解析+适配（541→去重 538，源文本 63,286 字符） | 1.59 ms | 1.02 / 5.61 ms |
-| `insertMany` 落库（538 题，载荷 0.27 MB / Storage 估算 0.44 MB） | 1.65 ms | 1.57 / 2.67 ms |
-| contentHash 索引构建 | 0.05 ms | 0.04 / 0.24 ms |
-| 关键词检索（538 题） | 0.66 ms | 0.62 / 1.62 ms |
-| 50 题整卷 `gradeAll` | 0.10 ms | 0.07 / 0.67 ms |
-| `shuffleOptions`（538 题，实际乱序 455 道选择类） | 0.56 ms | 0.48 / 0.99 ms |
-| 文本四格式导出（JSON+CSV+MD+TXT，673 KB） | 2.98 ms | 2.45 / 18.47 ms |
-| XLSX 构建（665.0 KB stored ZIP） | 6.60 ms | 5.76 / 8.56 ms |
-| DOCX 构建（258.2 KB stored ZIP） | 2.97 ms | 2.53 / 5.55 ms |
-| Markdown 538 题再解析 | 3.35 ms | 2.65 / 6.81 ms |
+| JSON 解析+适配（541→唯一 540，源文本 63,286 字符） | 1.69 ms | 1.09 / 4.66 ms |
+| `insertMany` 落库（540 题，载荷 0.28 MB / Storage 估算 0.44 MB） | 5.78 ms | 4.44 / 6.97 ms |
+| contentHash 索引构建 | 0.04 ms | 0.03 / 0.20 ms |
+| 关键词检索（540 题） | 0.65 ms | 0.63 / 1.21 ms |
+| 50 题整卷 `gradeAll` | 0.11 ms | 0.06 / 0.72 ms |
+| `shuffleOptions`（540 题，实际乱序 457 道选择类） | 0.62 ms | 0.50 / 1.29 ms |
+| 文本四格式导出（JSON+CSV+MD+TXT，675.6 KB） | 3.10 ms | 2.49 / 19.56 ms |
+| XLSX 构建（667.5 KB stored ZIP） | 8.34 ms | 6.46 / 11.34 ms |
+| DOCX 构建（259.2 KB stored ZIP） | 2.88 ms | 2.42 / 5.95 ms |
+| Markdown 540 题再解析 | 3.71 ms | 2.65 / 7.88 ms |
 
-bench 全程 heapUsed：5.26 → 24.00 MB（**+18.74 MB**，含全部夹具）。首屏静态体积（index.html + css + 49 个 js + sw/manifest/icon，共 54 个文件，`gzip -9`）：**119.4 KB gzip / 335.9 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：5.59 → 24.52 MB（**+18.93 MB**，含全部夹具）。首屏静态体积（index.html + css + 54 个 js + sw/manifest/icon，共 59 个文件，`gzip -9`）：**148.3 KB gzip / 419.2 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 
