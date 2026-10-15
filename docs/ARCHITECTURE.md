@@ -44,7 +44,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `index.html` | 唯一入口；按依赖顺序加载脚本；定义 `#view`/`#tabs`/`#status-text`/`#modal-root` 等骨架元素 |
-| `js/config.js` | `QB.CONFIG`（后端/题量/分值/前缀/题型定义）+ `QB.typeLabel`/`QB.typeBadge` |
+| `js/config.js` | `QB.CONFIG` 唯一配置中心：`NETWORK`（API_BASE_URL/网络导入限额）、`STORAGE`（前缀/配额/防抖）、`LIMITS`（题量/分值/历史与 revlog FIFO）、`ASSETS`（IDB 实例）、`WORKERS`、后端开关与题型/难度字典（顶层旧键保留为别名）+ `QB.typeLabel`/`QB.typeBadge` |
 | `js/app.js` | 主应用：状态管理、事件委托、视图渲染调度、模式流程；末行导出 `QB.App` |
 
 ### 3.2 公共抽象（utils）
@@ -212,7 +212,7 @@ Exporters.openFlow({kind, bank})
 1. 本期 LocalStorage 逻辑键与数据库表**字段一一对应**（见 [DATABASE.md](DATABASE.md)）。
 2. 后端就绪后：
    - 实现 `api-adapter.js`（照 `QB.CONTRACTS` 的方法签名对接 REST，见 [API-CONTRACT.md](API-CONTRACT.md)）。
-   - 将 `config.js` 的 `DATA_BACKEND` 改为 `'api'`，并配置 `API_BASE_URL`。
+   - 将 `config.js` 的 `DATA_BACKEND` 改为 `'api'`，并配置 `NETWORK.API_BASE_URL`（留空走同源相对路径）。
    - 前端 UI 代码**无需改动**（所有仓库方法早已是 Promise 风格）。
 3. 存量数据迁移：写一次性脚本读取 `qb:*` 键，按表结构 POST 到后端。
 

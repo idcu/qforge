@@ -12,7 +12,7 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
   const Core = QB.FSRSTrainCore;
-  const WORKER_URL = 'js/workers/fsrs-worker.js';
+  const WORKER_URL = (QB.CONFIG && QB.CONFIG.WORKERS && QB.CONFIG.WORKERS.FSRS_URL) || 'js/workers/fsrs-worker.js';
 
   function defaultEnv() {
     const hasWorker = typeof Worker !== 'undefined';

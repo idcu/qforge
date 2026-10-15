@@ -9,16 +9,36 @@
 - 浏览器端双击 `index.html` 即可（classic `<script>` 顺序加载）；IndexedDB（图片题）、URL 导入、PWA 在 `file://` 下受限，请用本地服务：
 
 ```bash
-node scripts/serve.mjs        # http://localhost:8777
+node scripts/serve.mjs                 # 默认 127.0.0.1:8777（仅本机）
+node scripts/serve.mjs 9000            # 自定义端口
+node scripts/serve.mjs 8777 0.0.0.0    # 监听全部网卡（手机/局域网验收）
+PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 ```
 
 - xlsx/docx 解析走自研 `js/utils/xml-lite.js`，Node 零依赖直接跑，**无需注入 DOMParser**（历史上的 `QB_DOMPARSER` 机制已移除）。
+
+## 1.1 运行时配置（`js/config.js`，唯一事实来源）
+
+所有部署/调优参数集中在 `QB.CONFIG`，**禁止在业务模块新增散落常量**。新代码用分组路径；顶层旧键（如 `STORAGE_PREFIX`、`QUESTIONS_PER_QUIZ`）保留为别名，向后兼容。
+
+| 分组 | 键（默认） | 用途 |
+| --- | --- | --- |
+| `NETWORK` | `API_BASE_URL('')`、`API_TIMEOUT_MS(15000)`、`URL_IMPORT_MAX_BYTES(8MB)`、`URL_IMPORT_TIMEOUT_MS(15000)` | REST 后端基址（空串=同源相对路径）、网络导入上限/超时 |
+| `STORAGE` | `PREFIX('qb')`、`QUOTA_BYTES(5MB)`、`WARN_RATIO(0.7)`、`DANGER_RATIO(0.85)`、`WRITE_DELAY_MS(200)` | LocalStorage 键前缀、配额告警、防抖落盘 |
+| `LIMITS` | `QUESTIONS_PER_QUIZ(50)`、`POINTS_PER_CORRECT(10)`、`DEFAULT_EXAM_MINUTES(30)`、`HISTORY_MAX(500)`、`REVLOG_MAX(20000)` | 题量/分值/历史与评分日志 FIFO |
+| `ASSETS` | `IDB_NAME('qforge')`、`IDB_VERSION(1)`、`IDB_STORE('assets')` | 图片资产 IndexedDB 实例（改名=换新库，不迁移旧图） |
+| `WORKERS` | `FSRS_URL('js/workers/fsrs-worker.js')` | FSRS 训练 Worker 路径（CDN 化时改此） |
+| 顶层 | `DATA_BACKEND('local')`、`DEDUPE_ON_IMPORT`、`SHUFFLE_OPTIONS`、`TYPES/TYPE_LABELS/TYPE_BADGES/DIFFICULTY_*` | 后端开关、业务字典 |
+
+**前后端分离**：把 `DATA_BACKEND` 改为 `'api'`、`NETWORK.API_BASE_URL` 指向后端（或部署同域用 `'/api'` 留空），实现 `js/data/api-adapter.js`（方法名已在 `CONTRACTS.QB` 定义）。`scripts/serve.mjs` 的端口/监听地址属开发工具配置，走命令行参数或 `PORT/HOST` 环境变量，不进 `config.js`。
+
+**不进配置的常量**（规范事实，改动需配套测试）：FSRS 权重/学习步骤/留出比例（`fsrs.js`、`fsrs-train-core.js`）、OOXML 命名空间与 ZIP 魔数/XML 实体（`xml-lite/zip-*`）、行式切题正则（`line-parser.js`）、题型表（已在 CONFIG）。
 
 ## 2. 测试矩阵（有数据才算做完）
 
 | 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **407** | 六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v2（同题干异选项/答案不误并、乱序语义等价、判断题答案入 hash）**、**考试简答待自评（gradeAll 保留 null，7 项）**、内置样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 540 题往返、多题库隔离/级联删除、答题卡 |
+| `scripts/smoke-test.mjs` | **419** | 全局配置契约（分组/旧键兼容/模块读取配置）、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v2（同题干异选项/答案不误并、乱序语义等价、判断题答案入 hash）**、**考试简答待自评（gradeAll 保留 null，7 项）**、内置样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 540 题往返、多题库隔离/级联删除、答题卡 |
 | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
 | `scripts/exporter.test.mjs` | **154** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、**材料题五格式分流/18 列多行块/三格式 hash 往返（18 项）**、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
@@ -35,7 +55,7 @@ node scripts/serve.mjs        # http://localhost:8777
 | `scripts/migrate.test.mjs` | **33** | v1→v2 contentHash 升级、review/wrong/fav/revlog 键重映射、revlog 回填 b、幂等逐字节不变、同题干异答案共存、旧裸 hash 强制重算 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **29** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式 |
-| **合计** | **2284 / 2284 通过 · 17 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2296 / 2296 通过 · 17 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 

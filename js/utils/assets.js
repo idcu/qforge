@@ -11,9 +11,10 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const DB_NAME = 'qforge';
-  const STORE = 'assets';
-  const DB_VERSION = 1;
+  const ASSET_CFG = (QB.CONFIG && QB.CONFIG.ASSETS) || {};
+  const DB_NAME = ASSET_CFG.IDB_NAME || 'qforge';
+  const STORE = ASSET_CFG.IDB_STORE || 'assets';
+  const DB_VERSION = ASSET_CFG.IDB_VERSION || 1;
 
   const MIME_EXT = {
     'image/png': 'png',

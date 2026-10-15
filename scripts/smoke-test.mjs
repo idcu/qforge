@@ -57,6 +57,25 @@ function expectMaterialRoundTrip(qs, hashRef, tag) {
 }
 
 /* ================= 1. 答案规范化 / 判分 ================= */
+section('全局配置契约（config.js 分组 + 旧键兼容）');
+{
+  const C = QB.CONFIG;
+  eq(C.DATA_BACKEND, 'local', 'DATA_BACKEND 默认 local');
+  eq(C.NETWORK.URL_IMPORT_MAX_BYTES, 8 * 1024 * 1024, 'URL 导入上限 8MB');
+  eq(C.LIMITS.HISTORY_MAX, 500, '历史上限 500');
+  eq(C.LIMITS.REVLOG_MAX, 20000, 'revlog 上限 20000');
+  eq(C.STORAGE.WRITE_DELAY_MS, 200, '防抖 200ms');
+  eq(C.ASSETS.IDB_NAME, 'qforge', 'IDB 库名 qforge');
+  eq(C.WORKERS.FSRS_URL, 'js/workers/fsrs-worker.js', 'FSRS Worker 路径');
+  // 顶层旧键向后兼容
+  eq(C.STORAGE_PREFIX, C.STORAGE.PREFIX, 'STORAGE_PREFIX 别名');
+  eq(C.QUESTIONS_PER_QUIZ, C.LIMITS.QUESTIONS_PER_QUIZ, 'QUESTIONS_PER_QUIZ 别名');
+  eq(C.API_BASE_URL, C.NETWORK.API_BASE_URL, 'API_BASE_URL 别名');
+  // 模块常量跟随配置
+  eq(QB.Source.URL_LIMIT_BYTES, C.NETWORK.URL_IMPORT_MAX_BYTES, 'Source 读取 CONFIG.NETWORK');
+  eq(QB.Source.URL_TIMEOUT_MS, C.NETWORK.URL_IMPORT_TIMEOUT_MS, 'Source 超时读取配置');
+}
+
 section('答案规范化与判分策略');
 eq(QB.normalizeAnswer(' Ａ Ｂ　', {}), 'ab', '全角/空格归一');
 eq(QB.parseBoolean('正确'), true, 'parseBoolean 正确');

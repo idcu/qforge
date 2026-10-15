@@ -13,7 +13,7 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
   const Core = QB.FSRSTrainCore;
-  const LOG_LIMIT = 20000;          // revlog FIFO 上限（约 0.8MB）
+  const LOG_LIMIT = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000; // revlog FIFO 上限（约 0.8MB）
 
   /* ---------------- revlog 读写 ---------------- */
 

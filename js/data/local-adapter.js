@@ -281,7 +281,7 @@
     async historyAdd(record) {
       const all = Storage.get(K.history, []).slice();
       all.unshift(Object.assign({ id: QB.uid('h'), createdAt: now() }, record));
-      Storage.set(K.history, all.slice(0, 500)); // 上限 500 条
+      Storage.setSync(K.history, all.slice(0, (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.HISTORY_MAX) || 500)); // FIFO 上限见 config.LIMITS
       return all;
     },
     async historyRemove(id) {

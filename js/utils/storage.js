@@ -12,8 +12,8 @@
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
-  const PREFIX = (QB.CONFIG && QB.CONFIG.STORAGE_PREFIX) || 'qb';
-  const WRITE_DELAY = 200;
+  const PREFIX = (QB.CONFIG && (QB.CONFIG.STORAGE_PREFIX || (QB.CONFIG.STORAGE && QB.CONFIG.STORAGE.PREFIX))) || 'qb';
+  const WRITE_DELAY = (QB.CONFIG && QB.CONFIG.STORAGE && QB.CONFIG.STORAGE.WRITE_DELAY_MS) || 200;
 
   const Storage = {
     _cache: new Map(),

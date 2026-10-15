@@ -8,8 +8,9 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const URL_LIMIT_BYTES = 8 * 1024 * 1024;
-  const URL_TIMEOUT_MS = 15000;
+  const CFG = (QB.CONFIG && QB.CONFIG.NETWORK) || {};
+  const URL_LIMIT_BYTES = CFG.URL_IMPORT_MAX_BYTES || 8 * 1024 * 1024;
+  const URL_TIMEOUT_MS = CFG.URL_IMPORT_TIMEOUT_MS || 15000;
   const BINARY_EXTS = ['xlsx', 'docx'];
 
   /** 来源种类 */
