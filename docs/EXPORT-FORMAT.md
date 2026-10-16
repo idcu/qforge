@@ -40,11 +40,19 @@
   "questions": [
     { "type": "single", "question": "…", "options": [{"letter":"A","text":"…"}],
       "answer": "B", "blanks": [], "reference_answer": "",
-      "analysis": "", "category": "", "source": "", "wrongCount": 2 }
+      "analysis": "", "category": "", "source": "", "wrongCount": 2 },
+    { "type": "material", "material": "共享材料正文", "question": "引导语",
+      "options": [], "answer": "", "blanks": [], "reference_answer": "",
+      "analysis": "", "category": "", "source": "", "difficulty": 3, "tags": ["…"],
+      "children": [
+        { "type": "single", "question": "小问 N", "options": [{"letter":"A","text":"…"}],
+          "answer": "A", "blanks": [], "reference_answer": "", "analysis": "", "source": "" }
+      ] }
   ]
 }
 ```
 > 错题导出时题目附带 `wrongCount`（再导入时被适配器忽略，不影响题面）。
+> 材料题（`type=material`）以 `material` + `children` **嵌套**导出（M1 起），JSON/.qbk 全字段无损；小问题目复用各题型字段，但不携带 `category/difficulty/tags`（继承父题，见 [SPEC-material.md](SPEC-material.md) §2.1）。
 
 ### 2.2 CSV 表头（默认 16 列；含材料题时 18 列；错题再 +1；xlsx 为同一张二维表）
 ```

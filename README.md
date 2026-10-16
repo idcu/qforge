@@ -87,9 +87,9 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 127.0.0.1:8777；`[port] [host]` 参数或 `PORT/HOST` 环境变量覆盖） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（419 项，含全局配置契约、材料题 M1/M2 五格式往返、xlsx 多工作表/docx 含图/WPS 回环、contentHash v2、考试简答待自评；零外部依赖） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（424 项，含全局配置契约、材料题 M1/M2 五格式往返、xlsx 多工作表/docx 含图/WPS 回环、contentHash v2、考试简答待自评；零外部依赖） |
 | `node scripts/xml-lite.test.mjs` | 自研极简 XML 解析器测试（39 项断言：结构/实体/命名空间/CDATA/畸形报错） |
-| `node scripts/exporter.test.mjs` | 导出功能单元测试（154 项断言，六题型/转义/难度标签列/材料题五格式分流/Markdown 往返/历史记录四格式） |
+| `node scripts/exporter.test.mjs` | 导出功能单元测试（160 项断言，六题型/转义/难度标签列/材料题五格式分流/Markdown·JSON 往返/历史记录四格式） |
 | `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/540 题双格式全量判分自洽） |
 | `node scripts/editor.test.mjs` | 题目编辑器 `buildQuestion` 纯函数测试（29 项断言） |
 | `node scripts/rich-text.test.mjs` | 富文本渲染器测试（45 项断言：转义防注入、上下标、图片占位、collectAssets、hydrate 假 DOM、光标插入） |

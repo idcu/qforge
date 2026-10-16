@@ -305,6 +305,15 @@ const matXlsxRt = await QB.XlsxImporter.parse({
 eq(QB.makeContentHash(matXlsxRt.questions[0]), QB.makeContentHash(matQ), '材料 XLSX 往返：hash 相等');
 const matMdRt = await QB.MdImporter.parse({ text: matMd, fileName: 'm.md' });
 eq(QB.makeContentHash(matMdRt.questions[0]), QB.makeContentHash(matQ), '材料 MD 往返：hash 相等');
+// JSON：材料题嵌套字段（material/children）无损——修复前 toPlain 未输出导致往返丢材料题
+const matJson = QB.Exporters.buildContent('json', matPayload).content;
+ok(matJson.indexOf('"material"') > 0 && matJson.indexOf('"children"') > 0, '材料 JSON：导出含 material/children 字段');
+const matJsonRt = await QB.JsonImporter.parse({ text: matJson, fileName: 'm.json' });
+eq(matJsonRt.questions.length, 1, '材料 JSON 往返：1 题');
+eq(matJsonRt.questions[0].type, 'material', '材料 JSON 往返：仍为材料题');
+eq(matJsonRt.questions[0].children.length, 2, '材料 JSON 往返：2 个小问');
+eq(matJsonRt.questions[0].material, '共享材料正文', '材料 JSON 往返：共享材料保留');
+eq(QB.makeContentHash(matJsonRt.questions[0]), QB.makeContentHash(matQ), '材料 JSON 往返：hash 相等');
 
 /* ================= 9.5 历史记录导出（非题集） ================= */
 section('历史记录导出');

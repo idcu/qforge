@@ -487,6 +487,14 @@ section('材料题 M2-B 表格材料块（CSV/XLSX）导入导出');
   eq(QB.makeContentHash(xBack.questions[0]), H_JSON, 'XLSX 导出→再导入：材料 hash 相等');
   eq(QB.makeContentHash(xBack.questions[1]), QB.makeContentHash(normalQ), 'XLSX 导出→再导入：普通题 hash 相等');
 
+  const jBuilt = QB.Exporters.buildContent('json', mixedPayload);
+  const jBack = await QB.JsonImporter.parse({ text: jBuilt.content, fileName: 'rt.json' });
+  eq(jBack.questions.length, 2, 'JSON 导出→再导入：2 题');
+  eq(jBack.questions[0].type, 'material', 'JSON 导出→再导入：材料题保留');
+  eq(jBack.questions[0].children.length, 5, 'JSON 导出→再导入：5 个小问');
+  eq(QB.makeContentHash(jBack.questions[0]), H_JSON, 'JSON 导出→再导入：材料 hash 相等');
+  eq(QB.makeContentHash(jBack.questions[1]), QB.makeContentHash(normalQ), 'JSON 导出→再导入：普通题 hash 相等');
+
   /* ---- 容错：小问行误带元数据给警告；块外悬空小问号警告并按普通题处理 ---- */
   const warnRes = QB.Adapters.tableToQuestions([
     ['题型', '材料', '小问', '题目', '选项A', '选项B', '答案', '分类'],

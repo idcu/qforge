@@ -78,6 +78,15 @@
     if (q.type === 'essay') return q.reference_answer || q.answer || '';
     return q.answer || '';
   }
+  /** 材料题子问题：复用各题型字段，但不携带 category/difficulty/tags（子问题继承父题，见 SPEC-material §2.1） */
+  function childPlain(c) {
+    const item = toPlain(c, null);
+    delete item.category;
+    delete item.difficulty;
+    delete item.tags;
+    return item;
+  }
+
   /** 导出为标准题目（与导入端 toStandard 对齐，保证导出→再导入可往返） */
   function toPlain(q, meta) {
     const item = {
@@ -93,6 +102,11 @@
       difficulty: Number(q.difficulty) || 0,
       tags: Array.isArray(q.tags) ? q.tags.slice() : []
     };
+    // 材料题：嵌套 material + children（JSON/.qbk 无损往返的必需字段；行式与表格格式另走分流）
+    if (q.type === 'material') {
+      item.material = q.material || '';
+      item.children = (q.children || []).map((c) => childPlain(c));
+    }
     // 错题导出附带错误次数；再导入时被适配器忽略，不影响题面
     if (meta && meta.wrongCount) item.wrongCount = meta.wrongCount;
     return item;
