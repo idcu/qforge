@@ -518,6 +518,34 @@ section('材料题 M2-B 表格材料块（CSV/XLSX）导入导出');
   eq(legacy.warnings.length, 0, '旧表：零警告');
 }
 
+/* ================= 2.11 导入入口入参分派（真实 File vs 快照）================= */
+section('导入入口入参分派：真实 File 读取 vs 快照注入');
+{
+  const prevFR = globalThis.FileReader;
+  globalThis.FileReader = class {
+    readAsText(blob) { blob.text().then((t) => { this.result = t.replace(/^\uFEFF/, ''); if (this.onload) this.onload(); }); }
+    readAsArrayBuffer(blob) { blob.arrayBuffer().then((b) => { this.result = b; if (this.onload) this.onload(); }); }
+  };
+  try {
+    const stdText = fs.readFileSync(path.join(QB_DIR, 'samples', '示例-标准JSON.json'), 'utf8');
+    const realFile = new File([stdText], '示例-标准JSON.json', { type: 'application/json' });
+    const viaFile = await QB.Importers.runImport(realFile);
+    eq(viaFile.questions.length, 7, '真实 File（选文件/拖拽入口）→ 7 题');
+    eq(viaFile.warnings.length, 0, '真实 File → 零警告');
+    // 回归：不再把 File 的 text()/arrayBuffer() 方法当内容（曾致 JSON 解析 "function te…" / text.split 非函数 / DataView 非 ArrayBuffer）
+    let rejected = false;
+    try { await QB.Importers.runImport({ name: '示例-标准JSON.json', text: function text() { return 'x'; } }); }
+    catch (e) { rejected = true; }
+    ok(rejected, '函数形态 text 被拒（回归：不误当快照）');
+    const viaSnap = await QB.Importers.runImport({ name: '示例-标准JSON.json', text: stdText });
+    eq(viaSnap.questions.length, 7, '文本快照 → 7 题（快照路径零回归）');
+    const viaBom = await QB.JsonImporter.parse({ text: '\uFEFF' + stdText, fileName: 'bom.json' });
+    eq(viaBom.questions.length, 7, 'JSON 导入：UTF-8 BOM 被剥离');
+  } finally {
+    if (prevFR === undefined) delete globalThis.FileReader; else globalThis.FileReader = prevFR;
+  }
+}
+
 section('真实数据导入（541 题）');
 const flatText = fs.readFileSync(fixturePath('题库-背题模式.json', '真实-541题-背题模式.json'), 'utf8');
 const nestedText = fs.readFileSync(fixturePath('题库-分类.json', '真实-541题-分类.json'), 'utf8');

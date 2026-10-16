@@ -34,14 +34,16 @@
   /**
    * 执行导入解析
    * 入参兼容三种形态（文件选择、拖拽、网络拉取的快照）：
-   *   - File 对象（含 .name，内部 FileReader 读取）
-   *   - {name, file: File}
-   *   - {name, text}            文本格式快照
-   *   - {name, arrayBuffer}     二进制格式快照（xlsx/docx）
+   *   - File/Blob 对象（选文件/拖拽）→ 内部 FileReader 读取（readAsText 按 UTF-8 解码并去 BOM）
+   *   - {name, file: File/Blob}
+   *   - {name, text}            文本格式快照（网络导入/粘贴/测试注入）
+   *   - {name, arrayBuffer}     二进制格式快照（xlsx/docx/qbk）
+   * 注意：真实 File/Blob 上有 `text()`/`arrayBuffer()` 方法，必须与字符串/ArrayBuffer 快照区分开（否则会把方法当内容传下去）。
    * @returns {Promise<{questions:Array, warnings:Array, format:string, stats:Object, ext:string}>}
    */
   async function runImport(file) {
-    const name = file && file.name ? file.name : '';
+    const realFile = file && file.file ? file.file : file;
+    const name = (file && file.name) || (realFile && realFile.name) || '';
     const ext = extOf(name);
     const parser = parsers[ext];
     if (!parser) {
@@ -49,17 +51,24 @@
     }
     const asBinary = BINARY_EXTS.indexOf(ext) >= 0;
     let input;
-    // 已是内存快照（网络导入/测试注入）：直接构造 parser 入参
-    if (file && (file.text != null || file.arrayBuffer != null)) {
-      input = asBinary
-        ? { arrayBuffer: file.arrayBuffer, fileName: name }
-        : { text: file.text, fileName: name };
-    } else {
-      const realFile = file.file || file;
+    if (typeof Blob !== 'undefined' && realFile instanceof Blob) {
+      // 真实 File/Blob（选文件/拖拽）：FileReader 读取
       const content = await readFile(realFile, asBinary);
       input = asBinary
         ? { arrayBuffer: content, fileName: name }
         : { text: content, fileName: name };
+    } else if (asBinary) {
+      // 二进制快照：必须是 ArrayBuffer，而非 Blob 上的 arrayBuffer() 方法
+      if (!file || typeof file.arrayBuffer !== 'object' || file.arrayBuffer == null) {
+        throw new Error('无法识别的二进制导入入参：' + name);
+      }
+      input = { arrayBuffer: file.arrayBuffer, fileName: name };
+    } else {
+      // 文本快照（网络导入/粘贴/测试注入）
+      if (!file || typeof file.text !== 'string') {
+        throw new Error('无法识别的文本导入入参：' + name);
+      }
+      input = { text: file.text, fileName: name };
     }
 
     const result = await parser.parse(input);

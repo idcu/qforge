@@ -87,7 +87,7 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 127.0.0.1:8777；`[port] [host]` 参数或 `PORT/HOST` 环境变量覆盖） |
-| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（424 项，含全局配置契约、材料题 M1/M2 五格式往返、xlsx 多工作表/docx 含图/WPS 回环、contentHash v2、考试简答待自评；零外部依赖） |
+| `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（429 项，含全局配置契约、导入入口 File/快照分派、材料题 M1/M2 五格式往返、xlsx 多工作表/docx 含图/WPS 回环、contentHash v2、考试简答待自评；零外部依赖） |
 | `node scripts/xml-lite.test.mjs` | 自研极简 XML 解析器测试（39 项断言：结构/实体/命名空间/CDATA/畸形报错） |
 | `node scripts/exporter.test.mjs` | 导出功能单元测试（160 项断言，六题型/转义/难度标签列/材料题五格式分流/Markdown·JSON 往返/历史记录四格式） |
 | `node scripts/office-export.test.mjs` | xlsx/docx 二进制导出往返测试（1148 项断言：CRC32/部件/540 题双格式全量判分自洽） |
@@ -110,7 +110,7 @@ qb/
 xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖），Node 直接跑全部断言，无需安装任何包。
 
 **实测数据（Node v24.14.0，2026-10-14 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
-- 17 个逻辑层测试套件 **2296 / 2296 通过**（UTC / UTC+8 双时区实跑）：冒烟 **419**、XML 解析器 **39**、导出 154、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **77**、**FSRS 优化器 91**、SRS **60**、存储可靠性 14、备份 25、schema 迁移 33、**WebDAV 32**、PWA 29。
+- 17 个逻辑层测试套件 **2312 / 2312 通过**（UTC / UTC+8 双时区实跑）：冒烟 **429**、XML 解析器 **39**、导出 160、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、来源/网络导入 29、FSRS **77**、**FSRS 优化器 91**、SRS **60**、存储可靠性 14、备份 25、schema 迁移 33、**WebDAV 32**、PWA 29。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、**材料题 M1 判分聚合 + M2 五格式（MD/DOCX/CSV/XLSX/TXT）往返黄金断言**、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 540 题全量往返、**contentHash v2 不误并同题干异答案题**、**考试简答待自评（不伪造错误）**、题库隔离与级联删除、答题卡跳转。
 - FSRS 优化器：800 卡 × 5 评的确定性合成日志（3200 相邻样本，切出 640 留出样本）验证——真权重扰动 ±40% 时，留出集 logloss 0.3374 < 默认 0.3388（改善 0.42%，超 0.2% 门控）才采纳；门控基于独立留出集（不再训练集自证），返回历史最佳权重；改善不足（含小样本过拟合 -0.13% 场景）诚实拒绝。
 - Office 导出：540 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验。

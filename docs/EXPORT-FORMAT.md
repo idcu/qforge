@@ -156,7 +156,7 @@ QB.Exporters.openFlow({ kind, bank })
 
 ## 7. 测试
 
-- `scripts/exporter.test.mjs`：导出功能单元测试（**154** 项断言），覆盖六题型、CSV 转义、BOM、JSON/CSV/MD 往返、错题 wrongCount、收藏、乱序隔离、**材料题五格式分流与 18 列多行块往返（M2，18 项）**、**历史记录四格式（11 列/半对/切出/用时小数/格式白名单拒绝）**、注册表异常。
+- `scripts/exporter.test.mjs`：导出功能单元测试（**160** 项断言），覆盖六题型、CSV 转义、BOM、JSON/CSV/MD 往返、错题 wrongCount、收藏、乱序隔离、**材料题五格式分流与 18 列多行块往返（M2，18 项）**、**材料题 JSON 嵌套 material+children 往返（6 项）**、**历史记录四格式（11 列/半对/切出/用时小数/格式白名单拒绝）**、注册表异常。
 - `scripts/office-export.test.mjs`：xlsx/docx 二进制导出专项（**1148** 项断言）：CRC32 标准向量、ZIP 部件、表格/文档行往返、538 题两种格式全量判分自洽、错题 17 列、可复现打包、openpyxl 已独立验证可打开（539 行 × 16 列）。
 - `scripts/smoke-test.mjs`：含 538 题真实数据的 JSON/CSV/Markdown 全量往返断言与 xlsx/docx 二进制结构断言；§2.9/§2.10 为材料题 MD/DOCX/TXT 与 CSV/XLSX 往返黄金断言（**396** 项，M2 累计净增 101 项：A +48 / B +53）。
 - 真实桌面 Office（Word/Excel 客户端）的打开验证不在自动化范围（本机无 GUI 环境），结构对齐 OOXML 最小集且经 Python openpyxl/zipfile 校验，已在本文件如实标注。

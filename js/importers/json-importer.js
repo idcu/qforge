@@ -7,8 +7,9 @@
   const QB = (global.QB = global.QB || {});
 
   async function parse(input) {
-    const text = input.text;
+    let text = input.text;
     if (!text) throw new Error('文件内容为空');
+    if (typeof text === 'string' && text.charCodeAt(0) === 0xfeff) text = text.slice(1); // 去 UTF-8 BOM（与 CSV/MD 一致）
     let json;
     try {
       json = JSON.parse(text);

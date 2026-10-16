@@ -76,10 +76,10 @@
 | --- | --- |
 | `importers/adapters.js` | **公共适配器**：`toStandard`/`sniffAndAdapt`/`adaptArray`/`adaptNested`/`tableToQuestions`/`validateQuestions`；题型映射、表头别名；M2-B 起 `tableToQuestions` 含材料多行块扫描（材料/小问两列，块首+小问归组，旧表零变化） |
 | `importers/line-parser.js` | **行式切题公共解析器**：`parseLines`/`blocksToQuestions`（题号/选项/答案/解析/分类标记识别 + 题型推断），docx 与 md 共用；M2 起含材料块状态机（`[材料题]` 开块 / `材料：` / `(i)` 小问 / 顶层题号收块，输出 `isMaterial` 块交 `Adapters.toStandard` 递归） |
-| `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX |
+| `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX；入参区分**真实 File/Blob**（选文件/拖拽，内部 FileReader 读取）与**内存快照** `{name,text}` / `{name,arrayBuffer}`（网络导入/粘贴/测试注入），真实 File 上的 `text()`/`arrayBuffer()` 方法不与快照数据混用 |
 | `importers/qbk-importer.js` | `.qbk` 题库包：`Qbk.parseBundle` 解包 → 复用 JsonImporter → 资产写 QB.Assets（缺图警告） |
 | `modules/qbk.js` | `QB.Qbk`：qbk/qfbk 的 stored ZIP 编解码（bank.json/backup.json + assets/*）、PK 头识别、题目引用资产 id 收集 |
-| `importers/json-importer.js` | JSON 结构嗅探（数组/导出/中文嵌套） |
+| `importers/json-importer.js` | JSON 结构嗅探（数组/导出/中文嵌套）；解析前去 UTF-8 BOM（与 CSV/MD 一致） |
 | `importers/csv-importer.js` | CSV/TSV 表头映射（自动识别逗号/制表符/分号、BOM、引号转义） |
 | `importers/md-importer.js` | Markdown 清洗（标题/列表/加粗/反引号/引用，保护 `____`）后复用 LineParser |
 | `importers/xlsx-importer.js` | 原生 zip + **XmlLite**（自研极简 XML，不依赖 DOMParser）：解析 workbook.xml + rels 取**全部工作表**（空表跳过、按工作簿顺序合并），支持共享字符串/内联字符串/数值单元格 |

@@ -36,11 +36,11 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 
 ## 2. 测试矩阵（有数据才算做完）
 
-| 套件 | 断言数（2026-10-14 实跑） | 覆盖 |
+| 套件 | 断言数（2026-10-16 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **419** | 全局配置契约（分组/旧键兼容/模块读取配置）、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v2（同题干异选项/答案不误并、乱序语义等价、判断题答案入 hash）**、**考试简答待自评（gradeAll 保留 null，7 项）**、内置样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 540 题往返、多题库隔离/级联删除、答题卡 |
+| `scripts/smoke-test.mjs` | **429** | 全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v2（同题干异选项/答案不误并、乱序语义等价、判断题答案入 hash）**、**考试简答待自评（gradeAll 保留 null，7 项）**、内置样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 540 题往返、多题库隔离/级联删除、答题卡 |
 | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
-| `scripts/exporter.test.mjs` | **154** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、错题 wrongCount、乱序隔离、**材料题五格式分流/18 列多行块/三格式 hash 往返（18 项）**、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
+| `scripts/exporter.test.mjs` | **160** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、**材料题五格式分流/18 列多行块/三格式 hash 往返/JSON 嵌套 material+children 往返（18 项）**、错题 wrongCount、乱序隔离、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
 | `scripts/editor.test.mjs` | **29** | `buildQuestion` 纯函数、增删改、编辑元数据不改变 contentHash |
 | `scripts/rich-text.test.mjs` | **45** | 转义防注入、上下标、图片占位、collectAssets、hydrate 假 DOM、光标插入 |
@@ -55,7 +55,7 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `scripts/migrate.test.mjs` | **33** | v1→v2 contentHash 升级、review/wrong/fav/revlog 键重映射、revlog 回填 b、幂等逐字节不变、同题干异答案共存、旧裸 hash 强制重算 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **29** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式 |
-| **合计** | **2296 / 2296 通过 · 17 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2312 / 2312 通过 · 17 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
