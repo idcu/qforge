@@ -1105,6 +1105,28 @@
 
 ---
 
+## 6ef0988 · feat(quiz): 练习/考试模式可选题型·分类·题量 + 修复组卷「开始」无反应
+
+**背景**：用户实测「组卷点开始没反应」，且要求练习/考试模式可选题型/分类/题量。
+
+**组卷根因**：openMixedDialog 内联 HTML 写成 `<select data-bp-min">` / `<select data-bp-max">`，多写一个双引号使真实属性名为 `data-bp-min"`；`modal.querySelector('[data-bp-min]')` 返回 null，点「开始」抛 `TypeError: Cannot read properties of null (reading 'value')`（app.js），弹窗不关闭且无任何 toast —— 即用户所见「没反应」。
+
+**核心改动**
+- 弹窗 HTML 构建由 `js/app.js` 下移到 `js/modules/ui-renderer.js`（符合 ARCHITECTURE「app.js 只做状态/流程/事件，视图渲染在 UIRenderer」）：新增 `renderMixDialog(avail,cats)`、`renderStartDialog(mode,avail,cats,count)` 及公共 `categoryOptions/difficultyOptions/typeCountRows`；app.js 仅保留 openModal 后的交互绑定。**公共抽象影响面**：`QB.UIRenderer` 新增两个导出方法，向后兼容（旧调用点仅 app.js 内部）。
+- 修复 `data-bp-min/max` 畸形属性。
+- **新功能**：练习模式/考试模式点击后弹窗可选题型（多选，默认全选）、分类、题量（0/空=不限），并可单独开关本场「选项乱序」；删除 `pickQuestions`（旧行为固定 50 题/全题型，无选择）。
+
+**验证数据**
+- 全量 **18 套 2333/2333 通过，0 失败**（Node v24.14.0 / Windows）。新套件 `scripts/ui-renderer.test.mjs` **21** 项（回归：`data-bp-min/max/cat` 可被 querySelector 命中、无畸形属性、题型复选框数=题型数、分类转义、题量默认值）。
+- 浏览器端到端（本地服务）：组卷 判断2/单选1→开始→进入答题界面 PASS；练习模式 判断题×3→开始→判断题答题界面 PASS；考试模式 题量2→开始→含计时器（29:55）的考试界面 PASS；Console 无新增报错。
+- 首屏体积/耗时无变化（本轮未触性能路径；`scripts/bench.mjs` 未重跑，无性能断言变更）。
+
+**遗留 TODO / 风险**
+- `renderStartDialog` 的题型复选框/选项乱序样式类（`st-type`/`st-types`）暂无专用 CSS，依赖浏览器默认呈现；后续如需要再补样式。
+- 练习/考试入口的行为已变更（由直接开始改为弹窗选择），历史文档/截图若引用旧行为需注意。
+
+---
+
 ## 7ecc912 · fix(srs): 历史最佳权重 + 留出集门控（评估报告工程项）
 
 - optimize 返回训练全程 loss 最低点权重快照（旧返回最后一轮却报最低 loss）；computeTrain 整条序列确定性切 20% 留出集，门控比留出 NLL（无 again 回退训练口径，gateBasis 标注）；返回 trainLoss/holdoutSamples 并写入 meta。
@@ -1135,6 +1157,7 @@
 > F4-M2（2026-10-14）：`a85deaa` feat(material) M2-A 行式材料块 MD/DOCX/TXT（2098 断言） · `fbf1237` feat(material) M2-B 表格材料块 CSV/XLSX（15 套件 2169 断言/137.6KB gzip）
 > 样例/材料导出修复（2026-10-16）：`8c4fdcd` fix(export,sample) 材料题 JSON/.qbk 无损往返 + 样例同步最新标准（17 套 2307 断言）
 > 导入入口修复（2026-10-16）：`26e655b` fix(import) File/快照分派（选文件/拖拽导入失败根因）+ JSON 去 BOM（17 套 2312 断言）
+> 练习/考试选择 + 组卷修复（2026-10-16）：`6ef0988` feat(quiz) 练习/考试可选题型·分类·题量 + 修复 data-bp-min/max 畸形属性致组卷「开始」无反应（18 套 2333 断言）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
