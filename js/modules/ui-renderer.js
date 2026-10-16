@@ -333,7 +333,7 @@
     }
 
     html += '<div class="card">' +
-      (q.type === 'material' && q.question ? '<div class="question-text">' + rich(q.question) + '</div>' : '') +
+      (q.question ? '<div class="question-text">' + rich(q.question) + '</div>' : '') +
       renderAnswerArea(q, userAns, result, answered) +
       '</div>';
 

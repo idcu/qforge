@@ -72,6 +72,37 @@ section('可用数量显示与分类转义');
   ok(html.indexOf('含<b>标签') < 0, '原始未转义分类名不出现');
 }
 
+section('答题界面：题干渲染（回归：非材料题曾看不到题干，只看到选项）');
+{
+  const mkEngine = (q) => ({
+    mode: 'practice',
+    questions: [q], currentIndex: 0, results: [null], answers: [undefined],
+    getCurrentQuestion: () => q,
+    getProgress: () => ({ current: 1, total: 1, percentage: 0 }),
+    getScore: () => ({ score: 0, correct: 0, wrong: 0 }),
+    hasAnswered: () => false,
+    canSubmit: () => false,
+    isLastQuestion: () => true
+  });
+  const single = { type: 'single', question: '单选题干唯一标识XYZ', options: ['甲', '乙', '丙', '丁'], answer: 'A' };
+  const h1 = UI.renderQuiz(mkEngine(single), {});
+  ok(h1.indexOf('class="question-text"') >= 0, '单选：渲染题干容器 question-text');
+  ok(h1.indexOf('单选题干唯一标识XYZ') >= 0, '单选：题干文本可见');
+  const judge = { type: 'judge', question: '判断题干ABC', options: ['正确', '错误'], answer: 'A' };
+  ok(UI.renderQuiz(mkEngine(judge), {}).indexOf('判断题干ABC') >= 0, '判断题：题干文本可见');
+  const fill = { type: 'fill', question: '填空题干DEF', blanks: ['x', 'y'], answer: 'x' };
+  ok(UI.renderQuiz(mkEngine(fill), {}).indexOf('填空题干DEF') >= 0, '填空题：题干文本可见');
+  const essay = { type: 'essay', question: '简答题干GHI', reference_answer: '参考' };
+  ok(UI.renderQuiz(mkEngine(essay), {}).indexOf('简答题干GHI') >= 0, '简答题：题干文本可见');
+  const mat = {
+    type: 'material', question: '材料总题干JKL', material: '共享材料MNO',
+    children: [{ type: 'single', question: '小问题干PQR', options: ['A1', 'A2'], answer: 'A' }]
+  };
+  const h3 = UI.renderQuiz(mkEngine(mat), {});
+  ok(h3.indexOf('共享材料MNO') >= 0, '材料题：共享材料可见');
+  ok(h3.indexOf('小问题干PQR') >= 0, '材料题：小问题干可见');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
