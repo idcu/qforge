@@ -1069,6 +1069,23 @@
 - 新增 `Backup.redactSecrets`（纯函数）：meta:dav 删 pass、保留地址/账号；buildBackup 必经，文件备份与 WebDAV PUT 同受益；弹窗/user-guide 明示。
 - 验证：backup 19→**25**；sync-dav 32 零回归。
 
+## 8c4fdcd · fix(export,sample): JSON/.qbk 保留材料题 material/children，样例同步最新标准
+
+**核心改动**
+- `exporter.toPlain` 新增材料题分支 → JSON/.qbk 导出保留 `material`+`children`（子问题复用题型字段、不携带 category/difficulty/tags）。修复导出丢材料题：M1 起文档声称「JSON 无损往返」，但 toPlain 未输出该两字段，`示例-材料题.json` 导入后再导出即丢 5 小问。
+- 样例同步：`示例-标准JSON.json` 补 `kind` 与完整标准字段（对齐 toPlain 输出）；`示例-Markdown导入.md` 补不定项（6→7 题），与同名「示例题库」JSON 样例 contentHash 集合一致。
+- 新增 `childPlain` 复用 `toPlain` 并剔除子问题元数据字段。
+
+**验证数据**
+- 材料 JSON 导出→再导入：**0 警告 / contentHash 相等 / 5 小问保留**（修复前 parent 无 material/children）。
+- 断言增量：exporter.test **154→160**、smoke-test **419→424**；全量 **17 套 2307/2307 通过，0 失败**（Node v24.14.0 / Windows，TZ 默认）。
+- 样例抽查：示例-标准JSON 与 示例-Markdown导入 各 7 题（判断 2/单选 1/多选 1/不定项 1/填空 1/简答 1），0 警告；真实 541 题在 contentHash v2 下文件内重复 1 道，538 题 0 重复。
+
+**遗留 TODO / 风险**
+- 本次补齐 JSON 材料往返断言；`.qbk`（含图片资产）材料往返未在本用例覆盖（需 IndexedDB 内存驱动），依赖既有 assets/qbk 用例保证。
+
+---
+
 ## 7ecc912 · fix(srs): 历史最佳权重 + 留出集门控（评估报告工程项）
 
 - optimize 返回训练全程 loss 最低点权重快照（旧返回最后一轮却报最低 loss）；computeTrain 整条序列确定性切 20% 留出集，门控比留出 NLL（无 again 回退训练口径，gateBasis 标注）；返回 trainLoss/holdoutSamples 并写入 meta。
@@ -1097,6 +1114,7 @@
 > F2.5/F4（2026-10-14）：`b1d8262` feat(import) 自研 XmlLite（15 套件 2009 断言/130.3KB gzip，xlsx/docx 零外部依赖） · `ab6cbc5` docs(spec) 材料题规格评审稿
 > F4-M1（2026-10-14）：`10fc2d7` feat(material) 材料题模型/递归判分/引擎/做题UI/JSON 往返（15 套件 2050 断言/135.6KB gzip）
 > F4-M2（2026-10-14）：`a85deaa` feat(material) M2-A 行式材料块 MD/DOCX/TXT（2098 断言） · `fbf1237` feat(material) M2-B 表格材料块 CSV/XLSX（15 套件 2169 断言/137.6KB gzip）
+> 样例/材料导出修复（2026-10-16）：`8c4fdcd` fix(export,sample) 材料题 JSON/.qbk 无损往返 + 样例同步最新标准（17 套 2307 断言）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
