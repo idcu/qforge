@@ -1086,6 +1086,25 @@
 
 ---
 
+## 26e655b · fix(import): 修复 File/快照分派导致选文件/拖拽导入全部失败 + JSON 去 BOM
+
+**背景**：用户实测选文件/拖拽导入**全部失败**，报错三条实为同一根因。引入 URL 导入（内存快照路径）时 `registry.runImport` 快照判定条件为 `file.text != null || file.arrayBuffer != null`——而真实 `File/Blob` 上的 `text()`/`arrayBuffer()` 是**方法**（恒非 null），于是把方法函数当内容下传：`JSON.parse(函数)` 报 `Unexpected token 'function te...'`、`text.split is not a function`、`First argument to DataView constructor must be an ArrayBuffer`。此为既有回归，非本轮样例改动引入。
+
+**核心改动**
+- `importers/registry.js`：分派改为 `realFile instanceof Blob` → FileReader 读取（`readAsText` 按 UTF-8 解码、去 BOM）；否则为内存快照，文本类严格要求 `typeof file.text === 'string'`、二进制类要求 `ArrayBuffer` 对象，函数/其他形态显式抛错。JSDoc 同步说明三种入参形态。
+- `importers/json-importer.js`：解析前剥离 UTF-8 BOM（`charCodeAt(0)===0xFEFF`），与 CSV/MD 对齐。
+- `scripts/smoke-test.mjs`：新增 §2.11「导入入口入参分派」5 项（注入 FileReader shim 复现真实 File 路径：7 题/0 警告；函数形态 text 被拒；文本快照零回归；JSON BOM 剥离）。
+
+**验证数据**
+- 全量 **17 套 2312/2312 通过，0 失败**（Node v24.14.0 / Windows，TZ 默认）；smoke 断言行 +5 → **429**。
+- 修复前后对照：真实 File 走 runImport 由 FAIL（`JSON 解析失败：Unexpected token 'e', "text() {"`）转为 7 题 0 警告。
+- 文档同步：README/DEVELOPMENT/EXPORT-FORMAT 断言行刷新（2296→2312、419→429、154→160），ARCHITECTURE §3.4 registry 职责补 File/Blob 与快照分派说明。
+
+**遗留 TODO / 风险**
+- 后续新增导入入口（如剪贴板二进制）须遵循同一分派契约：真实 Blob 与快照不可混判，见 registry JSDoc。
+
+---
+
 ## 7ecc912 · fix(srs): 历史最佳权重 + 留出集门控（评估报告工程项）
 
 - optimize 返回训练全程 loss 最低点权重快照（旧返回最后一轮却报最低 loss）；computeTrain 整条序列确定性切 20% 留出集，门控比留出 NLL（无 again 回退训练口径，gateBasis 标注）；返回 trainLoss/holdoutSamples 并写入 meta。
@@ -1115,6 +1134,7 @@
 > F4-M1（2026-10-14）：`10fc2d7` feat(material) 材料题模型/递归判分/引擎/做题UI/JSON 往返（15 套件 2050 断言/135.6KB gzip）
 > F4-M2（2026-10-14）：`a85deaa` feat(material) M2-A 行式材料块 MD/DOCX/TXT（2098 断言） · `fbf1237` feat(material) M2-B 表格材料块 CSV/XLSX（15 套件 2169 断言/137.6KB gzip）
 > 样例/材料导出修复（2026-10-16）：`8c4fdcd` fix(export,sample) 材料题 JSON/.qbk 无损往返 + 样例同步最新标准（17 套 2307 断言）
+> 导入入口修复（2026-10-16）：`26e655b` fix(import) File/快照分派（选文件/拖拽导入失败根因）+ JSON 去 BOM（17 套 2312 断言）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
