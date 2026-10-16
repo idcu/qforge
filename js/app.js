@@ -234,14 +234,6 @@
     State.timerText = '';
   }
 
-  function pickQuestions(type, count) {
-    let list = State.allQuestions.slice();
-    if (type) list = list.filter((q) => q.type === type);
-    list = QB.shuffle(list);
-    const n = count || QB.CONFIG.QUESTIONS_PER_QUIZ || 50;
-    return list.slice(0, n);
-  }
-
   async function recordWrongs(engine) {
     for (let i = 0; i < engine.questions.length; i++) {
       const r = engine.results[i];
@@ -427,9 +419,9 @@
       case 'start-review':
         return startReview();
       case 'start-practice':
-        return beginQuiz(pickQuestions(null), 'practice', '练习模式');
+        return openStartDialog('practice');
       case 'start-exam':
-        return beginQuiz(pickQuestions(null), 'exam', '考试模式');
+        return openStartDialog('exam');
       case 'start-mixed':
         return openMixedDialog();
       case 'start-wrong':
@@ -675,51 +667,54 @@
   function openMixedDialog() {
     const avail = QB.Blueprint.availability(State.allQuestions, {});
     const cats = QB.SearchFilter.categories(State.allQuestions);
-    const rows = QB.CONFIG.TYPES.map((t) =>
-      '<div class="bp-row"><label class="bp-name">' + esc(QB.typeLabel(t)) +
-      ' <span class="li-meta">（可选 ' + avail[t] + '）</span></label>' +
-      '<input type="number" min="0" class="bp-n" data-bp-type="' + t + '" value="0" /></div>').join('');
-    const catOpts = '<option value="">全部分类</option>' +
-      cats.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
-    UI.openModal(
-      '<h3>组卷</h3>' +
-      '<p class="li-meta">按题型设置题量（0=不选），可再按分类与难度区间抽题。题量不足时按实际数量组卷并提示。</p>' + rows +
-      '<div class="qe-grid"><div><label class="qe-label">分类</label><select data-bp-cat>' + catOpts + '</select></div>' +
-      '<div><label class="qe-label">难度下限</label><select data-bp-min">' +
-      [0, 1, 2, 3, 4, 5].map((d) => '<option value="' + d + '">' + (d === 0 ? '不限' : d) + '</option>').join('') +
-      '</select></div>' +
-      '<div><label class="qe-label">难度上限</label><select data-bp-max">' +
-      [0, 1, 2, 3, 4, 5].map((d) => '<option value="' + d + '"' + (d === 0 ? ' selected' : '') + '>' + (d === 0 ? '不限' : d) + '</option>').join('') +
-      '</select></div></div>' +
-      '<div class="checkbox-row"><input type="checkbox" id="bp-ordshuf" checked /><label for="bp-ordshuf">题目顺序乱序（取消则按题型分组的原始顺序）</label></div>' +
-      '<div class="checkbox-row"><input type="checkbox" id="bp-shuffle"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="bp-shuffle">选项乱序（单选/多选/不定项，答案自动重映射，仅影响本场）</label></div>' +
-      '<div class="checkbox-row"><input type="checkbox" id="bp-exam" /><label for="bp-exam">以考试模式开始（计时、交卷整卷判分）</label></div>' +
-      '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
-      '<button class="btn" data-action="modal-ok">开始</button></div>',
-      (modal) => {
-        modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
-        modal.querySelector('[data-action="modal-ok"]').onclick = () => {
-          const items = Array.prototype.map.call(modal.querySelectorAll('.bp-n'), (el) =>
-            ({ type: el.getAttribute('data-bp-type'), count: parseInt(el.value, 10) || 0 }));
-          const category = modal.querySelector('[data-bp-cat]').value;
-          const minDifficulty = parseInt(modal.querySelector('[data-bp-min]').value, 10) || 0;
-          const maxDifficulty = parseInt(modal.querySelector('[data-bp-max]').value, 10) || 0;
-          const asExam = modal.querySelector('#bp-exam').checked;
-          const shuffleOpts = modal.querySelector('#bp-shuffle').checked;
-          const orderShuffled = modal.querySelector('#bp-ordshuf').checked;
-          UI.closeModal();
-          const spec = { items: items, category: category || undefined, keepOrder: !orderShuffled };
-          if (minDifficulty) spec.minDifficulty = minDifficulty;
-          if (maxDifficulty) spec.maxDifficulty = maxDifficulty;
-          const { questions, shortages } = QB.Blueprint.compose(State.allQuestions, spec);
-          if (!questions.length) { UI.toast('按当前蓝图没有可组卷的题目', 'err'); return; }
-          if (shortages.length) {
-            UI.toast('部分题型题量不足，实际组卷 ' + questions.length + ' 题', 'err');
-          }
-          beginQuiz(questions, asExam ? 'exam' : 'practice', asExam ? '组卷考试' : '组卷练习', { shuffleOptions: shuffleOpts });
-        };
-      }
-    );
+    UI.openModal(UI.renderMixDialog(avail, cats), (modal) => {
+      modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
+      modal.querySelector('[data-action="modal-ok"]').onclick = () => {
+        const items = Array.prototype.map.call(modal.querySelectorAll('.bp-n'), (el) =>
+          ({ type: el.getAttribute('data-bp-type'), count: parseInt(el.value, 10) || 0 }));
+        const category = modal.querySelector('[data-bp-cat]').value;
+        const minDifficulty = parseInt(modal.querySelector('[data-bp-min]').value, 10) || 0;
+        const maxDifficulty = parseInt(modal.querySelector('[data-bp-max]').value, 10) || 0;
+        const asExam = modal.querySelector('#bp-exam').checked;
+        const shuffleOpts = modal.querySelector('#bp-shuffle').checked;
+        const orderShuffled = modal.querySelector('#bp-ordshuf').checked;
+        UI.closeModal();
+        const spec = { items: items, category: category || undefined, keepOrder: !orderShuffled };
+        if (minDifficulty) spec.minDifficulty = minDifficulty;
+        if (maxDifficulty) spec.maxDifficulty = maxDifficulty;
+        const { questions, shortages } = QB.Blueprint.compose(State.allQuestions, spec);
+        if (!questions.length) { UI.toast('按当前蓝图没有可组卷的题目', 'err'); return; }
+        if (shortages.length) {
+          UI.toast('部分题型题量不足，实际组卷 ' + questions.length + ' 题', 'err');
+        }
+        beginQuiz(questions, asExam ? 'exam' : 'practice', asExam ? '组卷考试' : '组卷练习', { shuffleOptions: shuffleOpts });
+      };
+    });
+  }
+
+  /** 练习/考试开始：可选题型（多选）、分类与题量，题量 0/空=不限 */
+  function openStartDialog(mode) {
+    const avail = QB.Blueprint.availability(State.allQuestions, {});
+    const cats = QB.SearchFilter.categories(State.allQuestions);
+    const defaultCount = QB.CONFIG.QUESTIONS_PER_QUIZ || 50;
+    UI.openModal(UI.renderStartDialog(mode, avail, cats, defaultCount), (modal) => {
+      modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
+      modal.querySelector('[data-action="modal-ok"]').onclick = () => {
+        const types = Array.prototype.map.call(modal.querySelectorAll('.st-type-cb:checked'), (el) => el.value);
+        const category = modal.querySelector('[data-st-cat]').value;
+        const count = parseInt(modal.querySelector('.st-count').value, 10) || 0;
+        const shuffleOpts = modal.querySelector('#st-shuffle-opt').checked;
+        UI.closeModal();
+        const pool = QB.Blueprint.filterPool(State.allQuestions, {
+          types: types.length ? types : undefined,
+          category: category || undefined
+        });
+        let qs = QB.shuffle(pool);
+        if (count > 0) qs = qs.slice(0, count);
+        if (!qs.length) { UI.toast('按当前条件没有可作答的题目', 'err'); return; }
+        beginQuiz(qs, mode, mode === 'exam' ? '考试模式' : '练习模式', { shuffleOptions: shuffleOpts });
+      };
+    });
   }
 
   /* ---------------- 事件委托绑定 ---------------- */

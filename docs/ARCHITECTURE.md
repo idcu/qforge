@@ -89,7 +89,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `modules/quiz-engine.js` | 答题状态机：装载/作答/进度/判分/`gradeAll`/`byType`/`restore` |
-| `modules/ui-renderer.js` | 渲染首页/答题/结果/列表/统计/搜索，以及 `toast`/`openModal`/`confirmDialog` |
+| `modules/ui-renderer.js` | 渲染首页/答题/结果/列表/统计/搜索，以及 `toast`/`openModal`/`confirmDialog`；**弹窗纯 HTML 构建**（组卷 `renderMixDialog`、练习/考试开始 `renderStartDialog`、题型/分类/难度/题量控件），交互由 app.js 绑定 |
 | `modules/bank-manager.js` | `create/rename/remove(级联)/importSample` |
 | `modules/question-editor.js` | 题目 CRUD：`buildQuestion` 纯函数 + 编辑器/管理器界面（走 QuestionRepo） |
 | `modules/wrong-book.js` | 错题本薄封装（`QB.DB.progress` + `buildIndex`） |

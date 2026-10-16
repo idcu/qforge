@@ -60,3 +60,5 @@ jobs:
         run: node scripts/sync-dav.test.mjs
       - name: PWA 资源校验
         run: node scripts/pwa.test.mjs
+      - name: UI 渲染器弹窗构建测试
+        run: node scripts/ui-renderer.test.mjs

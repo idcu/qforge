@@ -695,6 +695,72 @@
     setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 2600);
   }
 
+  /* ---------------- 组卷 / 开始答题弹窗（纯 HTML 字符串，交互由 app.js 绑定） ---------------- */
+
+  /** 分类下拉（首项为「全部」，文本均转义安全） */
+  function categoryOptions(cats, allLabel) {
+    return '<option value="">' + esc(allLabel || '全部分类') + '</option>' +
+      (cats || []).map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
+  }
+
+  /** 难度区间下拉（0=不限） */
+  function difficultyOptions(selectedZero) {
+    return [0, 1, 2, 3, 4, 5].map((d) =>
+      '<option value="' + d + '"' + (selectedZero && d === 0 ? ' selected' : '') + '>' +
+      (d === 0 ? '不限' : d) + '</option>').join('');
+  }
+
+  /** 题型 × 每题型题量行（组卷用） */
+  function typeCountRows(avail) {
+    return QB.CONFIG.TYPES.map((t) =>
+      '<div class="bp-row"><label class="bp-name">' + esc(QB.typeLabel(t)) +
+      ' <span class="li-meta">（可选 ' + ((avail && avail[t]) || 0) + '）</span></label>' +
+      '<input type="number" min="0" class="bp-n" data-bp-type="' + esc(t) + '" value="0" /></div>').join('');
+  }
+
+  /**
+   * 组卷弹窗 HTML（题型×分类×难度×数量）
+   * @param {Object} avail 各题型可用数量（QB.Blueprint.availability）
+   * @param {Array<string>} cats 分类列表（QB.SearchFilter.categories）
+   */
+  function renderMixDialog(avail, cats) {
+    return '<h3>组卷</h3>' +
+      '<p class="li-meta">按题型设置题量（0=不选），可再按分类与难度区间抽题。题量不足时按实际数量组卷并提示。</p>' +
+      typeCountRows(avail) +
+      '<div class="qe-grid">' +
+      '<div><label class="qe-label">分类</label><select data-bp-cat>' + categoryOptions(cats, '全部分类') + '</select></div>' +
+      '<div><label class="qe-label">难度下限</label><select data-bp-min>' + difficultyOptions(false) + '</select></div>' +
+      '<div><label class="qe-label">难度上限</label><select data-bp-max>' + difficultyOptions(true) + '</select></div></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="bp-ordshuf" checked /><label for="bp-ordshuf">题目顺序乱序（取消则按题型分组的原始顺序）</label></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="bp-shuffle"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="bp-shuffle">选项乱序（单选/多选/不定项，答案自动重映射，仅影响本场）</label></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="bp-exam" /><label for="bp-exam">以考试模式开始（计时、交卷整卷判分）</label></div>' +
+      '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
+      '<button class="btn" data-action="modal-ok">开始</button></div>';
+  }
+
+  /**
+   * 练习/考试开始弹窗 HTML：可选题型（多选）、分类与题量
+   * @param {string} mode 'practice' | 'exam'
+   * @param {Object} avail 各题型可用数量
+   * @param {Array<string>} cats 分类列表
+   * @param {number} defaultCount 默认题量（题量 0/空=不限）
+   */
+  function renderStartDialog(mode, avail, cats, defaultCount) {
+    const isExam = mode === 'exam';
+    const boxes = QB.CONFIG.TYPES.map((t) =>
+      '<label class="st-type"><input type="checkbox" class="st-type-cb" value="' + esc(t) + '" checked /> ' +
+      esc(QB.typeLabel(t)) + ' <span class="li-meta">（' + ((avail && avail[t]) || 0) + '）</span></label>').join('');
+    return '<h3>' + (isExam ? '考试模式' : '练习模式') + '</h3>' +
+      '<p class="li-meta">选择题型（默认全选）、分类与题量；题量留空或 0 表示不限，全部题量以题库为准。</p>' +
+      '<div class="st-types">' + boxes + '</div>' +
+      '<div class="qe-grid">' +
+      '<div><label class="qe-label">分类</label><select data-st-cat>' + categoryOptions(cats, '全部分类') + '</select></div>' +
+      '<div><label class="qe-label">题量</label><input type="number" min="0" class="st-count" value="' + (defaultCount || 50) + '" /></div></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="st-shuffle-opt"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="st-shuffle-opt">选项乱序（单选/多选/不定项，仅影响本场）</label></div>' +
+      '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
+      '<button class="btn" data-action="modal-ok">开始</button></div>';
+  }
+
   function openModal(html, onMount) {
     const root = document.getElementById('modal-root');
     root.innerHTML = '<div class="modal">' + html + '</div>';
@@ -726,6 +792,7 @@
     renderBanks, renderHome, renderQuiz, renderResult,
     renderWrongList, renderFavoritesList, renderHistoryList, renderStats, renderSearch,
     renderAnswerText, emptyState, progressBar,
+    renderMixDialog, renderStartDialog,
     toast, openModal, closeModal, confirmDialog
   };
   QB.UIRenderer.LIST_PAGE_SIZE = LIST_PAGE_SIZE;
