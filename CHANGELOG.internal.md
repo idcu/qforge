@@ -1148,6 +1148,30 @@
 
 ---
 
+## 3c10bfd · feat(ui): 「回到顶部」悬浮按钮 + 切换标签回顶
+
+**背景**：用户要求「需要一个回到顶部的按钮，其它细节优化你看着办」。
+
+**核心改动**
+- `index.html`：新增骨架元素 `<button id="btn-top" class="btn-top">↑</button>`。
+- `css/style.css`：`.btn-top`（`position:fixed; right:18px; bottom:76px`，右下角 44px 圆形悬浮按钮，`display:none`）与 `.btn-top.show { display:flex }`；hover 高亮；打印样式 `@media print` 追加隐藏 `.btn-top`。
+- `js/app.js`：新增 `syncTopButton()`（`window.scrollY > 400 && State.view !== 'quiz'` 时显示）；`render()` 末尾与 `resize`/`scroll`（passive）同步；`bindGlobal` 绑定 `#btn-top` 点击 → `window.scrollTo({ top: 0, behavior: 'smooth' })`；切换顶部标签时 `window.scrollTo(0, 0)` 回到顶部。
+- 设计取舍：答题视图（`view=quiz`）隐藏按钮，避免与底部「提交/答题卡」操作区重叠误触。
+
+**公共抽象 / 影响面**
+- app.js 新增内部函数 `syncTopButton()` —— 无对外 API 变更。
+- 新增 CSS 类 `.btn-top` / `.btn-top.show` 与骨架元素 `#btn-top`。
+
+**验证数据**
+- 全量 **18 套 2374 / 2374 通过 0 失败**（Node v24.14.0 / Windows）；`scripts/pwa.test.mjs` 29→**35**（+6：`#btn-top` 元素、`.btn-top` 类、app.js `getElementById('btn-top')`/`scrollTo`/`addEventListener('scroll')` 绑定、CSS `.btn-top.show`）。
+- 浏览器端到端（`127.0.0.1:8782`，无 SW 缓存）：①`#btn-top` 存在 PASS；②初始 `classList` 不含 `show`、`display=none` PASS；③注入 3000px 空白并 `scrollTo(0,1200)` 后 `show=true`、`display=flex` PASS；④点击后 `scrollY=0` 且按钮自动隐藏 PASS。
+- 无性能路径改动，`scripts/bench.mjs` 未重跑。
+
+**遗留 TODO / 风险**
+- 无。「答题视图隐藏」为设计选择，若后续希望答题页也可一键回顶，可去掉 `State.view !== 'quiz'` 条件。
+
+---
+
 ## 7ed5c05 · feat(ui): 答题卡配色 / 顶栏菜单吸顶 / 收藏态反馈 / 搜索单行固定 / 错题重练可筛选
 
 **背景**：用户实测反馈 6 项体验问题（答题卡颜色区分不明显、顶部菜单栏不固定、收藏后无状态反馈、历史统计不固定、搜索页筛选/计数/练习入口不在一行且不固定、错题重练不可筛选）。
@@ -1231,6 +1255,7 @@
 > 题干渲染修复（2026-10-16）：`3bd0ace` fix(quiz) 答题界面题干未渲染（非材料题只显示选项，回归自 10fc2d7）（18 套 2340 断言）
 > 结果页错题重练（2026-10-17）：`c74e7f6` feat(quiz) 结果页「错题重练」只练本场错题（新增 isWrongResult/sessionWrongs 公共纯函数，app.js 三处谓词复用）（18 套 2347 断言）
 > UI 体验批次（2026-10-17）：`7ed5c05` feat(ui) 答题卡配色/顶栏菜单吸顶/收藏态反馈/搜索单行固定/错题重练可筛选（修复 --brand 系列未定义致样式整片失效；新增 .stick-head/--top-shell-h）（18 套 2368 断言，ui-renderer 28→49）
+> 回到顶部按钮（2026-10-17）：`3c10bfd` feat(ui) 「回到顶部」悬浮按钮 + 切换标签回顶（新增 syncTopButton/.btn-top；答题视图自动隐藏）（18 套 2374 断言，pwa 29→35）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
