@@ -90,6 +90,13 @@
     if (ex) ex.textContent = State.timerText || '';
   }
 
+  /** 把「顶栏 + 菜单栏」实测高度写入 CSS 变量，供下方 sticky 区块（历史统计/搜索栏）定位 */
+  function syncStickyOffset() {
+    const shell = document.querySelector('.top-shell');
+    if (!shell) return;
+    document.documentElement.style.setProperty('--top-shell-h', shell.offsetHeight + 'px');
+  }
+
   /* ---------------- 数据装载 ---------------- */
 
   async function loadBankData() {
@@ -132,9 +139,14 @@
       case 'home':
         html = UI.renderHome(State.bank, State.counts);
         break;
-      case 'quiz':
-        html = State.engine ? UI.renderQuiz(State.engine, {}) : UI.renderHome(State.bank, State.counts);
+      case 'quiz': {
+        if (!State.engine) { html = UI.renderHome(State.bank, State.counts); break; }
+        const cq = State.engine.getCurrentQuestion();
+        let favorited = false;
+        if (cq) { try { favorited = await QB.Favorites.has(State.bankId, cq); } catch (e) { favorited = false; } }
+        html = UI.renderQuiz(State.engine, { favorited: favorited });
         break;
+      }
       case 'result':
         html = UI.renderResult(State.engine, State.bank, State.resultMeta);
         break;
@@ -190,6 +202,7 @@
 
     view().innerHTML = html;
     QB.RichText.hydrate(view()); // IndexedDB 图片异步换 src（无图时为空操作）
+    syncStickyOffset();          // 实测顶栏+菜单栏高度，供 sticky 区块定位
     updateStatus();
 
     if (wasSearch) {
@@ -305,10 +318,17 @@
     render();
   }
 
-  async function startWrongQuiz() {
+  /** 错题重练：在错题池上可选题型/分类/题量后再练（池=当前错题本） */
+  async function openWrongDialog() {
     const list = await QB.WrongBook.list(State.bankId);
     if (!list.length) { UI.toast('错题本是空的', 'err'); return; }
-    beginQuiz(QB.shuffle(list.map((x) => x.question)).slice(0, QB.CONFIG.QUESTIONS_PER_QUIZ), 'practice', '错题重练');
+    const pool = list.map((x) => x.question);
+    openStartDialog('practice', {
+      pool: pool,
+      title: '错题重练（' + pool.length + ' 题）',
+      quizTitle: '错题重练',
+      defaultCount: pool.length
+    });
   }
 
   /** 结果页「错题重练」：只练本场作答的错题（口径与错题本写入一致：错且非半对） */
@@ -434,7 +454,7 @@
       case 'start-mixed':
         return openMixedDialog();
       case 'start-wrong':
-        return startWrongQuiz();
+        return openWrongDialog();
       case 'start-favorite':
         return startFavoriteQuiz();
       case 'start-chapter':
@@ -535,9 +555,10 @@
       case 'fav-toggle': {
         if (!State.engine) return;
         const q = State.engine.getCurrentQuestion();
+        if (!q) return;
         const res = await QB.Favorites.toggle(State.bankId, q);
         UI.toast(res.added ? '已加入收藏' : '已取消收藏', 'ok');
-        return;
+        return render();
       }
 
       /* —— 错题 / 收藏 / 历史 —— */
@@ -701,12 +722,21 @@
     });
   }
 
-  /** 练习/考试开始：可选题型（多选）、分类与题量，题量 0/空=不限 */
-  function openStartDialog(mode) {
-    const avail = QB.Blueprint.availability(State.allQuestions, {});
-    const cats = QB.SearchFilter.categories(State.allQuestions);
-    const defaultCount = QB.CONFIG.QUESTIONS_PER_QUIZ || 50;
-    UI.openModal(UI.renderStartDialog(mode, avail, cats, defaultCount), (modal) => {
+  /**
+   * 练习/考试开始：可选题型（多选）、分类与题量，题量 0/空=不限
+   * @param {string} mode 'practice' | 'exam'
+   * @param {Object} [opts]
+   *   pool? 题池（默认 State.allQuestions；错题重练传入错题池）
+   *   title? 弹窗标题；quizTitle? 入场标题；defaultCount? 默认题量
+   */
+  function openStartDialog(mode, opts) {
+    opts = opts || {};
+    const pool0 = opts.pool || State.allQuestions;
+    const avail = QB.Blueprint.availability(pool0, {});
+    const cats = QB.SearchFilter.categories(pool0);
+    const defaultCount = opts.defaultCount || QB.CONFIG.QUESTIONS_PER_QUIZ || 50;
+    const quizTitle = opts.quizTitle || (mode === 'exam' ? '考试模式' : '练习模式');
+    UI.openModal(UI.renderStartDialog(mode, avail, cats, defaultCount, opts.title), (modal) => {
       modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
       modal.querySelector('[data-action="modal-ok"]').onclick = () => {
         const types = Array.prototype.map.call(modal.querySelectorAll('.st-type-cb:checked'), (el) => el.value);
@@ -714,14 +744,14 @@
         const count = parseInt(modal.querySelector('.st-count').value, 10) || 0;
         const shuffleOpts = modal.querySelector('#st-shuffle-opt').checked;
         UI.closeModal();
-        const pool = QB.Blueprint.filterPool(State.allQuestions, {
+        const pool = QB.Blueprint.filterPool(pool0, {
           types: types.length ? types : undefined,
           category: category || undefined
         });
         let qs = QB.shuffle(pool);
         if (count > 0) qs = qs.slice(0, count);
         if (!qs.length) { UI.toast('按当前条件没有可作答的题目', 'err'); return; }
-        beginQuiz(qs, mode, mode === 'exam' ? '考试模式' : '练习模式', { shuffleOptions: shuffleOpts });
+        beginQuiz(qs, mode, quizTitle, { shuffleOptions: shuffleOpts });
       };
     });
   }
@@ -824,6 +854,9 @@
       State.view = t.getAttribute('data-tab');
       render();
     });
+
+    // 顶栏/菜单栏高度随窗口宽度变化（换行），重算 sticky 偏移
+    window.addEventListener('resize', syncStickyOffset);
 
     // 文件拖拽导入：拖到窗口任意位置即可（答题中拒绝，避免误触）
     let dragDepth = 0;

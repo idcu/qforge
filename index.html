@@ -12,19 +12,21 @@
 </head>
 <body>
   <div id="app">
-    <header class="topbar">
-      <div class="topbar-left">
-        <span class="brand" id="brand">淬题</span>
-        <select id="bank-switch" class="bank-switch" title="切换题库" aria-label="切换题库"></select>
-      </div>
-      <div class="topbar-right">
-        <button id="btn-manage-banks" class="btn btn-ghost" type="button" title="题库管理">题库管理</button>
-        <button id="btn-help" class="btn btn-ghost" type="button" title="快捷键帮助（按 ? 打开）" aria-label="快捷键帮助">?</button>
-        <button id="btn-theme" class="btn btn-ghost" type="button" title="切换深浅色" aria-label="切换深浅色">🌙</button>
-      </div>
-    </header>
+    <div class="top-shell">
+      <header class="topbar">
+        <div class="topbar-left">
+          <span class="brand" id="brand">淬题</span>
+          <select id="bank-switch" class="bank-switch" title="切换题库" aria-label="切换题库"></select>
+        </div>
+        <div class="topbar-right">
+          <button id="btn-manage-banks" class="btn btn-ghost" type="button" title="题库管理">题库管理</button>
+          <button id="btn-help" class="btn btn-ghost" type="button" title="快捷键帮助（按 ? 打开）" aria-label="快捷键帮助">?</button>
+          <button id="btn-theme" class="btn btn-ghost" type="button" title="切换深浅色" aria-label="切换深浅色">🌙</button>
+        </div>
+      </header>
 
-    <nav class="tabs" id="tabs" aria-label="功能导航"></nav>
+      <nav class="tabs" id="tabs" aria-label="功能导航"></nav>
+    </div>
 
     <main id="view" class="view" aria-live="polite"></main>
 

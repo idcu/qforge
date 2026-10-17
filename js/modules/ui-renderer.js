@@ -354,7 +354,8 @@
       html += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
       html += '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
     }
-    html += '<button class="btn btn-ghost" data-action="fav-toggle" title="收藏本题">☆ 收藏</button>';
+    html += '<button class="btn btn-ghost' + (opts.favorited ? ' fav-on' : '') + '" data-action="fav-toggle" title="收藏本题">' +
+      (opts.favorited ? '★ 已收藏' : '☆ 收藏') + '</button>';
     html += '</div>';
 
     // 答题卡（题目较多时才显示，支持点击跳转）
@@ -379,7 +380,8 @@
       '<div class="ac-legend"><span class="ac-dot ac-empty"></span>未答 ' +
       '<span class="ac-dot ac-answered"></span>已答 ' +
       '<span class="ac-dot ac-correct"></span>正确 ' +
-      '<span class="ac-dot ac-wrong"></span>错误</div></details>';
+      '<span class="ac-dot ac-wrong"></span>错误 ' +
+      '<span class="ac-dot ac-pending"></span>待自评</div></details>';
   }
 
   /* ---------------- 结果 ---------------- */
@@ -544,7 +546,7 @@
 
   function renderHistoryList(records, stats) {
     if (!records.length) return emptyState('还没有答题记录。');
-    let html = '<div class="card"><h3 class="card-title">历史统计</h3><div class="stat-grid">' +
+    let html = '<div class="card stick-head"><h3 class="card-title">历史统计</h3><div class="stat-grid">' +
       '<div class="stat-box"><div class="st-num">' + stats.total + '</div><div class="st-label">测试次数</div></div>' +
       '<div class="stat-box"><div class="st-num">' + stats.avgScore + '</div><div class="st-label">平均分</div></div>' +
       '<div class="stat-box"><div class="st-num">' + stats.avgAccuracy + '%</div><div class="st-label">平均正确率</div></div>' +
@@ -648,7 +650,12 @@
 
   function renderSearch(bank, allCount, results, criteria, page) {
     criteria = criteria || {};
-    let html = '<div class="toolbar">' +
+    const practiceBtn = results.length
+      ? '<button class="btn" data-action="search-practice">用搜索结果练习（' + results.length + ' 题，取前 ' +
+        QB.CONFIG.QUESTIONS_PER_QUIZ + '）</button>'
+      : '';
+    // 搜索工具栏（筛选 + 计数 + 练习入口）固定为一行
+    let html = '<div class="toolbar stick-head search-bar">' +
       '<input type="search" class="grow" data-action="search-input" placeholder="关键词搜索题目 / 解析 / 标签…" aria-label="关键词搜索" value="' + esc(criteria.keyword || '') + '" />' +
       '<select data-action="search-type" aria-label="题型筛选">' +
       '<option value="">全部题型</option>' +
@@ -662,14 +669,14 @@
         '<select data-action="search-tag" aria-label="标签筛选"><option value="">全部标签</option>' +
         criteria.tags.map((t) => '<option value="' + esc(t) + '"' + (criteria.tag === t ? ' selected' : '') + '>' + esc(t) + '</option>').join('') +
         '</select>' : '') +
+      '<span class="li-meta search-count">共 ' + results.length + ' / ' + allCount + ' 题</span>' +
+      practiceBtn +
       '</div>';
 
-    html += '<div class="li-meta" style="margin-bottom:10px">共 ' + results.length + ' / ' + allCount + ' 题</div>';
     if (!results.length) {
       return html + emptyState('没有匹配的题目。');
     }
     const win = pageSlice(results, page, LIST_PAGE_SIZE);
-    html += '<div class="toolbar"><button class="btn" data-action="search-practice">用搜索结果练习（' + results.length + ' 题，取前 ' + QB.CONFIG.QUESTIONS_PER_QUIZ + '）</button></div>';
     win.items.forEach((q) => {
       html += '<div class="list-item"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
@@ -744,13 +751,14 @@
    * @param {Object} avail 各题型可用数量
    * @param {Array<string>} cats 分类列表
    * @param {number} defaultCount 默认题量（题量 0/空=不限）
+   * @param {string} [title] 弹窗标题（默认按 mode 显示「练习模式/考试模式」；错题重练等场景自定义）
    */
-  function renderStartDialog(mode, avail, cats, defaultCount) {
+  function renderStartDialog(mode, avail, cats, defaultCount, title) {
     const isExam = mode === 'exam';
     const boxes = QB.CONFIG.TYPES.map((t) =>
       '<label class="st-type"><input type="checkbox" class="st-type-cb" value="' + esc(t) + '" checked /> ' +
       esc(QB.typeLabel(t)) + ' <span class="li-meta">（' + ((avail && avail[t]) || 0) + '）</span></label>').join('');
-    return '<h3>' + (isExam ? '考试模式' : '练习模式') + '</h3>' +
+    return '<h3>' + esc(title || (isExam ? '考试模式' : '练习模式')) + '</h3>' +
       '<p class="li-meta">选择题型（默认全选）、分类与题量；题量留空或 0 表示不限，全部题量以题库为准。</p>' +
       '<div class="st-types">' + boxes + '</div>' +
       '<div class="qe-grid">' +

@@ -103,6 +103,81 @@ section('答题界面：题干渲染（回归：非材料题曾看不到题干�
   ok(h3.indexOf('小问题干PQR') >= 0, '材料题：小问题干可见');
 }
 
+section('答题卡：状态类与图例（正确/错误/已答/未答/待自评）');
+{
+  const qs = [{ type: 'single', question: 'a', options: ['1', '2'], answer: 'A' },
+    { type: 'judge', question: 'b', answer: 'A' },
+    { type: 'essay', question: 'c', reference_answer: 'x' },
+    { type: 'single', question: 'd', options: ['1', '2'], answer: 'A' }];
+  const statuses = ['correct', 'wrong', 'pending', 'empty'];
+  const engine = {
+    mode: 'practice', questions: qs, currentIndex: 1, results: [null, null, null, null], answers: [undefined, undefined, undefined, undefined],
+    getCurrentQuestion: () => qs[1],
+    getProgress: () => ({ current: 2, total: 4, percentage: 25 }),
+    getScore: () => ({ score: 0, correct: 0, wrong: 0 }),
+    hasAnswered: () => false, canSubmit: () => false, isLastQuestion: () => false,
+    statusAt: (i) => statuses[i],
+    answeredCount: () => 3
+  };
+  const html = UI.renderQuiz(engine, {});
+  ok(html.indexOf('ac-cell ac-correct') >= 0, '答题卡含「正确」状态格（ac-correct）');
+  ok(html.indexOf('ac-cell ac-wrong') >= 0, '答题卡含「错误」状态格（ac-wrong）');
+  ok(html.indexOf('ac-cell ac-pending') >= 0, '答题卡含「待自评」状态格（ac-pending）');
+  ok(html.indexOf('ac-cell ac-empty') >= 0, '答题卡含「未答」状态格（ac-empty）');
+  ok(html.indexOf('ac-cell ac-wrong cur') >= 0, '当前题高亮 cur 与状态类叠加（ac-wrong cur）');
+  ok(html.indexOf('ac-dot ac-correct') >= 0 && html.indexOf('ac-dot ac-wrong') >= 0, '图例含正确/错误色点');
+  ok(html.indexOf('ac-dot ac-pending') >= 0, '图例含待自评色点');
+}
+
+section('收藏按钮：已收藏态（实心星 + fav-on 高亮）');
+{
+  const q = { type: 'single', question: 'x', options: ['1', '2'], answer: 'A' };
+  const engine = {
+    mode: 'practice', questions: [q], currentIndex: 0, results: [null], answers: [undefined],
+    getCurrentQuestion: () => q,
+    getProgress: () => ({ current: 1, total: 1, percentage: 0 }),
+    getScore: () => ({ score: 0, correct: 0, wrong: 0 }),
+    hasAnswered: () => false, canSubmit: () => false, isLastQuestion: () => true
+  };
+  const off = UI.renderQuiz(engine, {});
+  ok(off.indexOf('☆ 收藏') >= 0, '未收藏：空心星「☆ 收藏」');
+  ok(off.indexOf('fav-on') < 0, '未收藏：无 fav-on 类');
+  const on = UI.renderQuiz(engine, { favorited: true });
+  ok(on.indexOf('★ 已收藏') >= 0, '已收藏：实心星「★ 已收藏」');
+  ok(on.indexOf('fav-on') >= 0, '已收藏：按钮带 fav-on 高亮类');
+}
+
+section('搜索视图：筛选/计数/练习入口同一行且 sticky');
+{
+  const results = [{ type: 'single', question: '搜索命中题', options: ['1', '2'], answer: 'A' }];
+  const criteria = { keyword: '搜索', type: '', category: '', tag: '', categories: ['分类A'], tags: [] };
+  const html = UI.renderSearch({ name: 'B' }, 100, results, criteria, 0);
+  ok(html.indexOf('toolbar stick-head search-bar') >= 0, '搜索工具栏为 sticky 单行容器');
+  ok(html.indexOf('data-action="search-input"') >= 0, '含关键词输入');
+  ok(html.indexOf('search-count') >= 0 && html.indexOf('共 1 / 100 题') >= 0, '计数与筛选同容器');
+  ok(html.indexOf('data-action="search-practice"') >= 0, '练习入口同容器');
+  ok(html.indexOf('用搜索结果练习（1 题') >= 0, '练习按钮文案含题数');
+  // 计数与练习按钮必须出现在同一个 toolbar 容器内（不跨容器）
+  const bar = html.slice(html.indexOf('toolbar stick-head search-bar'), html.indexOf('</div>', html.indexOf('practice')));
+  ok(bar.indexOf('search-count') >= 0 && bar.indexOf('search-practice') >= 0, '计数与练习入口处于同一行容器');
+}
+
+section('历史统计：sticky 卡片');
+{
+  const stats = { total: 3, avgScore: 80, avgAccuracy: 75, bestScore: 100 };
+  const recs = [{ id: '1', mode: 'practice', bankName: 'B', createdAt: Date.now(), score: 10, correct: 1, wrong: 0, accuracy: 100 }];
+  const html = UI.renderHistoryList(recs, stats);
+  ok(html.indexOf('card stick-head') >= 0, '历史统计卡片带 stick-head（固定在菜单栏下方）');
+  ok(html.indexOf('历史统计') >= 0, '历史统计标题存在');
+}
+
+section('开始弹窗：自定义标题（错题重练等场景）');
+{
+  const html = UI.renderStartDialog('practice', avail, cats, 7, '错题重练（7 题）');
+  ok(html.indexOf('错题重练（7 题）') >= 0, '弹窗标题使用自定义文案');
+  ok(html.indexOf('class="st-count" value="7"') >= 0, '默认题量可配为错题数');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

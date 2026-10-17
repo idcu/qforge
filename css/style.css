@@ -14,6 +14,13 @@
   --danger-weak: #fdeceb;
   --warning: #d97706;
   --warning-weak: #fdf3e3;
+  /* 兼容别名：历史样式引用了 brand 系列变量，此前未定义导致颜色失效（答题卡/存储条/热力图等） */
+  --brand: var(--primary);
+  --brand-soft: var(--primary-weak);
+  --brand-text: var(--primary);
+  --surface-muted: var(--surface-2);
+  /* 顶栏 + 菜单栏固定后的总高度，供 sticky 元素定位（由 app.js 实测写入） */
+  --top-shell-h: 0px;
   --radius: 10px;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.14);
@@ -60,11 +67,16 @@ body {
   min-height: 100vh;
 }
 
-/* ===== 顶栏 ===== */
-.topbar {
+/* ===== 顶栏 + 导航（整体固定在顶部） ===== */
+.top-shell {
   position: sticky;
   top: 0;
   z-index: 20;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -125,6 +137,8 @@ body {
 .btn-danger { background: var(--danger); }
 .btn-sm { padding: 5px 10px; font-size: 13px; }
 .btn-block { width: 100%; }
+/* 已收藏状态：实心星 + 高亮 */
+.btn.fav-on { background: var(--warning-weak); color: var(--warning); border-color: var(--warning); font-weight: 600; }
 
 /* ===== 导航标签 ===== */
 .tabs {
@@ -166,6 +180,15 @@ body {
   margin: 0 auto;
   padding: 20px 16px 40px;
 }
+
+/* 需固定在菜单栏下方的区块（历史统计 / 搜索工具栏等） */
+.stick-head {
+  position: sticky;
+  top: var(--top-shell-h);
+  z-index: 15;
+  background: var(--bg);
+}
+.stick-head.card { background: var(--surface); }
 
 /* ===== 卡片 / 面板 ===== */
 .card {
@@ -394,6 +417,9 @@ body {
   font-size: 14px;
 }
 .toolbar .grow { flex: 1; min-width: 160px; }
+/* 搜索工具栏固定为一行：筛选 + 计数 + 练习入口 */
+.search-bar { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.search-bar .search-count { white-space: nowrap; }
 
 /* ===== 状态栏 ===== */
 .statusbar {
@@ -490,20 +516,29 @@ body {
 .bp-name { flex: 1; font-size: 14px; }
 .bp-n { width: 90px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
 
+/* 练习/考试开始弹窗：题型多选 */
+.st-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 12px; margin: 8px 0; }
+.st-type { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+
 /* ===== 答题卡 ===== */
 .answer-card { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
 .answer-card summary { cursor: pointer; font-size: 13px; color: var(--text-muted); user-select: none; }
 .ac-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 6px; margin-top: 10px; }
-.ac-cell { height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); cursor: pointer; font-size: 13px; }
-.ac-cell.cur { outline: 2px solid var(--brand); }
-.ac-cell.ac-answered { background: var(--surface-muted); color: var(--text); }
-.ac-cell.ac-correct { background: var(--brand-soft); color: var(--brand-text); border-color: var(--brand); }
-.ac-cell.ac-wrong { background: rgba(232, 70, 58, .12); color: var(--danger); border-color: var(--danger); }
+.ac-cell { height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); cursor: pointer; font-size: 13px; font-weight: 600; }
+.ac-cell:hover { border-color: var(--text-muted); }
+.ac-cell.cur { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ac-cell.ac-empty { background: var(--surface-2); color: var(--text-muted); }
+.ac-cell.ac-answered { background: var(--primary-weak); color: var(--primary); border-color: var(--primary); }
+.ac-cell.ac-correct { background: var(--success); color: #fff; border-color: var(--success); }
+.ac-cell.ac-wrong { background: var(--danger); color: #fff; border-color: var(--danger); }
+.ac-cell.ac-pending { background: var(--warning-weak); color: var(--warning); border-color: var(--warning); }
 .ac-legend { margin-top: 10px; font-size: 12px; color: var(--text-muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-.ac-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; border: 1px solid var(--border); }
-.ac-dot.ac-answered { background: var(--surface-muted); }
-.ac-dot.ac-correct { background: var(--brand-soft); border-color: var(--brand); }
-.ac-dot.ac-wrong { background: rgba(232, 70, 58, .12); border-color: var(--danger); }
+.ac-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; border: 1px solid var(--border); vertical-align: -1px; }
+.ac-dot.ac-empty { background: var(--surface-2); }
+.ac-dot.ac-answered { background: var(--primary-weak); border-color: var(--primary); }
+.ac-dot.ac-correct { background: var(--success); border-color: var(--success); }
+.ac-dot.ac-wrong { background: var(--danger); border-color: var(--danger); }
+.ac-dot.ac-pending { background: var(--warning-weak); border-color: var(--warning); }
 
 /* ===== 今日复习热点 ===== */
 .menu-item { position: relative; }
