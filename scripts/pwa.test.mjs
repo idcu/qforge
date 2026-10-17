@@ -63,6 +63,15 @@ const app = read('js/app.js');
 ok(app.indexOf("navigator.serviceWorker.register('sw.js'") >= 0, '注册 sw.js（相对路径）');
 ok(/location\.protocol\s*===?\s*'https:'/.test(app) && app.indexOf("'http:'") >= 0, '仅 http(s) 环境注册（file:// 跳过）');
 
+section('回到顶部按钮');
+ok(index.indexOf('id="btn-top"') >= 0, 'index.html 含「回到顶部」按钮 #btn-top');
+ok(index.indexOf('class="btn-top"') >= 0, '按钮使用 .btn-top 样式类');
+ok(app.indexOf("getElementById('btn-top')") >= 0, 'app.js 绑定 #btn-top');
+ok(app.indexOf('scrollTo({ top: 0, behavior: \'smooth\' })') >= 0 || app.indexOf("scrollTo({ top: 0, behavior: 'smooth' })") >= 0, 'app.js 平滑滚回顶部');
+ok(app.indexOf("addEventListener('scroll'") >= 0, 'app.js 监听滚动以切换按钮显隐');
+const css = read('css/style.css');
+ok(css.indexOf('.btn-top') >= 0 && css.indexOf('.btn-top.show') >= 0, 'CSS 定义 .btn-top 与 .show 显隐');
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

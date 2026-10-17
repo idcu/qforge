@@ -97,6 +97,14 @@
     document.documentElement.style.setProperty('--top-shell-h', shell.offsetHeight + 'px');
   }
 
+  /** 「回到顶部」按钮显隐：滚动一定距离后出现；答题中隐藏，避免误触遮挡作答操作 */
+  function syncTopButton() {
+    const btn = document.getElementById('btn-top');
+    if (!btn) return;
+    const show = window.scrollY > 400 && State.view !== 'quiz';
+    btn.classList.toggle('show', show);
+  }
+
   /* ---------------- 数据装载 ---------------- */
 
   async function loadBankData() {
@@ -203,6 +211,7 @@
     view().innerHTML = html;
     QB.RichText.hydrate(view()); // IndexedDB 图片异步换 src（无图时为空操作）
     syncStickyOffset();          // 实测顶栏+菜单栏高度，供 sticky 区块定位
+    syncTopButton();             // 依滚动位置/当前视图切换「回到顶部」按钮显隐
     updateStatus();
 
     if (wasSearch) {
@@ -852,8 +861,14 @@
       const t = e.target.closest('[data-tab]');
       if (!t) return;
       State.view = t.getAttribute('data-tab');
+      window.scrollTo(0, 0); // 切换标签时回到顶部，避免继承上一页的滚动位置
       render();
     });
+
+    // 「回到顶部」：点击平滑滚回顶部；滚动时按位置/视图切换显隐
+    const topBtn = document.getElementById('btn-top');
+    if (topBtn) topBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    window.addEventListener('scroll', syncTopButton, { passive: true });
 
     // 顶栏/菜单栏高度随窗口宽度变化（换行），重算 sticky 偏移
     window.addEventListener('resize', syncStickyOffset);

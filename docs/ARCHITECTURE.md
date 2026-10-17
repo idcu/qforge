@@ -45,7 +45,7 @@
 | --- | --- |
 | `index.html` | 唯一入口；按依赖顺序加载脚本；定义 `#view`/`#tabs`/`#status-text`/`#modal-root` 等骨架元素 |
 | `js/config.js` | `QB.CONFIG` 唯一配置中心：`NETWORK`（API_BASE_URL/网络导入限额）、`STORAGE`（前缀/配额/防抖）、`LIMITS`（题量/分值/历史与 revlog FIFO）、`ASSETS`（IDB 实例）、`WORKERS`、后端开关与题型/难度字典（顶层旧键保留为别名）+ `QB.typeLabel`/`QB.typeBadge` |
-| `js/app.js` | 主应用：状态管理、事件委托、视图渲染调度、模式流程；每次渲染后实测「顶栏+菜单栏」高度写入 CSS 变量 `--top-shell-h`（`syncStickyOffset`），供 sticky 区块定位；练习/考试开始弹窗 `openStartDialog(mode, opts)` 支持自定义题池（错题重练 `openWrongDialog` 传入错题池）；末行导出 `QB.App` |
+| `js/app.js` | 主应用：状态管理、事件委托、视图渲染调度、模式流程；每次渲染后实测「顶栏+菜单栏」高度写入 CSS 变量 `--top-shell-h`（`syncStickyOffset`），供 sticky 区块定位；「回到顶部」悬浮按钮由 `syncTopButton` 按滚动位置与视图切换显隐（`scrollY>400` 且非答题视图）；练习/考试开始弹窗 `openStartDialog(mode, opts)` 支持自定义题池（错题重练 `openWrongDialog` 传入错题池）；末行导出 `QB.App` |
 
 ### 3.2 公共抽象（utils）
 | 文件 | 导出 | 职责 |
