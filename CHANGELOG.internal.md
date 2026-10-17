@@ -1148,6 +1148,27 @@
 
 ---
 
+## c74e7f6 · feat(quiz): 结果页「错题重练」只练本场错题（不对整本错题本抽题）
+
+**背景**：用户实测「练习模式下，做完题 点错题重练 只要练当前练习的错题就行，不要直接出来很多不是当次的」。原 `retry-wrong` 走 `startWrongQuiz`，抽的是整个错题本（全部历史错题、上限 50 题），与本场作答无关。
+
+**核心改动**
+- `js/modules/wrong-book.js`：新增公共纯函数 `isWrongResult(result)`（错且非半对）与 `sessionWrongs(questions, results)`（题目与结果按索引对齐，筛出本场错题并保持原顺序）。**公共抽象影响面**：`QB.WrongBook` 新增两个导出方法，向后兼容。
+- `js/app.js`：新增 `startResultWrongQuiz()`，用 `sessionWrongs(State.engine.questions, State.engine.results)` 取本场错题；`retry-wrong` 改指向它。首页「错题练习」`start-wrong` 仍走 `startWrongQuiz`（抽整本错题本，不变）。
+- 消除重复：app.js 中三处 `r.isCorrect === false && !r.partial` 内联谓词统一改为 `QB.WrongBook.isWrongResult(r)`，确保「进错题本」与「本场重练」口径完全一致（不定项少选得半分的 partial 不计入错题）。
+- 文档同步： ARCHITECTURE（wrong-book 职责）、user-guide（结果页错题重练行为）、README/DEVELOPMENT 计数。
+- `scripts/smoke-test.mjs`：新增 7 项断言（isWrongResult 对/错/半对/待自评(null)/未作答(null 结果) + sessionWrongs 仅取本场错题、命中位置正确）。
+
+**验证数据**
+- 全量 **18 套 2347/2347 通过，0 失败**（Node v24.14.0 / Windows）；smoke 429→**436**（+7）。
+- 浏览器端到端（新源 `127.0.0.1:8779`，无 SW 缓存）：练习 5 题故意答错 → 结果页显示 3 道 ✘错误 → 点「错题重练」→ 新练习显示「第 1 / 3 题」，题量=本场错误数（3，非 50），Console 无报错。
+- 未触性能路径，`scripts/bench.mjs` 未重跑（无性能断言变更）。
+
+**遗留 TODO / 风险**
+- 无。首页「错题练习」仍是整本抽题（用户明确区分两者：结果为「本场重练」）。
+
+---
+
 ## 7ecc912 · fix(srs): 历史最佳权重 + 留出集门控（评估报告工程项）
 
 - optimize 返回训练全程 loss 最低点权重快照（旧返回最后一轮却报最低 loss）；computeTrain 整条序列确定性切 20% 留出集，门控比留出 NLL（无 again 回退训练口径，gateBasis 标注）；返回 trainLoss/holdoutSamples 并写入 meta。
@@ -1180,6 +1201,7 @@
 > 导入入口修复（2026-10-16）：`26e655b` fix(import) File/快照分派（选文件/拖拽导入失败根因）+ JSON 去 BOM（17 套 2312 断言）
 > 练习/考试选择 + 组卷修复（2026-10-16）：`6ef0988` feat(quiz) 练习/考试可选题型·分类·题量 + 修复 data-bp-min/max 畸形属性致组卷「开始」无反应（18 套 2333 断言）
 > 题干渲染修复（2026-10-16）：`3bd0ace` fix(quiz) 答题界面题干未渲染（非材料题只显示选项，回归自 10fc2d7）（18 套 2340 断言）
+> 结果页错题重练（2026-10-17）：`c74e7f6` feat(quiz) 结果页「错题重练」只练本场错题（新增 isWrongResult/sessionWrongs 公共纯函数，app.js 三处谓词复用）（18 套 2347 断言）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
