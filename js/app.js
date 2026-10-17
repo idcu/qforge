@@ -238,7 +238,7 @@
     for (let i = 0; i < engine.questions.length; i++) {
       const r = engine.results[i];
       // 不定项少选（partial）得半分，不计入错题本
-      if (r && r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, engine.questions[i]);
+      if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, engine.questions[i]);
     }
   }
 
@@ -251,7 +251,7 @@
     // SRS：练习即时判分（全对 good / 少选 hard / 错 again；含简答的题待自评，不在此记录）
     const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
     if (entry) {
-      if (r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
+      if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
       try {
         QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
       } catch (e) { /* Storage.onError 已提示；不阻断答题 UI */ }
@@ -309,6 +309,15 @@
     const list = await QB.WrongBook.list(State.bankId);
     if (!list.length) { UI.toast('错题本是空的', 'err'); return; }
     beginQuiz(QB.shuffle(list.map((x) => x.question)).slice(0, QB.CONFIG.QUESTIONS_PER_QUIZ), 'practice', '错题重练');
+  }
+
+  /** 结果页「错题重练」：只练本场作答的错题（口径与错题本写入一致：错且非半对） */
+  function startResultWrongQuiz() {
+    const engine = State.engine;
+    if (!engine) return;
+    const wrongs = QB.WrongBook.sessionWrongs(engine.questions, engine.results);
+    if (!wrongs.length) { UI.toast('本次没有错题 🎉', 'ok'); return; }
+    beginQuiz(QB.shuffle(wrongs), 'practice', '本次错题重练（' + wrongs.length + ' 题）');
   }
 
   async function startFavoriteQuiz() {
@@ -437,7 +446,7 @@
         State.view = 'home';
         return render();
       case 'retry-wrong':
-        return startWrongQuiz();
+        return startResultWrongQuiz();
 
       /* —— 答题 —— */
       case 'pick': {
@@ -480,7 +489,7 @@
         if (entry) {
           try { QB.SRSStore.grade(State.bankId, entry.question, entry.rating); }
           catch (e) { /* Storage.onError 已提示 */ }
-          if (r.isCorrect === false && !r.partial) await QB.WrongBook.add(State.bankId, q);
+          if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
         }
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
         return render();

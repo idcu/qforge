@@ -92,7 +92,7 @@
 | `modules/ui-renderer.js` | 渲染首页/答题/结果/列表/统计/搜索，以及 `toast`/`openModal`/`confirmDialog`；**弹窗纯 HTML 构建**（组卷 `renderMixDialog`、练习/考试开始 `renderStartDialog`、题型/分类/难度/题量控件），交互由 app.js 绑定 |
 | `modules/bank-manager.js` | `create/rename/remove(级联)/importSample` |
 | `modules/question-editor.js` | 题目 CRUD：`buildQuestion` 纯函数 + 编辑器/管理器界面（走 QuestionRepo） |
-| `modules/wrong-book.js` | 错题本薄封装（`QB.DB.progress` + `buildIndex`） |
+| `modules/wrong-book.js` | 错题本薄封装（`QB.DB.progress` + `buildIndex`）；`isWrongResult/sessionWrongs` 统一「是否错题」判定（错且非半对，不定项少选不算），结果页「错题重练」据此只取本场错题 |
 | `modules/favorites.js` | 收藏夹薄封装 |
 | `modules/history.js` | 历史记录 + `stats` 聚合 |
 | `modules/statistics.js` | `overview`/`typePerformance`/`suggestions`/`dailyActivity`（近 N 周答题热力，周一列首对齐） |

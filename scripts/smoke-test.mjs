@@ -672,6 +672,19 @@ eq(wl[0].wrongCount, 2, '错题累加 wrongCount=2');
 eq(wl[0].question.contentHash, q0.contentHash, '错题可关联回题目');
 eq(await QB.WrongBook.count(bankB.id), 0, '错题本按题库隔离');
 
+// 本次错题口径（结果页「错题重练」与错题本写入必须一致）：错且非半对；对/半对/待自评/未作答不算
+ok(QB.WrongBook.isWrongResult({ isCorrect: false }), 'isWrongResult：错 = true');
+ok(!QB.WrongBook.isWrongResult({ isCorrect: true }), 'isWrongResult：对 = false');
+ok(!QB.WrongBook.isWrongResult({ isCorrect: false, partial: true }), 'isWrongResult：半对（少选）不算错');
+ok(!QB.WrongBook.isWrongResult({ isCorrect: null }), 'isWrongResult：待自评不算错');
+ok(!QB.WrongBook.isWrongResult(null), 'isWrongResult：未作答（null 结果）不算错');
+const sq = QB.WrongBook.sessionWrongs(
+  [{ question: 'a' }, { question: 'b' }, { question: 'c' }, { question: 'd' }],
+  [{ isCorrect: true }, { isCorrect: false }, { isCorrect: false, partial: true }, null]
+);
+eq(sq.length, 1, 'sessionWrongs：仅取本场错题（排除对/半对/未作答）');
+eq(sq[0].question, 'b', 'sessionWrongs：命中本场错题 b');
+
 const fav = await QB.Favorites.toggle(bankA.id, listA.items[1]);
 eq(fav.added, true, '收藏加入');
 eq(await QB.Favorites.count(bankA.id), 1, '收藏计数 1');
