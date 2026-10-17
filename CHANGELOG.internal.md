@@ -1148,6 +1148,34 @@
 
 ---
 
+## 7ed5c05 · feat(ui): 答题卡配色 / 顶栏菜单吸顶 / 收藏态反馈 / 搜索单行固定 / 错题重练可筛选
+
+**背景**：用户实测反馈 6 项体验问题（答题卡颜色区分不明显、顶部菜单栏不固定、收藏后无状态反馈、历史统计不固定、搜索页筛选/计数/练习入口不在一行且不固定、错题重练不可筛选）。
+
+**根因（关键）**：`css/style.css` 引用了 `--brand` / `--brand-soft` / `--brand-text` / `--surface-muted`，但这 4 个变量在 `:root` **从未定义**。CSS 中引用未定义 var 的声明会在计算值阶段被丢弃（不可继承），导致答题卡、存储条、热力图、拖拽遮罩、tag-chip 等**整片样式静默失效**——这正是「答题卡颜色区分不明显」的根因。
+
+**核心改动**
+- `css/style.css`：在 `:root` 补 `--brand: var(--primary)` / `--brand-soft: var(--primary-weak)` / `--brand-text: var(--primary)` / `--surface-muted: var(--surface-2)` 别名（修复整片失效）；答题卡状态色强化为 correct=绿(`--success`)、wrong=红(`--danger`)、answered=蓝(`--primary-weak`)、empty=灰、pending=黄(`--warning-weak`)，格子字重 600，图例补 pending；新增 `.stick-head`（`position:sticky; top:var(--top-shell-h)`）、`.fav-on`、`.st-types/.st-type`、`--top-shell-h`。
+- `index.html`：顶栏 + 菜单栏包入 `.top-shell`（整体 sticky，滚动常驻）。
+- `js/app.js`：新增 `syncStickyOffset()`（每次渲染后实测 `.top-shell` 高度写入 `--top-shell-h`，并监听 resize）；`fav-toggle` 切换后 `return render()` 即时反馈；新增 `openWrongDialog()`；`openStartDialog(mode, opts)` 泛化为可传题池（错题重练传错题池）；`start-wrong` 改指向 `openWrongDialog`，删除旧 `startWrongQuiz`。
+- `js/modules/ui-renderer.js`：`renderQuiz` 支持 `opts.favorited`（★ 已收藏 + fav-on）；答题卡图例补「待自评」；`renderHistoryList` 统计卡加 `stick-head`；`renderSearch` 重构为**单行 sticky 工具栏**（输入/题型/分类/标签/计数/练习入口同一容器）；`renderStartDialog` 新增可选 `title`。
+
+**公共抽象 / 影响面**
+- `QB.UIRenderer.renderStartDialog(mode, avail, cats, defaultCount, title)` —— 新增可选 `title`（向后兼容，缺省按 mode 显示）。
+- app.js 内部：`syncStickyOffset` / `openWrongDialog` 新增；`openStartDialog` 签名由 `(mode)` 泛化为 `(mode, opts)`。
+- CSS 令牌别名 + `.stick-head` / `.fav-on` / `.st-types` / `.st-type` —— 全站可复用。
+
+**验证数据**
+- 全量 **18 套 2368 / 2368 通过 0 失败**（Node v24.14.0 / Windows）；`scripts/ui-renderer.test.mjs` 28→**49**（+21：答题卡状态类与图例、收藏已收藏态、搜索单行 sticky、历史统计 sticky、自定义标题）。
+- 浏览器端到端（`127.0.0.1:8781`，无 SW 缓存）：①菜单栏滚动吸顶 PASS；②搜索栏 `getComputedStyle().position=sticky` 且输入/计数/练习按钮同容器 PASS；③错题重练弹窗含题型复选框/分类下拉/题量（value=错题数）PASS；④收藏双击 ★→☆→★ 双向切换 + fav-on PASS；⑤答题卡计算样式 `correct=rgb(22,163,74)`、`wrong=rgb(220,38,38)`、pending/answered/empty 互异且无 `rgba(0,0,0,0)` PASS。
+- 无性能路径改动，`scripts/bench.mjs` 未重跑（无性能断言变更）。
+
+**遗留 TODO / 风险**
+- 「历史统计」sticky 卡在**无历史记录**时 `renderHistoryList` 提前返回空状态、不渲染该卡（无法在空库下目测吸顶）；其吸顶由 `.stick-head` 类保证，已通过同一类的搜索栏 `position:sticky` 间接验证。
+- 说明：本轮 UI 为纯样式/交互，无 FSRS/hash 等算法改动。
+
+---
+
 ## c74e7f6 · feat(quiz): 结果页「错题重练」只练本场错题（不对整本错题本抽题）
 
 **背景**：用户实测「练习模式下，做完题 点错题重练 只要练当前练习的错题就行，不要直接出来很多不是当次的」。原 `retry-wrong` 走 `startWrongQuiz`，抽的是整个错题本（全部历史错题、上限 50 题），与本场作答无关。
@@ -1202,6 +1230,7 @@
 > 练习/考试选择 + 组卷修复（2026-10-16）：`6ef0988` feat(quiz) 练习/考试可选题型·分类·题量 + 修复 data-bp-min/max 畸形属性致组卷「开始」无反应（18 套 2333 断言）
 > 题干渲染修复（2026-10-16）：`3bd0ace` fix(quiz) 答题界面题干未渲染（非材料题只显示选项，回归自 10fc2d7）（18 套 2340 断言）
 > 结果页错题重练（2026-10-17）：`c74e7f6` feat(quiz) 结果页「错题重练」只练本场错题（新增 isWrongResult/sessionWrongs 公共纯函数，app.js 三处谓词复用）（18 套 2347 断言）
+> UI 体验批次（2026-10-17）：`7ed5c05` feat(ui) 答题卡配色/顶栏菜单吸顶/收藏态反馈/搜索单行固定/错题重练可筛选（修复 --brand 系列未定义致样式整片失效；新增 .stick-head/--top-shell-h）（18 套 2368 断言，ui-renderer 28→49）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
