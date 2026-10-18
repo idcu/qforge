@@ -1148,6 +1148,29 @@
 
 ---
 
+## eda51ba · feat(ui): 「直达底部」悬浮按钮（与回到顶部对称，共享 .btn-float）
+
+**背景**：用户要求「添加直达底部按钮」——与既有「回到顶部」对称。
+
+**核心改动**
+- `index.html`：新增 `<button id="btn-bottom" class="btn-float btn-bottom">↓</button>`；`#btn-top` 同改为 `class="btn-float btn-top"`。
+- `css/style.css`：抽取共享 `.btn-float`（`position:fixed; right:18px; 44px 圆形悬浮钮; display:none`）与 `.btn-float.show{display:flex}`；`.btn-top{bottom:76px}` / `.btn-bottom{bottom:20px}` 仅负责定位；`@media print` 改隐藏 `.btn-float`。
+- `js/app.js`：`syncTopButton` 泛化为 `syncScrollButtons` —— 距顶 > 400px 显示「回到顶部」、距底 > 400px 显示「直达底部」（`max = scrollHeight - innerHeight`），答题视图一律隐藏；绑定 `#btn-bottom` → `scrollTo({ top: scrollHeight, behavior:'smooth' })`。
+
+**公共抽象 / 影响面**
+- app.js 内部函数 `syncTopButton()` → 重命名 `syncScrollButtons()`（同时管理两钮）。
+- CSS 新增共享类 `.btn-float`（替代原 `.btn-top` 内的完整样式），`.btn-top`/`.btn-bottom` 退化为定位类 —— 全站可复用。
+- 无对外 API 变更。
+
+**验证数据**
+- 全量 **18 套 2379 / 2379 通过 0 失败**（Node v24.14.0 / Windows）；`scripts/pwa.test.mjs` 35→**40**（+5：#btn-bottom 元素、`.btn-float` 复用、`scrollHeight` 直达底部、定位类断言）。
+- 无性能路径改动，`scripts/bench.mjs` 未重跑。
+
+**遗留 TODO / 风险**
+- 无。「直达底部」与「回到顶部」互为镜像，阈值同为 400px；答题视图统一隐藏。
+
+---
+
 ## 3c10bfd · feat(ui): 「回到顶部」悬浮按钮 + 切换标签回顶
 
 **背景**：用户要求「需要一个回到顶部的按钮，其它细节优化你看着办」。
@@ -1256,6 +1279,7 @@
 > 结果页错题重练（2026-10-17）：`c74e7f6` feat(quiz) 结果页「错题重练」只练本场错题（新增 isWrongResult/sessionWrongs 公共纯函数，app.js 三处谓词复用）（18 套 2347 断言）
 > UI 体验批次（2026-10-17）：`7ed5c05` feat(ui) 答题卡配色/顶栏菜单吸顶/收藏态反馈/搜索单行固定/错题重练可筛选（修复 --brand 系列未定义致样式整片失效；新增 .stick-head/--top-shell-h）（18 套 2368 断言，ui-renderer 28→49）
 > 回到顶部按钮（2026-10-17）：`3c10bfd` feat(ui) 「回到顶部」悬浮按钮 + 切换标签回顶（新增 syncTopButton/.btn-top；答题视图自动隐藏）（18 套 2374 断言，pwa 29→35）
+> 直达底部按钮（2026-10-18）：`eda51ba` feat(ui) 「直达底部」悬浮按钮（抽取共享 .btn-float，syncTopButton→syncScrollButtons 双向管理）（18 套 2379 断言，pwa 35→40）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
