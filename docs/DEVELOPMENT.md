@@ -36,9 +36,9 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 
 ## 2. 测试矩阵（有数据才算做完）
 
-| 套件 | 断言数（2026-10-16 实跑） | 覆盖 |
+| 套件 | 断言数（2026-10-19 实跑） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **436** | 全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v2（同题干异选项/答案不误并、乱序语义等价、判断题答案入 hash）**、**考试简答待自评（gradeAll 保留 null，7 项）**、内置样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 540 题往返、多题库隔离/级联删除、答题卡、**结果页错题重练按本场错题（isWrongResult/sessionWrongs，7 项）** |
+| `scripts/smoke-test.mjs` | **461** | 全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v2（同题干异选项/答案不误并、乱序语义等价、判断题答案入 hash）**、**按题型分值（pointsMap：默认 10 分/自定义 25·40 分、材料题满分=各小问按小问题型分值累加、全对满分与少选半分、getState/restore 保留时长·分值·计时开关，15 项）**、**考试时长与练习正计时（createExamTimer countUp/倒计时实测 onTick·onExpire·setDuration，8 项）**、**考试简答待自评（gradeAll 保留 null，7 项）**、内置样例、xlsx 多工作表/docx 解析（自研 XmlLite）、DOCX 内嵌图片与 WPS 回环、选项乱序、JSON/CSV/Markdown 三格式 540 题往返、多题库隔离/级联删除、答题卡、**结果页错题重练按本场错题（isWrongResult/sessionWrongs，7 项）** |
 | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
 | `scripts/exporter.test.mjs` | **160** | 七格式注册、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、**材料题五格式分流/18 列多行块/三格式 hash 往返/JSON 嵌套 material+children 往返（18 项）**、错题 wrongCount、乱序隔离、历史记录四格式（11 列/半对/切出/用时/白名单拒绝） |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
@@ -55,8 +55,8 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `scripts/migrate.test.mjs` | **33** | v1→v2 contentHash 升级、review/wrong/fav/revlog 键重映射、revlog 回填 b、幂等逐字节不变、同题干异答案共存、旧裸 hash 强制重算 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **46** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**悬浮滚动按钮（#btn-top/#btn-bottom 复用 .btn-float + .btn-top/.btn-bottom 定位 + app.js scrollTo/scrollHeight/scroll 绑定 + CSS .btn-float.show，11 项）**、**细节样式修复（`.li-meta` 不限 `.list-item`、弹窗 `.modal select`/`input.st-count` 控件样式、`.bp-n` 宽度不被覆盖、toast 置底居中避开悬浮按钮、`.qe-grid` 换行，6 项）** |
-| `scripts/ui-renderer.test.mjs` | **49** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、题型复选框数=题型数、分类转义、题量默认值、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡** |
-| **合计** | **2385 / 2385 通过 · 18 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| `scripts/ui-renderer.test.mjs` | **55** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡** |
+| **合计** | **2416 / 2416 通过 · 18 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 

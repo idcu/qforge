@@ -38,6 +38,7 @@ const MODULES = [
   'js/modules/source.js',
   'js/modules/data-io.js',
   'js/modules/quiz-engine.js',
+  'js/modules/exam-timer.js',
   'js/modules/wrong-book.js',
   'js/modules/favorites.js',
   'js/modules/history.js',

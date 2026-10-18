@@ -1059,7 +1059,95 @@ const docxBuilt = QB.Exporters.buildContent('docx', expBank);
 ok(docxBuilt.content instanceof ArrayBuffer && docxBuilt.content.byteLength > 0, 'docx 导出为二进制 ArrayBuffer');
 eq(QB.Exporters.FORMATS.length, 7, '已注册导出格式数 = 7（qbk/json/csv/xlsx/docx/markdown/txt）');
 
-/* ================= 10. 级联删除 ================= */
+/* ================= 10. 按题型分值 / 考试时长 / 练习计时 ================= */
+section('按题型分值 / 考试时长 / 练习计时');
+{
+  const mkSingle = (id) => ({ id: id, type: 'single', question: '题干', options: ['甲', '乙', '丙', '丁'], answer: 'A' });
+  const mkJudge = (id) => ({ id: id, type: 'judge', question: '题干', answer: '正确' });
+
+  // 默认口径：每题 10 分（CONFIG.POINTS_PER_CORRECT）
+  const eng0 = new QB.QuizEngine();
+  eng0.loadQuestions([mkJudge('a')], 'mixed', { shuffleOptions: false });
+  eq(eng0.pointOf('judge'), 10, '默认每题分值 = CONFIG.POINTS_PER_CORRECT(10)');
+  eng0.selectAnswer(true); eng0.submitAnswer();
+  eq(eng0.getScore().score, 10, '默认判对得 10 分');
+
+  // 本场按题型分值（不写回题库）：判断 25 / 单选 40
+  const eng = new QB.QuizEngine();
+  eng.loadQuestions([mkJudge('b'), mkSingle('c')], 'mixed', { shuffleOptions: false, pointsMap: { judge: 25, single: 40 } });
+  eq(eng.pointOf('judge'), 25, '判断题本场分值 25');
+  eq(eng.pointOf('single'), 40, '单选题本场分值 40');
+  eng.selectAnswer(true); eng.submitAnswer(); eng.nextQuestion();
+  eng.selectAnswer('A'); eng.submitAnswer();
+  eq(eng.getScore().score, 65, '两题按题型分值合计 25 + 40 = 65');
+  eq(eng.getScore().accuracy, 100, '两题全对正确率 100%');
+
+  // 材料题：整题满分 = 各小问「小问题型分值」累加（替换原 10×小问数口径）
+  const mat = {
+    id: 'm', type: 'material', question: '材料总题干', material: '共享材料',
+    children: [
+      { type: 'single', question: '小问1', options: ['甲', '乙', '丙', '丁'], answer: 'A' },
+      { type: 'indefinite', question: '小问2', options: ['甲', '乙', '丙', '丁'], answer: 'AB' }
+    ]
+  };
+  const eng2 = new QB.QuizEngine();
+  eng2.loadQuestions([mat], 'mixed', { shuffleOptions: false, pointsMap: { single: 20, indefinite: 30 } });
+  eng2.selectAnswer('A', 0); eng2.toggleAnswer('A', 1); eng2.toggleAnswer('B', 1);
+  eng2.submitAnswer();
+  eq(eng2.results[0].points.max, 50, '材料题满分 = 20 + 30 = 50（小问题型分值累加）');
+  eq(eng2.results[0].points.earned, 50, '材料题全对得满分 50');
+  eq(eng2.getScore().score, 50, '材料题按小问累计计 50 分');
+
+  // 材料题不定项小问「少选半对」= 该小问半分
+  const mat2 = {
+    id: 'm2', type: 'material', question: '材料2', material: 'm',
+    children: [
+      { type: 'indefinite', question: 'i', options: ['甲', '乙', '丙', '丁'], answer: 'AB' },
+      { type: 'judge', question: 'j', answer: '正确' }
+    ]
+  };
+  const eng3 = new QB.QuizEngine();
+  eng3.loadQuestions([mat2], 'mixed', { shuffleOptions: false, pointsMap: { indefinite: 30, judge: 10 } });
+  eng3.toggleAnswer('A', 0); eng3.selectAnswer(true, 1); // 少选 AB 里的 A → 半对
+  eng3.submitAnswer();
+  eq(eng3.results[0].children[0].earned, 15, '不定项少选半对：30 分得 15');
+  eq(eng3.results[0].points.earned, 25, '材料题得分 = 15 + 10 = 25');
+  eq(eng3.results[0].partial, true, '材料题含半对 → partial=true（不计全对）');
+
+  // 时长 / 计时开关 / 分值 经 getState→restore 保留（进度恢复）
+  const eng4 = new QB.QuizEngine();
+  eng4.loadQuestions([mkJudge('d')], 'mixed', { shuffleOptions: false });
+  eng4.mode = 'exam'; eng4.pointsMap = { judge: 12 }; eng4.durationMs = 30 * 60 * 1000; eng4.showTimer = true;
+  const resumed = new QB.QuizEngine();
+  ok(resumed.restore(eng4.getState()), '进度恢复：restore 成功');
+  eq(resumed.durationMs, 1800000, '考试时长经 getState/restore 保留（30 分钟）');
+  eq(resumed.pointOf('judge'), 12, '按题型分值经 restore 保留');
+  eq(resumed.showTimer, true, '练习计时开关经 restore 保留');
+
+  // 计时器：正计时（练习）与倒计时（考试）实测
+  let lastTick = 0;
+  const up = QB.createExamTimer({ countUp: true, onTick: (ms) => { lastTick = ms; } });
+  eq(up.getElapsed(), 0, '正计时初值 elapsed=0');
+  eq(up.getRemaining(), 0, '正计时 remaining 恒为 0（不限时）');
+  up.start();
+  await new Promise((r) => setTimeout(r, 1100));
+  up.stop();
+  ok(up.getElapsed() >= 900, '正计时 1.1 秒后 elapsed ≥ 900ms（实测 ' + up.getElapsed() + 'ms）');
+  ok(lastTick >= 900, 'onTick 回报已用毫秒（实测 ' + lastTick + 'ms）');
+  eq(up.isRunning(), false, 'stop 后不再计时');
+
+  let expired = false;
+  const down = QB.createExamTimer({ durationMs: 100, onExpire: () => { expired = true; } });
+  eq(down.getRemaining(), 100, '倒计时初值 = durationMs');
+  down.start();
+  await new Promise((r) => setTimeout(r, 1200));
+  ok(expired === true, '倒计时到期触发 onExpire（自动交卷）');
+  eq(down.getRemaining(), 0, '到期后剩余 0');
+  down.setDuration(500);
+  eq(down.getRemaining(), 500, 'setDuration 重置剩余时间');
+}
+
+/* ================= 11. 级联删除 ================= */
 section('级联删除');
 await QB.DB.banks.remove(bankA.id, { cascade: true });
 eq((await QB.DB.banks.list()).length, 1, '删除后剩余 1 个题库');

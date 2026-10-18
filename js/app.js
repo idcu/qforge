@@ -238,14 +238,23 @@
     State.engine = engine;
     State.quizMeta = { startTs: Date.now(), title: title || '', focusLeaves: 0, locked: false };
     State.view = 'quiz';
-    if (engine.mode === 'exam') startExamTimer(); else stopTimer();
+    startQuizTimer(engine);
     QB.ProgressSaver.save(State.bankId, engine);
     render();
   }
 
+  /** 按引擎配置启动计时：考试→倒计时（durationMs>0）；练习→可选正计时 */
+  function startQuizTimer(engine) {
+    if (!engine) return stopTimer();
+    if (engine.mode === 'exam') startExamTimer();
+    else if (engine.showTimer) startPracticeTimer();
+    else stopTimer();
+  }
+
   function startExamTimer() {
     stopTimer();
-    const dur = (QB.CONFIG.DEFAULT_EXAM_MINUTES || 30) * 60 * 1000;
+    const dur = (State.engine && State.engine.durationMs) || 0;
+    if (dur <= 0) return; // 0=不限时，不启动倒计时
     State.timerText = QB.Helpers.formatDuration(dur);
     State.timer = QB.createExamTimer({
       durationMs: dur,
@@ -253,6 +262,18 @@
       onExpire: () => { UI.toast('考试时间到，已自动交卷', 'err'); finishQuiz(); }
     });
     State.timer.start();
+  }
+
+  /** 练习模式可选正计时（仅显示用时，不自动结束） */
+  function startPracticeTimer() {
+    stopTimer();
+    State.timerText = QB.Helpers.formatDuration(0);
+    State.timer = QB.createExamTimer({
+      countUp: true,
+      onTick: (elapsed) => { State.timerText = QB.Helpers.formatDuration(elapsed); updateStatus(); }
+    });
+    State.timer.start();
+    updateStatus();
   }
 
   function stopTimer() {
@@ -339,8 +360,7 @@
     openStartDialog('practice', {
       pool: pool,
       title: '错题重练（' + pool.length + ' 题）',
-      quizTitle: '错题重练',
-      defaultCount: pool.length
+      quizTitle: '错题重练'
     });
   }
 
@@ -707,14 +727,27 @@
     );
   }
 
+  /** 读取弹窗内各题型的「数量 / 每题分值」输入（组卷与练习·考试开始弹窗共用） */
+  function readTypeInputs(modal) {
+    const counts = {};
+    const points = {};
+    Array.prototype.forEach.call(modal.querySelectorAll('[data-bp-type]'), (el) => {
+      counts[el.getAttribute('data-bp-type')] = parseInt(el.value, 10) || 0;
+    });
+    Array.prototype.forEach.call(modal.querySelectorAll('[data-bp-pts]'), (el) => {
+      points[el.getAttribute('data-bp-pts')] = parseInt(el.value, 10) || 0;
+    });
+    return { counts: counts, points: points };
+  }
+
   function openMixedDialog() {
     const avail = QB.Blueprint.availability(State.allQuestions, {});
     const cats = QB.SearchFilter.categories(State.allQuestions);
     UI.openModal(UI.renderMixDialog(avail, cats), (modal) => {
       modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
       modal.querySelector('[data-action="modal-ok"]').onclick = () => {
-        const items = Array.prototype.map.call(modal.querySelectorAll('.bp-n'), (el) =>
-          ({ type: el.getAttribute('data-bp-type'), count: parseInt(el.value, 10) || 0 }));
+        const { counts } = readTypeInputs(modal);
+        const items = QB.CONFIG.TYPES.map((t) => ({ type: t, count: counts[t] || 0 }));
         const category = modal.querySelector('[data-bp-cat]').value;
         const minDifficulty = parseInt(modal.querySelector('[data-bp-min]').value, 10) || 0;
         const maxDifficulty = parseInt(modal.querySelector('[data-bp-max]').value, 10) || 0;
@@ -736,35 +769,48 @@
   }
 
   /**
-   * 练习/考试开始：可选题型（多选）、分类与题量，题量 0/空=不限
+   * 练习/考试开始：按题型设置「抽取数量 + 每题分值」，可再选分类；
+   *   考试模式可设时长；练习模式可选显示正计时。
    * @param {string} mode 'practice' | 'exam'
    * @param {Object} [opts]
    *   pool? 题池（默认 State.allQuestions；错题重练传入错题池）
-   *   title? 弹窗标题；quizTitle? 入场标题；defaultCount? 默认题量
+   *   title? 弹窗标题；quizTitle? 入场标题
    */
   function openStartDialog(mode, opts) {
     opts = opts || {};
     const pool0 = opts.pool || State.allQuestions;
     const avail = QB.Blueprint.availability(pool0, {});
     const cats = QB.SearchFilter.categories(pool0);
-    const defaultCount = opts.defaultCount || QB.CONFIG.QUESTIONS_PER_QUIZ || 50;
     const quizTitle = opts.quizTitle || (mode === 'exam' ? '考试模式' : '练习模式');
-    UI.openModal(UI.renderStartDialog(mode, avail, cats, defaultCount, opts.title), (modal) => {
+    UI.openModal(UI.renderStartDialog(mode, avail, cats, { title: opts.title }), (modal) => {
       modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
       modal.querySelector('[data-action="modal-ok"]').onclick = () => {
-        const types = Array.prototype.map.call(modal.querySelectorAll('.st-type-cb:checked'), (el) => el.value);
+        const { counts, points } = readTypeInputs(modal);
+        const items = QB.CONFIG.TYPES.map((t) => ({ type: t, count: counts[t] || 0 }))
+          .filter((it) => it.count > 0);
         const category = modal.querySelector('[data-st-cat]').value;
-        const count = parseInt(modal.querySelector('.st-count').value, 10) || 0;
         const shuffleOpts = modal.querySelector('#st-shuffle-opt').checked;
+        let durationMin = 0;
+        let showTimer = false;
+        if (mode === 'exam') {
+          durationMin = parseInt(modal.querySelector('#st-duration').value, 10) || 0;
+        } else {
+          showTimer = modal.querySelector('#st-timer').checked;
+        }
         UI.closeModal();
-        const pool = QB.Blueprint.filterPool(pool0, {
-          types: types.length ? types : undefined,
-          category: category || undefined
+        if (!items.length) { UI.toast('请先为至少一种题型设置抽取数量（0=不选）', 'err'); return; }
+        const { questions, shortages } = QB.Blueprint.compose(pool0, { items: items, category: category || undefined });
+        if (!questions.length) { UI.toast('按当前条件没有可作答的题目', 'err'); return; }
+        if (shortages.length) {
+          UI.toast('部分题型数量不足，实际组卷 ' + questions.length + ' 题', 'err');
+        }
+        const pointsMap = {};
+        items.forEach((it) => {
+          pointsMap[it.type] = points[it.type] > 0 ? points[it.type] : (QB.CONFIG.POINTS_PER_CORRECT || 10);
         });
-        let qs = QB.shuffle(pool);
-        if (count > 0) qs = qs.slice(0, count);
-        if (!qs.length) { UI.toast('按当前条件没有可作答的题目', 'err'); return; }
-        beginQuiz(qs, mode, quizTitle, { shuffleOptions: shuffleOpts });
+        const quizOpts = { shuffleOptions: shuffleOpts, pointsMap: pointsMap, showTimer: showTimer };
+        if (mode === 'exam' && durationMin > 0) quizOpts.durationMs = durationMin * 60 * 1000;
+        beginQuiz(questions, mode, quizTitle, quizOpts);
       };
     });
   }
@@ -999,7 +1045,7 @@
     State.engine = engine;
     State.quizMeta = { startTs: Date.now(), title: '继续上次' };
     State.view = 'quiz';
-    if (engine.mode === 'exam') startExamTimer();
+    startQuizTimer(engine);
     render();
   }
 

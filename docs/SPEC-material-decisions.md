@@ -10,9 +10,10 @@
 
 ### 现状（代码事实）
 
-- `config.js`：`POINTS_PER_CORRECT=10`，全局唯一分值常量；`quiz-engine.getScore()` 为 `correct*10 + partial*Math.round(10/2)`（不定项少选得 5 分）。
+- `config.js`：`POINTS_PER_CORRECT=10`，全局默认分值常量；`quiz-engine.getScore()` 按题型分值计：`pointOf(type)`（本场 `pointsMap[type]` 优先，否则回落 10）+ 半对半分（不定项少选得半分）。
 - 历史记录 `attempts.score` 是单整数；蓝图（`blueprint.js`）只有抽题数量概念，无分值。
-- 所有现有题型满分一致（10），跨题分数天然可比，统计/历史 XLSX 导出按此口径。
+- 练习题/考试开始弹窗（2026-10-19 起）可为**每个题型单独设「每题分值」**（仅本场生效、不写回题库）；材料题整题满分 = 各小问按「小问题型分值」累加（`QB.childPoints`）。未单设时仍为 10 分/题，跨题分数可比口径不变。
+- 默认口径下所有现有题型满分一致（10），跨题分数天然可比，统计/历史 XLSX 导出按此口径；本场按题型覆盖分值后，仅影响本场得分展示，历史 `score` 仍记本场实际得分。
 
 ### 选项
 

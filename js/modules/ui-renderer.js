@@ -717,12 +717,28 @@
       (d === 0 ? '不限' : d) + '</option>').join('');
   }
 
-  /** 题型 × 每题型题量行（组卷用） */
-  function typeCountRows(avail) {
+  /**
+   * 题型行构建器（组卷 / 练习 / 考试开始弹窗共用）
+   * @param {Object} avail 各题型可用数量
+   * @param {Object} [opts]
+   *   countClass? 数量输入框类名（默认 bp-n）
+   *   countValue? 数量默认值（默认 0）
+   *   points? 是否显示「每题分值」列（练习/考试用，组卷不显示）
+   *   pointsDefault? 每题分值默认值（默认 CONFIG.POINTS_PER_CORRECT）
+   */
+  function typeCountRows(avail, opts) {
+    opts = opts || {};
+    const countClass = opts.countClass || 'bp-n';
+    const countValue = opts.countValue === undefined ? 0 : opts.countValue;
+    const showPoints = !!opts.points;
+    const pDef = opts.pointsDefault || (QB.CONFIG.POINTS_PER_CORRECT || 10);
     return QB.CONFIG.TYPES.map((t) =>
       '<div class="bp-row"><label class="bp-name">' + esc(QB.typeLabel(t)) +
       ' <span class="li-meta">（可选 ' + ((avail && avail[t]) || 0) + '）</span></label>' +
-      '<input type="number" min="0" class="bp-n" data-bp-type="' + esc(t) + '" value="0" /></div>').join('');
+      '<input type="number" min="0" class="' + esc(countClass) + '" data-bp-type="' + esc(t) + '" value="' + countValue + '" />' +
+      (showPoints ? '<span class="bp-pts-label">每题</span><input type="number" min="0" class="bp-pts" data-bp-pts="' +
+        esc(t) + '" value="' + pDef + '" />' : '') +
+      '</div>').join('');
   }
 
   /**
@@ -746,25 +762,36 @@
   }
 
   /**
-   * 练习/考试开始弹窗 HTML：可选题型（多选）、分类与题量
+   * 练习/考试开始弹窗 HTML：按题型设置「抽取数量 + 每题分值」，可再选分类；
+   *   考试模式可设「考试时长（分钟）」；练习模式可选「显示计时（正计时，默认关）」。
    * @param {string} mode 'practice' | 'exam'
    * @param {Object} avail 各题型可用数量
    * @param {Array<string>} cats 分类列表
-   * @param {number} defaultCount 默认题量（题量 0/空=不限）
-   * @param {string} [title] 弹窗标题（默认按 mode 显示「练习模式/考试模式」；错题重练等场景自定义）
+   * @param {Object} [opts] { title?, countValue?, durationDefault? }
    */
-  function renderStartDialog(mode, avail, cats, defaultCount, title) {
+  function renderStartDialog(mode, avail, cats, opts) {
+    opts = opts || {};
     const isExam = mode === 'exam';
-    const boxes = QB.CONFIG.TYPES.map((t) =>
-      '<label class="st-type"><input type="checkbox" class="st-type-cb" value="' + esc(t) + '" checked /> ' +
-      esc(QB.typeLabel(t)) + ' <span class="li-meta">（' + ((avail && avail[t]) || 0) + '）</span></label>').join('');
-    return '<h3>' + esc(title || (isExam ? '考试模式' : '练习模式')) + '</h3>' +
-      '<p class="li-meta">选择题型（默认全选）、分类与题量；题量留空或 0 表示不限，全部题量以题库为准。</p>' +
-      '<div class="st-types">' + boxes + '</div>' +
+    const durDef = opts.durationDefault || QB.CONFIG.DEFAULT_EXAM_MINUTES || 30;
+    const durField = isExam
+      ? '<div><label class="qe-label">考试时长（分钟，0=不限时）</label>' +
+        '<input type="number" min="0" class="st-count" id="st-duration" value="' + durDef + '" /></div>'
+      : '';
+    const timerRow = isExam ? '' :
+      '<div class="checkbox-row"><input type="checkbox" id="st-timer" /><label for="st-timer">显示计时（正计时，仅本场；默认关闭）</label></div>';
+    return '<h3>' + esc(opts.title || (isExam ? '考试模式' : '练习模式')) + '</h3>' +
+      '<p class="li-meta">按题型设置抽取数量（0=不选该题型）与每题分值；某题型数量不足时按实际数量组卷并提示。</p>' +
+      typeCountRows(avail, {
+        countClass: 'st-count',
+        countValue: opts.countValue === undefined ? 0 : opts.countValue,
+        points: true
+      }) +
       '<div class="qe-grid">' +
       '<div><label class="qe-label">分类</label><select data-st-cat>' + categoryOptions(cats, '全部分类') + '</select></div>' +
-      '<div><label class="qe-label">题量</label><input type="number" min="0" class="st-count" value="' + (defaultCount || 50) + '" /></div></div>' +
+      durField +
+      '</div>' +
       '<div class="checkbox-row"><input type="checkbox" id="st-shuffle-opt"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="st-shuffle-opt">选项乱序（单选/多选/不定项，仅影响本场）</label></div>' +
+      timerRow +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
       '<button class="btn" data-action="modal-ok">开始</button></div>';
   }

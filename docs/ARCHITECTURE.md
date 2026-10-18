@@ -55,7 +55,7 @@
 | `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存；visibility/beforeunload 落盘；`usageBytes()` |
 | `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions` | mulberry32 种子化洗牌/抽样；选项乱序并同步重映射答案 |
 | `utils/answer-normalize.js` | `QB.normalizeAnswer`/`QB.parseBoolean`/`QB.normalizeLetters` | 全角转半角、去空白、去标点、大小写归一；布尔归一 |
-| `utils/judge-answer.js` | `QB.judgeAnswer` | 按 `type` 策略表判分 |
+| `utils/judge-answer.js` | `QB.judgeAnswer` / `QB.childPoints` | 按 `type` 策略表判分；`judgeAnswer(q, ans, opts?)` 的 `opts.pointOf(type)` 提供本场「按题型分值」，材料题小问按小问题型分值累加（`childPoints` 口径唯一：本场分值 > 题目自带分 > `CONFIG.POINTS_PER_CORRECT`） |
 | `utils/question-id.js` | `QB.makeContentHash`/`QB.makeQuestionKey`/`QB.isCurrentHash` | v2 去重键（题型+题干+选项+答案，前缀 `2:`）；普通题与材料题子问题共用模块内语义归一件 |
 | `utils/zip-reader.js` | `QB.ZipReader`/`QB.decodeUtf8` | 原生 ZIP 读取（EOCD→中央目录→本地头）+ `DecompressionStream('deflate-raw')`；支持 method 0/8 |
 | `utils/zip-writer.js` | `QB.ZipWriter` | 原生 ZIP 打包（stored method=0 + CRC32），与 ZipReader 对称；xlsx/docx/qbk/qfbk 写出共用 |
@@ -88,8 +88,8 @@
 ### 3.5 业务模块（modules）
 | 文件 | 职责 |
 | --- | --- |
-| `modules/quiz-engine.js` | 答题状态机：装载/作答/进度/判分/`gradeAll`/`byType`/`restore` |
-| `modules/ui-renderer.js` | 渲染首页/答题/结果/列表/统计/搜索，以及 `toast`/`openModal`/`confirmDialog`；**弹窗纯 HTML 构建**（组卷 `renderMixDialog`、练习/考试开始 `renderStartDialog(mode, avail, cats, count, title)`、题型/分类/难度/题量控件），交互由 app.js 绑定；**需吸顶区块加 `stick-head` 类**（历史统计卡、搜索工具栏），答题卡按状态类着色（`ac-correct`/`ac-wrong`/`ac-answered`/`ac-pending`/`ac-empty`） |
+| `modules/quiz-engine.js` | 答题状态机：装载/作答/进度/判分/`gradeAll`/`byType`/`restore`；本场配置 `pointsMap`（按题型分值）、`durationMs`（考试限时）、`showTimer`（练习正计时开关）随 `getState/restore` 持久化；`pointOf(type)` 为分值解析唯一入口，`getScore()` 按题型计分 |
+| `modules/ui-renderer.js` | 渲染首页/答题/结果/列表/统计/搜索，以及 `toast`/`openModal`/`confirmDialog`；**弹窗纯 HTML 构建**（组卷 `renderMixDialog`、练习/考试开始 `renderStartDialog(mode, avail, cats, opts)`；题型行由公共 `typeCountRows(avail, {countClass,countValue,points,pointsDefault})` 构建，练习/考试含「每题分值」`bp-pts` 列、考试含 `#st-duration`、练习含 `#st-timer`），交互由 app.js 绑定；**需吸顶区块加 `stick-head` 类**（历史统计卡、搜索工具栏），答题卡按状态类着色（`ac-correct`/`ac-wrong`/`ac-answered`/`ac-pending`/`ac-empty`） |
 | `modules/bank-manager.js` | `create/rename/remove(级联)/importSample` |
 | `modules/question-editor.js` | 题目 CRUD：`buildQuestion` 纯函数 + 编辑器/管理器界面（走 QuestionRepo） |
 | `modules/wrong-book.js` | 错题本薄封装（`QB.DB.progress` + `buildIndex`）；`isWrongResult/sessionWrongs` 统一「是否错题」判定（错且非半对，不定项少选不算），结果页「错题重练」据此只取本场错题 |
@@ -105,7 +105,7 @@
 | `workers/fsrs-worker.js` | 训练 Worker（不经 index.html）：importScripts fsrs.js + train-core，收 `train` 消息回 `done/error`；SW 预缓存，离线可用 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
 | `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（一次作答一条 revlog 契约） |
-| `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire})` |
+| `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire,countUp})`：倒计时（考试，到期 `onExpire` 自动交卷）与正计时（练习 `countUp=true`，从 0 累加不结束）共用同一实现，`onTick` 统一回调「剩余/已用毫秒」 |
 | `modules/source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入测试） |
 | `modules/data-io.js` | 文件/粘贴/拖拽/**URL** 导入编排，统一「解析→预览→insertMany→记录来源」；`refreshUrlFlow` 按 checksum 刷新 |
 | `modules/office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包（与导入端对称） |
@@ -132,10 +132,12 @@
 
 ### 4.2 答题与结算
 ```
-app.beginQuiz(questions, mode) → new QuizEngine().loadQuestions
-  作答：selectAnswer / toggleAnswer / setFillAnswer / setEssayAnswer → submitAnswer
+app.beginQuiz(questions, mode, title, opts{pointsMap,durationMs,showTimer}) → new QuizEngine().loadQuestions
+  作答：selectAnswer / toggleAnswer / setFillAnswer / setEssayAnswer → submitAnswer（judgeAnswer 带 pointOf）
   练习：每题即时 judgeAnswer；简答 isCorrect=null → 自评 selfAssess
   考试：交卷时 gradeAll()（客观题未作答计错；简答/未自评小问保留 null=待自评，不计分不计错、不写 SRS/错题）
+  计分：每题型分值 = pointsMap[type] 或 CONFIG.POINTS_PER_CORRECT；材料题满分 = 各小问按小问题型分值累加
+  计时：startQuizTimer(engine) → 考试 durationMs>0 倒计时（到期自动交卷）；练习 showTimer 正计时（仅显示用时）
   finishQuiz() → History.add(record) → ProgressSaver.clear → 结果视图
 ```
 
@@ -170,7 +172,7 @@ Exporters.openFlow({kind, bank})
 | 抽象 | 职责 | 复用方 |
 | --- | --- | --- |
 | `normalizeAnswer(str, opts)` | 全角转半角、去空白、去标点、大小写 | 判分、去重、搜索 |
-| `judgeAnswer(question, userAnswer)` | 按 `type` 策略表统一判分；essay 返回 `null` | quiz-engine、statistics |
+| `judgeAnswer(question, userAnswer, opts?)` | 按 `type` 策略表统一判分；essay 返回 `null`；`opts.pointOf(type)` 指定本场按题型分值（材料题小问按此累加） | quiz-engine、statistics |
 | `makeContentHash(q)` | v2：`'2:'+FNV1a(题型+题干+选项集合+答案语义)` 去重键 | 导入去重、Repo、错题/收藏索引 |
 | `shuffle(arr, seed?)` / `shuffleOptions(q, seed?)` | 随机/种子化洗牌；选项乱序+答案重映射的派生克隆 | 抽题、答题选项乱序 |
 | `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步 | local-adapter 及所有持久化 |

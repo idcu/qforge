@@ -1288,6 +1288,38 @@
 
 ---
 
+## （待回填）· feat(quiz): 按题型抽取数量·每题分值 + 考试时长可设 + 练习可选正计时
+
+**背景**：用户实测「考试模式 不能设置考试时长，也不能设置每种题型的数量和分值；练习模式 不能设置每种题型的数量和分值，也不计时」。原 `renderStartDialog` 仅提供「题型复选框 + 单一总题量」，考试时长写死 `DEFAULT_EXAM_MINUTES`，练习无任何计时。
+
+**核心改动**
+- `js/modules/ui-renderer.js`：`typeCountRows(avail, opts)` 通用化（`countClass/countValue/points/pointsDefault`），组卷弹窗不显示分值列、练习/考试弹窗显示「数量 `st-count` + 每题分值 `bp-pts`」行；`renderStartDialog(mode, avail, cats, opts)` 重写（考试含 `#st-duration` 默认 30、练习含 `#st-timer` 计时开关，签名由 `(mode,avail,cats,defaultCount,title)` 改为 `(mode,avail,cats,opts)`）。
+- `js/utils/judge-answer.js`：新增公共纯函数 `QB.childPoints(q, opts)`（口径唯一：`opts.pointOf(type)` > 题目自带分 > `CONFIG.POINTS_PER_CORRECT`）；`QB.judgeAnswer(question, userAnswer, opts?)` 透传 `opts.pointOf`，材料题各小问按「小问题型分值」累加（替换原 `cq.score||10`）。
+- `js/modules/quiz-engine.js`：`loadQuestions` 接收 `pointsMap/durationMs/showTimer`；`pointOf(type)` 分值解析唯一入口，`getScore()` 按题型计分；`submitAnswer`/`gradeAll` 判分带 `pointOf`；`getState/restore` 持久化三项本场配置（旧会话无字段→回落默认，向前兼容）。
+- `js/modules/exam-timer.js`：`createExamTimer` 新增 `countUp`（练习正计时，从 0 累加不结束），倒计时/正计时共用同一 tick 实现，`onTick` 统一回调「剩余/已用毫秒」。
+- `js/app.js`：`openStartDialog` 重写（读 `[data-bp-type]/[data-bp-pts]` 组装 `Blueprint.compose` items，构造 `pointsMap`，考试读 `#st-duration`、练习读 `#st-timer`；总数为 0 时提示）；新增公共 `readTypeInputs(modal)`（组卷与开始弹窗共用）；`startQuizTimer(engine)` 分流启动（考试倒计时 / 练习正计时 / 无）；`startExamTimer` 改用 `engine.durationMs`（0=不限时）。
+- `css/style.css`：新增 `.modal .bp-row .st-count/·bp-pts`（窄控件，覆盖 `.modal input.st-count` 全宽）+ `.bp-pts-label`；删除随复选框一并废弃的 `.st-types`/`.st-type`。
+- 文档同步：ARCHITECTURE（judge-answer/quiz-engine/ui-renderer/exam-timer + 4.2 计分·计时）、user-guide（练习/考试/材料题三行）、SPEC-material-decisions（分值口径）、README/DEVELOPMENT（计数与覆盖）。
+
+**公共抽象 / 影响面**
+- 新增 `QB.childPoints(q, opts)` 公共纯函数；`QB.judgeAnswer` 第三参可选（向后兼容，缺省 10 分/题）。
+- `QB.QuizEngine.pointOf(type)` 新增；`getState()/restore()` schema 增 3 字段（`pointsMap/durationMs/showTimer`），旧快照缺省即默认，无破坏。
+- `QB.createExamTimer` 增 `countUp` 选项（旧调用行为不变，`onTick` 语义仍为倒计时剩余毫秒）。
+- `QB.UIRenderer.renderStartDialog` 第四参由 `defaultCount` 数字改为 `opts` 对象 —— **影响面**：唯一调用方 `app.js openStartDialog` 及 `scripts/ui-renderer.test.mjs` 已同步；无外部消费者。
+- app.js 内部：新增 `readTypeInputs(modal)`（组卷/开始弹窗共用，消除 `.bp-n` 与 `[data-bp-pts]` 两套读取）。
+
+**验证数据**
+- 全量 **18 套 2416 / 2416 通过 0 失败**（Node v24.14.0 / Windows）：smoke 436→**461**（+25：默认/自定义题型分值、材料题满分=小问题型分值累加 20+30=50 与全对 50 分、不定项少选 30→15 半分、`getState/restore` 保留时长/分值/计时开关、`createExamTimer` 正计时实测 elapsed=1001ms 与倒计时 onExpire+setDuration）；ui-renderer 49→**55**（+6：组卷无分值列、练习/考试每题型数量+分值行、考试时长默认 30、练习计时开关、data-st-cat）。
+- 口径核对（断言实测值）：默认每题 10 分判对得 10；本场 `{judge:25,single:40}` 两题全对得 65、正确率 100%；材料题 `{single:20,indefinite:30}` 全对满分 50。
+- 未触性能路径（无热路径改动），`scripts/bench.mjs` 未重跑。
+
+**遗留 TODO / 风险**
+- 按题型分值/时长/计时为**仅本场参数，不写回题库**；进度恢复保留，但引擎 `getState` 新增字段写入 IndexedDB 会话（旧客户端读到的旧快照缺少字段→按默认处理，已测）。
+- 练习弹窗每题数量默认 0（须手动填写，0=不选）；总量为 0 时以 toast 提示，不再像旧版默认抽 50 题（交互变更，已在 user-guide 说明）。
+- 考试时长为 0 表示**不限时**（不启动倒计时）；默认值 30。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > 评估整改批次：`3bcf58f` FSRS 公式对齐 · `0a594a2` changelog · `644bd41` 一次一评分 ·
 > `06c0971` contentHash v2+迁移 · `2f0b437` revlog 按库隔离 · `89a07ec` 考试待自评 ·
@@ -1317,6 +1349,7 @@
 > 回到顶部按钮（2026-10-17）：`3c10bfd` feat(ui) 「回到顶部」悬浮按钮 + 切换标签回顶（新增 syncTopButton/.btn-top；答题视图自动隐藏）（18 套 2374 断言，pwa 29→35）
 > 直达底部按钮（2026-10-18）：`eda51ba` feat(ui) 「直达底部」悬浮按钮（抽取共享 .btn-float，syncTopButton→syncScrollButtons 双向管理）（18 套 2379 断言，pwa 35→40）
 > 细节样式审计修复（2026-10-18）：`752a969` fix(ui) .li-meta 作用域解除 / 弹窗 select·题量框控件样式 / toast 置底居中不遮挡悬浮按钮 / .qe-grid 换行（18 套 2385 断言，pwa 40→46）
+> 本场组卷参数（2026-10-19）：`（待回填）` feat(quiz) 按题型抽取数量·每题分值 + 考试时长可设 + 练习可选正计时（新增 QB.childPoints/QuizEngine.pointOf/readTypeInputs，createExamTimer 支持 countUp；18 套 2416 断言，smoke 436→461，ui-renderer 49→55）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。

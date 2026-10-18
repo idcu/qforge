@@ -10,6 +10,9 @@
     this.questions = [];
     this.currentType = 'mixed';
     this.mode = 'practice'; // practice | exam
+    this.pointsMap = null;  // 本场「按题型分值」覆盖（null=按 CONFIG.POINTS_PER_CORRECT）
+    this.durationMs = 0;    // 考试限时毫秒（0=不限时）
+    this.showTimer = false; // 练习模式是否显示正计时
     this.reset();
   }
 
@@ -29,13 +32,24 @@
    */
   QuizEngine.prototype.loadQuestions = function (questions, type, opts) {
     let list = (questions || []).slice();
-    const doShuffle = opts && opts.shuffleOptions !== undefined
+    opts = opts || {};
+    const doShuffle = opts.shuffleOptions !== undefined
       ? !!opts.shuffleOptions
       : !QB.CONFIG || QB.CONFIG.SHUFFLE_OPTIONS !== false;
     if (doShuffle) list = list.map((q) => QB.shuffleOptions(q));
     this.questions = list;
     this.currentType = type || 'mixed';
+    this.pointsMap = opts.pointsMap || null;
+    this.durationMs = Number(opts.durationMs) > 0 ? Number(opts.durationMs) : 0;
+    this.showTimer = !!opts.showTimer;
     this.reset();
+  };
+
+  /** 本场某题型每题分值（公共口径）：有覆盖用覆盖，否则回落 CONFIG.POINTS_PER_CORRECT */
+  QuizEngine.prototype.pointOf = function (type) {
+    const m = this.pointsMap;
+    if (m && Number(m[type]) > 0) return Number(m[type]);
+    return (QB.CONFIG && QB.CONFIG.POINTS_PER_CORRECT) || 10;
   };
 
   QuizEngine.prototype.sliceQuestions = function (count) {
@@ -62,13 +76,13 @@
     let wrong = 0;
     let partial = 0;
     let score = 0;
-    const points = (QB.CONFIG && QB.CONFIG.POINTS_PER_CORRECT) || 10;
     this.results.forEach((r) => {
       if (!r) return;
       if (r.isCorrect === true) correct++;
       else if (r.partial) partial++;
       else if (r.isCorrect === false) wrong++;
-      // 材料题按小问累计得分；普通题 10 分 / 半对 5 分
+      // 每题分值按本场「题型分值」解析；材料题按小问累计得分
+      const points = this.pointOf(r.type);
       if (r.points) score += r.points.earned || 0;
       else if (r.isCorrect === true) score += points;
       else if (r.partial) score += Math.round(points * 0.5);
@@ -208,7 +222,7 @@
     const q = this.getCurrentQuestion();
     if (!q || this.hasAnswered()) return null;
     const userAnswer = this.answers[this.currentIndex];
-    const verdict = QB.judgeAnswer(q, userAnswer);
+    const verdict = QB.judgeAnswer(q, userAnswer, { pointOf: (t) => this.pointOf(t) });
     const result = {
       questionId: q.id,
       contentHash: q.contentHash || QB.makeContentHash(q),
@@ -268,7 +282,7 @@
     for (let i = 0; i < this.questions.length; i++) {
       if (this.results[i]) continue;
       const q = this.questions[i];
-      const verdict = QB.judgeAnswer(q, this.answers[i]);
+      const verdict = QB.judgeAnswer(q, this.answers[i], { pointOf: (t) => this.pointOf(t) });
       let isCorrect = verdict.isCorrect;
       let points = verdict.points;
       let children = verdict.children;
@@ -395,7 +409,10 @@
       currentIndex: this.currentIndex,
       questions: this.questions,
       answers: this.answers,
-      results: this.results
+      results: this.results,
+      pointsMap: this.pointsMap,
+      durationMs: this.durationMs,
+      showTimer: this.showTimer
     };
   };
 
@@ -407,6 +424,9 @@
     this.answers = state.answers || [];
     this.results = state.results || [];
     this.currentIndex = state.currentIndex || 0;
+    this.pointsMap = state.pointsMap || null;
+    this.durationMs = Number(state.durationMs) > 0 ? Number(state.durationMs) : 0;
+    this.showTimer = !!state.showTimer;
     return this.questions.length > 0;
   };
 

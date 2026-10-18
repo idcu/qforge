@@ -42,32 +42,39 @@ section('组卷弹窗：属性可查询（回归 data-bp-min/max 多引号）');
   ok(html.indexOf('<select data-bp-cat>') >= 0, '分类下拉为 data-bp-cat');
   const n = (html.match(/data-bp-type=/g) || []).length;
   eq(n, NTYPES, '每题型一行（data-bp-type 个数 = 题型数）');
+  ok(html.indexOf('data-bp-pts') < 0, '组卷弹窗不含每题分值列（保持现状）');
   ok(html.indexOf('id="bp-exam"') >= 0, '含考试模式开关');
   ok(html.indexOf('data-action="modal-ok">开始') >= 0, '含「开始」按钮');
 }
 
-section('练习/考试开始弹窗：题型多选/分类/题量');
+section('练习/考试开始弹窗：每题型数量+分值、考试时长、练习计时开关');
 {
-  const p = UI.renderStartDialog('practice', avail, cats, 50);
+  const p = UI.renderStartDialog('practice', avail, cats, {});
   ok(p.indexOf('练习模式') >= 0, '练习模式标题');
   ok(p.indexOf('考试模式') < 0, '练习弹窗不含考试标题');
-  const n = (p.match(/class="st-type-cb"/g) || []).length;
-  eq(n, NTYPES, '题型复选框 = 题型数（默认全选）');
-  ok(p.indexOf('checked') >= 0, '题型默认勾选');
+  const nc = (p.match(/data-bp-type=/g) || []).length;
+  eq(nc, NTYPES, '每题型一个数量输入（data-bp-type 个数 = 题型数）');
+  const np = (p.match(/data-bp-pts=/g) || []).length;
+  eq(np, NTYPES, '每题型一个分值输入（data-bp-pts 个数 = 题型数）');
+  ok(p.indexOf('class="bp-pts"') >= 0, '分值列使用 .bp-pts');
   ok(p.indexOf('<select data-st-cat>') >= 0, '分类下拉为 data-st-cat');
-  ok(p.indexOf('class="st-count" value="50"') >= 0, '题量输入默认 50');
+  ok(p.indexOf('id="st-duration"') < 0, '练习弹窗不含考试时长');
+  ok(p.indexOf('id="st-timer"') >= 0, '练习弹窗含「显示计时」开关');
   ok(p.indexOf('data-action="modal-cancel">取消') >= 0, '含取消按钮');
   ok(p.indexOf('data-action="modal-ok">开始') >= 0, '含开始按钮');
 
-  const e = UI.renderStartDialog('exam', avail, cats, 30);
+  const e = UI.renderStartDialog('exam', avail, cats, {});
   ok(e.indexOf('考试模式') >= 0, '考试模式标题');
-  ok(e.indexOf('class="st-count" value="30"') >= 0, '考试弹窗题量默认值可配');
+  ok(e.indexOf('id="st-duration"') >= 0, '考试弹窗含考试时长输入');
+  ok(e.indexOf('value="30"') >= 0, '考试时长默认 30 分钟');
+  ok(e.indexOf('id="st-timer"') < 0, '考试弹窗不含练习计时开关');
+  ok(e.indexOf('data-bp-pts=') >= 0, '考试弹窗也含每题分值列');
 }
 
 section('可用数量显示与分类转义');
 {
-  const html = UI.renderStartDialog('practice', avail, cats, 10);
-  ok(html.indexOf('（1）') >= 0, '显示题型可用数量');
+  const html = UI.renderStartDialog('practice', avail, cats, {});
+  ok(html.indexOf('（可选 1）') >= 0, '显示题型可用数量');
   ok(html.indexOf('含&lt;b&gt;标签') >= 0, '分类名经 HTML 转义');
   ok(html.indexOf('含<b>标签') < 0, '原始未转义分类名不出现');
 }
@@ -173,9 +180,9 @@ section('历史统计：sticky 卡片');
 
 section('开始弹窗：自定义标题（错题重练等场景）');
 {
-  const html = UI.renderStartDialog('practice', avail, cats, 7, '错题重练（7 题）');
+  const html = UI.renderStartDialog('practice', avail, cats, { title: '错题重练（7 题）' });
   ok(html.indexOf('错题重练（7 题）') >= 0, '弹窗标题使用自定义文案');
-  ok(html.indexOf('class="st-count" value="7"') >= 0, '默认题量可配为错题数');
+  ok(html.indexOf('id="st-timer"') >= 0, '错题重练（练习）仍含计时开关');
 }
 
 console.log('\n================ 汇总 ================');

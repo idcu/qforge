@@ -112,6 +112,22 @@
   };
 
   /**
+   * 小问/单题每题分值（公共抽象）：本场「按题型分值」优先，其次题目自带分，最后回落全局默认。
+   * 材料题整题满分 = 各小问按「小问题型分值」累加（复用此函数，语义唯一）。
+   * @param {Object} q 题目（材料题子问题或普通题）
+   * @param {Object} [opts] { pointOf(type) => number } 本场按题型分值解析器
+   */
+  function childPoints(q, opts) {
+    if (q && opts && typeof opts.pointOf === 'function') {
+      const p = Number(opts.pointOf(q.type));
+      if (p > 0) return p;
+    }
+    if (q && Number(q.score) > 0) return Number(q.score);
+    return (QB.CONFIG && QB.CONFIG.POINTS_PER_CORRECT) || 10;
+  }
+  QB.childPoints = childPoints;
+
+  /**
    * 材料题（综合题）：逐小问判分并聚合
    * userAnswer 为与 children 等长的数组（元素为各小问题型既有作答形状）；
    * 引擎自评重算/考试强制计错复用 aggregateMaterial。
@@ -141,12 +157,12 @@
     return { isCorrect: isCorrect, partial: !hardError && partial, points: { max: max, earned: earned } };
   }
 
-  Strategies.material = function material(question, userAnswers) {
+  Strategies.material = function material(question, userAnswers, opts) {
     const children = Array.isArray(question.children) ? question.children : [];
     const arr = Array.isArray(userAnswers) ? userAnswers : [];
     const childResults = children.map((cq, i) => {
-      const v = QB.judgeAnswer(cq, arr[i]);
-      const points = Number(cq.score) > 0 ? Number(cq.score) : 10;
+      const v = QB.judgeAnswer(cq, arr[i], opts);
+      const points = childPoints(cq, opts);
       v.score = points;
       v.earned = v.isCorrect === true ? points : (v.partial ? Math.round(points / 2) : 0);
       v.index = i;
@@ -169,13 +185,14 @@
    * 统一判分入口
    * @param {Object} question 标准题目模型
    * @param {*} userAnswer 判断题→布尔/字符串；单选→字母；多选→字母数组/串；填空→字符串数组；简答→文本；材料题→各小问作答数组
+   * @param {Object} [opts] { pointOf(type) => number } 本场按题型分值解析器（材料题小问按题型计分用）
    */
-  QB.judgeAnswer = function judgeAnswer(question, userAnswer) {
+  QB.judgeAnswer = function judgeAnswer(question, userAnswer, opts) {
     if (!question || !question.type) {
       return { isCorrect: false, partial: false, children: null, points: null, correctAnswer: '', userAnswer: String(userAnswer || ''), detail: null };
     }
     const fn = Strategies[question.type] || Strategies.single;
-    const verdict = fn(question, userAnswer);
+    const verdict = fn(question, userAnswer, opts);
     return {
       isCorrect: verdict.isCorrect,
       partial: verdict.partial === true,

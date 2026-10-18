@@ -524,7 +524,7 @@ body {
 .qe-form { display: flex; flex-direction: column; gap: 6px; }
 .qe-label { font-size: 13px; color: var(--text-muted); margin-top: 8px; }
 /* 弹窗表单控件统一样式：题目编辑器 .qe-form 与各类弹窗（组卷/练习·考试/章节顺序等弹窗未包 .qe-form）共用；
-   数字控件只匹配 .st-count，避免覆盖抽题行的 .bp-n（宽度 90px） */
+   数字控件匹配 .st-count（练习·考试弹窗的数量/时长，全宽）与 .bp-n（组卷抽题行，90px） */
 .qe-form input[type='text'], .qe-form textarea, .qe-form select,
 .modal select, .modal input[type='text'], .modal textarea, .modal input.st-count {
   width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
@@ -548,10 +548,12 @@ body {
 .bp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
 .bp-name { flex: 1; font-size: 14px; }
 .bp-n { width: 90px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); }
-
-/* 练习/考试开始弹窗：题型多选 */
-.st-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 12px; margin: 8px 0; }
-.st-type { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+/* 练习/考试开始弹窗：每题型「数量 + 每题分值」行（窄控件，覆盖 .modal input.st-count 的 100% 宽） */
+.modal .bp-row .st-count, .modal .bp-row .bp-pts {
+  width: 74px; flex: 0 0 auto; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface); color: var(--text); font-size: 14px;
+}
+.bp-pts-label { font-size: 12px; color: var(--text-muted); flex: 0 0 auto; }
 
 /* ===== 答题卡 ===== */
 .answer-card { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
