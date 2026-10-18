@@ -1288,7 +1288,7 @@
 
 ---
 
-## （待回填）· feat(quiz): 按题型抽取数量·每题分值 + 考试时长可设 + 练习可选正计时
+## `9382053` · feat(quiz): 按题型抽取数量·每题分值 + 考试时长可设 + 练习可选正计时
 
 **背景**：用户实测「考试模式 不能设置考试时长，也不能设置每种题型的数量和分值；练习模式 不能设置每种题型的数量和分值，也不计时」。原 `renderStartDialog` 仅提供「题型复选框 + 单一总题量」，考试时长写死 `DEFAULT_EXAM_MINUTES`，练习无任何计时。
 
@@ -1349,7 +1349,7 @@
 > 回到顶部按钮（2026-10-17）：`3c10bfd` feat(ui) 「回到顶部」悬浮按钮 + 切换标签回顶（新增 syncTopButton/.btn-top；答题视图自动隐藏）（18 套 2374 断言，pwa 29→35）
 > 直达底部按钮（2026-10-18）：`eda51ba` feat(ui) 「直达底部」悬浮按钮（抽取共享 .btn-float，syncTopButton→syncScrollButtons 双向管理）（18 套 2379 断言，pwa 35→40）
 > 细节样式审计修复（2026-10-18）：`752a969` fix(ui) .li-meta 作用域解除 / 弹窗 select·题量框控件样式 / toast 置底居中不遮挡悬浮按钮 / .qe-grid 换行（18 套 2385 断言，pwa 40→46）
-> 本场组卷参数（2026-10-19）：`（待回填）` feat(quiz) 按题型抽取数量·每题分值 + 考试时长可设 + 练习可选正计时（新增 QB.childPoints/QuizEngine.pointOf/readTypeInputs，createExamTimer 支持 countUp；18 套 2416 断言，smoke 436→461，ui-renderer 49→55）
+> 本场组卷参数（2026-10-19）：`9382053` feat(quiz) 按题型抽取数量·每题分值 + 考试时长可设 + 练习可选正计时（新增 QB.childPoints/QuizEngine.pointOf/readTypeInputs，createExamTimer 支持 countUp；18 套 2416 断言，smoke 436→461，ui-renderer 49→55）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
