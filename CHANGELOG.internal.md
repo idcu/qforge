@@ -1148,6 +1148,42 @@
 
 ---
 
+## 752a969 · fix(ui): 细节样式审计修复 4 处（作用域 / 弹窗控件 / 遮挡 / 换行）
+
+**背景**：用户要求「请检查并修复其他细节问题」。经 CSS 变量全量审计（无未定义变量）+ 逐类选择器核查，
+发现 4 处「静默样式缺陷」——JS 逻辑与既有断言均无法覆盖，仅表现为外观退化。
+
+**核心改动**（均在 `css/style.css`）
+1. `.list-item .li-meta` → `.li-meta`：该 class 在 js 中共 50 处使用，绝大多数不在列表行内
+   （弹窗提示 / 结果页统计行 / 搜索「共 X / Y 题」/ 历史行 / 统计页说明 / 编辑器提示），
+   原先全部失去小号弱化样式。解除作用域后列表内取值不变，其余位置恢复设计意图。
+2. 控件样式规则并入共享选择器列表，新增 `.modal select` / `.modal input[type='text']` /
+   `.modal textarea` / `.modal input.st-count`：修复组卷、练习·考试、章节顺序练等**未包 `.qe-form`**
+   的弹窗内 `<select>`（data-bp-cat/min/max、data-st-cat、#ch-cat）与题量框以浏览器默认外观渲染的问题；
+   数字控件只匹配 `.st-count`，不覆盖抽题行 `.bp-n`（90px）。
+3. `.toast-wrap` 由 right:16/bottom:16 改为**置底居中**（left:50% + translateX(-50%)）：
+   原先与「↓ 直达底部」悬浮按钮（right:18/bottom:20）完全重叠且层级更高（60 > 25）会盖住按钮；
+   另为 `.toast` 加 `max-width: min(360px, calc(100vw - 40px))` 防窄屏溢出。
+4. `.qe-grid` 加 `flex-wrap: wrap`、子项 `flex: 1 1 120px`：窄屏下 3 个筛选控件不再被挤压。
+
+**公共抽象 / 影响面**
+- 控件样式由 `.qe-form` 单点扩展为共享选择器列表（单一规则体，无重复定义）→ 全站弹窗复用。
+- `.li-meta` 由「列表专有类」提升为「全局次要文字类」；列表内取值不变，仅新增覆盖位置。
+- 无对外 API、无 JS 逻辑变更。
+
+**验证数据**
+- 全量 **18 套 2385 / 2385 通过 0 失败**（Node v24.14.0 / Windows）；`scripts/pwa.test.mjs` 40→**46**（+6）。
+- 浏览器端到端（`127.0.0.1:8783`）**计算样式**实测：弹窗 `.modal select` 与 `input.st-count`
+  border=1px / padding=8px / radius=10px / font=14px（不再是默认裸控件）；弹窗内 `p.li-meta`
+  font=12px 灰系；toast 中心 X=387 ≈ 视口半宽 394，且与 `#btn-bottom` 包围盒不重叠。
+- 无性能路径改动，`scripts/bench.mjs` 未重跑。
+
+**遗留 TODO / 风险**
+- 窄屏（≤375px）下居中 toast 与右侧悬浮按钮在 x 方向可能短暂交叠（toast 为 2–4 秒瞬时提示，
+  且非破坏性操作，判定可接受）；如需彻底消除可对 ≤600px 单独偏移 toast。
+
+---
+
 ## eda51ba · feat(ui): 「直达底部」悬浮按钮（与回到顶部对称，共享 .btn-float）
 
 **背景**：用户要求「添加直达底部按钮」——与既有「回到顶部」对称。
@@ -1280,6 +1316,7 @@
 > UI 体验批次（2026-10-17）：`7ed5c05` feat(ui) 答题卡配色/顶栏菜单吸顶/收藏态反馈/搜索单行固定/错题重练可筛选（修复 --brand 系列未定义致样式整片失效；新增 .stick-head/--top-shell-h）（18 套 2368 断言，ui-renderer 28→49）
 > 回到顶部按钮（2026-10-17）：`3c10bfd` feat(ui) 「回到顶部」悬浮按钮 + 切换标签回顶（新增 syncTopButton/.btn-top；答题视图自动隐藏）（18 套 2374 断言，pwa 29→35）
 > 直达底部按钮（2026-10-18）：`eda51ba` feat(ui) 「直达底部」悬浮按钮（抽取共享 .btn-float，syncTopButton→syncScrollButtons 双向管理）（18 套 2379 断言，pwa 35→40）
+> 细节样式审计修复（2026-10-18）：`752a969` fix(ui) .li-meta 作用域解除 / 弹窗 select·题量框控件样式 / toast 置底居中不遮挡悬浮按钮 / .qe-grid 换行（18 套 2385 断言，pwa 40→46）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
