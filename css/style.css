@@ -433,11 +433,10 @@ body {
   border-top: 1px solid var(--border);
 }
 
-/* ===== 回到顶部（悬浮按钮，滚动一定距离后出现；答题中隐藏避免误触） ===== */
-.btn-top {
+/* ===== 悬浮滚动按钮（回到顶部 / 直达底部；滚动一定距离后出现，答题中隐藏） ===== */
+.btn-float {
   position: fixed;
   right: 18px;
-  bottom: 76px;
   z-index: 25;
   width: 44px;
   height: 44px;
@@ -455,8 +454,10 @@ body {
   box-shadow: var(--shadow-lg);
   transition: background .15s, color .15s, border-color .15s, transform .15s;
 }
-.btn-top.show { display: flex; }
-.btn-top:hover { background: var(--primary-weak); color: var(--primary); border-color: var(--primary); transform: translateY(-2px); }
+.btn-float.show { display: flex; }
+.btn-float:hover { background: var(--primary-weak); color: var(--primary); border-color: var(--primary); transform: translateY(-2px); }
+.btn-top { bottom: 76px; }
+.btn-bottom { bottom: 20px; }
 
 /* ===== Toast ===== */
 .toast-wrap {
@@ -599,7 +600,7 @@ body {
 
 /* ===== 打印：只保留主体内容 ===== */
 @media print {
-  .topbar, .tabs, .statusbar, .toolbar, .quiz-actions, .li-actions, .answer-card, #toast-wrap, #modal-root, .pager button, .btn-top { display: none !important; }
+  .topbar, .tabs, .statusbar, .toolbar, .quiz-actions, .li-actions, .answer-card, #toast-wrap, #modal-root, .pager button, .btn-float { display: none !important; }
   .view { padding: 0; max-width: none; }
   body { background: #fff; }
   .card, .list-item, .quiz-card { border: none; box-shadow: none; break-inside: avoid; }

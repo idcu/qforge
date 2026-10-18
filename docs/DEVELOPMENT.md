@@ -54,9 +54,9 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `scripts/backup.test.mjs` | **25** | 全量备份、覆盖/合并恢复、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项） |
 | `scripts/migrate.test.mjs` | **33** | v1→v2 contentHash 升级、review/wrong/fav/revlog 键重映射、revlog 回填 b、幂等逐字节不变、同题干异答案共存、旧裸 hash 强制重算 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
-| `scripts/pwa.test.mjs` | **35** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**回到顶部按钮（index.html #btn-top + app.js scrollTo/scroll 绑定 + CSS .btn-top.show，6 项）** |
+| `scripts/pwa.test.mjs` | **40** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**悬浮滚动按钮（#btn-top/#btn-bottom 复用 .btn-float + .btn-top/.btn-bottom 定位 + app.js scrollTo/scrollHeight/scroll 绑定 + CSS .btn-float.show，11 项）** |
 | `scripts/ui-renderer.test.mjs` | **49** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、题型复选框数=题型数、分类转义、题量默认值、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡** |
-| **合计** | **2374 / 2374 通过 · 18 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2379 / 2379 通过 · 18 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 

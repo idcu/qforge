@@ -97,12 +97,16 @@
     document.documentElement.style.setProperty('--top-shell-h', shell.offsetHeight + 'px');
   }
 
-  /** 「回到顶部」按钮显隐：滚动一定距离后出现；答题中隐藏，避免误触遮挡作答操作 */
-  function syncTopButton() {
-    const btn = document.getElementById('btn-top');
-    if (!btn) return;
-    const show = window.scrollY > 400 && State.view !== 'quiz';
-    btn.classList.toggle('show', show);
+  /** 悬浮滚动按钮显隐：距顶/距底各 > 400px 时分别出现；答题中一律隐藏，避免误触 */
+  function syncScrollButtons() {
+    const top = document.getElementById('btn-top');
+    const bottom = document.getElementById('btn-bottom');
+    if (!top && !bottom) return;
+    const y = window.scrollY;
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const visible = State.view !== 'quiz';
+    if (top) top.classList.toggle('show', visible && y > 400);
+    if (bottom) bottom.classList.toggle('show', visible && max - y > 400);
   }
 
   /* ---------------- 数据装载 ---------------- */
@@ -211,7 +215,7 @@
     view().innerHTML = html;
     QB.RichText.hydrate(view()); // IndexedDB 图片异步换 src（无图时为空操作）
     syncStickyOffset();          // 实测顶栏+菜单栏高度，供 sticky 区块定位
-    syncTopButton();             // 依滚动位置/当前视图切换「回到顶部」按钮显隐
+    syncScrollButtons();         // 依滚动位置/当前视图切换「回到顶部/直达底部」按钮显隐
     updateStatus();
 
     if (wasSearch) {
@@ -865,13 +869,15 @@
       render();
     });
 
-    // 「回到顶部」：点击平滑滚回顶部；滚动时按位置/视图切换显隐
+    // 悬浮滚动按钮：↑ 回到顶部 / ↓ 直达底部（平滑滚动）；滚动时按位置/视图切换显隐
     const topBtn = document.getElementById('btn-top');
     if (topBtn) topBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
-    window.addEventListener('scroll', syncTopButton, { passive: true });
+    const bottomBtn = document.getElementById('btn-bottom');
+    if (bottomBtn) bottomBtn.addEventListener('click', () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }));
+    window.addEventListener('scroll', syncScrollButtons, { passive: true });
 
-    // 顶栏/菜单栏高度随窗口宽度变化（换行），重算 sticky 偏移
-    window.addEventListener('resize', syncStickyOffset);
+    // 顶栏/菜单栏高度随窗口宽度变化（换行），重算 sticky 偏移与悬浮按钮显隐
+    window.addEventListener('resize', () => { syncStickyOffset(); syncScrollButtons(); });
 
     // 文件拖拽导入：拖到窗口任意位置即可（答题中拒绝，避免误触）
     let dragDepth = 0;

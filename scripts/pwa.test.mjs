@@ -63,14 +63,19 @@ const app = read('js/app.js');
 ok(app.indexOf("navigator.serviceWorker.register('sw.js'") >= 0, '注册 sw.js（相对路径）');
 ok(/location\.protocol\s*===?\s*'https:'/.test(app) && app.indexOf("'http:'") >= 0, '仅 http(s) 环境注册（file:// 跳过）');
 
-section('回到顶部按钮');
+section('悬浮滚动按钮（回到顶部 / 直达底部）');
 ok(index.indexOf('id="btn-top"') >= 0, 'index.html 含「回到顶部」按钮 #btn-top');
-ok(index.indexOf('class="btn-top"') >= 0, '按钮使用 .btn-top 样式类');
+ok(index.indexOf('id="btn-bottom"') >= 0, 'index.html 含「直达底部」按钮 #btn-bottom');
+ok(index.indexOf('class="btn-float btn-top"') >= 0, '回到顶部复用共享 .btn-float + 定位类 .btn-top');
+ok(index.indexOf('class="btn-float btn-bottom"') >= 0, '直达底部复用共享 .btn-float + 定位类 .btn-bottom');
 ok(app.indexOf("getElementById('btn-top')") >= 0, 'app.js 绑定 #btn-top');
-ok(app.indexOf('scrollTo({ top: 0, behavior: \'smooth\' })') >= 0 || app.indexOf("scrollTo({ top: 0, behavior: 'smooth' })") >= 0, 'app.js 平滑滚回顶部');
+ok(app.indexOf("getElementById('btn-bottom')") >= 0, 'app.js 绑定 #btn-bottom');
+ok(app.indexOf("scrollTo({ top: 0, behavior: 'smooth' })") >= 0, 'app.js 平滑滚回顶部');
+ok(app.indexOf('scrollHeight') >= 0 && app.indexOf("behavior: 'smooth'") >= 0, 'app.js 直达底部读取 scrollHeight 并平滑滚动');
 ok(app.indexOf("addEventListener('scroll'") >= 0, 'app.js 监听滚动以切换按钮显隐');
 const css = read('css/style.css');
-ok(css.indexOf('.btn-top') >= 0 && css.indexOf('.btn-top.show') >= 0, 'CSS 定义 .btn-top 与 .show 显隐');
+ok(css.indexOf('.btn-float') >= 0 && css.indexOf('.btn-float.show') >= 0, 'CSS 定义共享 .btn-float 与 .show 显隐');
+ok(css.indexOf('.btn-top') >= 0 && css.indexOf('.btn-bottom') >= 0, 'CSS 定义 .btn-top / .btn-bottom 定位');
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
