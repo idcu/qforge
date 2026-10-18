@@ -77,6 +77,14 @@ const css = read('css/style.css');
 ok(css.indexOf('.btn-float') >= 0 && css.indexOf('.btn-float.show') >= 0, 'CSS 定义共享 .btn-float 与 .show 显隐');
 ok(css.indexOf('.btn-top') >= 0 && css.indexOf('.btn-bottom') >= 0, 'CSS 定义 .btn-top / .btn-bottom 定位');
 
+section('细节样式修复（作用域 / 弹窗控件 / 遮挡）');
+ok(css.indexOf('.list-item .li-meta') < 0 && /(^|\n)\.li-meta\s*\{/.test(css), '.li-meta 样式不再限定 .list-item（50+ 处弹窗/结果页/统计页提示恢复小号弱化）');
+ok(/\.modal\s+select/.test(css), '弹窗 <select> 有统一控件样式（回归：组卷/练习·考试/章节弹窗内下拉未包 .qe-form 而无样式）');
+ok(/\.modal\s+input\.st-count/.test(css), '弹窗题量数字框 .st-count 有统一控件样式');
+ok(css.indexOf('.bp-n') >= 0 && !/\.modal\s+input\[type='number'\]/.test(css), '抽题行 .bp-n（90px）不被通用数字控件样式覆盖宽度');
+ok(/\.toast-wrap[^}]*left:\s*50%/.test(css) && /\.toast-wrap[^}]*translateX\(-50%\)/.test(css), 'toast 置底居中，避开右下角悬浮滚动按钮（回归：曾与直达底部按钮重叠）');
+ok(/\.qe-grid\s*\{[^}]*flex-wrap:\s*wrap/.test(css), '.qe-grid 支持换行（窄屏筛选控件不再被挤压）');
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

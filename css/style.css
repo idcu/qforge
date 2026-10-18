@@ -375,7 +375,8 @@ body {
 }
 .list-item .li-head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .list-item .li-title { flex: 1; font-weight: 500; }
-.list-item .li-meta { color: var(--text-muted); font-size: 12px; }
+/* 次要说明文字（列表行、弹窗提示、结果页/统计页说明等，共 50+ 处使用），作用域不限列表 */
+.li-meta { color: var(--text-muted); font-size: 12px; }
 .list-item .li-actions { margin-top: 8px; display: flex; gap: 8px; }
 .hl { background: rgba(37, 99, 235, .22); border-radius: 3px; padding: 0 1px; }
 
@@ -460,18 +461,21 @@ body {
 .btn-bottom { bottom: 20px; }
 
 /* ===== Toast ===== */
+/* 提示条：置底居中，避开右下角的悬浮滚动按钮（回到顶部/直达底部） */
 .toast-wrap {
   position: fixed;
-  right: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 16px;
   z-index: 60;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
 }
 .toast {
   min-width: 180px;
-  max-width: 360px;
+  max-width: min(360px, calc(100vw - 40px));
   padding: 10px 14px;
   border-radius: var(--radius);
   background: var(--surface);
@@ -519,13 +523,16 @@ body {
 /* ===== 题目管理 / 编辑器 ===== */
 .qe-form { display: flex; flex-direction: column; gap: 6px; }
 .qe-label { font-size: 13px; color: var(--text-muted); margin-top: 8px; }
-.qe-form input[type='text'], .qe-form textarea, .qe-form select {
+/* 弹窗表单控件统一样式：题目编辑器 .qe-form 与各类弹窗（组卷/练习·考试/章节顺序等弹窗未包 .qe-form）共用；
+   数字控件只匹配 .st-count，避免覆盖抽题行的 .bp-n（宽度 90px） */
+.qe-form input[type='text'], .qe-form textarea, .qe-form select,
+.modal select, .modal input[type='text'], .modal textarea, .modal input.st-count {
   width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--surface); color: var(--text); font-size: 14px; box-sizing: border-box;
 }
 .qe-form textarea { resize: vertical; }
-.qe-grid { display: flex; gap: 10px; }
-.qe-grid > div { flex: 1; }
+.qe-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+.qe-grid > div { flex: 1 1 120px; }
 .qe-optrow { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .qe-optrow input[type='text'] { flex: 1; }
 .qe-letter { min-width: 22px; font-weight: 600; color: var(--text-muted); }

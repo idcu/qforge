@@ -103,7 +103,7 @@ qb/
 | `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（25 项断言，含失败快照回滚、WebDAV 密码脱敏） |
 | `node scripts/migrate.test.mjs` | schema 迁移测试（33 项断言：contentHash v1→v2 与全部用户数据键重映射、幂等） |
 | `node scripts/sync-dav.test.mjs` | WebDAV 云备份测试（32 项断言：配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/404） |
-| `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源 + FSRS Worker 资源校验 + 悬浮滚动按钮（回到顶部/直达底部）绑定（40 项断言） |
+| `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源 + FSRS Worker 资源校验 + 悬浮滚动按钮 + 细节样式修复回归（46 项断言） |
 | `node scripts/ui-renderer.test.mjs` | UI 渲染器弹窗/答题界面构建（49 项断言：`data-bp-min/max/cat` 属性可查询回归、题型复选框数=题型数、分类转义、题量默认值、**自定义标题**、**题干渲染回归：非材料题曾只显示选项**、**答题卡状态类与图例**、**收藏已收藏态**、**搜索单行 sticky**、**历史统计 sticky**） |
 | `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出 的耗时与内存） |
 | `python scripts/gen_fixtures.py` | 重新生成 xlsx / docx 样例（需 openpyxl）；`--docx-image` 含图 docx、`--material-md` 材料 MD/DOCX、`--material-csv` 材料 CSV/XLSX |
@@ -111,7 +111,7 @@ qb/
 xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖），Node 直接跑全部断言，无需安装任何包。
 
 **实测数据（Node v24.14.0，2026-10-14 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
-- 18 个逻辑层测试套件 **2379 / 2379 通过**（UTC / UTC+8 双时区实跑）：冒烟 **436**、XML 解析器 **39**、导出 160、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、**UI 渲染器 49**、来源/网络导入 29、FSRS **77**、**FSRS 优化器 91**、SRS **60**、存储可靠性 14、备份 25、schema 迁移 33、**WebDAV 32**、PWA **40**。
+- 18 个逻辑层测试套件 **2385 / 2385 通过**（UTC / UTC+8 双时区实跑）：冒烟 **436**、XML 解析器 **39**、导出 160、Office 导出 1148、编辑器 29、**富文本 45**、**图片资产 54**、组卷 18、**UI 渲染器 49**、来源/网络导入 29、FSRS **77**、**FSRS 优化器 91**、SRS **60**、存储可靠性 14、备份 25、schema 迁移 33、**WebDAV 32**、PWA **46**。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、**材料题 M1 判分聚合 + M2 五格式（MD/DOCX/CSV/XLSX/TXT）往返黄金断言**、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 540 题全量往返、**contentHash v2 不误并同题干异答案题**、**考试简答待自评（不伪造错误）**、题库隔离与级联删除、答题卡跳转。
 - FSRS 优化器：800 卡 × 5 评的确定性合成日志（3200 相邻样本，切出 640 留出样本）验证——真权重扰动 ±40% 时，留出集 logloss 0.3374 < 默认 0.3388（改善 0.42%，超 0.2% 门控）才采纳；门控基于独立留出集（不再训练集自证），返回历史最佳权重；改善不足（含小样本过拟合 -0.13% 场景）诚实拒绝。
 - Office 导出：540 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验。
