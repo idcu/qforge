@@ -14,6 +14,41 @@
 
 ---
 
+## 97b0046 · fix(sync-dav): 响应体消费修复 + WebDAV 真机验收端点；Backup/WebDAV 恢复真机验证通过
+
+**核心改动**
+- `js/modules/sync-dav.js`：`upload`（PUT）与 `fetchBackup`（GET 错误分支）**消费响应体**——未消费的 Response 被释放时浏览器会为「其实已成功」的请求记 `net::ERR_ABORTED`（与 `api-adapter.req` 同一类噪声，见上一条）。
+- 新增 `scripts/serve-webdav.mjs`（零依赖、开发/验收用，不随应用发布）：WebDAV **子集桩**——固定对象 `qforge-backup-latest.bin` 的 PUT/GET + Basic 认证 + **CORS 预检**，数据落 `<工程根>/.qforge-webdav/`（`.gitignore` 已加）。**理由**：真实坚果云/Nextcloud 默认不发 CORS 头，浏览器直接拦截跨域（服务端策略，非前端缺陷），故 `QB.SyncDAV` 的**真机**验收必须落在可开 CORS 的端点上。
+- `scripts/sync-dav.test.mjs`：新增「真实 HTTP 集成」段（32 → **44** 项）：预检 OPTIONS 204 + 放行 Authorization + 回显 Origin、真实 PUT 201 且端点落盘可解析 JSON、错误密码 401、含图 PUT → 端点收 ZIP（PK 头）、真实 GET 下载解析、无对象 404。
+
+**真机验收（浏览器，本轮新增；证据均实测）**
+- WebDAV **上传**：UI toast「已上传到 WebDAV（8 KB）」；端点侧落盘 `qforge-backup-latest.bin` **9676 B**，内容 `app=qforge-backup` / `banks=["测试题库"]` / `questions:<id>:meta` **count=18**；**`meta:dav` 仅含 `baseUrl`+`user`、`pass` 字段不存在 → 备份密码脱敏在真机链路上得到证实**。
+- WebDAV **下载 + 恢复**：在**全新源**（8796，应用为空、无 SW）中恢复弹窗文案为「备份包含 **8 个数据键**，导出时间 2026-10-19T10:55:42.898Z 来源 http://127.0.0.1:8899/dav/qforge-backup-latest.bin」，选「覆盖恢复」→ 确认 → 刷新后**题库「测试题库」与 18 题回来了**（真实恢复，非空转）。
+- 控制台：修复后的**新标签**（空控制台）跑 WebDAV 上传 → **无 error / 无 warning**。
+
+**过程记录（如实标注，含一次误判）**
+- 首轮在旧源（8795）复测**未观测到恢复弹窗**，控制台还残留一条指向 8795 的旧 `ERR_ABORTED` 条目（`sync-dav.js:85`）；新源 8796 + 新标签复测全部正常 ⇒ 该源当时由 Service Worker 的 stale-while-revalidate 提供**旧版 JS**（缓存换代前的一次刷新延迟，属已知限制），叠加浏览器代理漏报瞬时 toast 所致，**非功能缺陷**。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **22 个测试运行项 2897/2897 断言通过**，UTC 与 Asia/Shanghai 双时区均 0 失败（2885 → 2897：sync-dav 32 → **44**）。
+
+**子任务计时（实测，`scripts/task-timer.mjs`；数据源 `.qforge-timings.json`）**
+
+| 子任务 | 内容 | 耗时(min) |
+| --- | --- | --- |
+| d1 | WebDAV 验证端点 + sync-dav 真实 HTTP 集成段（12 项） | 1.8 |
+| d2 | 真机验收 WebDAV（上传/下载/恢复）+ 定位 `ERR_ABORTED` 并修复 | 8.4 |
+| **合计** | （已完成 2 项） | **10.2** |
+
+**遗留 TODO / 风险**
+- **备份「选取文件」路径（`pickAndRestore`：`<input type=file>` + FileReader）仍未真机验证**：浏览器代理无法操作原生文件选择器，本轮未用人工接管（`browser_waiting_for_user_interaction`）去点选文件。其共享下游（`parseBackupFile` / `confirmRestore` / `applyBackup`）已由 WebDAV 真机路径 + `backup.test`（25 项）覆盖，**故仅剩「文件选取→读字节」这一小段未验**——需要时可人工点选一次补齐。
+- 本轮浏览器验收**未纳入 CI**（需真实浏览器）；WebDAV 相关回归由 `sync-dav.test` 的端点集成段在 Node 覆盖。
+- `serve-webdav.mjs` 是**验证桩**：仅实现客户端用到的 PUT/GET；不支持 PROPFIND/目录列举（客户端也不用），**不是 WebDAV 服务端产品**。
+- WebDAV 真机仍受真实服务端 CORS 策略影响（坚果云等公共服务默认拦截）——属部署环境问题，非代码缺陷。
+- 本轮仅 `git commit`，**未 push**（用户本轮未指示）。
+
+---
+
 ## 4f7b41b · feat(api): api 模式按库缓存落地 + 后端链路三处缺陷修复（阶段 C 收尾）
 
 **核心改动**
