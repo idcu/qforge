@@ -14,6 +14,32 @@
 
 ---
 
+## 4389bd7 · perf(ui): 答题卡格级增量——区域细化 frame+sub，整卡 <details> 不再重建（阶段 A）
+
+**核心改动**
+- `dom-patch.js` 增**子区域（格级增量）**：区域可带 `frame`（仅结构，跨作答稳定）+ `sub`（子区域数组，各带 `into` 指定容器 `[data-sub]`）；`patch` 顶层对账只比 `contentOf`（`frame||html`），**帧未变时 `syncSub` 仅按 key 就地替换内容变化的子节点**（数量/顺序变化才整容器重建）；新增 `snapshot`（区域数组→上次快照 map）、`contentOf`、`groupSub`（按容器归组、去重、剔除非法项）；`nodeFromHtml` 兼容纯文本子节点（`firstElementChild || firstChild`）。`plan` 仍为纯函数，可在 Node 单测。
+- `ui-renderer.js`：`renderAnswerCard` 拆出 `answerCellHtml`（单格）/`answerCardLegend`（静态图例）/`answerCardRegion`；`renderQuizRegions` 的 `quiz-card` 改为 `answerCardRegion(engine)` → `{ key, html, frame, sub }`——`html` 仍为整块（区域拼接逐字节不变）、`frame` 仅结构（计数/格子容器留空）、`sub` = `ac-count` 计数 + 逐格 `ac-cell-<i>`；`<summary>` 计数与 `.ac-grid` 加 `data-sub` 容器。`app.js`/`index.html` **无需改动**（`patch` 已支持 sub）。
+- `scripts/ui-renderer.test.mjs` **76→87**（加「答题卡格级增量」段：帧跨作答逐字节不变、子区域键序/容器归属、作答/跳题仅「计数 + 受影响格」变化）；`scripts/dom-patch.test.mjs` **27→40**（加 frame/sub 对账、`snapshot`/`contentOf`/`groupSub`）；`scripts/bench.mjs` 增「答题卡格级对账」打点，`prev` 改用 `DP.snapshot`（以 frame 为基准）。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **20 套件 2603/2603 通过**（UTC 与 Asia/Shanghai 双时区均 0 失败；UTC 实跑汇总=2603）。较上一版 +24 断言（dom-patch +13、ui-renderer +11）。
+- bench（`node --expose-gc scripts/bench.mjs`，采样 10 中位数）：
+  - 勾选选项 顶层区域对账：**重建 2/5 区域，占 HTML 字节 10.2%**（细化前 3/5、95.6%）；对账 0.00 ms。
+  - 答题卡格级对账：**整卡 `<details>` 不重建**（帧未变），仅替换 **2/51 子节点**（计数 + 受影响格），占整卡 HTML 字节 **2.0%**；对账 0.00 ms。
+  - 错题本移除一条：仅重建 1/22 区域（占字节 0.9%），20 区域保持原节点；对账 0.00 ms。
+  - heapUsed 增量 **+2.55 MB**（5.16→7.71，`--expose-gc`）；3000 题规模库末态 **14.64 MB**；**DOM 增量末态 14.83 MB**。
+  - 首屏静态体积 **166.1 KB gzip / 469.4 KB raw**（60 文件 / 55 js）。
+- **浏览器实机验证**（`node scripts/serve.mjs` + 自动化浏览器，导入示例题库→练习）：
+  - 关键证明：**折叠答题卡（`<summary>`）后作答，卡片保持折叠**（DOM 检测 `open` 属性仍缺失）——旧「整块 innerHTML」会以 `open` 重建而重新展开，故该行为即「整卡未重建」的直接证据。
+  - 作答使选项获 `selected` 类、`提交答案` 移除 `disabled`、答题卡「已答 1/5」→「2/5」、当前格 `ac-empty cur`→`ac-answered cur`；控制台无报错。
+
+**遗留 TODO / 风险**
+- **答题卡外的答题视图区域仍为整块**（`quiz-question` 选项态、`quiz-actions` 按钮每次作答重建，占答题区字节 10.2%）：这些区块含选项列表/按钮，逐项细化收益有限，暂不细化。
+- **浏览器 DOM 解析/布局 P95 未单独测量**（bench 只量字符串构建与纯函数对账）；如需端到端口径需补浏览器性能打点。
+- 子区域对账依赖容器上 `[data-sub]` 与元素 `__regionHtml`；整卷题数变化（子区域数量变化）会整容器重建——该场景仅在换卷/换视图时出现，可接受。
+
+---
+
 ## 3da7ced · perf(ui): 列表与答题区 DOM 区域级增量回填（阶段 A）
 
 **核心改动**
