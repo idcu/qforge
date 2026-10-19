@@ -377,6 +377,80 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   eq(Object.keys((await QB.DB.weights.read()).banks).length, 0, 'api：级联删库（权重 preset）');
 }
 
+section('跨布局整链 E2E：本地备份 → 真实后端（POST /api/backup）→ 读回 → 再恢复到本地');
+{
+  // 1) local 模式造数据 → 本地布局备份载荷（questions:<id>:meta 分片 + user:*/meta:*）
+  const ctxL = await createHarness(path.resolve(__dirname, '..'));
+  const L = ctxL.QB;
+  L.DB.init();
+  const bank = await L.DB.banks.create({ name: '整链库', category: 'chain' });
+  await L.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: '整链题1', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' },
+    { type: 'judge', question: '整链题2', answer: '正确' }
+  ], { dedupe: false });
+  const localQs = (await L.DB.questions.list(bank.id, {})).items;
+  await L.DB.progress.wrongAdd(bank.id, localQs[0]);
+  await L.DB.progress.historyAdd({ bankId: bank.id, bankName: '整链库', mode: 'practice', total: 2, correct: 1, byType: { single: { correct: 1, total: 2 } }, durationMs: 34127 });
+  await L.DB.revlog.append([{ h: localQs[0].contentHash, r: 3, b: bank.id }]);
+  await L.DB.weights.write({ global: { w: L.FSRS.DEFAULT_W, trainedAt: 8 }, banks: {} });
+  const localBackup = await L.Backup.buildBackup();
+  ok(!L.Backup.isServerFormat(localBackup.data), '整链：本地模式导出的是本地布局载荷');
+  const lm = localBackup.data[L.KEYS.questionsMeta(bank.id)];
+  ok(!!lm && lm.v === 3 && lm.count === 2, '整链：本地载荷含分片清单 v3/count=2（确为本地布局）');
+
+  // 2) api 模式（指向真实参考后端）恢复该本地备份 → localToServer + POST /api/backup?mode=replace
+  const ctxA = await createHarness(path.resolve(__dirname, '..'));
+  const A = ctxA.QB;
+  A.CONFIG.DATA_BACKEND = 'api';
+  A.CONFIG.API_BASE_URL = base;
+  A.ApiAdapter.useFetch((url, opts) => fetch(url, opts)); // harness 的 window 无 fetch，需注入（同 parity 段）
+  A.DB.init();
+  eq(A.DB.backend, 'api', '整链：恢复端为 api 模式');
+  const r = await A.Backup.applyBackup(localBackup, { mode: 'replace' });
+  eq(r.mode, 'replace', '整链：恢复回执 replace');
+  eq((await A.DB.banks.list()).length, 1, '整链：服务端仅剩该库（replace）');
+  eq(await A.DB.questions.count(bank.id), 2, '整链：服务端题目数 2');
+  eq((await A.DB.progress.wrongList(bank.id))[0].wrongCount, 1, '整链：服务端错题回读 wrongCount');
+
+  // 3) 直接读 HTTP 载荷：核对「到达服务端的确实是后端布局（snake_case + 按库归集）」
+  const wire = (await req('GET', '/api/backup')).body.data;
+  eq(wire.banks.length, 1, '整链：后端口径 banks 1 个');
+  eq(wire.banks[0].id, bank.id, '整链：题库 id 原样保留');
+  eq(wire.banks[0].created_at, bank.createdAt, '整链：createdAt → created_at');
+  eq(wire.questions[bank.id].length, 2, '整链：题目归集到 questions:{bankId}');
+  eq(wire.questions[bank.id][0].bank_id, bank.id, '整链：题目带 bank_id');
+  eq(wire.questions[bank.id][1].content_hash, localQs[1].contentHash, '整链：contentHash → content_hash 一致');
+  eq(wire.questions[bank.id][1].question, '整链题2', '整链：题面一致');
+  eq(wire.progress[bank.id].wrong[0].wrong_count, 1, '整链：questionKey→question_key、wrongCount→wrong_count');
+  eq(wire.history[0].duration_ms, 34127, '整链：durationMs → duration_ms');
+  ok(!!wire.history[0].created_at, '整链：createdAt → created_at（历史）');
+  eq(wire.revlog.length, 1, '整链：user:revlog → revlog');
+  eq(wire.revlog[0].b, bank.id, '整链：revlog 题库归属保留');
+  eq(wire.weights.global.w.length, L.FSRS.DEFAULT_W.length, '整链：meta:fsrsWeights → weights');
+
+  // 4) 把真实后端载荷再恢复到另一个 local 模式上下文 → 与步骤 1 的数据等价（整链闭环）
+  const ctxL2 = await createHarness(path.resolve(__dirname, '..'));
+  const L2 = ctxL2.QB;
+  L2.DB.init();
+  ok(L2.Backup.isServerFormat(wire), '整链：服务端载荷被识别为后端布局');
+  await L2.Backup.applyBackup({ app: 'qforge-backup', version: L2.CONFIG.VERSION, exportedAt: new Date().toISOString(), data: wire }, { mode: 'replace' });
+  const back = await L2.DB.banks.list();
+  eq(back.length, 1, '整链闭环：本地仅 1 库');
+  eq(back[0].id, bank.id, '整链闭环：库 id 与源一致');
+  eq(back[0].name, '整链库', '整链闭环：库名一致');
+  eq(back[0].createdAt, bank.createdAt, '整链闭环：created_at → createdAt 往返一致');
+  const backQs = (await L2.DB.questions.list(bank.id, {})).items;
+  eq(backQs.length, 2, '整链闭环：题目 2 道（由分片重建）');
+  eq(backQs[0].question, '整链题1', '整链闭环：题面一致');
+  eq(backQs[1].contentHash, localQs[1].contentHash, '整链闭环：content_hash → contentHash 一致');
+  const backWrong = await L2.DB.progress.wrongList(bank.id);
+  eq(backWrong[0].questionKey, L2.makeQuestionKey(localQs[0]), '整链闭环：错题键一致');
+  eq(backWrong[0].wrongCount, 1, '整链闭环：wrong_count → wrongCount 一致');
+  eq((await L2.DB.progress.historyList(bank.id))[0].durationMs, 34127, '整链闭环：历史用时一致');
+  ok((await L2.DB.revlog.list()).some((e) => e.b === bank.id), '整链闭环：revlog 归属一致');
+  eq((await L2.DB.weights.read()).global.trainedAt, 8, '整链闭环：权重 meta（trainedAt）保留');
+}
+
 await srv.close();
 
 section('后端不可达时的诚实拒绝（无假数据）');
@@ -385,11 +459,15 @@ section('后端不可达时的诚实拒绝（无假数据）');
   const { QB } = ctx;
   QB.CONFIG.DATA_BACKEND = 'api';
   QB.CONFIG.API_BASE_URL = 'http://127.0.0.1:1'; // 无人监听
+  // 注入 fetch：否则 req 会在「没注入 fetch」这一步就抛错，断言便测不到真正的网络失败路径
+  QB.ApiAdapter.useFetch((url, opts) => fetch(url, opts));
   QB.DB.init();
   let err = null;
   try { await QB.DB.banks.list(); } catch (e) { err = e; }
   ok(!!err, 'api 后端不可达时抛错（不静默返回假数据）');
-  ok(/fetch|ECONNREFUSED|Failed|network/i.test(String(err && err.message)), '错误信息指向网络失败（' + (err && err.message) + '）');
+  const msg = String(err && err.message);
+  ok(/ECONNREFUSED|fetch failed|Failed to fetch|network/i.test(msg) && msg.indexOf('没有 fetch') < 0,
+    '错误信息指向网络失败（' + msg + '）');
 }
 
 console.log('\n================ 汇总 ================');
