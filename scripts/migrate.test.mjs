@@ -104,7 +104,7 @@ section('v1→v2：题目与全部用户数据键跟随重映射');
   ok(review[n2.contentHash] && review[n2.contentHash].stability === 5.8, 'q2 复习状态迁移到新键');
   ok(!review[h1old] && !review[h2old], '旧 hash 键已清除');
   // 迁移后仍可正常取状态/评分
-  const st = QB.SRSStore.getState(bank.id, n1);
+  const st = await QB.SRSStore.getState(bank.id, n1);
   eq(st && st.stability, 2.4, 'SRSStore 按新键读到迁移状态');
 
   // 错题/收藏

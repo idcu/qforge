@@ -3,19 +3,22 @@
  * 与错题/收藏一致使用 contentHash，题目元数据被编辑不影响复习进度。
  * 调度算法 QB.FSRS（FSRS-4.5）；旧 SM-2 状态（无 algo/stability）在首次评分时
  * 自动按 FSRS 新卡初始化（见 fsrs.review）。
+ *
+ * 存储读写一律经 QB.DB.reviews 契约层（local-adapter 直写 LocalStorage / api-adapter 走 REST），
+ * 故触碰存储的方法均为异步（await）；评分映射与到期桶计算保持同步纯函数。
  */
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  function keyOf(bankId) { return QB.KEYS.review(bankId); }
-
-  function readMap(bankId) {
-    return QB.Storage.get(keyOf(bankId)) || {};
+  /** 该库调度状态 map（contentHash → state），经契约层；无记录返回 {} */
+  async function readMap(bankId) {
+    return await QB.DB.reviews.list(bankId);
   }
 
-  function writeMap(bankId, map) {
-    QB.Storage.setSync(keyOf(bankId), map); // 学习数据同步落盘：失败立即上抛，不假成功
+  /** 整表落盘（失败即抛，不假成功），经契约层 */
+  async function writeMap(bankId, map) {
+    return await QB.DB.reviews.save(bankId, map);
   }
 
   function keyFor(q) { return q.contentHash || QB.makeContentHash(q); }
@@ -58,30 +61,30 @@
   }
 
   /** 取某题状态（无记录返回 null） */
-  function getState(bankId, q) {
-    const map = readMap(bankId);
+  async function getState(bankId, q) {
+    const map = await readMap(bankId);
     return map[keyFor(q)] || null;
   }
 
   /** 应用一次评分，返回新状态并落盘（同时写 revlog 供参数优化） */
-  function grade(bankId, q, rating, now) {
+  async function grade(bankId, q, rating, now) {
     const ts = now == null ? Date.now() : now;
-    const map = readMap(bankId);
+    const map = await readMap(bankId);
     const k = keyFor(q);
     const fr = fsrsRating(rating);
-    const next = QB.FSRS.review(map[k], fr, ts, QB.FSRSOpt.getActiveWeights(bankId));
+    const next = QB.FSRS.review(map[k], fr, ts, await QB.FSRSOpt.getActiveWeights(bankId));
     map[k] = next;
-    writeMap(bankId, map);
-    QB.FSRSOpt.appendLog([{ t: ts, h: k, r: fr, b: bankId }]);
+    await writeMap(bankId, map);
+    await QB.FSRSOpt.appendLog([{ t: ts, h: k, r: fr, b: bankId }]);
     return next;
   }
 
   /** 批量应用：[{question, rating}]（应用层 0–3） */
-  function gradeMany(bankId, entries, now) {
+  async function gradeMany(bankId, entries, now) {
     if (!entries || !entries.length) return;
     const ts = now == null ? Date.now() : now;
-    const map = readMap(bankId);
-    const w = QB.FSRSOpt.getActiveWeights(bankId);
+    const map = await readMap(bankId);
+    const w = await QB.FSRSOpt.getActiveWeights(bankId);
     const logs = [];
     entries.forEach((e) => {
       const k = keyFor(e.question);
@@ -89,18 +92,18 @@
       map[k] = QB.FSRS.review(map[k], fr, ts, w);
       logs.push({ t: ts, h: k, r: fr, b: bankId });
     });
-    writeMap(bankId, map);
-    QB.FSRSOpt.appendLog(logs);
+    await writeMap(bankId, map);
+    await QB.FSRSOpt.appendLog(logs);
   }
 
   /** 今日到期题目（未学过的题也算到期） */
-  function dueToday(bankId, questions, now) {
-    const map = readMap(bankId);
+  async function dueToday(bankId, questions, now) {
+    const map = await readMap(bankId);
     return QB.SRS.dueQuestions(questions, map, now);
   }
 
-  function countDue(bankId, questions, now) {
-    return dueToday(bankId, questions, now).length;
+  async function countDue(bankId, questions, now) {
+    return (await dueToday(bankId, questions, now)).length;
   }
 
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -113,8 +116,8 @@
   }
 
   /** 概览：已跟踪题数、已学题数（有 stability 的） */
-  function stats(bankId, now) {
-    const map = readMap(bankId);
+  async function stats(bankId, now) {
+    const map = await readMap(bankId);
     const keys = Object.keys(map);
     let learned = 0;
     keys.forEach((k) => { if (map[k] && map[k].stability > 0) learned++; });
@@ -125,12 +128,12 @@
    * 到期预报（纯统计，不改状态）
    * @param {Array} questions 题库全部题目（未学过的题计入今日到期）
    * @param {number} days 预报天数（含今天，默认 7）
-   * @returns {{today:number, learned:number, tracked:number, newCount:number, days:Array<{label,count,overdue:boolean}>}}
+   * @returns {Promise<{today:number, learned:number, tracked:number, newCount:number, days:Array<{label,count,overdue:boolean}>}>}
    */
-  function forecast(bankId, questions, days, now) {
+  async function forecast(bankId, questions, days, now) {
     now = now == null ? Date.now() : now;
     const horizon = days || 7;
-    const map = readMap(bankId);
+    const map = await readMap(bankId);
     const todayIdx = dayIndex(now);
     const buckets = new Array(horizon).fill(0);
     let tracked = 0;
@@ -166,8 +169,8 @@
     };
   }
 
-  function clear(bankId) {
-    QB.Storage.remove(keyOf(bankId));
+  async function clear(bankId) {
+    return await QB.DB.reviews.remove(bankId);
   }
 
   QB.SRSStore = { getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear, keyFor, ratingForResult, collectGraded, readMap, writeMap };

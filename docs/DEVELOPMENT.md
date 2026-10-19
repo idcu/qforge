@@ -72,7 +72,7 @@ PORT=8788 HOST=0.0.0.0 DATA_DIR=/tmp/qf-data node scripts/serve-api.mjs
 | `scripts/pwa.test.mjs` | **47** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**悬浮滚动按钮（#btn-top/#btn-bottom 复用 .btn-float + .btn-top/.btn-bottom 定位 + app.js scrollTo/scrollHeight/scroll 绑定 + CSS .btn-float.show，11 项）**、**细节样式修复（`.li-meta` 不限 `.list-item`、弹窗 `.modal select`/`input.st-count` 控件样式、`.bp-n` 宽度不被覆盖、toast 置底居中避开悬浮按钮、`.qe-grid` 换行、窄屏（≤560px）提示条让位，7 项）** |
 | `scripts/ui-renderer.test.mjs` | **87** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡**；**区域数组与 DOM 对账（阶段 A）：5 个 `*Regions` 变体键序稳定、拼接逐字节等于旧整块字符串、顶层带 `data-region`；`QB.DomPatch.plan` 对账（作答区仅重建变化区域、错题本 keyed 条目保留未变节点）**；**答题卡格级增量（阶段 A）：`quiz-card` 区域含 `frame`+`sub`、帧不含格子状态跨作答逐字节不变、子区域键序/容器归属、作答/跳题仅「计数 + 受影响格」变化（其余格不重建）** |
 | `scripts/dom-patch.test.mjs` | **40** | `QB.DomPatch` 区域对账（`plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`，DOM-free）：首次全变化、内容一致全不重建、单区域变化、区域新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全、列表移除场景；**子区域（格级）：`contentOf` 取 frame、帧未变→顶层不重建、`snapshot` 以 frame 为基准、`normalize` 保留 `frame`/`sub`、`groupSub` 按容器归组去重剔除非法项** |
-| `scripts/contract.test.mjs` | **52** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径 |
+| `scripts/contract.test.mjs` | **52** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源（**local-adapter 直读写 Storage，领域模块经 `QB.DB.*` 委托本适配器，禁双向委托以免自递归**）；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径 |
 | `scripts/api-backend.test.mjs` | **117** | **参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、`count` 缓存、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错 |
 | **合计** | **2872 / 2872 通过 · 22 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
@@ -140,7 +140,7 @@ node --expose-gc scripts/bench.mjs   # 采样 10 次取中位数，输出耗时�
 > **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账（列表 + 答题区，含**答题卡格级增量**）。**列表侧**——错题本移除一条仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）。**答题区**——勾选选项时顶层仅重建 2/5 区域（`quiz-question` + `quiz-actions`，占字节 10.2%）；答题卡由「整卡单区域」细化为 `frame` + `sub`：帧跨作答逐字节不变（整张 `<details>` 不重建，展开态不丢），仅按 key 就地替换变化的 **2/51** 子节点（计数 + 受影响格，占整卡 HTML 字节 2.0%）。相较细化前（整卡占答题区字节约 95.6%），答题热路径重建量 **由 95.6% 降至 10.2%**。**浏览器实机验证**：折叠答题卡后作答，卡片保持折叠（证明 `<details>` 未被重建）；作答使选项态/提交按钮/计数/当前格状态同步更新，控制台无报错。
 > `insertMany` 落库耗时以 v2 contentHash 语义哈希重算为主（约 4.5 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体 0.67 ms）反而低于旧单键写（0.88 ms）。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化。
 
-bench 全程 heapUsed：5.16 → 7.71 MB（**+2.55 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 14.64 MB；DOM 增量末态 14.83 MB）。首屏静态体积（index.html + css + 55 个 js + sw/manifest/icon，共 60 个文件，`gzip -9`）：**166.1 KB gzip / 469.4 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：5.26 → 7.81 MB（**+2.54 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 14.77 MB；DOM 增量末态 14.95 MB）。首屏静态体积（index.html + css + 54 个 index 内联 js + FSRS 训练 Worker + sw.js + manifest/icon，共 60 个文件，逐文件 `gzip -9` 合计）：**178.8 KB gzip / 503.5 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 
@@ -173,7 +173,7 @@ bench 全程 heapUsed：5.16 → 7.71 MB（**+2.55 MB**；`--expose-gc` 连跑�
 
 ### 5.4 接后端
 
-实现 `js/data/api-adapter.js`（照 [API-CONTRACT.md](API-CONTRACT.md)），`config.js` 切 `DATA_BACKEND='api'`。注意 SRS/备份/资产三组当前直连 Storage/IndexedDB，需按契约 §6–§8 同步扩展 `contracts.js`（文档中已显式标注影响面）。
+实现/接入后端：`config.js` 设 `DATA_BACKEND='api'` + `NETWORK.API_BASE_URL` 指向服务端即可（参考后端 `scripts/serve-api.mjs`，见 §1）。**SRS/备份/资产三组均已纳入契约层**——`QB.CONTRACTS` 含 `reviews/revlog/weights/backup`，资产走独立的 `QB.ASSET_DRIVER_CONTRACT`；领域模块（`srs-store`/`fsrs-opt`/`backup`）只经 `QB.DB.*` **异步**存取、不直连 Storage/IndexedDB，故启用后端时 **UI 代码零改动**（详见 [API-CONTRACT.md](API-CONTRACT.md) §6/§8/§9 与 [SRS.md](SRS.md) §9）。新增一类资源时：按 §9 先补 `contracts.js` 一组方法 → 两个适配器实现 → 服务端端点，再改领域模块。
 
 ### 5.5 重新生成 xlsx/docx 夹具
 

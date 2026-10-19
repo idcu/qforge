@@ -194,14 +194,14 @@ section('备份包 .qfbk 往返（JSON 与 ZIP 自动识别）');
   // 覆盖恢复：先清再写
   await QB.Assets.clear();
   eq((await QB.Assets.ids()).length, 0, 'IDB 已清空');
-  QB.Backup.applyBackup(parsed.backup, { mode: 'replace' });
+  await QB.Backup.applyBackup(parsed.backup, { mode: 'replace' });
   const restored = await QB.Backup.restoreAssets(parsed.assets, 'replace');
   eq(restored, 1, '恢复图片 1 张');
   ok(!!(await QB.Assets.get(imgId)), '恢复后图片可取');
 
   // 无图时 JSON 路径仍可被 parseBackupFile 识别
   await QB.Assets.clear();
-  const jsonText = JSON.stringify(QB.Backup.buildBackup());
+  const jsonText = JSON.stringify(await QB.Backup.buildBackup());
   const parsedJson = await QB.Backup.parseBackupFile(new TextEncoder().encode(jsonText).buffer);
   ok(!!parsedJson.backup.data && parsedJson.assets.length === 0, '纯 JSON 备份识别成功');
 

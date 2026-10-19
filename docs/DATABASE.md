@@ -184,7 +184,7 @@ CREATE TABLE assets (
 | `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}` |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
 | `qb:user:session` | `sessions` | 单条会话快照 |
-| `qb:user:revlog` | `review_log` | 全局 FIFO 评分日志，元素 `{id,h,r,t}` |
+| `qb:user:revlog` | `review_log` | 全局 FIFO 评分日志，元素 `{id,h,r,t,b?}`（`b`=bankId） |
 | `qb:meta:fsrsWeights` | —（前端偏好） | 个性化 FSRS 权重与训练元数据 |
 | `qb:meta:dav` | —（前端偏好） | WebDAV 配置（目录 URL/账号/应用密码/上次同步时间），仅本机 |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |
@@ -230,3 +230,24 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 | bench 全程 heapUsed 增量 | +2.56 MB（4.99 → 7.55 MB；`--expose-gc` 连跑稳定） |
 
 > 数据来源：2026-10-19 本机实测与 `CHANGELOG.internal.md`；后端选型时以此估算存储与索引规模（分片仅影响前端 LocalStorage 布局，后端仍按 `questions` 单表 `UNIQUE(bank_id, content_hash)` 落库）。
+
+## 7. 参考后端落盘布局（`.qforge-data/`）↔ 表映射
+
+阶段 C 的零依赖参考后端 [serve-api.mjs](../scripts/serve-api.mjs) 把 §2 的表落成 JSON（目录默认 `<工程根>/.qforge-data`，**已 gitignore**；写入 `tmp + rename` 原子替换、内存 cache + write-through，重启读回）：
+
+| 文件 / 目录 | 内容 | 对应表 / 端点 |
+| --- | --- | --- |
+| `banks.json` | 题库数组 | `banks`（§2.1）/ `/api/banks` |
+| `questions/<bankId>.json` | 该库题目数组 | `questions`（§2.2）/ `/api/banks/{id}/questions` |
+| `progress/<bankId>.json` | `{wrong:[], favorite:[], review:{}}`（错题/收藏/复习计划分三段） | `wrong_questions` / `favorites` / `review_schedule` / `/api/banks/{id}/{wrong,favorites,reviews}` |
+| `history.json` | 答题历史数组 | `attempts`（§2.5）/ `/api/history` |
+| `session.json` | 单条会话快照（`null` 或对象） | `sessions`（§2.6）/ `/api/session` |
+| `revlog.json` | 评分日志数组（服务端补 id/时间戳并按上限 FIFO） | `review_log`（§2.8）/ `/api/revlog` |
+| `weights.json` | `{global, banks}` 权重仓 | 前端偏好（`qb:meta:fsrsWeights`）/ `/api/fsrs-weights` |
+| `assets/<id>.bin` + `<id>.mime` | 图片原始字节 + MIME（id=FNV-1a 32 + 长度，与 `assets.js::idFor` 一致） | `assets`（§2.9）/ `/api/assets` |
+
+> 与前端 LocalStorage 的差异：服务端按库**单文件**存题目与进度，而前端题目为 200 题/片的分片 + 清单（§3）——两种布局映射到同一张 `questions` 表（`UNIQUE(bank_id, content_hash)`）；`GET /api/backup` 由上述文件**实时组装**（无独立 `backup.json`）。字段名一律 snake_case（§3「字段命名转换」），由 `api-adapter.js` 的 wire 映射表与前端 camelCase 互转。
+
+## 8. 数据访问契约（阶段 C，代码侧权威）
+
+LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务模块）与本子系统的存储都只经门面 `QB.DB` 的 7 组 Repository（`banks/questions/progress/reviews/revlog/weights/backup` + 资产驱动契约）。契约归属、异步形状与「禁止双向委托」的约束见 [API-CONTRACT.md](API-CONTRACT.md) §9 与 [SRS.md](SRS.md) §9.1。

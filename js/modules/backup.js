@@ -1,6 +1,8 @@
 /**
  * 全量备份 / 恢复（跨设备、跨浏览器迁移本地数据）
- * 纯函数 buildBackup/applyBackup 不依赖 DOM（可单测）；openFlow 负责文件下载/选择。
+ * buildBackup/applyBackup 不依赖 DOM（可单测），但读写经 QB.DB.backup 契约层
+ * （local-adapter 直写 LocalStorage / api-adapter 走 REST），故均为异步；
+ * openFlow 负责文件下载/选择。
  * 备份内容：Storage 中以应用前缀开头的全部逻辑键（题库、题目、错题、收藏、SRS、历史、偏好）。
  */
 (function (global) {
@@ -35,13 +37,18 @@
     return data;
   }
 
-  /** 读取全部应用数据 → 备份对象（值为已解析的 JS 对象；敏感密码已脱敏） */
-  function buildBackup(now) {
+  /**
+   * 读取全部应用数据 → 备份对象（值为已解析的 JS 对象；敏感密码已脱敏）。
+   * 载荷经 QB.DB.backup.export（local=LocalStorage / api=REST），故为异步。
+   * @returns {Promise<Object>}
+   */
+  async function buildBackup(now) {
+    const payload = await QB.DB.backup.export();
     return {
       app: MAGIC,
       version: QB.CONFIG.VERSION,
       exportedAt: new Date(now == null ? Date.now() : now).toISOString(),
-      data: redactSecrets(readAllData())
+      data: redactSecrets((payload && payload.data) || {})
     };
   }
 
@@ -98,14 +105,14 @@
   }
 
   /**
-   * 恢复备份（含外壳校验）
+   * 恢复备份（含外壳校验）；载荷经 QB.DB.backup.import（local 直写 / api REST），故为异步
    * @param {Object} backup 备份对象
    * @param {{mode?:'replace'|'merge'}} opts
-   * @returns {{keys:number, mode:string}}
+   * @returns {Promise<{keys:number, mode:string}>}
    */
-  function applyBackup(backup, opts) {
+  async function applyBackup(backup, opts) {
     if (!isBackup(backup)) throw new Error('不是有效的 qforge 备份文件');
-    return applyData(backup.data, (opts || {}).mode);
+    return await QB.DB.backup.import({ data: backup.data }, (opts || {}).mode);
   }
 
   /* ---------------- 含图片资产的备份包（.qfbk：backup.json + assets/*） ---------------- */
@@ -129,7 +136,7 @@
     QB.Storage.forceSync();
     const assets = await QB.Assets.allEntries();
     if (!assets.length) return null;
-    const payload = buildBackup();
+    const payload = await buildBackup();
     return {
       content: QB.Qbk.buildBundle('backup.json', JSON.stringify(payload, null, 2), assets),
       assetCount: assets.length
@@ -163,7 +170,7 @@
       blob = new Blob([bundle.content], { type: 'application/zip' });
       name = filename || ('qforge-backup-' + new Date().toISOString().slice(0, 10) + '.qfbk');
     } else {
-      const payload = buildBackup();
+      const payload = await buildBackup();
       blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
       name = filename || ('qforge-backup-' + new Date().toISOString().slice(0, 10) + '.json');
     }
@@ -204,7 +211,7 @@
             modal.querySelector('[data-bk="ok"]').onclick = async () => {
               const mode = modal.querySelector('#bk-merge').checked ? 'merge' : 'replace';
               try {
-                const r = applyBackup(backup, { mode: mode });
+                const r = await applyBackup(backup, { mode: mode });
                 const imgCount = await restoreAssets(parsed.assets, mode);
                 QB.UIRenderer.closeModal();
                 QB.UIRenderer.toast('已恢复 ' + r.keys + ' 个数据键' + (imgCount ? '、' + imgCount + ' 张图片' : ''), 'ok');

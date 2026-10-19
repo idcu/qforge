@@ -23,10 +23,10 @@ const bank = await QB.DB.banks.create({ name: '备份库' });
 await QB.DB.questions.insertMany(bank.id, [
   { type: 'single', question: '备份题', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' }
 ], { dedupe: false });
-QB.SRSStore.grade(bank.id, (await QB.DB.questions.list(bank.id, {})).items[0], QB.SRS.RATINGS.good, Date.now());
+await QB.SRSStore.grade(bank.id, (await QB.DB.questions.list(bank.id, {})).items[0], QB.SRS.RATINGS.good, Date.now());
 const beforeBankCount = (await QB.DB.banks.list()).length;
 
-const backup = QB.Backup.buildBackup();
+const backup = await QB.Backup.buildBackup();
 eq(backup.app, 'qforge-backup', '备份标识正确');
 ok(!!backup.exportedAt && backup.version, '含时间戳与版本');
 const dataKeys = Object.keys(backup.data);
@@ -38,7 +38,7 @@ ok(!!bankKey, '备份含题库/SRS 数据键');
 section('WebDAV 密码脱敏（备份可安全分享，评估报告中优先级#6）');
 {
   QB.SyncDAV.saveConfig({ baseUrl: 'https://dav.example.com/', user: 'u1', pass: 's3cret', lastAt: 1 });
-  const bp = QB.Backup.buildBackup();
+  const bp = await QB.Backup.buildBackup();
   const dav = bp.data[QB.KEYS.metaDav];
   ok(!!dav && dav.pass === undefined, '备份不含 WebDAV 明文密码');
   eq(dav.baseUrl, 'https://dav.example.com/', '非密字段（地址）保留');
@@ -54,13 +54,13 @@ section('WebDAV 密码脱敏（备份可安全分享，评估报告中优先级#
 section('覆盖恢复');
 clearAll();
 eq((await QB.DB.banks.list()).length, 0, '清空后题库为 0');
-const r = QB.Backup.applyBackup(backup);
+const r = await QB.Backup.applyBackup(backup);
 ok(r.keys >= dataKeys.length, 'applyBackup 写回键数');
 eq((await QB.DB.banks.list()).length, beforeBankCount, '恢复后题库数量一致');
 const qs = await QB.DB.questions.list(bank.id, {});
 eq(qs.items.length, 1, '恢复后题目 1 道');
 eq(qs.items[0].question, '备份题', '题目内容一致');
-const srs = QB.SRSStore.getState(bank.id, qs.items[0]);
+const srs = await QB.SRSStore.getState(bank.id, qs.items[0]);
 ok(srs && srs.algo === 'fsrs' && srs.stability > 0, 'SRS（FSRS）复习状态一并恢复');
 
 section('合并恢复');
@@ -68,7 +68,7 @@ clearAll();
 await QB.DB.banks.create({ name: '现有库' });
 QB.Storage.set('test:extra-key', { keep: true }); // 备份之外的独立数据
 QB.Storage.forceSync();
-QB.Backup.applyBackup(backup, { mode: 'merge' });
+await QB.Backup.applyBackup(backup, { mode: 'merge' });
 ok(QB.Storage.get('test:extra-key').keep === true, '合并模式保留备份外的现有数据');
 eq((await QB.DB.banks.list()).length, beforeBankCount, '同名键（banks）被备份覆盖');
 
@@ -91,7 +91,7 @@ QB.Storage.remove = (k) => {
   return origRemove(k);
 };
 let rollThrew = false;
-try { QB.Backup.applyBackup(failingBackup); } catch (e) { rollThrew = true; }
+try { await QB.Backup.applyBackup(failingBackup); } catch (e) { rollThrew = true; }
 QB.Storage.remove = origRemove;
 ok(rollThrew, '恢复过程失败时错误上抛');
 eq(QB.Storage.get('roll:shared') && QB.Storage.get('roll:shared').v, 'old', '已覆盖键回滚到旧值');
@@ -101,7 +101,7 @@ clearAll();
 
 section('异常输入');
 let threw = false;
-try { QB.Backup.applyBackup({ app: 'other', data: {} }); } catch (e) { threw = true; }
+try { await QB.Backup.applyBackup({ app: 'other', data: {} }); } catch (e) { threw = true; }
 ok(threw, '非备份文件抛错');
 ok(!QB.Backup.isBackup(null) && !QB.Backup.isBackup({ foo: 1 }), 'isBackup 识别非法对象');
 

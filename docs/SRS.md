@@ -12,8 +12,8 @@
 | 核心变量 | 稳定度 S（天）、难度 D（1–10） |
 | 卡片键 | 题目 `contentHash`（与去重/错题/收藏同键，跨导入稳定） |
 | 作用域 | 调度状态按题库隔离；评分日志按题记录 `b=bankId`（全局训练用全部、按库训练仅该库）；权重支持全局 + 按题库 preset（权重与训练数据作用域一致） |
-| 模块 | `fsrs.js`（纯调度器）/ `srs.js`（到期判定）/ `srs-store.js`（存储与迁移）/ `fsrs-opt.js`（个性化优化器） |
-| 依赖 | 零第三方库、零 DOM、零 Storage 依赖（fsrs/srs 为纯函数，可在 Node 直接测试） |
+| 模块 | `fsrs.js`（纯调度器）/ `srs.js`（到期判定）/ `srs-store.js`（存取与迁移）/ `fsrs-opt.js`（个性化优化器） |
+| 依赖 | 零第三方库、零 DOM；`fsrs.js`/`srs.js` 为纯函数（零 Storage 依赖，可在 Node 直接测试）；`srs-store.js`/`fsrs-opt.js` 的存储读写**经 `QB.DB` 契约层**（异步），不再直接触碰 LocalStorage（见 §9） |
 
 ## 2. 状态模型
 
@@ -155,8 +155,8 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 
 ### 8.1 数据采集
 
-- 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳, b:bankId}` 到 `qb:user:revlog`。
-- **FIFO 上限 20,000 条**（约 0.8MB），超限丢最旧。
+- 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳, b:bankId}` 到 `qb:user:revlog`（**经契约层 `QB.DB.revlog.append`，异步**；补 id/时间戳与 FIFO 裁剪在 `local-adapter` 侧完成）。
+- **FIFO 上限 20,000 条**（约 0.8MB），超限丢最旧；常量唯一来源为 `QB.LocalAdapter.REVLOG_MAX`，`FSRSOpt.LOG_LIMIT` 再导出同值（不重复定义）。
 - **作用域隔离（评估报告中优先级#4 修复）**：按题库训练只读取 `b === 当前库` 的日志；全局训练读取全部。2026-10 前的旧日志无 `b`，只参与全局训练（不静默归入任何题库）；v1→v2 迁移时，题目仍唯一归属某库的旧日志会自动回填 `b`（见 [DATABASE.md](DATABASE.md) §4）。
 
 ### 8.2 训练在哪执行（Worker 化）
@@ -219,7 +219,7 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 - **工作路径一致**：热启动起点与迭代数经 `FSRSTrain.run` 一并透传给 Worker（消息 `startWeights`）与主线程回退路径，两条路径结果一致。
 - **实测收益**（`scripts/bench.mjs`，3200 样本）：全量训练中位 **3893.58 ms** → 热启动 **1548.56 ms**（**2.51×**），留出集改善 2.89%（≥ 全量 2.84%），门控仍达标。
 
-## 9. 存储键一览
+## 9. 存储键与数据契约（Repository）
 
 | 键 | 内容 | 对应表（见 DATABASE.md） |
 | --- | --- | --- |
@@ -227,19 +227,35 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 | `qb:user:revlog` | 全局 FIFO 评分日志 `{id,h,r,t,b?}[]`（`b`=bankId，按库训练过滤用） | `review_log` |
 | `qb:meta:fsrsWeights` | 全局/按题库权重与训练元数据 | 前端偏好（后端可置 user 设置） |
 
+### 9.1 阶段 C：SRS 已纳入数据层契约（异步存取）
+
+自 2026-10-19 起，本子系统的存储读写**不再直接触碰 LocalStorage**，一律经门面 `QB.DB`（唯一存储权威是适配器；`local-adapter` 直写 LocalStorage / `api-adapter` 走 REST）：
+
+| Repository | 方法（`QB.CONTRACTS`） | 领域模块入口 |
+| --- | --- | --- |
+| `QB.DB.reviews` | `list(bankId)` / `save(bankId,map)` / `remove(bankId)` | `SRSStore.readMap/writeMap/clear/getState/grade/gradeMany/dueToday/countDue/stats/forecast` |
+| `QB.DB.revlog` | `list()` / `append(entries)` | `FSRSOpt.readLog/readLogForScope/appendLog/shouldRetrain` |
+| `QB.DB.weights` | `read()` / `write(store)` / `remove(scope)` | `FSRSOpt.readStore/writeStore/getActiveWeights/getWeightsMeta/saveWeights/resetWeights/train/trainAsync` |
+
+- **只暴露存储原语**（读/写某键）：FSRS 调度、留出门控、到期桶计算、SM-2 迁移等算法**仍在**本子系统，不进契约层。
+- **读写均为异步**：`local-adapter` 返回值是普通值（`await` 零额外开销，local 行为逐字节等价），`api-adapter` 返回 Promise；调用点一律 `await`，故「切到后端后 UI 零改动」。
+- **禁止双向委托**：`local-adapter.reviews/revlog/weights` 必须直读写 LocalStorage，**不得**反向调用 `SRSStore`/`FSRSOpt`（否则与「领域模块 → `QB.DB.*`」互为委托成自递归）。`FSRSOpt.normalizeStore`（纯函数）是 `{global,banks}` 归一结构的唯一实现，被 `local-adapter.weights` 复用。
+- 纯函数（`ratingForResult`/`collectGraded`/`keyFor`/`fsrsRating`/`dayIndex`/桶计算）保持同步。
+- 已知遗留：api 模式下若频繁 render，会重复 `GET /api/banks/{id}/reviews`（计划中的适配器内 reviews 按库缓存尚未实现，见 CHANGELOG 遗留项）。
+
 ## 10. API 与测试
 
 | 模块 | 关键导出 |
 | --- | --- |
 | `fsrs.js` | `QB.FSRS.review(state, rating, now, weights, opts?)`（`opts.fuzzSeed` 启用 fuzz）、`initialState(now)`、`isLearning(state)`、`DEFAULT_W`（21）、`DECAY`/`FACTOR`/`REQUEST_RETENTION`/`STABILITY_MIN`/`MAX_INTERVAL_DAYS`/`SAME_DAY_LIMIT_DAYS`/`FUZZ_RANGES`、`decayOf`/`factorOf`/`powerDecay`/`retrievability`、`initStability`/`initDifficulty`/`nextStability`/`nextDifficulty`、`recallStability`/`forgetStability`/`stabilityShortTerm`、`nextIntervalDays`/`applyFuzz` |
 | `srs.js` | `QB.SRS.RATINGS`、`isDue`、`isDueToday`、`dueQuestions` |
-| `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/...`（0–3→1–4 映射、SM-2 迁移） |
-| `fsrs-opt.js` | revlog/权重存储层：`appendLog`、`readLogForScope`、`diagnose`、`train`（同步）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights`、**`shouldRetrain`/`warmWeightsFor`**（增量重训）；常量 `WARM_ITERATIONS`/`RETRAIN_MIN_NEW` |
+| `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear`（**均 async，经 `QB.DB.reviews`**；0–3→1–4 映射、SM-2 迁移）；同步纯函数 `keyFor`/`ratingForResult`/`collectGraded` |
+| `fsrs-opt.js` | revlog/权重**存取层**（经 `QB.DB.revlog/weights`，**均 async**）：`appendLog`、`readLogForScope`、`diagnose`、`train`（async 存储包装）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights`、**`shouldRetrain`/`warmWeightsFor`**（增量重训）；纯函数 `normalizeStore`（归一唯一实现，local-adapter 复用）；常量 `LOG_LIMIT`/`WARM_ITERATIONS`/`RETRAIN_MIN_NEW` |
 | `fsrs-train-core.js` | 纯计算：`computeTrain(revlog,opts)`（`initWeights` 门控基线 / `startWeights` 优化起点）、`diagnose`、`buildSequences/loss/gradient/optimize`、门控/边界常量（Worker 与主线程共用） |
 | `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,opts)`（Worker 优先、自动回退；训练参数含增量热启动 `startWeights`/`iterations` 一并透传，可注入测试） |
 | `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train`（`initWeights` 基线 / `startWeights?` 热启动起点）→ `done/error`（不经 index.html 加载） |
 
-测试（2026-10-19 实跑全绿）：`fsrs.test.mjs` **135** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **60** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **114** 项（优化器 67 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5；含 23 项增量重训）。全套件 20 项（19 套件 + smoke）**2684** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
+测试（2026-10-19 实跑全绿）：`fsrs.test.mjs` **135** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **60** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **114** 项（优化器 67 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5；含 23 项增量重训）。全套件 **22** 项（21 套件 + smoke）**2872** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
 
 ## 11. 已知边界（设计取舍）
 

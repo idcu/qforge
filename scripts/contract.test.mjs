@@ -61,7 +61,7 @@ section('reviews 仓库（本地）');
   const map = { 'hash1': { algo: 'fsrs', stability: 2.3065, due: 1 } };
   QB.DB.reviews.save(b, map);
   eq(QB.DB.reviews.list(b)['hash1'].stability, 2.3065, 'save 后 list 回读同一状态');
-  eq(QB.SRSStore.getState(b, { contentHash: 'hash1' }).stability, 2.3065, '仓库与领域模块同源（readMap/writeMap 复用）');
+  eq((await QB.SRSStore.getState(b, { contentHash: 'hash1' })).stability, 2.3065, '仓库与领域模块同源（readMap 经 DB.reviews.list）');
   QB.DB.reviews.remove(b);
   eq(JSON.stringify(QB.DB.reviews.list(b)), '{}', 'remove 后回到空 map');
 }
@@ -73,7 +73,7 @@ section('revlog 仓库（本地，委托 fsrs-opt）');
   eq(out.length, 2, 'append 返回追加后的完整日志');
   ok(out[0].id && out[0].t === 100, '条目自动补 id，显式 t 保留');
   ok(out[1].id && typeof out[1].t === 'number', '缺省 t 补当前时间戳');
-  eq(JSON.stringify(QB.DB.revlog.list()), JSON.stringify(QB.FSRSOpt.readLog()), 'list 与领域模块同一数据（同一实现）');
+  eq(JSON.stringify(QB.DB.revlog.list()), JSON.stringify(await QB.FSRSOpt.readLog()), 'list 与领域模块同一数据（同一实现）');
 }
 
 section('weights 仓库（本地）');

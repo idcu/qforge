@@ -10,6 +10,7 @@ import { createHarness } from './_harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { QB } = await createHarness(path.resolve(__dirname, '..'));
+QB.DB.init(); // 备份载荷经 QB.DB.backup，需初始化数据层（local 适配器）
 
 let pass = 0;
 const failures = [];
@@ -98,7 +99,7 @@ section('上传：有图 → ZIP（.qfbk 结构）');
 section('下载并解析');
 {
   QB.Storage.set('banks', []);
-  const backup = QB.Backup.buildBackup();
+  const backup = await QB.Backup.buildBackup();
   const jsonBuf = new TextEncoder().encode(JSON.stringify(backup)).buffer;
   const rec = {};
   const parsed = await D.fetchBackup({

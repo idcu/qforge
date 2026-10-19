@@ -112,12 +112,13 @@
 
 ## 6. 资源：间隔重复（SRS）
 
-> **契约归属（2026-10-19 阶段 C 起，已落地）**：SRS 三块存储原语已进入 `QB.CONTRACTS`——
+> **契约归属（2026-10-19 阶段 C 起，已落地并接线）**：SRS 三块存储原语已进入 `QB.CONTRACTS`——
 > `reviews:[list,save,remove]`、`revlog:[list,append]`、`weights:[read,write,remove]`，并已由
-> `local-adapter`（委托 `SRSStore`/`FSRSOpt`）与 `api-adapter`（REST）双双实现；参考后端
-> `scripts/serve-api.mjs` 实现了下表端点。**未实现**：`GET /api/reviews/due`（到期集合由前端
-> 用 reviews 全表 + 本地算法计算，无服务端端点）与 `POST /api/fsrs-weights/train`（训练仍在本地
-> Worker 完成，服务端不代训）——如实标注，不做假实现。
+> `local-adapter`（**直读写 LocalStorage，是唯一存储权威**）与 `api-adapter`（REST）双双实现；
+> 领域模块 `SRSStore`/`FSRSOpt` 只保留算法与作用域过滤，存储一律经 `QB.DB.reviews/revlog/weights`
+> 委托（均为异步，见 §9 接线进度）。参考后端 `scripts/serve-api.mjs` 实现了下表端点。**未实现**：
+> `GET /api/reviews/due`（到期集合由前端用 reviews 全表 + 本地算法计算，无服务端端点）与
+> `POST /api/fsrs-weights/train`（训练仍在本地 Worker 完成，服务端不代训）——如实标注，不做假实现。
 
 | 方法 | 路径 | 说明 | 请求体 / 响应 |
 | --- | --- | --- | --- |
@@ -180,7 +181,9 @@
 
 > **契约归属（2026-10-19 阶段 C 起）**：`reviews/revlog/weights/backup` 已进入 `QB.CONTRACTS`（只暴露「存储原语」，算法留在领域模块）；**资产不进 `QB.CONTRACTS`**，改走独立的 `QB.ASSET_DRIVER_CONTRACT`（避免 `DB.init → useDriver → getDriver` 自递归）。
 >
-> **接线进度（诚实标注）**：契约与两个适配器已就位；`srs-store.js`/`fsrs-opt.js`/`backup.js` 的调用点改为「经 `QB.DB.*` 异步仓库」随参考后端一并落地（同一阶段内完成，届时 UI 仅在这些模块的存储调用处加 `await`）。
+> **接线进度（诚实标注）**：契约与两个适配器已就位，且领域模块**已完成接线**——`srs-store.js`/`fsrs-opt.js`/`backup.js` 的存储读写全部改为「经 `QB.DB.*` 异步仓库」（`SRSStore`/`FSRSOpt`/`Backup` 只保留算法与作用域过滤），`sync-dav.js` 与 `app.js` 的调用点补齐 `await`。**断开自递归**的关键：`local-adapter` 的 `reviews/revlog/weights` 直接读写 LocalStorage，**不反向调用**领域模块（否则与「领域模块 → `QB.DB.*`」互为委托死循环）；`SRSStore.readMap`/`FSRSOpt.readLog` 等改为委托 `QB.DB.*`。
+>
+> **本阶段验证**：21 套件 + smoke 共 **22** 项 / **2872** 断言在 UTC 与 Asia/Shanghai 双时区全绿；浏览器 E2E（本地后端）练习答题→交卷→结果页、统计页（到期预报 + FSRS 诊断）、今日复习、Backup 均无控制台报错。**已知遗留**：api 模式下渲染热路径每次 render 会打一次 `GET /api/banks/{id}/reviews`（计划中的「api-adapter reviews 按库内存缓存」尚未实现，见 CHANGELOG 遗留项）。
 >
 > 资产上传为**原始字节**（`POST /api/assets`，body=bytes、`Content-Type`=图片 MIME），**不使用 multipart**；服务端按 FNV-1a 32 + 长度算 id（算法冻结见 §8，实现须与 `js/utils/assets.js::idFor` 一致）。含图备份的 `.qfbk`（ZIP）**仍在客户端组装**（图片经 §8 端点进出）。
 >

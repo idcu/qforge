@@ -149,7 +149,7 @@
     QB.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
     items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
     State.allQuestions = items;
-    State.counts = { total: items.length, byType: byType, dueReview: QB.SRSStore.countDue(State.bankId, items) };
+    State.counts = { total: items.length, byType: byType, dueReview: await QB.SRSStore.countDue(State.bankId, items) };
   }
 
   /* ---------------- 渲染分发 ---------------- */
@@ -197,8 +197,8 @@
         break;
       }
       case 'stats': {
-        const fc = State.bankId ? QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
-        const diag = QB.FSRSOpt.diagnose();
+        const fc = State.bankId ? await QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
+        const diag = await QB.FSRSOpt.diagnose();
         const banks = await QB.DB.banks.list();
         if (State.fsrsScope && !banks.some((b) => b.id === State.fsrsScope)) State.fsrsScope = null;
         const scopeBank = banks.find((b) => b.id === State.fsrsScope);
@@ -207,7 +207,7 @@
         const fsrsInfo = {
           samples: diag.samples,
           threshold: QB.FSRSOpt.MIN_SAMPLES,
-          trained: QB.FSRSOpt.getWeightsMeta(State.fsrsScope),
+          trained: await QB.FSRSOpt.getWeightsMeta(State.fsrsScope),
           scopes: scopes,
           scopeLabel: scopeBank ? scopeBank.name : '全局'
         };
@@ -327,7 +327,7 @@
     if (entry) {
       if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
       try {
-        QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
+        await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
       } catch (e) { /* Storage.onError 已提示；不阻断答题 UI */ }
     }
     QB.ProgressSaver.saveDebounced(State.bankId, engine);
@@ -348,7 +348,7 @@
       engine.questions.map((question, i) => ({ question: question, result: engine.results[i] }))
     );
     if (srsEntries.length) {
-      try { QB.SRSStore.gradeMany(State.bankId, srsEntries); }
+      try { await QB.SRSStore.gradeMany(State.bankId, srsEntries); }
       catch (e) { /* Storage.onError 已提示；成绩与历史不受影响 */ }
     }
     const score = engine.getScore();
@@ -407,8 +407,8 @@
   }
 
   /** 今日复习：抽取 SRS 到期题（含未学新题），打乱成练习 */
-  function startReview() {
-    const due = QB.SRSStore.dueToday(State.bankId, State.allQuestions);
+  async function startReview() {
+    const due = await QB.SRSStore.dueToday(State.bankId, State.allQuestions);
     if (!due.length) { UI.toast('今日没有到期需要复习的题目 🎉', 'ok'); return; }
     beginQuiz(QB.shuffle(due), 'practice', '今日复习（' + due.length + ' 题）');
   }
@@ -567,7 +567,7 @@
         // 材料题：只有聚合从 null（待自评）变为已判定时才记一次调度/错题
         const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
         if (entry) {
-          try { QB.SRSStore.grade(State.bankId, entry.question, entry.rating); }
+          try { await QB.SRSStore.grade(State.bankId, entry.question, entry.rating); }
           catch (e) { /* Storage.onError 已提示 */ }
           if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
         }
@@ -690,7 +690,7 @@
       case 'fsrs-reset': {
         const scope = State.fsrsScope;
         if (await UI.confirmDialog('恢复' + (scope ? '本题库' : '全局') + '为官方默认权重？该作用域个性化参数将被清除。', '恢复')) {
-          QB.FSRSOpt.resetWeights(scope);
+          await QB.FSRSOpt.resetWeights(scope);
           UI.toast('已恢复官方默认权重', 'ok');
         }
         return render();
@@ -1080,7 +1080,9 @@
 
   async function boot() {
     QB.DB.init();
-    if (QB.Migration) await QB.Migration.run(); // v1→v2 contentHash 存量迁移（幂等）
+    // v1→v2 contentHash / v2→v3 分片 存量迁移（幂等）。仅 local 后端：api 模式下数据在服务端，
+    // 本地 schema 迁移无对象，且服务端数据须已是 v3 形状（见 docs/API-CONTRACT.md）。
+    if (QB.Migration && QB.DB.backend !== 'api') await QB.Migration.run();
     // 本地存储落盘失败（如配额已满）全局可见，不静默吞掉
     QB.Storage.onError(() => {
       UI.toast('本地保存失败：浏览器存储可能已满，请尽快在「备份与恢复」导出备份并清理空间', 'err');

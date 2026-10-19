@@ -27,16 +27,18 @@
                        │
 ┌──────────────────────▼───────────────────────┐
 │  数据访问层 db.js（门面，按 config 选择实现）    │
-│   BankRepo / QuestionRepo / ProgressRepo       │
+│   banks / questions / progress                 │
+│   + reviews / revlog / weights / backup（共 7 组）│
 ├──────────────────────┬───────────────────────┤
 │ local-adapter.js     │ api-adapter.js         │
-│ （本期启用）           │ （预留骨架，走 REST）    │
+│ （本期启用）           │ （走 REST，参考后端     │
+│                      │   scripts/serve-api.mjs）│
 └──────────────────────┴───────────────────────┘
        │                          │
- LocalStorage              REST API → SQLite/其他
+ LocalStorage              REST API → JSON/SQLite
 ```
 
-**关键约束**：表现层与应用层**不直接接触** `localStorage` / `fetch`。所有持久化经 `QB.Storage`（local）或 REST（api），仅由适配器实现。所有仓库方法返回 Promise，迁移时 UI 代码零改动。
+**关键约束**：表现层与应用层**不直接接触** `localStorage` / `fetch`。所有持久化经 `QB.DB` 的 7 组 Repository；仅由适配器实现。所有仓库方法**返回 Promise 语义**（local 返回普通值、api 返回真 Promise），调用点统一 `await`，迁移时 UI 代码零改动。**领域模块（srs-store / fsrs-opt / backup）同样只经 `QB.DB.*` 存取**，不直接读写 LocalStorage（详见 §3.3/§3.5 与 [SRS.md](SRS.md) §9）。
 
 ## 3. 模块清单与职责
 
@@ -66,7 +68,7 @@
 | 文件 | 职责 |
 | --- | --- |
 | `data/contracts.js` | `QB.KEYS`（逻辑键，含题目分片键 `questionsMeta`/`questionShard`）、`QB.CONTRACTS`（**7 组**接口方法名：banks/questions/progress + 阶段 C 新增 reviews/revlog/weights/backup，只暴露存储原语）、`QB.ASSET_DRIVER_CONTRACT`（资产驱动 6 方法，独立于仓库契约以避免「仓库→驱动→仓库」自递归）、`QB.assertAdapter`/`QB.assertDriver`（自检） |
-| `data/local-adapter.js` | 七个 Repository 的 LocalStorage 实现；`insertMany` 是导入落库唯一入口。单库题目按 `LIMITS.QUESTIONS_SHARD_SIZE`（200）分片存 `questions:<bankId>:<i>` + 清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`），单题增删改只重写所在分片、列表按区间只解析覆盖分片；分片读写收敛为公共抽象 **`QB.QuestionShards`**（`readAll/readRange/count/writeAll/append/locate/clear` 等，供 migrate 复用，双重实现者禁止各自复制）。阶段 C 的 `reviews/revlog/weights/backup` **委托既有领域模块导出**（`SRSStore.readMap/writeMap`、`FSRSOpt.readLog/appendLog/readStore/writeStore/normalizeStore/resetWeights`、`Backup.readAllData/applyData`），零算法复制；删库级联收敛为私有唯一入口 `cascadeDelete(bankId)`（题目分片 + 错题/收藏/复习/评分日志/权重 preset/历史/当前库） |
+| `data/local-adapter.js` | 七个 Repository 的 LocalStorage 实现；`insertMany` 是导入落库唯一入口。单库题目按 `LIMITS.QUESTIONS_SHARD_SIZE`（200）分片存 `questions:<bankId>:<i>` + 清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`），单题增删改只重写所在分片、列表按区间只解析覆盖分片；分片读写收敛为公共抽象 **`QB.QuestionShards`**（`readAll/readRange/count/writeAll/append/locate/clear` 等，供 migrate 复用，双重实现者禁止各自复制）。阶段 C 的 `reviews/revlog/weights` **直接读写 LocalStorage（唯一存储权威）**、`backup` 复用 `QB.Backup.readAllData/applyData`（纯存取，零算法复制）；领域模块反向经 `QB.DB.*` 委托本适配器——**不可双向委托**（否则「适配器 → 领域模块 → QB.DB → 适配器」成自递归死循环）；删库级联收敛为私有唯一入口 `cascadeDelete(bankId)`（题目分片 + 错题/收藏/复习/评分日志/权重 preset/历史/当前库） |
 | `data/api-adapter.js` | REST 实现：照 `QB.CONTRACTS` 对接 `API-CONTRACT.md`；**未实现方法骨架按 `QB.CONTRACTS` 自动派生**（新增契约组无需改本文件），后端未就绪时调用即诚实拒绝 |
 | `data/db.js` | 门面：`init()` 按 `DATA_BACKEND` 选适配器并暴露 **7 个仓库**（banks/questions/progress/reviews/revlog/weights/backup）；**`loadQuestions(bankId)` 整库读缓存**（按 `bankId` + 适配器写修订号失效，供各视图按需装载，命中即复用同一数组、0 分片解析）；`buildIndex(bankId)` 复用该缓存建 contentHash 索引 |
 | `data/sample-data.js` | `QB.SAMPLE`：18 道内置样例（判断/单选/多选/填空/简答各 3 + 不定项 3，覆盖六题型） |
@@ -101,16 +103,16 @@
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
 | `modules/fsrs.js` | **FSRS-6 纯调度器**（21 个官方默认权重，逐项对齐 py-fsrs 6.3.2）：`review(state,rating,now,weights,opts?)`/`initialState/isLearning`、指数式初始难度、可学习衰减（DECAY=-w20）、召回/遗忘/同日稳定度、整日间隔反解、opt-in fuzz、新卡/重学 learning steps（1m/10m 状态机），无 DOM/存储依赖。公式/状态机/边界见 [SRS.md](SRS.md) |
 | `modules/fsrs-train-core.js` | 训练**纯计算核心**（Storage/DOM 零依赖）：computeTrain/diagnose/序列/NLL/梯度/Adam/门控常量（门控基线 `initWeights` 与热启动起点 `startWeights` 分离）；Worker 与主线程共用同一数值来源，见 [SRS.md](SRS.md) §8.2 |
-| `modules/fsrs-opt.js` | revlog/权重**存储层** + 一键训练：`train`（同步）/`trainAsync`（Worker 优先自动回退）；门控采纳后唯一写盘点；权重支持全局 + 按题库 preset（旧单组结构自动归一）。**增量重训**：采纳后记录 `trainedLogLen`，`shouldRetrain()` 纯读判定增量触发，已有权重时以之为热启动起点（`WARM_ITERATIONS` 少迭代，门控基线不变）。细节见 [SRS.md](SRS.md) §8 |
+| `modules/fsrs-opt.js` | revlog/权重**存取**（经 `QB.DB.revlog/weights`，**均为异步**；local-adapter 直写 LocalStorage / api-adapter 走 REST）+ 一键训练：`train`（存储包装，`async`）/`trainAsync`（Worker 优先自动回退）；门控采纳后唯一写盘点；权重支持全局 + 按题库 preset（旧单组结构自动归一，归一函数 `normalizeStore` 为唯一实现并被 local-adapter 复用）。**增量重训**：采纳后记录 `trainedLogLen`，`shouldRetrain()` 纯读判定增量触发，已有权重时以之为热启动起点（`WARM_ITERATIONS` 少迭代，门控基线不变）。细节见 [SRS.md](SRS.md) §8 |
 | `modules/fsrs-train-client.js` | 训练执行选择器：`supported(env)` 判定（http(s)+Worker）、`run(revlog,opts)` 消息往返（30s 超时）并透传训练参数（含热启动 `startWeights`）、构造/运行失败自动回退主线程；env/createWorker/compute 可注入测试 |
 | `workers/fsrs-worker.js` | 训练 Worker（不经 index.html）：importScripts fsrs.js + train-core，收 `train`（`initWeights` 基线 / `startWeights?` 热启动）回 `done/error`；SW 预缓存，离线可用 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
-| `modules/srs-store.js` | SRS 状态按题库存储（`user:review:<bank>`，contentHash 键）：`grade/gradeMany/dueToday`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（一次作答一条 revlog 契约） |
+| `modules/srs-store.js` | SRS 状态按题库存取（`user:review:<bank>`，contentHash 键）**经 `QB.DB.reviews`（异步）**：`grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear` 均 `async`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（同步纯函数，一次作答一条 revlog 契约） |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire,countUp})`：倒计时（考试，到期 `onExpire` 自动交卷）与正计时（练习 `countUp=true`，从 0 累加不结束）共用同一实现，`onTick` 统一回调「剩余/已用毫秒」 |
 | `modules/source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入测试） |
 | `modules/data-io.js` | 文件/粘贴/拖拽/**URL** 导入编排，统一「解析→预览→insertMany→记录来源」；`refreshUrlFlow` 按 checksum 刷新 |
 | `modules/office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包（与导入端对称） |
-| `modules/backup.js` | 全量备份/恢复（Storage 全量枚举，覆盖/合并；有图自动 ZIP .qfbk；`confirmRestore` 供文件与 WebDAV 共用）；覆盖恢复先快照再写入，失败自动回滚（不先删后写） |
+| `modules/backup.js` | 全量备份/恢复：数据载荷**经 `QB.DB.backup.export/import`（异步）**（local 直写 LocalStorage / api 走 REST），外壳与脱敏（`redactSecrets`）在本模块；有图自动 ZIP .qfbk；`confirmRestore` 供文件与 WebDAV 共用；覆盖恢复先快照再写入，失败自动回滚（不先删后写） |
 | `modules/migrate.js` | `QB.Migration.run`：本地 schema 版本化迁移（当前 v1→v2 contentHash 与 **v2→v3 题目分片**，按 `fromVersion` 链式执行；分片迁移复用 `QB.QuestionShards.writeAll`），启动时幂等执行，重映射题目/复习/错题/收藏/revlog 并返回 `{migrated, sharded}`（见 [DATABASE.md](DATABASE.md) §4） |
 | `modules/sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象异步备份（Basic Auth，fetch 可注入测试）；CORS 受限如实报错 |
 | `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |

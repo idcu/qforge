@@ -504,31 +504,55 @@
   };
 
   /* ---------------- SRS / 评分日志 / 权重 / 备份 Repository ----------------
-   * 阶段 C（开生态）把这三处「原先直连存储」的能力纳入契约层。本实现在本地模式下
-   * **委托既有领域模块的导出入参**（fsrs-opt / srs-store / backup），不复制算法、
-   * 留出门控或 FIFO 保留策略 —— 同一逻辑只有一份实现；api 适配器以同名方法对应
-   * docs/API-CONTRACT.md §6–§8 端点，故上层（SRSStore/FSRSOpt/Backup）调用面不变。
+   * 阶段 C（开生态）把这三处「原先直连存储」的能力纳入契约层。本适配器是**唯一存储权威**：
+   * 直接读写 LocalStorage，不反向调用领域模块 —— 否则与「领域模块 → QB.DB.*」互为委托成
+   * 自递归（fsrs-opt 将改为委托 DB.revlog，若本仓库再调 FSRSOpt.appendLog 即死循环）。
+   * 领域模块（srs-store / fsrs-opt / backup）只做作用域过滤与算法，故上层调用面与行为不变；
+   * api 适配器以同名方法对应 docs/API-CONTRACT.md §6–§8 端点。
    */
   const reviews = {
     /** 该库调度状态 map（contentHash → state）；无记录返回 {} */
-    list(bankId) { return QB.SRSStore.readMap(bankId); },
+    list(bankId) { return Storage.get(K.review(bankId)) || {}; },
     /** 整表落盘（一次评分/整卷结算后提交），失败即抛 */
-    save(bankId, map) { QB.SRSStore.writeMap(bankId, map || {}); },
-    remove(bankId) { QB.SRSStore.clear(bankId); }
+    save(bankId, map) { Storage.setSync(K.review(bankId), map || {}); },
+    remove(bankId) { Storage.remove(K.review(bankId)); }
   };
 
+  const REVLOG_MAX = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000; // revlog FIFO 上限
   const revlog = {
-    list() { return QB.FSRSOpt.readLog(); },
-    /** 追加条目（存储层负责补 id/时间戳与 FIFO 上限），返回追加后的完整日志 */
-    append(entries) { return QB.FSRSOpt.appendLog(entries); }
+    list() { return Storage.get(K.revlog, []) || []; },
+    /** 追加条目（本层负责补 id/时间戳与 FIFO 裁剪），返回追加后的完整日志 */
+    append(entries) {
+      const list = revlog.list();
+      if (!entries || !entries.length) return list;
+      const t0 = now();
+      entries.forEach((e) => {
+        const entry = { id: QB.uid('rl'), t: e.t || t0, h: e.h, r: e.r };
+        if (e.b) entry.b = e.b; // 题库归属；旧链路无 b 时不写（全局日志/历史数据）
+        list.push(entry);
+      });
+      if (list.length > REVLOG_MAX) list.splice(0, list.length - REVLOG_MAX);
+      Storage.setSync(K.revlog, list);
+      return list;
+    }
   };
 
   const weights = {
-    /** 全局 + 按题库 preset（已归一为 { global, banks }） */
-    read() { return QB.FSRSOpt.readStore(); },
-    write(store) { QB.FSRSOpt.writeStore(QB.FSRSOpt.normalizeStore(store)); },
+    /** 全局 + 按题库 preset（归一为 { global, banks }；归一逻辑复用 fsrs-opt 纯函数） */
+    read() { return QB.FSRSOpt.normalizeStore(Storage.get(K.metaFsrsWeights, null)); },
+    write(store) {
+      const s = QB.FSRSOpt.normalizeStore(store);
+      if (!s.global && !Object.keys(s.banks).length) Storage.remove(K.metaFsrsWeights); // 回到纯默认状态
+      else Storage.setSync(K.metaFsrsWeights, s);
+    },
     /** 删除某作用域（scope 为空/缺省 = 全局），回到官方默认 */
-    remove(scope) { QB.FSRSOpt.resetWeights(scope); }
+    remove(scope) {
+      const s = weights.read();
+      const banks = Object.assign({}, s.banks);
+      let global = s.global;
+      if (scope) delete banks[scope]; else global = null;
+      weights.write({ global: global, banks: banks });
+    }
   };
 
   const backup = {
@@ -564,6 +588,7 @@
     if (cur === id) Storage.setSync(K.metaCurrentBank, null);
   }
 
-  QB.LocalAdapter = { banks, questions, progress, reviews, revlog, weights, backup };
+  // REVLOG_MAX：revlog FIFO 上限的唯一常量定义源，fsrs-opt 的 LOG_LIMIT 再导出此处
+  QB.LocalAdapter = { banks, questions, progress, reviews, revlog, weights, backup, REVLOG_MAX: REVLOG_MAX };
   QB.QuestionShards = QuestionShards; // 分片读写公共抽象（migrate 等复用，避免重复实现）
 })(window);

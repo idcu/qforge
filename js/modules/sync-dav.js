@@ -78,7 +78,7 @@
       body = bundle.content; mime = 'application/zip'; assetCount = bundle.assetCount;
     } else {
       QB.Storage.forceSync();
-      body = JSON.stringify(QB.Backup.buildBackup());
+      body = JSON.stringify(await QB.Backup.buildBackup());
       mime = 'application/json;charset=utf-8';
       assetCount = 0;
     }

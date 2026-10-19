@@ -9,6 +9,21 @@
 
 首次进入是空系统，需要导入或新建题库。
 
+### 1.1 自建后端（可选，多设备/团队）
+
+默认数据存本机浏览器（`localStorage` + IndexedDB）。若想让数据落在自己的服务器、供多设备共享，可启用随仓库附带的**零依赖参考后端**：
+
+```bash
+# 静态文件 + /api/* 一并提供（默认 127.0.0.1:8788，数据写入 .qforge-data/）
+node scripts/serve-api.mjs
+# 浏览器打开：http://127.0.0.1:8788/?backend=api
+```
+
+- 后端实现见 [API-CONTRACT.md](API-CONTRACT.md)（数据落工程根 `.qforge-data/` 的 JSON，已 gitignore；原子写入）。
+- **切换后端不改动任何前端代码/界面**——SRS 复习计划、备份、图片资产等都已纳入数据层契约（见 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3 与 [SRS.md](SRS.md) §9）。
+- 说明与已知限制：参考后端**无鉴权、单用户**；复习计划的并发写为「整表 last-write-wins」；后端不可用时界面会如实报网络错误（不静默返回假数据）。
+
+
 ## 2. 题库管理
 
 顶部下拉框可切换当前题库；点击「管理题库」进入题库列表。
@@ -186,10 +201,10 @@
 - **☁ WebDAV 云备份**：配置 WebDAV 目录（坚果云/Nextcloud/群晖等）后一键 PUT 上传全量备份、GET 拉取并走同一恢复确认；固定对象名 `qforge-backup-latest.bin`，账号密码仅存本机 LocalStorage，**上传的备份包已脱敏密码**（换机恢复后需重填）。**CORS 限制**：浏览器要求 WebDAV 服务允许本站跨域，坚果云等公共服务默认可能被拦截（报错属浏览器/服务端策略），自建服务通常可配置。
 - 弹窗显示本地存储占用，超过约 4MB 会提示尽快备份、分库；图片在 IndexedDB 不占用该配额。
 
-> WebDAV 是手动触发的异步备份，不是实时多端同步；真正的账号化实时同步走预留的 `DATA_BACKEND=api` 后端契约（见 [DATABASE.md](DATABASE.md) 与 [API-CONTRACT.md](API-CONTRACT.md)）。
+> WebDAV 是手动触发的异步备份，不是实时多端同步；真正的账号化实时同步走 `DATA_BACKEND=api` 后端契约（见 §1.1 与 [DATABASE.md](DATABASE.md)、[API-CONTRACT.md](API-CONTRACT.md)）。
 
 ## 10. 已知限制
 
 - `.xlsx` / `.docx` 解析依赖浏览器 `DecompressionStream`；过老浏览器可能不支持。
-- LocalStorage 容量有限（通常 5–10MB），超大题库建议分库或迁往后端。
+- LocalStorage 容量有限（通常 5–10MB），超大题库建议分库、或启用自建后端（§1.1）。
 - 应用支持 **PWA**：通过 http(s) 访问（如 GitHub Pages）时可用浏览器「安装到主屏幕/桌面」，Service Worker 缓存后可离线打开；`file://` 双击场景不启用离线缓存。检测到新版本时会提示「刷新页面即可更新」（不会在答题中自动刷新）。

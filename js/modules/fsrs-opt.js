@@ -4,8 +4,9 @@
  * 数据：每次评分追加 {id,t,h,r,b} 到 qb:user:revlog（b=bankId：按题库隔离训练
  * 数据；2026-10 前的旧日志无 b，只参与全局训练，不静默归入任何题库）。
  * 训练数值逻辑（样本/损失/梯度/Adam/门控）在 fsrs-train-core.js，本模块负责：
- *   - revlog 与权重的 LocalStorage 读写（全局 + 按题库 preset）
- *   - train()：同步包装（测试与回退用）
+ *   - revlog 与权重的**存取**（全局 + 按题库 preset）——一律经 QB.DB.revlog/weights 契约层
+ *     （local-adapter 直写 LocalStorage / api-adapter 走 REST），故读写均为异步（await）
+ *   - train()：存储包装（测试与回退用，异步）
  *   - trainAsync()：优先 Worker、不满足或失败自动回退主线程（UI 入口，见 fsrs-train-client.js）
  *   - 增量重训：已有采纳权重时以其为热启动起点（WARM_ITERATIONS 少迭代），门控基线仍为
  *     官方默认（口径不变）；shouldRetrain() 纯读判定「距上次训练新增样本是否达标」。
@@ -15,20 +16,21 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
   const Core = QB.FSRSTrainCore;
-  const LOG_LIMIT = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000; // revlog FIFO 上限（约 0.8MB）
+  // revlog FIFO 上限：唯一常量定义源在 local-adapter（REVLOG_MAX），此处再导出供历史调用方/测试用
+  const LOG_LIMIT = (QB.LocalAdapter && QB.LocalAdapter.REVLOG_MAX) || 20000;
 
-  /* ---------------- revlog 读写 ---------------- */
+  /* ---------------- revlog 读写（经契约层 QB.DB.revlog） ---------------- */
 
-  function readLog() {
-    return QB.Storage.get(QB.KEYS.revlog, []) || [];
+  async function readLog() {
+    return await QB.DB.revlog.list();
   }
 
   /** 增量重训触发阈值：距上次训练新增 revlog 条数达到该值才值得重训 */
   const RETRAIN_MIN_NEW = Core.MIN_SAMPLES;
 
   /** 上次采纳的权重（作增量重训热启动起点）；无则 null（从官方默认起点训练） */
-  function warmWeightsFor(bankId) {
-    const meta = getWeightsMeta(bankId);
+  async function warmWeightsFor(bankId) {
+    const meta = await getWeightsMeta(bankId);
     return meta && Array.isArray(meta.w) ? meta.w.slice() : null;
   }
 
@@ -37,13 +39,13 @@
    * 供 UI 提示「有新数据可训练」；不改变任何状态、不自动训练。
    * @param {string} [bankId] 作用域（省略=全局）
    * @param {{minNew?:number}} [opts]
-   * @returns {{retrain:boolean, newCount:number, sinceLen:number, logLen:number, hasWeights:boolean, minNew:number}}
+   * @returns {Promise<{retrain:boolean, newCount:number, sinceLen:number, logLen:number, hasWeights:boolean, minNew:number}>}
    */
-  function shouldRetrain(bankId, opts) {
+  async function shouldRetrain(bankId, opts) {
     opts = opts || {};
     const minNew = opts.minNew == null ? RETRAIN_MIN_NEW : opts.minNew;
-    const meta = getWeightsMeta(bankId);
-    const logLen = readLogForScope(bankId).length;
+    const meta = await getWeightsMeta(bankId);
+    const logLen = (await readLogForScope(bankId)).length;
     const sinceLen = meta && typeof meta.trainedLogLen === 'number' ? meta.trainedLogLen : 0;
     const newCount = Math.max(0, logLen - sinceLen);
     return {
@@ -57,33 +59,19 @@
    * 按作用域取训练日志：bankId 省略=全局（含旧无 b 日志）；
    * 传 bankId=仅该库评分（严格相等，无 b 的旧日志不计入，避免跨科目串样本）。
    */
-  function readLogForScope(bankId) {
-    const all = readLog();
+  async function readLogForScope(bankId) {
+    const all = await readLog();
     return bankId ? all.filter((e) => e && e.b === bankId) : all;
   }
 
-  /** 追加评分日志（补 id/时间戳、FIFO 裁剪），返回追加后的完整日志（数据层 revlog.append 复用） */
-  function appendLog(entries) {
-    if (!entries || !entries.length) return readLog();
-    const list = readLog();
-    const now = Date.now();
-    entries.forEach((e) => {
-      const entry = {
-        id: QB.uid('rl'),
-        t: e.t || now,
-        h: e.h,
-        r: e.r
-      };
-      if (e.b) entry.b = e.b; // 题库归属；旧链路无 b 时不写（全局日志/历史数据）
-      list.push(entry);
-    });
-    if (list.length > LOG_LIMIT) list.splice(0, list.length - LOG_LIMIT);
-    QB.Storage.setSync(QB.KEYS.revlog, list);
-    return list;
+  /** 追加评分日志（经契约层，补 id/时间戳与 FIFO 裁剪在实现侧），返回追加后的完整日志 */
+  async function appendLog(entries) {
+    return await QB.DB.revlog.append(entries);
   }
 
-  /* ---------------- 权重存取（全局 + 按题库 preset） ----------------
+  /* ---------------- 权重存取（全局 + 按题库 preset，经契约层 QB.DB.weights） ----------------
    * 存储结构：{ global?: {w,...meta}, banks?: { [bankId]: {w,...meta} } }
+   * normalizeStore 是纯归一函数（唯一实现，local-adapter.weights 复用）。
    * 旧版本 {w,...}（单组全局权重）读取时自动归一为 global，不写迁移。
    * 训练样本同样按作用域读取（readLogForScope）：按库训练只用该库 revlog，
    * 全局训练用全部（含旧无 b 日志），preset 与训练数据作用域一致。 */
@@ -97,8 +85,8 @@
     };
   }
 
-  function readStore() {
-    return normalizeStore(QB.Storage.get(QB.KEYS.metaFsrsWeights, null));
+  async function readStore() {
+    return await QB.DB.weights.read();
   }
 
   function validMeta(meta) {
@@ -106,41 +94,34 @@
   }
 
   /** 活动权重：题库 preset → 全局 → 官方默认 */
-  function getActiveWeights(bankId) {
-    const store = readStore();
+  async function getActiveWeights(bankId) {
+    const store = await readStore();
     const meta = (bankId && validMeta(store.banks[bankId])) || validMeta(store.global);
     return meta ? meta.w.slice() : QB.FSRS.DEFAULT_W.slice();
   }
 
   /** 某作用域训练元数据（bankId 省略=全局）；无则 null */
-  function getWeightsMeta(bankId) {
-    const store = readStore();
+  async function getWeightsMeta(bankId) {
+    const store = await readStore();
     if (bankId) return validMeta(store.banks[bankId]) || null;
     return validMeta(store.global);
   }
 
-  function writeStore(store) {
-    if (!store.global && !Object.keys(store.banks).length) {
-      QB.Storage.remove(QB.KEYS.metaFsrsWeights); // 回到纯默认状态
-    } else {
-      QB.Storage.setSync(QB.KEYS.metaFsrsWeights, store);
-    }
+  async function writeStore(store) {
+    return await QB.DB.weights.write(store);
   }
 
-  function saveWeights(w, meta, bankId) {
-    const store = readStore();
+  async function saveWeights(w, meta, bankId) {
+    const store = await readStore();
     const entry = Object.assign({ w: w.slice(), trainedAt: Date.now() }, meta || {});
     if (bankId) store.banks[bankId] = entry;
     else store.global = entry;
-    writeStore(store);
+    await writeStore(store);
   }
 
   /** 删除某题库 preset；省略 bankId 时清除全局权重 */
-  function resetWeights(bankId) {
-    const store = readStore();
-    if (bankId) delete store.banks[bankId];
-    else store.global = null;
-    writeStore(store);
+  async function resetWeights(bankId) {
+    return await QB.DB.weights.remove(bankId);
   }
 
   /* ---------------- 一键训练 ---------------- */
@@ -157,21 +138,21 @@
   }
 
   /**
-   * 同步训练：bankId 省略=全局日志；传 bankId=仅该库 revlog（preset 与数据同作用域）。
+   * 训练（存储包装，异步）：bankId 省略=全局日志；传 bankId=仅该库 revlog（preset 与数据同作用域）。
    * 增量重训：若该作用域已有采纳权重，则以其为**热启动起点**（WARM_ITERATIONS 少迭代）；
    * 门控基线始终为官方默认（`initWeights` 不传），improvement 口径不因热启动放宽。
    * @param {Array} [revlogInput] 显式日志（测试注入，优先于作用域读取）
    * @param {string} [bankId] 权重保存与日志过滤作用域：省略=全局，传 id=该题库 preset
-   * @returns {{ok:boolean, reason?:string, warmStarted?:boolean, defaultLoss?:number, loss?:number, improvement?:number, samples:number}}
+   * @returns {Promise<{ok:boolean, reason?:string, warmStarted?:boolean, defaultLoss?:number, loss?:number, improvement?:number, samples:number}>}
    */
-  function train(revlogInput, bankId) {
-    const log = revlogInput || readLogForScope(bankId);
-    const warm = warmWeightsFor(bankId);
+  async function train(revlogInput, bankId) {
+    const log = revlogInput || (await readLogForScope(bankId));
+    const warm = await warmWeightsFor(bankId);
     const res = Core.computeTrain(log, {
       startWeights: warm || undefined,
       iterations: warm ? Core.WARM_ITERATIONS : Core.ITERATIONS
     });
-    if (res.ok) saveWeights(res.weights, metaOf(res, log, bankId, res.warmStarted), bankId);
+    if (res.ok) await saveWeights(res.weights, metaOf(res, log, bankId, res.warmStarted), bankId);
     return res;
   }
 
@@ -182,14 +163,14 @@
    * 增量重训的热启动起点与迭代数同样透传（Worker 与主线程一致）。
    */
   async function trainAsync(bankId, deps) {
-    const log = readLogForScope(bankId);
-    const warm = warmWeightsFor(bankId);
+    const log = await readLogForScope(bankId);
+    const warm = await warmWeightsFor(bankId);
     // deps 仅测试注入（env/createWorker/compute），生产调用只传 bankId
     const res = await QB.FSRSTrain.run(log, Object.assign({}, deps, {
       startWeights: warm || undefined,
       iterations: warm ? Core.WARM_ITERATIONS : Core.ITERATIONS
     }));
-    if (res.ok) saveWeights(res.weights, metaOf(res, log, bankId, res.warmStarted), bankId);
+    if (res.ok) await saveWeights(res.weights, metaOf(res, log, bankId, res.warmStarted), bankId);
     return res;
   }
 
@@ -205,7 +186,7 @@
     // 存储与训练
     readLog, readLogForScope, appendLog, getActiveWeights, getWeightsMeta, saveWeights, resetWeights,
     shouldRetrain, warmWeightsFor,
-    // 存储原语（数据层 weights 仓库复用，见 js/data/local-adapter.js）
+    // 权重/日志存取（经契约层；均为异步）。normalizeStore 为纯归一函数（实现侧复用）
     normalizeStore, readStore, writeStore,
     train, trainAsync,
     // 纯函数透传（历史调用方/测试用，逻辑唯一来源为 Core）
@@ -215,6 +196,6 @@
     loss: Core.loss,
     gradient: Core.gradient,
     optimize: Core.optimize,
-    diagnose: function (revlog) { return Core.diagnose(revlog || readLog()); }
+    diagnose: async function (revlog) { return Core.diagnose(revlog || (await readLog())); }
   };
 })(window);
