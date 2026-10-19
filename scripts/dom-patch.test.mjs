@@ -112,6 +112,43 @@ section('列表场景：移除一条只影响被移除区域与计数区域');
   deepEq(p.unchanged, ['toolbar', 'i-k2', 'i-k3'], '工具栏与未涉及条目保持原节点');
 }
 
+section('子区域（格级）：frame 稳定、contentOf 取帧、snapshot 快照');
+{
+  const card1 = { key: 'card', frame: 'F', sub: [{ key: 'n', into: 'c', html: '1' }, { key: 'cell0', into: 'g', html: '<b class="x">0</b>' }] };
+  const card2 = { key: 'card', frame: 'F', sub: [{ key: 'n', into: 'c', html: '2' }, { key: 'cell0', into: 'g', html: '<b class="x">0</b>' }] };
+  const card3 = { key: 'card', frame: 'F2', sub: card2.sub };
+  eq(DP.contentOf(card1), 'F', 'contentOf：有 frame 取 frame（与子区域内容无关）');
+  eq(DP.contentOf(R('a', 'A')), 'A', 'contentOf：无 frame 取 html');
+  const p1 = DP.plan(DP.snapshot([card1]), [card2]);
+  deepEq(p1.unchanged, ['card'], '帧未变 → 顶层「不重建」（子区域变化不触发整区域重建）');
+  const p2 = DP.plan(DP.snapshot([card1]), [card3]);
+  deepEq(p2.changed, ['card'], '帧变化 → 顶层重建');
+  const s = DP.snapshot([card1, R('b', 'B')]);
+  deepEq(Object.keys(s), ['card', 'b'], 'snapshot 键序与区域顺序一致');
+  eq(s.card, 'F', 'snapshot 存 frame 而非 html');
+
+  const n = DP.normalize([{ key: 'k', frame: 'F', sub: [{ key: 's', into: 'c', html: 'x' }] }]);
+  eq(n.length, 1, 'normalize：仅 frame 的区域不被过滤');
+  ok(n[0].sub && n[0].sub.length === 1, 'normalize：保留 sub');
+  deepEq(DP.normalize([{ key: 'k2' }]), [], 'normalize：html/frame 皆空 → 过滤');
+}
+
+section('子区域分组：groupSub 按容器归组、去重、剔除不合法项');
+{
+  const g = DP.groupSub([
+    { key: 'n', into: 'c', html: '1' },
+    { key: 'a', into: 'g', html: 'A' },
+    { key: 'b', into: 'g', html: 'B' },
+    { key: 'a', into: 'g', html: 'A2' },
+    { key: 'bad', into: 'g' },
+    null
+  ]);
+  deepEq(Array.from(g.keys()), ['c', 'g'], '分组键序 = 首次出现顺序');
+  deepEq(g.get('c').map((s) => s.key), ['n'], '单元素容器');
+  deepEq(g.get('g').map((s) => s.key), ['a', 'b'], '同容器按声明顺序，重复 key 只保留首个');
+  eq(DP.groupSub(null).size, 0, 'groupSub(null) → 空分组');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

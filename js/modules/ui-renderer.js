@@ -309,8 +309,9 @@
   /**
    * 答题视图区域数组（阶段 A·答题区 DOM 增量更新）：
    * 每个区域的顶层元素带 `data-region` 标记，交由 QB.DomPatch 对账，仅重建变化的区域。
-   * 作答一次（pick/toggle）通常只重建「题干+选项」「操作按钮」「答题卡」三块，
-   * 头部、进度条、材料卡、反馈卡保持不变，避免整棵答题视图被拆掉重建。
+   * 作答一次（pick/toggle）通常只重建「题干+选项」「操作按钮」两块；答题卡为**格级增量**
+   * （quiz-card 帧跨作答稳定，仅按 key 就地替换变化的一格 + 计数），头部、进度条、材料卡、
+   * 反馈卡保持不变，避免整棵答题视图被拆掉重建。
    */
   function renderQuizRegions(engine, opts) {
     opts = opts || {};
@@ -368,8 +369,8 @@
     actions += '</div>';
     regions.push({ key: 'quiz-actions', html: actions });
 
-    // 答题卡（题目较多时才显示，支持点击跳转）
-    if (engine.questions.length > 1) regions.push({ key: 'quiz-card', html: renderAnswerCard(engine) });
+    // 答题卡（题目较多时才显示，支持点击跳转）：格级增量 —— 帧稳定 + 子区域（计数/逐格）
+    if (engine.questions.length > 1) regions.push(answerCardRegion(engine));
 
     if (!isExam && answered) {
       regions.push({ key: 'quiz-feedback', html: q.type === 'material' ? renderMaterialOverall(result) : renderFeedback(q, result) });
@@ -384,21 +385,47 @@
     return regions.map((r) => r.html).join('');
   }
 
-  /** 答题卡网格：空/已答/对错状态，点击跳转 */
-  function renderAnswerCard(engine) {
-    const cells = engine.questions.map((_, i) => {
-      const st = engine.statusAt(i);
-      const cur = i === engine.currentIndex ? ' cur' : '';
-      return '<button type="button" class="ac-cell ac-' + st + cur + '" data-action="card-jump" data-idx="' + i + '" title="第 ' + (i + 1) + ' 题">' + (i + 1) + '</button>';
-    }).join('');
-    const done = engine.answeredCount();
-    return '<details class="answer-card" data-region="quiz-card" open><summary>答题卡（已答 ' + done + ' / ' + engine.questions.length + '）</summary>' +
-      '<div class="ac-grid">' + cells + '</div>' +
-      '<div class="ac-legend"><span class="ac-dot ac-empty"></span>未答 ' +
+  /** 答题卡单格：空/已答/对错状态 + 当前题高亮，点击跳转 */
+  function answerCellHtml(engine, i) {
+    const st = engine.statusAt(i);
+    const cur = i === engine.currentIndex ? ' cur' : '';
+    return '<button type="button" class="ac-cell ac-' + st + cur + '" data-action="card-jump" data-idx="' + i + '" title="第 ' + (i + 1) + ' 题">' + (i + 1) + '</button>';
+  }
+
+  /** 答题卡图例（静态，不随作答变化） */
+  function answerCardLegend() {
+    return '<div class="ac-legend"><span class="ac-dot ac-empty"></span>未答 ' +
       '<span class="ac-dot ac-answered"></span>已答 ' +
       '<span class="ac-dot ac-correct"></span>正确 ' +
       '<span class="ac-dot ac-wrong"></span>错误 ' +
-      '<span class="ac-dot ac-pending"></span>待自评</div></details>';
+      '<span class="ac-dot ac-pending"></span>待自评</div>';
+  }
+
+  /**
+   * 答题卡区域（阶段 A·格级增量）：返回 { key, html, frame, sub }。
+   *   html  = 整块字符串（与 renderAnswerCard 逐字节一致，供区域拼接 / 整块回退）；
+   *   frame = 仅结构（计数与格子容器留空），作答/跳转均不变化 → 顶层对账稳定命中；
+   *   sub   = 子区域（`ac-count` 计数 + 逐格 `ac-cell-<i>`），帧未变时仅替换内容变化的子节点。
+   */
+  function answerCardRegion(engine) {
+    const n = engine.questions.length;
+    const sub = [{ key: 'ac-count', into: 'ac-count', html: String(engine.answeredCount()) }];
+    engine.questions.forEach((_, i) => {
+      sub.push({ key: 'ac-cell-' + i, into: 'ac-grid', html: answerCellHtml(engine, i) });
+    });
+    const frame = '<details class="answer-card" data-region="quiz-card" open><summary>答题卡（已答 <span data-sub="ac-count"></span> / ' + n + '）</summary>' +
+      '<div class="ac-grid" data-sub="ac-grid"></div>' + answerCardLegend() + '</details>';
+    return { key: 'quiz-card', html: renderAnswerCard(engine), frame: frame, sub: sub };
+  }
+
+  /** 答题卡整块 HTML（向后兼容：与区域变体的 html 逐字节一致） */
+  function renderAnswerCard(engine) {
+    const n = engine.questions.length;
+    let cells = '';
+    for (let i = 0; i < n; i++) cells += answerCellHtml(engine, i);
+    const done = engine.answeredCount();
+    return '<details class="answer-card" data-region="quiz-card" open><summary>答题卡（已答 <span data-sub="ac-count">' + done + '</span> / ' + n + '）</summary>' +
+      '<div class="ac-grid" data-sub="ac-grid">' + cells + '</div>' + answerCardLegend() + '</details>';
   }
 
   /* ---------------- 结果 ---------------- */

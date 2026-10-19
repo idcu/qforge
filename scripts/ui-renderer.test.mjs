@@ -234,12 +234,12 @@ section('DOM 增量对账：作答区/列表仅重建变化区域（QB.DomPatch.
   const s1 = { type: 'single', question: '题一', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
   const s2 = { type: 'judge', question: '题二', answer: 'A' };
 
-  // 作答一次：头部/进度条不重建，题面/按钮/答题卡重建
-  const before = {};
-  UI.renderQuizRegions(mkQ('practice', [s1, s2], 0, false), {}).forEach((r) => { before[r.key] = r.html; });
+  // 作答一次：头部/进度条/答题卡「帧」不重建，题面/按钮重建
+  const before = DP.snapshot(UI.renderQuizRegions(mkQ('practice', [s1, s2], 0, false), {}));
   const plan1 = DP.plan(before, UI.renderQuizRegions(mkQ('practice', [s1, s2], 0, true), {}));
   ok(plan1.unchanged.indexOf('quiz-head') >= 0, '作答后：头部「不重建」');
   ok(plan1.unchanged.indexOf('quiz-progress') >= 0, '作答后：进度条「不重建」');
+  ok(plan1.unchanged.indexOf('quiz-card') >= 0, '作答后：答题卡「帧未变」→ 整张 <details> 不重建');
   ok(plan1.changed.indexOf('quiz-question') >= 0, '作答后：题面需重建（选项态变化）');
   ok(plan1.changed.indexOf('quiz-actions') >= 0, '作答后：按钮区需重建（提交→下一题）');
   eq(plan1.removed.length, 0, '作答后：无区域被移除');
@@ -264,6 +264,44 @@ section('DOM 增量对账：作答区/列表仅重建变化区域（QB.DomPatch.
   eq(sr[0].key, 'search-bar', '搜索：首个区域为工具栏');
   ok(sr[0].html.indexOf('data-region="search-bar"') >= 0, '搜索：工具栏顶层带 data-region');
   eq(sr.map((r) => r.html).join(''), UI.renderSearch({ name: 'B' }, 2, [s1], { keyword: 'x', categories: ['c'], tags: [] }, 0), '搜索：区域拼接 = 整块字符串');
+}
+
+section('答题卡格级增量：帧稳定 + 子区域仅变化一格 + 计数（阶段 A）');
+{
+  const sA = { type: 'single', question: 'A', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
+  const sB = { type: 'judge', question: 'B', answer: 'A' };
+  const qs = [sA, sB, sA];
+  const mk = (idx, done) => ({
+    mode: 'practice', questions: qs, currentIndex: idx,
+    results: qs.map(() => null), answers: qs.map(() => undefined),
+    getCurrentQuestion: () => qs[idx],
+    getProgress: () => ({ current: idx + 1, total: qs.length, percentage: 0 }),
+    getScore: () => ({ score: 0, correct: 0, wrong: 0 }),
+    hasAnswered: () => false, canSubmit: () => true, isLastQuestion: () => idx === qs.length - 1,
+    statusAt: (i) => (i === idx ? 'correct' : 'empty'),
+    answeredCount: () => done
+  });
+  const cardOf = (rs) => rs.filter((r) => r.key === 'quiz-card')[0];
+
+  const r1 = UI.renderQuizRegions(mk(0, 0), {});
+  const c1 = cardOf(r1);
+  ok(!!c1 && !!c1.frame && !!c1.sub, '答题卡区域含 frame + sub（格级增量）');
+  ok(c1.frame.indexOf('ac-cell') < 0, '帧不含格子状态（结构稳定，跨作答不变）');
+  ok(c1.frame.indexOf('data-sub="ac-grid"') >= 0 && c1.frame.indexOf('data-sub="ac-count"') >= 0, '帧含子区域容器 ac-grid / ac-count');
+  eq(c1.sub.map((s) => s.key).join(','), 'ac-count,ac-cell-0,ac-cell-1,ac-cell-2', '子区域键序：计数 + 逐格');
+  eq(c1.sub.map((s) => s.into).join(','), 'ac-count,ac-grid,ac-grid,ac-grid', '子区域容器归属正确');
+  ok(c1.html.indexOf('ac-cell ac-correct cur') >= 0, '整块 html 仍带状态类（向后兼容拼接）');
+  eq(UI.renderQuizRegions(mk(0, 0), {}).map((r) => r.html).join(''), UI.renderQuiz(mk(0, 0), {}), '卡区域 html 拼接 = renderQuiz 整块');
+
+  // 跳到第 2 题并已答：帧不变；子区域仅「计数 + 旧当前格 + 新当前格」变化，其余格保持原节点
+  const snap1 = DP.snapshot(r1);
+  const r2 = UI.renderQuizRegions(mk(1, 1), {});
+  const c2 = cardOf(r2);
+  eq(c2.frame, c1.frame, '帧跨作答/跳题逐字节不变（顶层对账稳定命中 quiz-card）');
+  const base = {}; c1.sub.forEach((s) => { base[s.key] = s.html; });
+  const changedSub = c2.sub.filter((s) => base[s.key] !== s.html).map((s) => s.key).sort();
+  deepEq(changedSub, ['ac-cell-0', 'ac-cell-1', 'ac-count'], '子区域仅「计数 + 受影响两格」变化，其余格不重建');
+  ok(DP.plan(snap1, r2).unchanged.indexOf('quiz-card') >= 0, 'plan：答题卡在 unchanged（整卡不重建）');
 }
 
 console.log('\n================ 汇总 ================');
