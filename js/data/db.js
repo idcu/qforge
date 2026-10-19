@@ -41,6 +41,13 @@
       this.revlog = adapter.revlog;
       this.weights = adapter.weights;
       this.backup = adapter.backup;
+      // 资产在 api 模式下改走后端（IndexedDB → REST 驱动）；local 模式保持默认 IDB 驱动，
+      // **不注入**（否则会覆盖 assets.test 已注入的 memory 驱动、并与 getDriver 自递归）。
+      if (backend === 'api' && typeof adapter.assetDriver === 'function' && QB.Assets) {
+        const driver = adapter.assetDriver();
+        QB.assertDriver(driver, 'api-asset-driver');
+        QB.Assets.useDriver(driver);
+      }
       return this;
     },
 

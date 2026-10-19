@@ -59,13 +59,36 @@
     FSRS_URL: 'js/workers/fsrs-worker.js'
   };
 
+  /**
+   * 后端切换覆盖（**仅配置层**，不属于 UI 代码）：
+   *   1) `window.__QF_BACKEND__ = 'api'` + `window.__QF_API__ = 'http://host:8788'`；
+   *   2) 或 URL 查询串 `?backend=api&api=http://host:8788`（本地验收参考后端用，见 DEVELOPMENT §1）。
+   * 未提供时不改变默认（local），保证既有行为不变。
+   */
+  function backendOverride() {
+    const out = { backend: null, api: null };
+    try {
+      if (typeof global.__QF_BACKEND__ === 'string') out.backend = global.__QF_BACKEND__;
+      if (typeof global.__QF_API__ === 'string') out.api = global.__QF_API__;
+      const loc = global.location;
+      const search = (loc && typeof loc.search === 'string') ? loc.search : '';
+      if (search && typeof global.URLSearchParams === 'function') {
+        const qs = new global.URLSearchParams(search);
+        if (qs.get('backend')) out.backend = qs.get('backend');
+        if (qs.get('api') !== null) out.api = qs.get('api');
+      }
+    } catch (e) { /* 无 location/URLSearchParams 的环境（Node 测试）忽略 */ }
+    return out;
+  }
+  const OVERRIDE = backendOverride();
+
   QB.CONFIG = {
     APP_NAME: '淬题',
     VERSION: '1.0.0',
 
-    // 数据后端：'local' | 'api'
-    DATA_BACKEND: 'local',
-    API_BASE_URL: NETWORK.API_BASE_URL,
+    // 数据后端：'local' | 'api'（可由 backendOverride 覆盖，见上）
+    DATA_BACKEND: OVERRIDE.backend || 'local',
+    API_BASE_URL: OVERRIDE.api == null ? NETWORK.API_BASE_URL : OVERRIDE.api,
 
     // 分组
     NETWORK, STORAGE, LIMITS, ASSETS, WORKERS,

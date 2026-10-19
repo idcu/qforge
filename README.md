@@ -89,6 +89,7 @@ qb/
 | 命令 | 用途 |
 | --- | --- |
 | `node scripts/serve.mjs` | 启动本地静态服务（默认 127.0.0.1:8777；`[port] [host]` 参数或 `PORT/HOST` 环境变量覆盖） |
+| `node scripts/serve-api.mjs` | **参考后端**（零依赖）：静态文件 + `/api/*`（照 API-CONTRACT.md），数据落 `.qforge-data/`（gitignore）；默认 127.0.0.1:8788，`[port] [host] [dataDir]` 或 `PORT/HOST/DATA_DIR`；前端用 `?backend=api&api=` 切到后端且 UI 零改动 |
 | `node scripts/smoke-test.mjs` | 逻辑层冒烟测试（461 项，含全局配置契约、导入入口 File/快照分派、材料题 M1/M2 五格式往返、xlsx 多工作表/docx 含图/WPS 回环、contentHash v2、考试简答待自评、**按题型分值与考试时长/练习正计时**、结果页错题重练按本场错题；零外部依赖） |
 | `node scripts/xml-lite.test.mjs` | 自研极简 XML 解析器测试（39 项断言：结构/实体/命名空间/CDATA/畸形报错） |
 | `node scripts/exporter.test.mjs` | 导出功能单元测试（160 项断言，六题型/转义/难度标签列/材料题五格式分流/Markdown·JSON 往返/历史记录四格式） |
@@ -106,6 +107,7 @@ qb/
 | `node scripts/migrate.test.mjs` | schema 迁移测试（55 项断言：contentHash v1→v2 与全部用户数据键重映射、幂等、v2→v3 分片迁移幂等） |
 | `node scripts/shard.test.mjs` | 题目库分片存储测试（82 项断言：切分与清单、按需单页只解析覆盖分片、单题增删改只重写所在分片、空分片与高位回收、旧单 blob 兼容与写时迁移、删库级联清分片；UI 级按需装载：count 直读清单零分片解析、loadQuestions 缓存命中同数组、buildIndex 复用缓存、写操作令修订号 +1 并使缓存失效重读） |
 | `node scripts/contract.test.mjs` | 数据契约层测试（52 项断言：`QB.CONTRACTS` 7 组方法清单、`QB.ASSET_DRIVER_CONTRACT`、`assertAdapter`/`assertDriver` 精确报缺；local-adapter 的 reviews/revlog/weights/backup 四组仓库读写语义与领域模块同源；**删库级联唯一入口 `cascadeDelete`** 全键清理 + 非级联路径） |
+| `node scripts/api-backend.test.mjs` | **参考后端 + api 适配器端到端测试**（117 项断言：真实 Node HTTP 服务上跑 banks/questions(含 batch·import)/progress/reviews·revlog·weights/backup/assets 的路由·状态码·错误体·级联·原子落盘·重启持久化；并把 `DATA_BACKEND='api'` + 适配器指向该服务，用与 UI 相同的仓库调用面断言 wire 映射、`count` 缓存与 `revision()` 写修订号失效、资产 FNV id 与服务端一致、级联删库同语义、后端不可达时诚实抛错） |
 | `node scripts/sync-dav.test.mjs` | WebDAV 云备份测试（32 项断言：配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/404） |
 | `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源 + FSRS Worker 资源校验 + 悬浮滚动按钮 + 细节样式修复回归（46 项断言） |
 | `node scripts/ui-renderer.test.mjs` | UI 渲染器弹窗/答题界面构建（87 项断言：`data-bp-min/max/cat` 属性可查询回归、**组卷抽题行不含分值列 / 练习·考试开始弹窗每题型「数量+分值」行、考试时长默认 30、练习计时开关**、分类转义、**自定义标题**、**题干渲染回归：非材料题曾只显示选项**、**答题卡状态类与图例**、**收藏已收藏态**、**搜索单行 sticky**、**历史统计 sticky**；**区域数组与 DOM 对账（阶段 A）：`*Regions` 键序稳定、拼接逐字节等于旧整块字符串、顶层带 `data-region`、`DomPatch.plan` 仅重建变化区域；答题卡格级增量：帧跨作答逐字节不变、仅「计数 + 受影响格」变化**） |
@@ -116,7 +118,7 @@ qb/
 xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖），Node 直接跑全部断言，无需安装任何包。
 
 **实测数据（Node v24.14.0，2026-10-19 全量回归，UTC / Asia/Shanghai 双时区，详见 `CHANGELOG.internal.md`）**：
-- 21 个逻辑层测试套件 **2755 / 2755 通过**（UTC / UTC+8 双时区实跑）：冒烟 **461**、XML 解析器 **39**、导出 160、Office 导出 1148、编辑器 29、**富文本 66**、**图片资产 62**、组卷 18、**UI 渲染器 87**、**DOM 增量 40**、来源/网络导入 29、FSRS **135**、**FSRS 优化器 114**、SRS **60**、存储可靠性 14、备份 25、schema 迁移 **55**、**题目分片 82**、**数据契约 52**、**WebDAV 32**、PWA **47**。
+- 22 个逻辑层测试套件 **2872 / 2872 通过**（UTC / UTC+8 双时区实跑）：冒烟 **461**、XML 解析器 **39**、导出 160、Office 导出 1148、编辑器 29、**富文本 66**、**图片资产 62**、组卷 18、**UI 渲染器 87**、**DOM 增量 40**、来源/网络导入 29、FSRS **135**、**FSRS 优化器 114**、SRS **60**、存储可靠性 14、备份 25、schema 迁移 **55**、**题目分片 82**、**数据契约 52**、**参考后端 E2E 117**、**WebDAV 32**、PWA **47**。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、**按题型分值（自定义分值、材料题按小问题型分值累加、时长与计时开关随进度恢复）**、**考试倒计时 / 练习正计时实测**、**材料题 M1 判分聚合 + M2 五格式（MD/DOCX/CSV/XLSX/TXT）往返黄金断言**、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 540 题全量往返、**contentHash v2 不误并同题干异答案题**、**考试简答待自评（不伪造错误）**、题库隔离与级联删除、答题卡跳转。
 - FSRS 优化器：800 卡 × 5 评的确定性合成日志（3200 相邻样本，切出 640 留出样本）验证——真权重刻意显著偏离默认（初始稳定度×1.5、w6×0.5、召回增长×1.3、hard 惩罚×0.6）时，留出集 logloss 改善 **2.84%**（超 0.2% 门控）才采纳；门控基于独立留出集（不再训练集自证），返回历史最佳权重；改善不足（含默认权重自生成的日志）诚实拒绝。注：旧夹具 ±40% 随机扰动在 FSRS-6 下改善仅 0.04%，已改用可解释的偏离真权重（详见 SRS.md §8.6）。
 - Office 导出：540 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验。

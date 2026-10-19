@@ -56,9 +56,17 @@ jobs:
         run: node scripts/backup.test.mjs
       - name: schema 迁移测试
         run: node scripts/migrate.test.mjs
+      - name: 题目分片存储测试
+        run: node scripts/shard.test.mjs
+      - name: 数据契约层测试
+        run: node scripts/contract.test.mjs
+      - name: 参考后端 + api 适配器端到端测试
+        run: node scripts/api-backend.test.mjs
       - name: WebDAV 云备份测试
         run: node scripts/sync-dav.test.mjs
       - name: PWA 资源校验
         run: node scripts/pwa.test.mjs
       - name: UI 渲染器弹窗构建测试
         run: node scripts/ui-renderer.test.mjs
+      - name: DOM 增量更新区域对账测试
+        run: node scripts/dom-patch.test.mjs

@@ -112,40 +112,50 @@
 
 ## 6. 资源：间隔重复（SRS）
 
-> **现状提示（诚实标注）**：当前 SRS 子系统**未走 Repository 契约**——`SRSStore` 直连 `QB.Storage`，优化器直连 revlog/weights 键（见 [SRS.md](SRS.md) §9）。以下端点是 `api-adapter` 落地时需补齐的**建议契约**，方法签名尚未进入 `QB.CONTRACTS`。
+> **契约归属（2026-10-19 阶段 C 起，已落地）**：SRS 三块存储原语已进入 `QB.CONTRACTS`——
+> `reviews:[list,save,remove]`、`revlog:[list,append]`、`weights:[read,write,remove]`，并已由
+> `local-adapter`（委托 `SRSStore`/`FSRSOpt`）与 `api-adapter`（REST）双双实现；参考后端
+> `scripts/serve-api.mjs` 实现了下表端点。**未实现**：`GET /api/reviews/due`（到期集合由前端
+> 用 reviews 全表 + 本地算法计算，无服务端端点）与 `POST /api/fsrs-weights/train`（训练仍在本地
+> Worker 完成，服务端不代训）——如实标注，不做假实现。
 
 | 方法 | 路径 | 说明 | 请求体 / 响应 |
 | --- | --- | --- | --- |
-| GET | `/api/banks/{id}/reviews` | 该库全部调度状态（content_hash → state） | `{ items: [{ content_hash, due, algo, stability, difficulty, reps, lapses, last, learning }] }` |
-| PUT | `/api/banks/{id}/reviews` | 批量 upsert（一次评分/整卷结算后提交） | `{ items: [...] }` → `{ saved }` |
-| GET | `/api/reviews/due?bank_id=&at=` | 今日到期集合（`at` 毫秒时间戳，便于跨时区测试） | `{ items: [content_hash] }` |
-| GET | `/api/revlog` | 评分日志分页（全局，按人） | `{ items: [{id,h,r,t}], total, page, size }` |
-| POST | `/api/revlog` | 追加评分日志（可批量） | `{ items: [{h,r,t}] }` → `{ saved }`（服务端 FIFO/归档） |
-| GET | `/api/fsrs-weights` | 个性化权重（全局 + 各库 preset） | `{ global?: {...}, banks?: {bankId: {...}} }` |
-| PUT | `/api/fsrs-weights` | 保存某作用域权重（训练后） | `{ scope: "global" \| bankId, w: [17], trainedAt, samples, defaultLoss, loss, improvement }` |
-| DELETE | `/api/fsrs-weights/{scope}` | 恢复某作用域官方默认 | `204` |
-| POST | `/api/fsrs-weights/train` | 可选：服务端代训练（前端本地训练已够用） | `{ scope }` → 同 PUT 实体或 `{ ok:false, reason }`（门控未过时） |
+| GET | `/api/banks/{id}/reviews` | 该库全部调度状态（content_hash → state 的**整表 map**） | `{ items: { hash: { algo, due, stability, difficulty, reps, lapses, last, learning } } }` |
+| PUT | `/api/banks/{id}/reviews` | 整表 upsert（一次评分/整卷结算后提交） | `{ items: {...} }` → `{ saved }`（**last-write-wins**，多端冲突消解属后续项） |
+| DELETE | `/api/banks/{id}/reviews` | 清空该库调度状态 | — | `204` |
+| GET | `/api/revlog` | 评分日志（全局，按人） | `{ items: [{id,h,r,t,b?}], total }` |
+| POST | `/api/revlog` | 追加评分日志（可批量；服务端补 id/时间戳并按上限 FIFO） | `{ items: [{h,r,t,b?}] }` → `{ saved, items }` |
+| GET | `/api/fsrs-weights` | 个性化权重（**整仓**：全局 + 各库 preset） | `{ global?: {w:[21],...}, banks?: {bankId: {...}} }` |
+| PUT | `/api/fsrs-weights` | 保存整仓权重（训练后） | `{ global?, banks? }` → `{ saved:true }` |
+| DELETE | `/api/fsrs-weights/{scope}` | 恢复某作用域官方默认（`global` 或 bankId） | — | `204` |
+| ~~POST~~ | ~~`/api/fsrs-weights/train`~~ | **未实现**（训练在本地 Worker 完成，前端 PUT 结果即可） | — |
 
-> 字段语义与门控（100 样本 / ≥3 again / ≥3 档位 / 0.2% 改善）以 [SRS.md](SRS.md) 为准；训练在前端完成时本接口只需 PUT 结果。
+> 字段语义与门控（100 样本 / ≥3 again / ≥3 档位 / 留出集 ≥0.2% 改善）以 [SRS.md](SRS.md) 为准；权重维度为 **21（FSRS-6）**。
 
 ## 7. 资源：备份与恢复
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/backup` | 下载全量备份（无图 JSON；含图时为 `application/zip` 的 .qfbk，语义对齐前端 `QB.Backup`） |
-| POST | `/api/backup?mode=overwrite\|merge` | 上传备份恢复 |
+| GET | `/api/backup` | 导出全量数据载荷 → `{ data }`。**载荷口径由后端定义**（参考后端为 `{ banks, questions:{bankId:[]}, progress:{bankId:{}}, history, session, revlog, weights }`）；JSON 直出，**不用 ZIP**——含图备份的 `.qfbk`（ZIP）由**客户端**组装，图片经 §8 端点进出 |
+| POST | `/api/backup?mode=replace\|merge` | 按载荷恢复（`replace` 先清后写；`merge` 同名段覆盖）→ `{ keys, mode }` |
 
 > WebDAV 固定对象（`qforge-backup-latest.bin`）是纯前端的旁路云备份，不经此后端，见 user-guide §9.1。
+> `mode` 取值与前端 `QB.Backup.applyData` 对齐（`replace`/`merge`）；**参考后端不支持 multipart**（资产走原始字节，见 §8）。
 
 ## 8. 资源：图片资产（Assets）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/assets` | 上传图片（`multipart/form-data` 或原始字节 + `Content-Type`）；服务端按内容（FNV-1a + 长度）寻址，幂等 → `{ id, mime, bytes }` |
+| GET | `/api/assets` | 全部资产 id 列表 → `{ items: [id], total }` |
+| POST | `/api/assets` | 上传图片：**body = 原始字节** + `Content-Type`（**参考后端不支持 multipart**）；服务端按内容（FNV-1a 32 + 长度）寻址，幂等 → `{ id, mime, bytes }` |
 | GET | `/api/assets/{id}` | 取图片字节（可直接放 CDN/签名 URL） |
 | DELETE | `/api/assets/{id}` | 删除（孤儿清理由客户端扫描引用差集后调用） |
 
-> 本期资产存浏览器 IndexedDB（store `assets`），文本中以 `![alt](asset:<id>)` 引用；资产与题目文本解耦，后端可独立 CDN 化，表结构见 [DATABASE.md](DATABASE.md) §2.9。
+> 本地模式资产存浏览器 IndexedDB（store `assets`），文本中以 `![alt](asset:<id>)` 引用；**api 模式**
+> 由 `QB.DB.init()` 注入 `QB.ApiAdapter.assetDriver()`（实现 `QB.ASSET_DRIVER_CONTRACT`），`QB.Assets`
+> 对外接口不变（`put/get/all/ids/remove/clear`）。**id 算法须与 `js/utils/assets.js::idFor` 逐字节一致**
+> （FNV-1a 32 位 + 字节长度），E2E 断言两侧 id 相等。资产与题目文本解耦，后端可独立 CDN 化，表结构见 [DATABASE.md](DATABASE.md) §2.9。
 
 ## 9. 与前端适配器的对应关系
 

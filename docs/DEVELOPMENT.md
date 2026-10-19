@@ -32,6 +32,20 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 
 **前后端分离**：把 `DATA_BACKEND` 改为 `'api'`、`NETWORK.API_BASE_URL` 指向后端（或部署同域用 `'/api'` 留空），实现 `js/data/api-adapter.js`（方法名已在 `CONTRACTS.QB` 定义）。`scripts/serve.mjs` 的端口/监听地址属开发工具配置，走命令行参数或 `PORT/HOST` 环境变量，不进 `config.js`。
 
+**参考后端（阶段 C）**：`scripts/serve-api.mjs` 是零依赖的静态文件 + `/api/*` 服务（照 [API-CONTRACT.md](API-CONTRACT.md)），数据落 `<工程根>/.qforge-data/`（已 gitignore，JSON + 原子写）：
+
+```bash
+node scripts/serve-api.mjs                 # 127.0.0.1:8788，数据目录 .qforge-data
+node scripts/serve-api.mjs 8788 0.0.0.0 /tmp/qf-data
+PORT=8788 HOST=0.0.0.0 DATA_DIR=/tmp/qf-data node scripts/serve-api.mjs
+```
+
+前端切到后端**无需改 UI**（配置层即可）：启动 `serve-api.mjs` 后用查询串覆盖后端选择，例如
+`http://127.0.0.1:8788/?backend=api&api=`（同源，`api` 留空即相对路径）；跨域时填完整地址
+`?backend=api&api=http://127.0.0.1:8788`。等价地可在页面前置 `window.__QF_BACKEND__='api'`。
+不支持 multipart 上传（资产走**原始字节** `POST /api/assets`）；`POST /api/banks/{id}/import`
+仅实现 `{ questions, mode }` JSON 分支。无鉴权、单用户参考实现，`reviews` 为整表 last-write-wins。
+
 **不进配置的常量**（规范事实，改动需配套测试）：FSRS 权重/学习步骤/留出比例（`fsrs.js`、`fsrs-train-core.js`）、OOXML 命名空间与 ZIP 魔数/XML 实体（`xml-lite/zip-*`）、行式切题正则（`line-parser.js`）、题型表（已在 CONFIG）。
 
 ## 2. 测试矩阵（有数据才算做完）
@@ -59,7 +73,8 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `scripts/ui-renderer.test.mjs` | **87** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡**；**区域数组与 DOM 对账（阶段 A）：5 个 `*Regions` 变体键序稳定、拼接逐字节等于旧整块字符串、顶层带 `data-region`；`QB.DomPatch.plan` 对账（作答区仅重建变化区域、错题本 keyed 条目保留未变节点）**；**答题卡格级增量（阶段 A）：`quiz-card` 区域含 `frame`+`sub`、帧不含格子状态跨作答逐字节不变、子区域键序/容器归属、作答/跳题仅「计数 + 受影响格」变化（其余格不重建）** |
 | `scripts/dom-patch.test.mjs` | **40** | `QB.DomPatch` 区域对账（`plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`，DOM-free）：首次全变化、内容一致全不重建、单区域变化、区域新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全、列表移除场景；**子区域（格级）：`contentOf` 取 frame、帧未变→顶层不重建、`snapshot` 以 frame 为基准、`normalize` 保留 `frame`/`sub`、`groupSub` 按容器归组去重剔除非法项** |
 | `scripts/contract.test.mjs` | **52** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径 |
-| **合计** | **2755 / 2755 通过 · 21 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| `scripts/api-backend.test.mjs` | **117** | **参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、`count` 缓存、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错 |
+| **合计** | **2872 / 2872 通过 · 22 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
