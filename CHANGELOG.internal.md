@@ -14,6 +14,31 @@
 
 ---
 
+## 2e0ec6a · feat(data): 题目库分片存储与按需读取（阶段 A）
+
+**核心改动**
+- `config.js` 增 `LIMITS.QUESTIONS_SHARD_SIZE = 200`；`contracts.js` 增逻辑键 `questionsMeta(bankId)` / `questionShard(bankId, i)`（原 `questions(bankId)` 降为兼容读取/迁移来源）。
+- `local-adapter.js` 新增公共抽象 **`QB.QuestionShards`**（`SHARD_SIZE/META_VERSION/metaOf/setMeta/shardOf/setShard/removeShard/legacyOf/readAll/readRange/count/writeAll/append/locate/clear`）：单库题目切片存 `questions:<bankId>:<i>` + 清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`）。
+- `questions` 仓库重写：`list(bankId, {offset,limit})` 无筛选时只解析覆盖区间分片（total 走 `count`）；`get` 经 `locate` 逐分片命中即止；`create`→`append`（只写尾分片）；`update`/`remove` 只重写所在分片（空分片回收）；`insertMany` overwrite→`writeAll`（回收高位分片）、merge→`append`、`removeMany` 按分片过滤。
+- `banks.remove` 级联改走 `QuestionShards.clear(id)`（分片+清单+旧 blob 一并清）。
+- `migrate.js`：`SCHEMA_VERSION` 2→3，新增 `migrateV2ToV3`（遍历 `questions:<bankId>` 旧 blob，复用 `writeAll` 切片；已存在清单跳过→幂等），`run()` 按 `fromVersion` 链式 v1→v2→v3，返回体新增 `sharded:{banks,questions}`。
+- `scripts/shard.test.mjs` 新增（68 断言，以「调用捕获」结构性证明读/写放大收敛）；`scripts/migrate.test.mjs` 33→55；`scripts/bench.mjs` 新增冷读/强刷/GC 工具与分片打点（含 3000 题规模库）。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- 19 套件 **2517/2517 通过**（UTC 与 Asia/Shanghai 双时区均 0 失败）：冒烟 461、XML 39、导出 160、Office 1148、编辑器 29、富文本 47、资产 62、组卷 18、UI 渲染器 55、来源 29、FSRS 77、FSRS 优化器 91、SRS 60、存储 14、备份 25、**迁移 55**、**分片 68**、WebDAV 32、PWA 47。
+- bench（`node --expose-gc scripts/bench.mjs`，采样 10 中位数，6000 字符源文本 63286）：
+  - 540 题库（3 片）按需单页冷读 **0.27 ms** vs 全量冷读 **0.77 ms**；`count` 直读清单 < 0.01 ms；单题 create 0.22 ms / update 0.27 ms（只重写 1 分片）。
+  - **3000 题规模库（15 片，载荷 1.10 MB）**：按需单页冷读 **0.22 ms** vs 全量冷读 **3.63 ms**（约 16×）；单题 update **0.23 ms** vs overwrite 全量重写 **38.56 ms**（约 168×）——单题写与库规模解耦。
+  - `insertMany` 落库 4.87 ms（min 4.69/max 7.34）：**以 v2 contentHash 重算为主**（独立探针实测 `makeContentHash×541` ≈ 4.55 ms），分片写入 `writeAll`（3 片+清单）整体 0.67 ms **低于**旧单键写 0.88 ms → 无回退。历史记录 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 上线后即 4.97–5.38 ms，见本文件 1046/1065 行），非本批退化（探针：`D:\Users\临时文件\qforge-probe{,2,3}.mjs`，不提交）。
+  - heapUsed 增量 **+2.56 MB**（4.99→7.55 MB，`--expose-gc` 连跑 3 次稳定）；3000 题规模库末态 13.99 MB。
+
+**遗留 TODO / 风险**
+- **UI 级按需加载未接入**：`db.js` 的 `buildIndex`/`loadBankData` 仍 `questions.list(bankId, {})` 全量读，故首屏与作答交互 P95 尚未受益（阶段 A 剩余项：首屏/作答 P95、列表与答题区局部 DOM 更新）。
+- 分片仅优化 LocalStorage 布局与读写放大；单库总量仍受 5–10MB 配额约束，超大库需配合导出/分库。
+- `removeMany` 仍遍历全部题库的 `banks.list()` 逐库处理，跨库批量删可后续优化。
+
+---
+
 ## 57fb82d · feat(core): 静态单页骨架、配置与 localStorage 缓存层
 
 **核心改动**
