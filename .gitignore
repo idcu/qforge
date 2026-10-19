@@ -6,3 +6,8 @@
 
 # WebDAV 验证端点数据目录（scripts/serve-webdav.mjs 运行时生成，勿入库）
 .qforge-webdav/
+
+# 代理 / IDE 工具产物（非应用源码，勿入库）：IDE 侧开发文档、HTML 报告分享包、报告产物
+.trae/
+.trae-html-share-packages/
+qforge-evaluation/
