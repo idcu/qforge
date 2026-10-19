@@ -14,6 +14,33 @@
 
 ---
 
+## bb66bf1 · feat(rich-text): 轻量公式子集渲染器——零依赖 \frac/\sqrt + 上下标（阶段 B · P2）
+
+**核心改动**
+- `js/utils/rich-text.js`：新增 `readGroup`（嵌套大括号配对读取）、`expandFormula`（单遍扫描展开 `\frac{..}{..}` 与 `\sqrt{..}`/`\sqrt[n]{..}`，**内部内容递归**交给 render/toPlain 自身，故可嵌套公式/上下标）、`HTML_FORMS`/`PLAIN_FORMS`（HTML 与纯文本两种产物）；`render`/`toPlain` 统一改走 `renderInline` + `expandFormula`。未闭合或缺参数组**原样保留**（不误伤普通文本，含普通反斜杠如 `C:\temp`）。图片 `alt` 的标签剥离由 `/<\/?su[bp]>/g` 改为通用 `/<[^>]*>/g`（公式会产出标签，避免属性被破坏；对既有上下标产物等值）。
+- `css/style.css`：新增 `.rt-frac`（列向 `inline-flex` + 分母 `border-top` 分数线）、`.rt-sqrt`（`::before` 内容 `√` + `.rt-radicand` 上划线）、`.rt-index`（根号指数）——纯 CSS 排版，**零依赖**（不引入 KaTeX/MathJax）。
+- 公共抽象：公式展开与上下标共用同一渲染入口 `renderInline`（唯一路径）；新增记号只需在此模块内实现（ARCHITECTURE 约定已更新，禁止各处自行拼 HTML）。
+- 测试：`rich-text.test.mjs` **47→66**（+19：基本/嵌在文本中的分式、基本/指数根号、根号内嵌分式、参数组嵌套、内部递归上下标、未闭合/缺参/普通反斜杠回退、公式内部转义防注入、`alt` 剥离公式标签、`toPlain` 公式去记号）；`bench.mjs` 新增「富文本公式子集渲染」打点。
+- 文档同步（同一提交）：`user-guide.md` §3.2（更名「轻量公式（上下标/分式/根号）」+ 记号表）、`IMPORT-FORMAT.md`、`COMPETITORS.md`（2.4 图片/公式能力行 + 差距表第 4 行**划掉旧结论**，并顺带把第 8 行 FSRS 4.5 更正为 FSRS-6）、`ARCHITECTURE.md`（rich-text 行 + 公共抽象约定）、`README.md`、`DEVELOPMENT.md`（测试矩阵/合计/bench 表）。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **20 项（19 套件 + smoke）2703/2703 断言全通过**，UTC 与 Asia/Shanghai 双时区均 0 失败（较 P1 的 2684 增 +19）。
+- bench（`node --expose-gc scripts/bench.mjs`）：`\frac`/`\sqrt` 混排渲染中位 **0.01 ms**（min 0.00 / max 0.24）。
+- **真实浏览器校验**（`node scripts/serve.mjs` + 自动化浏览器，临时验证页加载**真实** `css/style.css` 与 `js/utils/rich-text.js`，随后已删除临时页）：
+  - `getComputedStyle` 证实 `#row-1`（`\frac{a}{b}`）的 `.rt-frac` 为 `display: inline-flex` + `flex-direction: column`，`.rt-den` `border-top-width: 1px`；分子/分母 `getBoundingClientRect` 上下分层。
+  - `#row-3`（`\sqrt{x}` 与 `\sqrt[3]{x}`）：`.rt-sqrt::before` 的 `content` 为 `√`，`.rt-radicand` `border-top-width: 1px`，`.rt-index` 文本为 `3`。
+  - `#row-4`（嵌套：分式内根号内含 `b^{2}-4ac`）：`.rt-sqrt .rt-frac` 与 `sup` 节点均在位。
+  - **截图不可用**（浏览器标签被节流/离屏，多次 `take_screenshot` 失败）——已在文档如实标注，视觉结论以 computed style + 边界框为准。
+  - 控制台有 1 条 `net::ERR_ABORTED`（针对该临时页 URL 的导航中断），页面渲染不受影响。
+
+**遗留 TODO / 风险**
+- 公式子集**刻意不含**：矩阵/方程组、求和/积分号、字体与空格指令（`\text`/`\,`）、文字上下标（`\sum_{i=1}^{n}` 的 `^{}` 因现有 `SUP_RE` 不允许嵌套大括号而保持字面）——按零依赖定位取舍，已在 user-guide §3.2 与 ARCHITECTURE 明示。
+- `.rt-frac` 用 `inline-flex` 参与行内排版，与中文行高的基线对齐在极端字号下可能需微调（当前以 `vertical-align: middle` 处理，未做跨端像素级核对）。
+- 未做**打印/另存 PDF** 与**移动端窄屏**下的公式排版核对（打印样式已隐藏外壳，公式与正文同样式）。
+- 本轮仅 `git commit`，**未 push**（等用户明确指示）。
+
+---
+
 ## 3958861 · feat(fsrs): 增量重训——门控基线/优化起点分离 + 训练点增量触发 + 热启动（阶段 B · P1）
 
 **核心改动**
