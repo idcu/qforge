@@ -14,6 +14,33 @@
 
 ---
 
+## 2151613 · chore(repo): .gitignore 忽略代理/IDE 工具产物目录（.trae、分享包、评估报告）
+
+**背景（工作区审计结果）**
+- 用户要求「核对本地未提交的改动」。审计结论：**已入库文件零改动** —— `git diff` / `git diff --cached` 均为空、`git stash list` 为空、`origin/main..HEAD` 为空、`main 512315e [origin/main]` 与远端同步；工作区唯一内容就是 3 个长期未跟踪目录（9 文件，约 5.0 MB），且它们此前**未被 .gitignore 覆盖**（`.git/info/exclude` 也为空）：
+  | 目录 | 文件数 | 体积 | 内容 |
+  | --- | --- | --- | --- |
+  | `.trae/` | 1 | 13.0 KB | `.trae/documents/阶段C-契约打通与参考后端.md`（IDE/代理侧开发任务文档） |
+  | `.trae-html-share-packages/` | 1 | 1.24 MB | HTML 报告分享包 zip |
+  | `qforge-evaluation/` | 8 | 3.87 MB | 评估报告产物（`qforge-evaluation.html` + `assets/charts.js` + echarts/mermaid min.js + 4 个 ttf 字体） |
+
+**核心改动**
+- `.gitignore` +3 行：`.trae/`、`.trae-html-share-packages/`、`qforge-evaluation/`，并加注释说明「代理/IDE 工具产物，非应用源码」。**仅忽略、不删除**（用户选择）；仓库中被跟踪的 html 仍只有 `index.html`，未引入任何 zip/大件二进制。
+
+**验证数据（2026-10-19 实跑）**
+- `git status --short` 由「3 个 `??` 目录」→ 空（仅剩本次对 `.gitignore` 自身的修改）；
+- `git check-ignore -v` 三处均命中：`.gitignore:11:.trae/`、`.gitignore:12:.trae-html-share-packages/`、`.gitignore:13:qforge-evaluation/`；
+- `Test-Path` 确认 3 份代表性文件仍在磁盘（忽略 ≠ 删除）。
+- **未重跑测试**：本改动不涉及被测代码，`.gitignore` 不在测试枚举内、也不被应用/scripts 读取（上一轮实测基线 2996/2996 双时区 0 失败）。
+- 无文档需同步：docs 中各自提到的运行期数据目录（`.qforge-data/`、`.qforge-timings.json`、`.qforge-webdav/`）未变动。
+
+**子任务计时**：本次为审计 + 3 行改动，未单独打点（timer 已在上一任务结束时报出）。
+
+**遗留 TODO / 风险**
+- 无功能遗留。若日后确实需要把评估报告作为交付物入库，需显式把 `qforge-evaluation/` 从忽略列表移除（当前按用户选择保持忽略）。
+
+---
+
 ## f7eaaa3 · test(e2e): api-backend 增加跨布局整链 E2E（33 项）+ 加固「后端不可达」断言
 
 **动因（da7c197 的遗留项）**
