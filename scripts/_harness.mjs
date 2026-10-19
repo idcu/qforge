@@ -22,6 +22,7 @@ const MODULES = [
   'js/utils/xml-lite.js',
   'js/utils/assets.js',
   'js/data/contracts.js',
+  'js/data/wire.js',
   'js/data/local-adapter.js',
   'js/data/api-adapter.js',
   'js/data/db.js',

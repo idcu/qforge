@@ -61,10 +61,13 @@
     SHARD_SIZE: SHARD_SIZE,
     META_VERSION: META_VERSION,
 
+    /** 分片清单解析（唯一实现）：非清单 / 旧版 / null 一律返回 null */
+    parseMeta(raw) {
+      return (raw && typeof raw === 'object' && !Array.isArray(raw) && raw.v === META_VERSION) ? raw : null;
+    },
     /** 分片清单（非清单或旧版返回 null） */
     metaOf(bankId) {
-      const m = Storage.get(K.questionsMeta(bankId), null);
-      return (m && typeof m === 'object' && !Array.isArray(m) && m.v === META_VERSION) ? m : null;
+      return QuestionShards.parseMeta(Storage.get(K.questionsMeta(bankId), null));
     },
     setMeta(bankId, meta) { Storage.set(K.questionsMeta(bankId), meta); },
 
@@ -81,13 +84,25 @@
       return Array.isArray(legacy) ? legacy : [];
     },
 
+    /**
+     * 按清单顺序拼接分片（分片顺序语义的唯一实现）。getShard(i) → 第 i 个分片数组。
+     * 纯函数（不碰 Storage），供 readAll 与备份跨布局转换共用。
+     */
+    concatShards(meta, getShard) {
+      if (!meta || !meta.sizes) return [];
+      let out = [];
+      for (let i = 0; i < meta.sizes.length; i++) {
+        const part = getShard(i);
+        if (Array.isArray(part) && part.length) out = out.concat(part);
+      }
+      return out;
+    },
+
     /** 全量题目（分片按序拼接；无清单时回退旧单 blob） */
     readAll(bankId) {
       const meta = QuestionShards.metaOf(bankId);
       if (!meta) return QuestionShards.legacyOf(bankId).slice();
-      let out = [];
-      for (let i = 0; i < meta.sizes.length; i++) out = out.concat(QuestionShards.shardOf(bankId, i));
-      return out;
+      return QuestionShards.concatShards(meta, (i) => QuestionShards.shardOf(bankId, i));
     },
 
     /** 按需读取 [start,end)：只解析覆盖该区间的分片，前置分片仅按清单长度跳过 */
@@ -113,20 +128,32 @@
       return meta ? meta.count : QuestionShards.legacyOf(bankId).length;
     },
 
+    /**
+     * 切分计划（纯函数，分片切分规则唯一实现）：{meta, shards:[[题…],…]}。
+     * 供 writeAll 与备份跨布局转换共用，禁止各自复制切片逻辑。
+     */
+    plan(list) {
+      const src = Array.isArray(list) ? list : [];
+      const shards = [];
+      const sizes = [];
+      for (let i = 0; i * SHARD_SIZE < src.length; i++) {
+        const part = src.slice(i * SHARD_SIZE, (i + 1) * SHARD_SIZE);
+        shards.push(part);
+        sizes.push(part.length);
+      }
+      const meta = emptyMeta();
+      meta.count = src.length;
+      meta.sizes = sizes;
+      return { meta: meta, shards: shards };
+    },
+
     /** 全量重写：清旧分片后按 SHARD_SIZE 切片写；顺带清除旧单 blob */
     writeAll(bankId, list) {
       QuestionShards.clear(bankId);
       if (!list || !list.length) return;
-      const sizes = [];
-      for (let i = 0; i * SHARD_SIZE < list.length; i++) {
-        const part = list.slice(i * SHARD_SIZE, (i + 1) * SHARD_SIZE);
-        QuestionShards.setShard(bankId, i, part);
-        sizes.push(part.length);
-      }
-      const meta = emptyMeta();
-      meta.count = list.length;
-      meta.sizes = sizes;
-      QuestionShards.setMeta(bankId, meta);
+      const p = QuestionShards.plan(list);
+      p.shards.forEach((part, i) => QuestionShards.setShard(bankId, i, part));
+      QuestionShards.setMeta(bankId, p.meta);
     },
 
     /** 追加题目到尾部：只重写尾分片与新增分片，前置分片零写入 */

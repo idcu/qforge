@@ -75,7 +75,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 | `scripts/fsrs-opt.test.mjs` | **114** | revlog/FIFO/作用域隔离、四门控、**留出门控（holdout 20%/gateBasis）+历史最佳权重-loss 自洽**、合成日志留出 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；**增量重训（P1，23 项）：`trainedLogLen` 训练点、`shouldRetrain` 阈值与 `minNew` 可调、热启动 `warmStarted`、Worker 透传 `startWeights`/`WARM_ITERATIONS`**；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
 | `scripts/srs.test.mjs` | **60** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项） |
 | `scripts/storage.test.mjs` | **20** | setSync 即落盘/配额抛错+onError+待写重试、forceSync、跨标签 storage 事件、keys 合并 pending；**`Helpers.debounce().cancel`（丢弃挂起调用）+ 会话清空压过挂起防抖保存的竞态回归（交卷后不再「继续上次」）** |
-| `scripts/backup.test.mjs` | **25** | 全量备份、覆盖/合并恢复、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项） |
+| `scripts/backup.test.mjs` | **90** | 全量备份、覆盖/合并恢复、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项）、**备份载荷两布局识别与双向转换（65 项）：`isServerFormat`/`isLocalFormat`、`serverToLocal`（题目映射 → 分片+清单、题目/进度/历史 snake→camel、本地专有 meta 直通）、`localToServer`（分片重组 → `{bankId:[题]}`、往返一致）、`applyBackup` 按 `QB.DB.backend` 自动转换（真机缺陷回归：后端载荷在 local 模式下恢复出 3 题而非 0 题；api 模式反向转换 + 已是后端布局则透传）** |
 | `scripts/migrate.test.mjs` | **55** | v1→v2 contentHash 升级、review/wrong/fav/revlog 键重映射、revlog 回填 b、幂等逐字节不变、同题干异答案共存、旧裸 hash 强制重算、**v2→v3 分片迁移（旧单 blob → 分片+清单，幂等；450 题切 200/200/50 二次运行逐字节不变）** |
 | `scripts/shard.test.mjs` | **82** | 题目库分片存储：切分与清单、追加只写尾分片、按需单页只解析覆盖分片（冷读调用捕获）、越界零读、跨分片边界、单题 update/remove 只写所在分片、空分片回收、overwrite 高位回收、removeMany 跨分片、旧单 blob 兼容与写时迁移、删库级联清分片；**UI 级按需装载（阶段 A）：`count` 直读清单零分片解析、`loadQuestions` 缓存命中同一数组实例、`buildIndex` 复用缓存、create/update/remove 使修订号 +1 并令缓存失效重读、refresh 强制重读、空 bankId 安全返回** |
 | `scripts/sync-dav.test.mjs` | **44** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404；**真实 HTTP 集成（本地 CORS WebDAV 验证端点 `serve-webdav.mjs`）：预检 OPTIONS 204 + 放行 Authorization + 回显 Origin、真实 PUT 201 并落盘可解析 JSON、错误密码 401、含图 PUT → 端点收 ZIP（PK 头）、真实 GET 下载解析、无对象 404（12 项）** |
@@ -84,7 +84,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 | `scripts/dom-patch.test.mjs` | **40** | `QB.DomPatch` 区域对账（`plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`，DOM-free）：首次全变化、内容一致全不重建、单区域变化、区域新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全、列表移除场景；**子区域（格级）：`contentOf` 取 frame、帧未变→顶层不重建、`snapshot` 以 frame 为基准、`normalize` 保留 `frame`/`sub`、`groupSub` 按容器归组去重剔除非法项** |
 | `scripts/contract.test.mjs` | **52** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源（**local-adapter 直读写 Storage，领域模块经 `QB.DB.*` 委托本适配器，禁双向委托以免自递归**）；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径 |
 | `scripts/api-backend.test.mjs` | **122** | **参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、**`count`/`reviews` 按库缓存命中与写·级联·`backup.import` 后失效（5 项）**、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错 |
-| **合计** | **2897 / 2897 通过 · 22 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2962 / 2962 通过 · 22 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
@@ -150,7 +150,7 @@ node --expose-gc scripts/bench.mjs   # 采样 10 次取中位数，输出耗时�
 > **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账（列表 + 答题区，含**答题卡格级增量**）。**列表侧**——错题本移除一条仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）。**答题区**——勾选选项时顶层仅重建 2/5 区域（`quiz-question` + `quiz-actions`，占字节 10.2%）；答题卡由「整卡单区域」细化为 `frame` + `sub`：帧跨作答逐字节不变（整张 `<details>` 不重建，展开态不丢），仅按 key 就地替换变化的 **2/51** 子节点（计数 + 受影响格，占整卡 HTML 字节 2.0%）。相较细化前（整卡占答题区字节约 95.6%），答题热路径重建量 **由 95.6% 降至 10.2%**。**浏览器实机验证**：折叠答题卡后作答，卡片保持折叠（证明 `<details>` 未被重建）；作答使选项态/提交按钮/计数/当前格状态同步更新，控制台无报错。
 > `insertMany` 落库耗时以 v2 contentHash 语义哈希重算为主（约 4.5 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体 0.67 ms）反而低于旧单键写（0.88 ms）。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化。
 
-bench 全程 heapUsed：5.26 → 7.81 MB（**+2.54 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 14.77 MB；DOM 增量末态 14.95 MB）。首屏静态体积（index.html + css + 54 个 index 内联 js + FSRS 训练 Worker + sw.js + manifest/icon，共 60 个文件，逐文件 `gzip -9` 合计）：**178.8 KB gzip / 503.5 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：5.26 → 7.81 MB（**+2.54 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 14.77 MB；DOM 增量末态 14.95 MB）。首屏静态体积（index.html + css + 55 个 index 内联 js + FSRS 训练 Worker + sw.js + manifest/icon，共 61 个文件，逐文件 `gzip -9` 合计；随 `js/data/wire.js` 新增重测）：**185.9 KB gzip / 522.8 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 

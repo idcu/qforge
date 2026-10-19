@@ -105,31 +105,20 @@
   }
   const enc = (s) => encodeURIComponent(String(s));
 
-  /* ---------------- wire 映射（snake_case ↔ 前端 camelCase） ---------------- */
+  /* ---------------- wire 映射（snake_case ↔ 前端 camelCase） ----------------
+   * from 方向唯一实现见 QB.Wire（js/data/wire.js）：REST 响应与后端备份载荷同构，
+   * 由 api-adapter 与 backup.js 共用。to 方向保留本文件（请求体塑形，服务端补戳
+   * id/bank_id/created_at），与 QB.Wire 的「全量导出式 to」用途不同。
+   */
 
-  function fromWireBank(w) {
-    return {
-      id: w.id, name: w.name, description: w.description || '', category: w.category || '',
-      createdAt: w.created_at, updatedAt: w.updated_at
-    };
-  }
+  const fromWireBank = (w) => QB.Wire.bank.from(w);
   function toWireBank(b) {
     const out = {};
     if (!b) return out;
     ['name', 'description', 'category'].forEach((k) => { if (b[k] !== undefined) out[k] = b[k]; });
     return out;
   }
-  function fromWireQuestion(w) {
-    return {
-      id: w.id, bankId: w.bank_id, type: w.type,
-      material: w.material, children: (w.children || []).map(fromWireQuestion),
-      question: w.question, options: w.options || [], answer: w.answer,
-      blanks: w.blanks || [], reference_answer: w.reference_answer || '',
-      analysis: w.analysis || '', category: w.category || '', source: w.source || '',
-      difficulty: w.difficulty || 0, tags: w.tags || [],
-      contentHash: w.content_hash, createdAt: w.created_at, updatedAt: w.updated_at
-    };
-  }
+  const fromWireQuestion = (w) => QB.Wire.question.from(w);
   function toWireQuestion(q) {
     const out = {};
     if (!q) return out;
@@ -150,16 +139,9 @@
     if (hash) out.content_hash = hash;
     return out;
   }
-  const fromWireWrong = (w) => ({ questionKey: w.question_key, wrongCount: w.wrong_count, lastAt: w.last_at });
-  const fromWireFavorite = (f) => ({ questionKey: f.question_key, addedAt: f.added_at });
-  function fromWireAttempt(w) {
-    return {
-      id: w.id, bankId: w.bank_id, bankName: w.bank_name, mode: w.mode,
-      total: w.total, correct: w.correct, wrong: w.wrong, partial: w.partial || 0,
-      score: w.score, accuracy: w.accuracy, byType: w.by_type || {},
-      durationMs: w.duration_ms || 0, focusLeaves: w.focus_leaves || 0, createdAt: w.created_at
-    };
-  }
+  const fromWireWrong = (w) => QB.Wire.wrong.from(w);
+  const fromWireFavorite = (f) => QB.Wire.favorite.from(f);
+  const fromWireAttempt = (w) => QB.Wire.attempt.from(w);
   function toWireAttempt(r) {
     const out = {};
     if (!r) return out;

@@ -248,6 +248,21 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 
 > 与前端 LocalStorage 的差异：服务端按库**单文件**存题目与进度，而前端题目为 200 题/片的分片 + 清单（§3）——两种布局映射到同一张 `questions` 表（`UNIQUE(bank_id, content_hash)`）；`GET /api/backup` 由上述文件**实时组装**（无独立 `backup.json`）。字段名一律 snake_case（§3「字段命名转换」），由 `api-adapter.js` 的 wire 映射表与前端 camelCase 互转。
 
+### 7.1 备份载荷的两种布局与互转（2026-10-19）
+
+`GET /api/backup` 的 `data` 与前端「下载全量备份」的 `data` **键名与字段口径都不同**，故备份文件在两侧不通用；前端在恢复时按 `QB.DB.backend` 自动转换（实现见 `js/modules/backup.js` 的 `isServerFormat`/`isLocalFormat`/`serverToLocal`/`localToServer`，纯函数、可单测）。
+
+| 概念 | 本地布局（LocalStorage / 前端备份） | 后端布局（`GET /api/backup` 的 `data`） |
+| --- | --- | --- |
+| 题库 | `banks`（数组，`createdAt/updatedAt`） | `banks`（数组，`created_at/updated_at`） |
+| 题目 | `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`）+ `questions:<bankId>:<i>`（分片）；旧兼容 `questions:<bankId>` 单 blob | `questions`（`{ bankId: [题目] }`，题目带 `bank_id/created_at/updated_at/content_hash`） |
+| 错题 / 收藏 / 复习计划 | `user:wrong:<bankId>`（`{questionKey,wrongCount,lastAt}`）/ `user:fav:<bankId>`（`{questionKey,addedAt}`）/ `user:review:<bankId>`（`contentHash → state` map） | `progress`（`{ bankId: { wrong:[{question_key,wrong_count,last_at}], favorite:[{question_key,added_at}], review:{} } }`） |
+| 历史 | `user:history`（`bankId/bankName/byType/durationMs/focusLeaves/createdAt`） | `history`（`bank_id/bank_name/by_type/duration_ms/focus_leaves/created_at`） |
+| 会话 / 评分日志 / 权重 | `user:session` / `user:revlog` / `meta:fsrsWeights` | `session` / `revlog` / `weights` |
+| 本机专有偏好 | `meta:dav` / `meta:theme` / `meta:currentBank` / `meta:schemaVersion` | **无对应键**（后端布局不含本机偏好） |
+
+转换规则（`serverToLocal`）：题目按 `bankId` 展开为分片 + 清单（切分复用 `QB.QuestionShards.plan`），进度按库拆成三个前缀键，历史/会话/日志/权重落到对应本地键；`meta:*` 本机专有偏好**原样直通**，本地布局残留键（缓存产物，如空的 `questions:<id>`/`<id>:meta`）**丢弃**以免覆盖转换结果。反向（`localToServer`）按上面 `banks` 列表重组分片（拼接复用 `QB.QuestionShards.concatShards`）后输出后端 7 键；本机专有 meta 偏好不透传（后端无对应语义）。恢复时若本端布局载荷缺本机专有偏好，`applyBackup` 保留 LocalStorage 现值（避免「恢复一次丢主题/WebDAV 配置」）。
+
 ## 8. 数据访问契约（阶段 C，代码侧权威）
 
 LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务模块）与本子系统的存储都只经门面 `QB.DB` 的 7 组 Repository（`banks/questions/progress/reviews/revlog/weights/backup` + 资产驱动契约）。契约归属、异步形状与「禁止双向委托」的约束见 [API-CONTRACT.md](API-CONTRACT.md) §9 与 [SRS.md](SRS.md) §9.1。

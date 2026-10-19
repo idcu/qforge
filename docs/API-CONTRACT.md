@@ -143,6 +143,8 @@
 
 > WebDAV 固定对象（`qforge-backup-latest.bin`）是纯前端的旁路云备份，不经此后端，见 user-guide §9.1。**真机验收**可用内置的本地 WebDAV 验证端点 `node scripts/serve-webdav.mjs`（PUT/GET + Basic + CORS 预检，见 DEVELOPMENT §1）；真实坚果云/Nextcloud 默认不发 CORS 头，浏览器会直接拦截（服务端策略，非前端缺陷）。
 > `mode` 取值与前端 `QB.Backup.applyData` 对齐（`replace`/`merge`）；**参考后端不支持 multipart**（资产走原始字节，见 §8）。
+>
+> **载荷口径与跨布局自动转换（2026-10-19）**：`data` 的键与字段口径**由后端定义**——参考后端为 7 个无前缀键 `banks / questions:{bankId:[]} / progress:{bankId:{wrong,favorite,review}} / history / session / revlog / weights`，实体字段一律 snake_case（与前端的「本地布局」完全不同：本地是 `questions:<bankId>:meta`+分片、`user:*`/`meta:*` 前缀键 + camelCase）。因此备份文件在两侧**不通用**，误用会「静默恢复错库」（本地模式吃后端载荷时只显示题库、题目 0 题，且零报错）。前端已按 `QB.DB.backend` **自动转换**：local 后端遇到后端布局载荷 → `QB.Backup.serverToLocal`；api 后端遇到本地布局载荷 → `QB.Backup.localToServer`；已是本端布局则原样透传。两侧键与字段的完整对照见 [DATABASE.md](DATABASE.md) §7.1。第三方后端实现可自行定义载荷口径，但需与前端约定同样的两种布局语义（或只支持其中一种并明确文档化）。
 
 ## 8. 资源：图片资产（Assets）
 

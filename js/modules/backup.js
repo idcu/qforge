@@ -105,14 +105,138 @@
   }
 
   /**
-   * 恢复备份（含外壳校验）；载荷经 QB.DB.backup.import（local 直写 / api REST），故为异步
+   * 恢复备份（含外壳校验）；载荷经 QB.DB.backup.import（local 直写 / api REST），故为异步。
+   * 载荷有两种布局（本地布局 / 后端布局），恢复时按当前后端自动转换，见下方「跨布局转换」。
    * @param {Object} backup 备份对象
    * @param {{mode?:'replace'|'merge'}} opts
    * @returns {Promise<{keys:number, mode:string}>}
    */
   async function applyBackup(backup, opts) {
     if (!isBackup(backup)) throw new Error('不是有效的 qforge 备份文件');
-    return await QB.DB.backup.import({ data: backup.data }, (opts || {}).mode);
+    const mode = (opts || {}).mode;
+    let data = backup.data;
+    if (QB.DB.backend === 'api') {
+      // 本地布局载荷 → 后端布局（已是后端布局则原样透传）
+      if (!isServerFormat(data) && isLocalFormat(data)) data = localToServer(data);
+    } else if (isServerFormat(data)) {
+      data = serverToLocal(data);
+      // 后端布局不含本地专有偏好（主题/当前库/WebDAV/schema）：载荷缺失时保留本机现值，
+      // 否则覆盖恢复会把这些本机偏好一并清空
+      LOCAL_ONLY_META_KEYS.forEach((k) => {
+        if (!hasKey(data, k)) {
+          const v = QB.Storage.get(k, null);
+          if (v != null) data[k] = v;
+        }
+      });
+    }
+    return await QB.DB.backup.import({ data: data }, mode);
+  }
+
+  /* ---------------- 跨布局转换（本地布局 ⇄ 后端布局） ----------------
+   * 备份载荷有两种布局：
+   *   - 本地布局：banks（camelCase 时间戳）+ questions:<bankId>:meta / questions:<bankId>:<i> 分片
+   *     + user:wrong|fav|review:<bankId> + user:history|session|revlog + meta:* （见 docs/DATABASE.md）
+   *   - 后端布局：GET /api/backup 的 7 个无前缀键 banks / questions{bankId:[题]} /
+   *     progress{bankId:{wrong,favorite,review}} / history / session / revlog / weights，
+   *     实体字段为 snake_case（见 docs/API-CONTRACT.md §7）
+   * 两种布局混用会「静默恢复错库」：本地模式吃后端载荷时 banks 恰好同名可用（题库显示正常），
+   * 但题目落在 questions:<bankId> 与分片键之外 → 显示「题库在、题目 0 题」且零报错。
+   * 故 applyBackup 按 QB.DB.backend 自动转换；转换本身是纯函数，可被单测直接调用。
+   * 实体字段映射复用 QB.Wire（js/data/wire.js），分片切分/拼接复用 QB.QuestionShards。
+   */
+
+  /** 两布局同名同义、只存在于本地侧的偏好键（后端载荷无对应键，恢复时保留本机现值） */
+  const LOCAL_ONLY_META_KEYS = [QB.KEYS.metaDav, QB.KEYS.metaTheme, QB.KEYS.metaCurrentBank, QB.KEYS.metaSchema];
+
+  function hasKey(obj, k) { return Object.prototype.hasOwnProperty.call(obj, k); }
+  function isPlainMap(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+
+  /**
+   * 后端布局识别：出现任一「只有后端布局才会有的无前缀键」即判定。
+   * 本地布局永不写这些无前缀键（题目/进度/历史等一律带前缀），故不会误判。
+   */
+  function isServerFormat(data) {
+    if (!isPlainMap(data)) return false;
+    return isPlainMap(data.questions) || isPlainMap(data.progress) || isPlainMap(data.weights) ||
+      isPlainMap(data.session) || Array.isArray(data.history) || Array.isArray(data.revlog);
+  }
+
+  /** 本地布局识别：含带前缀逻辑键（user:/meta:/questions:），或 banks 用 camelCase 时间戳 */
+  function isLocalFormat(data) {
+    if (!isPlainMap(data)) return false;
+    if (Object.keys(data).some((k) => k.indexOf(':') >= 0)) return true;
+    const banks = data[QB.KEYS.banks];
+    return Array.isArray(banks) && banks.some((b) => b && b.createdAt != null);
+  }
+
+  /** 后端布局载荷 → 本地布局（纯函数，不改输入） */
+  function serverToLocal(data) {
+    const src = isPlainMap(data) ? data : {};
+    const out = {};
+    // 1) 同义键直通（两布局同名同义：WebDAV 配置 / 主题 / 当前库 / schema）
+    LOCAL_ONLY_META_KEYS.forEach((k) => { if (hasKey(src, k)) out[k] = src[k]; });
+    // 2) 题库
+    out[QB.KEYS.banks] = (src.banks || []).map((w) => QB.Wire.bank.from(w));
+    // 3) 题目 {bankId:[题]} → questions:<bankId>:meta + questions:<bankId>:<i>（切分复用 QuestionShards.plan）
+    const qmap = isPlainMap(src.questions) ? src.questions : {};
+    Object.keys(qmap).forEach((bankId) => {
+      const plan = QB.QuestionShards.plan((qmap[bankId] || []).map((w) => QB.Wire.question.from(w)));
+      if (!plan.shards.length) return; // 空库不写清单（与 QuestionShards.writeAll 空列表语义一致）
+      plan.shards.forEach((part, i) => { out[QB.KEYS.questionShard(bankId, i)] = part; });
+      out[QB.KEYS.questionsMeta(bankId)] = plan.meta;
+    });
+    // 4) 进度 progress{bankId:{wrong,favorite,review}} → user:wrong|fav|review:<bankId>
+    const pmap = isPlainMap(src.progress) ? src.progress : {};
+    Object.keys(pmap).forEach((bankId) => {
+      const p = isPlainMap(pmap[bankId]) ? pmap[bankId] : {};
+      out[QB.KEYS.wrong(bankId)] = (p.wrong || []).map((w) => QB.Wire.wrong.from(w));
+      out[QB.KEYS.favorite(bankId)] = (p.favorite || []).map((f) => QB.Wire.favorite.from(f));
+      out[QB.KEYS.review(bankId)] = isPlainMap(p.review) ? p.review : {};
+    });
+    // 5) 历史 / 会话 / 评分日志 / 权重
+    out[QB.KEYS.history] = (src.history || []).map((w) => QB.Wire.attempt.from(w));
+    out[QB.KEYS.session] = src.session || null;
+    out[QB.KEYS.revlog] = Array.isArray(src.revlog) ? src.revlog.slice() : [];
+    out[QB.KEYS.metaFsrsWeights] = isPlainMap(src.weights) ? src.weights : { global: null, banks: {} };
+    return out;
+  }
+
+  /**
+   * 本地布局载荷 → 后端布局（纯函数，不改输入）。用于 api 模式下恢复本地导出的备份。
+   * 只处理后端 importData 认识的那 7 个键（本地专有 meta 偏好与后端无关，不透传）。
+   */
+  function localToServer(data) {
+    const src = isPlainMap(data) ? data : {};
+    const banks = (src[QB.KEYS.banks] || []).map((b) => QB.Wire.bank.to(b));
+    const out = {
+      banks: banks,
+      questions: {},
+      progress: {},
+      history: (src[QB.KEYS.history] || []).map((r) => QB.Wire.attempt.to(r)),
+      session: src[QB.KEYS.session] || null,
+      revlog: Array.isArray(src[QB.KEYS.revlog]) ? src[QB.KEYS.revlog].slice() : [],
+      weights: isPlainMap(src[QB.KEYS.metaFsrsWeights]) ? src[QB.KEYS.metaFsrsWeights] : { global: null, banks: {} }
+    };
+    banks.forEach((b) => {
+      const bankId = b.id;
+      const meta = QB.QuestionShards.parseMeta(src[QB.KEYS.questionsMeta(bankId)]);
+      const legacy = src[QB.KEYS.questions(bankId)];
+      const list = meta
+        ? QB.QuestionShards.concatShards(meta, (i) => src[QB.KEYS.questionShard(bankId, i)])
+        : (Array.isArray(legacy) ? legacy : []);
+      if (list.length) out.questions[bankId] = list.map((q) => QB.Wire.question.to(q));
+      const wrong = src[QB.KEYS.wrong(bankId)];
+      const fav = src[QB.KEYS.favorite(bankId)];
+      const review = src[QB.KEYS.review(bankId)];
+      if (wrong || fav || review) {
+        out.progress[bankId] = {
+          wrong: (wrong || []).map((w) => QB.Wire.wrong.to(w)),
+          favorite: (fav || []).map((f) => QB.Wire.favorite.to(f)),
+          review: isPlainMap(review) ? review : {}
+        };
+      }
+    });
+    return out;
   }
 
   /* ---------------- 含图片资产的备份包（.qfbk：backup.json + assets/*） ---------------- */
@@ -297,6 +421,7 @@
 
   QB.Backup = {
     buildBackup, applyBackup, isBackup, redactSecrets, readAllData, applyData,
+    isServerFormat, isLocalFormat, serverToLocal, localToServer,
     buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,
     confirmRestore,
     download, pickAndRestore, openFlow
