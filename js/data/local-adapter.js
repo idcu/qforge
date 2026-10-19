@@ -36,6 +36,138 @@
     return item;
   }
 
+  /* ---------------- 题目分片存储（公共抽象 QB.QuestionShards） ----------------
+   * 单库题目按 QUESTIONS_SHARD_SIZE 切片存于 questions:<bankId>:<i>，清单
+   * （分片数/总数/各分片长度）存 questions:<bankId>:meta。目的：
+   *   - 写：单题增删改只重写所在分片（写放大 O(全库) → O(分片)）；
+   *   - 读：列表按区间只解析覆盖分片（读放大 → 按需），total 直读清单免解析全库。
+   * 兼容：分片前旧数据为 questions:<bankId> 单数组，读取时回退，写入时迁移为分片。
+   * 唯一实现，供 local-adapter 与 migrate 复用，禁止各自复制分片逻辑。
+   */
+  const SHARD_SIZE = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.QUESTIONS_SHARD_SIZE) || 200;
+  const META_VERSION = 3;
+
+  function emptyMeta() {
+    return { v: META_VERSION, shardSize: SHARD_SIZE, count: 0, sizes: [] };
+  }
+
+  const QuestionShards = {
+    SHARD_SIZE: SHARD_SIZE,
+    META_VERSION: META_VERSION,
+
+    /** 分片清单（非清单或旧版返回 null） */
+    metaOf(bankId) {
+      const m = Storage.get(K.questionsMeta(bankId), null);
+      return (m && typeof m === 'object' && !Array.isArray(m) && m.v === META_VERSION) ? m : null;
+    },
+    setMeta(bankId, meta) { Storage.set(K.questionsMeta(bankId), meta); },
+
+    shardOf(bankId, i) {
+      const s = Storage.get(K.questionShard(bankId, i), []);
+      return Array.isArray(s) ? s : [];
+    },
+    setShard(bankId, i, arr) { Storage.set(K.questionShard(bankId, i), arr); },
+    removeShard(bankId, i) { Storage.remove(K.questionShard(bankId, i)); },
+
+    /** 旧单 blob（分片迁移前）读取，非数组返回 [] */
+    legacyOf(bankId) {
+      const legacy = Storage.get(K.questions(bankId), []);
+      return Array.isArray(legacy) ? legacy : [];
+    },
+
+    /** 全量题目（分片按序拼接；无清单时回退旧单 blob） */
+    readAll(bankId) {
+      const meta = QuestionShards.metaOf(bankId);
+      if (!meta) return QuestionShards.legacyOf(bankId).slice();
+      let out = [];
+      for (let i = 0; i < meta.sizes.length; i++) out = out.concat(QuestionShards.shardOf(bankId, i));
+      return out;
+    },
+
+    /** 按需读取 [start,end)：只解析覆盖该区间的分片，前置分片仅按清单长度跳过 */
+    readRange(bankId, start, end) {
+      const meta = QuestionShards.metaOf(bankId);
+      if (!meta) return QuestionShards.legacyOf(bankId).slice(start, end);
+      let out = [];
+      let pos = 0;
+      for (let i = 0; i < meta.sizes.length; i++) {
+        const len = meta.sizes[i];
+        if (pos + len <= start) { pos += len; continue; }
+        if (pos >= end) break;
+        const shard = QuestionShards.shardOf(bankId, i);
+        out = out.concat(shard.slice(Math.max(0, start - pos), Math.min(len, end - pos)));
+        pos += len;
+      }
+      return out;
+    },
+
+    /** 题目总数（清单直读，免解析分片） */
+    count(bankId) {
+      const meta = QuestionShards.metaOf(bankId);
+      return meta ? meta.count : QuestionShards.legacyOf(bankId).length;
+    },
+
+    /** 全量重写：清旧分片后按 SHARD_SIZE 切片写；顺带清除旧单 blob */
+    writeAll(bankId, list) {
+      QuestionShards.clear(bankId);
+      if (!list || !list.length) return;
+      const sizes = [];
+      for (let i = 0; i * SHARD_SIZE < list.length; i++) {
+        const part = list.slice(i * SHARD_SIZE, (i + 1) * SHARD_SIZE);
+        QuestionShards.setShard(bankId, i, part);
+        sizes.push(part.length);
+      }
+      const meta = emptyMeta();
+      meta.count = list.length;
+      meta.sizes = sizes;
+      QuestionShards.setMeta(bankId, meta);
+    },
+
+    /** 追加题目到尾部：只重写尾分片与新增分片，前置分片零写入 */
+    append(bankId, items) {
+      if (!items || !items.length) return;
+      const meta = QuestionShards.metaOf(bankId);
+      if (!meta) { QuestionShards.writeAll(bankId, QuestionShards.readAll(bankId).concat(items)); return; }
+      let idx = meta.sizes.length ? meta.sizes.length - 1 : 0;
+      let shard = meta.sizes.length ? QuestionShards.shardOf(bankId, idx) : [];
+      items.forEach((it) => {
+        if (shard.length >= SHARD_SIZE) {
+          QuestionShards.setShard(bankId, idx, shard);
+          meta.sizes[idx] = shard.length;
+          idx += 1;
+          shard = [];
+        }
+        shard.push(it);
+      });
+      QuestionShards.setShard(bankId, idx, shard);
+      meta.sizes[idx] = shard.length;
+      meta.count += items.length;
+      QuestionShards.setMeta(bankId, meta);
+    },
+
+    /** 定位题目所在分片（逐分片读取，命中即止）：{legacy} | {idx,pos} | null */
+    locate(bankId, id) {
+      const meta = QuestionShards.metaOf(bankId);
+      if (!meta) {
+        const pos = QuestionShards.legacyOf(bankId).findIndex((q) => q.id === id);
+        return pos >= 0 ? { legacy: true, pos: pos } : null;
+      }
+      for (let i = 0; i < meta.sizes.length; i++) {
+        const pos = QuestionShards.shardOf(bankId, i).findIndex((q) => q.id === id);
+        if (pos >= 0) return { legacy: false, idx: i, pos: pos };
+      }
+      return null;
+    },
+
+    /** 清除某库全部分片与清单（含旧单 blob），删库级联用 */
+    clear(bankId) {
+      const meta = QuestionShards.metaOf(bankId);
+      if (meta) for (let i = 0; i < meta.sizes.length; i++) Storage.remove(K.questionShard(bankId, i));
+      Storage.remove(K.questionsMeta(bankId));
+      Storage.remove(K.questions(bankId));
+    }
+  };
+
   /* ---------------- BankRepository ---------------- */
   const banks = {
     async list() {
@@ -72,7 +204,7 @@
       const list = (await banks.list()).filter((b) => b.id !== id);
       Storage.setSync(K.banks, list);
       if (cascade) {
-        Storage.remove(K.questions(id));
+        QuestionShards.clear(id); // 题目分片 + 清单 + 旧单 blob 一并清除
         Storage.remove(K.wrong(id));
         Storage.remove(K.favorite(id));
         Storage.remove(K.review(id)); // 评估报告中优先级#6：旧实现残留 user:review:<bankId>
@@ -96,60 +228,84 @@
 
   /* ---------------- QuestionRepository ---------------- */
   const questions = {
+    /**
+     * 列表查询。除原有 {type,category,keyword,page,size} 外，支持 {offset,limit} 按需读取：
+     * 无筛选时只解析覆盖目标区间的分片（total 直读清单），不会反序列化整库。
+     */
     async list(bankId, query) {
       query = query || {};
-      let items = Storage.get(K.questions(bankId), []).slice();
-      if (query.type) items = items.filter((q) => q.type === query.type);
-      if (query.category) items = items.filter((q) => q.category === query.category);
-      if (query.keyword) {
-        const kw = QB.normalizeAnswer(query.keyword, { stripPunctuation: false });
-        items = items.filter((q) => QB.normalizeAnswer(q.question).indexOf(kw) >= 0);
-      }
-      const total = items.length;
+      const filtered = !!(query.type || query.category || query.keyword);
+      const useOffset = query.offset != null || query.limit != null;
+      const usePage = !!(query.page || query.size);
+      const total = filtered ? 0 : QuestionShards.count(bankId);
       const page = query.page || 1;
-      const size = query.size || total || 1;
-      if (query.page || query.size) {
-        const start = (page - 1) * size;
-        items = items.slice(start, start + size);
+      const size = query.size || (query.limit != null ? Number(query.limit) : (total || 1));
+      let start = 0;
+      let end = total;
+      if (useOffset) {
+        start = Math.max(0, Number(query.offset) || 0);
+        end = query.limit != null ? start + Math.max(0, Number(query.limit)) : total;
+      } else if (usePage) {
+        start = (page - 1) * size;
+        end = start + size;
       }
-      return { items, total, page, size };
+
+      let items;
+      let outTotal = total;
+      if (filtered) {
+        items = QuestionShards.readAll(bankId);
+        if (query.type) items = items.filter((q) => q.type === query.type);
+        if (query.category) items = items.filter((q) => q.category === query.category);
+        if (query.keyword) {
+          const kw = QB.normalizeAnswer(query.keyword, { stripPunctuation: false });
+          items = items.filter((q) => QB.normalizeAnswer(q.question).indexOf(kw) >= 0);
+        }
+        outTotal = items.length;
+        if (useOffset || usePage) items = items.slice(start, end);
+      } else if (useOffset || usePage) {
+        items = QuestionShards.readRange(bankId, start, end);
+      } else {
+        items = QuestionShards.readAll(bankId);
+      }
+      return { items, total: outTotal, page, size };
     },
 
     async get(id) {
-      const all = await questions._all();
-      return all.find((q) => q.id === id) || null;
-    },
-
-    async _all() {
       const bankList = await banks.list();
-      let out = [];
-      bankList.forEach((b) => {
-        out = out.concat(Storage.get(K.questions(b.id), []));
-      });
-      return out;
+      for (const b of bankList) {
+        const loc = QuestionShards.locate(b.id, id);
+        if (!loc) continue;
+        const holder = loc.legacy ? QuestionShards.legacyOf(b.id) : QuestionShards.shardOf(b.id, loc.idx);
+        return holder[loc.pos] || null;
+      }
+      return null;
     },
 
     async create(bankId, question) {
-      const list = Storage.get(K.questions(bankId), []).slice();
       const item = stampQuestion(question, bankId);
-      list.push(item);
-      Storage.set(K.questions(bankId), list);
+      QuestionShards.append(bankId, [item]); // 只重写尾分片/新增分片
       return item;
     },
 
     async update(id, patch) {
       const bankList = await banks.list();
       for (const b of bankList) {
-        const list = Storage.get(K.questions(b.id), []);
-        const idx = list.findIndex((q) => q.id === id);
-        if (idx >= 0) {
-          const merged = Object.assign({}, list[idx], patch, { id: id, bankId: b.id, updatedAt: now() });
+        const loc = QuestionShards.locate(b.id, id);
+        if (!loc) continue;
+        if (loc.legacy) {
+          const list = QuestionShards.readAll(b.id);
+          const merged = Object.assign({}, list[loc.pos], patch, { id: id, bankId: b.id, updatedAt: now() });
           merged.contentHash = QB.makeContentHash(merged);
-          const copy = list.slice();
-          copy[idx] = merged;
-          Storage.set(K.questions(b.id), copy);
+          list[loc.pos] = merged;
+          QuestionShards.writeAll(b.id, list); // 旧单 blob：一次性迁移为分片
           return merged;
         }
+        const shard = QuestionShards.shardOf(b.id, loc.idx);
+        const merged = Object.assign({}, shard[loc.pos], patch, { id: id, bankId: b.id, updatedAt: now() });
+        merged.contentHash = QB.makeContentHash(merged);
+        shard[loc.pos] = merged;
+        QuestionShards.setShard(b.id, loc.idx, shard); // 只重写所在分片
+        return merged;
       }
       throw new Error('题目不存在: ' + id);
     },
@@ -157,20 +313,34 @@
     async remove(id) {
       const bankList = await banks.list();
       for (const b of bankList) {
-        const list = Storage.get(K.questions(b.id), []);
-        const idx = list.findIndex((q) => q.id === id);
-        if (idx >= 0) {
-          const copy = list.slice();
-          const [removed] = copy.splice(idx, 1);
-          Storage.set(K.questions(b.id), copy);
+        const loc = QuestionShards.locate(b.id, id);
+        if (!loc) continue;
+        if (loc.legacy) {
+          const list = QuestionShards.readAll(b.id);
+          const [removed] = list.splice(loc.pos, 1);
+          QuestionShards.writeAll(b.id, list);
           return removed;
         }
+        const meta = QuestionShards.metaOf(b.id);
+        const shard = QuestionShards.shardOf(b.id, loc.idx);
+        const [removed] = shard.splice(loc.pos, 1);
+        if (!shard.length) {
+          QuestionShards.removeShard(b.id, loc.idx); // 分片清空即回收，避免空壳
+          meta.sizes.splice(loc.idx, 1);
+        } else {
+          QuestionShards.setShard(b.id, loc.idx, shard);
+          meta.sizes[loc.idx] = shard.length;
+        }
+        meta.count -= 1;
+        QuestionShards.setMeta(b.id, meta);
+        return removed;
       }
       return null;
     },
 
     /**
      * 批量新增（导入路径复用此方法，不另写落库逻辑）
+     * merge 模式仅重写尾分片；overwrite 模式清库重写。
      * @returns {Promise<{inserted:number, duplicates:number, skipped:number, total:number}>}
      */
     async insertMany(bankId, incoming, options) {
@@ -178,12 +348,13 @@
       const dedupe = options.dedupe !== false;
       const mode = options.mode || 'merge'; // 'merge' | 'overwrite'
 
-      let list = mode === 'overwrite' ? [] : Storage.get(K.questions(bankId), []).slice();
-      const seen = new Set(list.map((q) => q.contentHash));
+      const existing = mode === 'overwrite' ? [] : QuestionShards.readAll(bankId);
+      const seen = new Set(existing.map((q) => q.contentHash));
 
       let inserted = 0;
       let duplicates = 0;
       let skipped = 0;
+      const fresh = [];
 
       (incoming || []).forEach((raw) => {
         const item = stampQuestion(raw, bankId);
@@ -196,12 +367,17 @@
           return;
         }
         seen.add(item.contentHash);
-        list.push(item);
+        fresh.push(item);
         inserted++;
       });
 
-      Storage.set(K.questions(bankId), list);
-      return { inserted, duplicates, skipped, total: list.length };
+      if (mode === 'overwrite') {
+        QuestionShards.writeAll(bankId, fresh);
+      } else if (fresh.length) {
+        QuestionShards.append(bankId, fresh);
+      }
+      const total = mode === 'overwrite' ? fresh.length : existing.length + fresh.length;
+      return { inserted, duplicates, skipped, total };
     },
 
     async removeMany(ids) {
@@ -209,15 +385,33 @@
       const bankList = await banks.list();
       let removed = 0;
       bankList.forEach((b) => {
-        const list = Storage.get(K.questions(b.id), []);
-        const kept = list.filter((q) => {
-          if (idSet.has(q.id)) {
-            removed++;
-            return false;
-          }
-          return true;
-        });
-        if (kept.length !== list.length) Storage.set(K.questions(b.id), kept);
+        const meta = QuestionShards.metaOf(b.id);
+        if (!meta) {
+          const list = QuestionShards.legacyOf(b.id);
+          const kept = list.filter((q) => {
+            if (idSet.has(q.id)) { removed++; return false; }
+            return true;
+          });
+          if (kept.length !== list.length) QuestionShards.writeAll(b.id, kept);
+          return;
+        }
+        const sizes = [];
+        let count = 0;
+        for (let i = 0; i < meta.sizes.length; i++) {
+          const shard = QuestionShards.shardOf(b.id, i);
+          const kept = shard.filter((q) => {
+            if (idSet.has(q.id)) { removed++; return false; }
+            return true;
+          });
+          if (kept.length === shard.length) { sizes.push(shard.length); count += shard.length; continue; }
+          if (!kept.length) { QuestionShards.removeShard(b.id, i); continue; }
+          QuestionShards.setShard(b.id, i, kept);
+          sizes.push(kept.length);
+          count += kept.length;
+        }
+        meta.sizes = sizes;
+        meta.count = count;
+        QuestionShards.setMeta(b.id, meta);
       });
       return { removed };
     }
@@ -306,4 +500,5 @@
   };
 
   QB.LocalAdapter = { banks, questions, progress };
+  QB.QuestionShards = QuestionShards; // 分片读写公共抽象（migrate 等复用，避免重复实现）
 })(window);

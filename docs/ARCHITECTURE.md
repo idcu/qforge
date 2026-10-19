@@ -65,8 +65,8 @@
 ### 3.3 数据访问层（data）
 | 文件 | 职责 |
 | --- | --- |
-| `data/contracts.js` | `QB.KEYS`（逻辑键）、`QB.CONTRACTS`（接口方法名）、`QB.assertAdapter`（自检） |
-| `data/local-adapter.js` | 三个 Repository 的 LocalStorage 实现；`insertMany` 是导入落库唯一入口 |
+| `data/contracts.js` | `QB.KEYS`（逻辑键，含题目分片键 `questionsMeta`/`questionShard`）、`QB.CONTRACTS`（接口方法名）、`QB.assertAdapter`（自检） |
+| `data/local-adapter.js` | 三个 Repository 的 LocalStorage 实现；`insertMany` 是导入落库唯一入口。单库题目按 `LIMITS.QUESTIONS_SHARD_SIZE`（200）分片存 `questions:<bankId>:<i>` + 清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`），单题增删改只重写所在分片、列表按区间只解析覆盖分片；分片读写收敛为公共抽象 **`QB.QuestionShards`**（`readAll/readRange/count/writeAll/append/locate/clear` 等，供 migrate 复用，双重实现者禁止各自复制） |
 | `data/api-adapter.js` | REST 实现骨架（`notImplemented`），定义方法签名供后续填充 |
 | `data/db.js` | 门面：`init()` 按 `DATA_BACKEND` 选适配器；`buildIndex(bankId)` 建 contentHash 索引 |
 | `data/sample-data.js` | `QB.SAMPLE`：18 道内置样例（判断/单选/多选/填空/简答各 3 + 不定项 3，覆盖六题型） |
@@ -110,7 +110,7 @@
 | `modules/data-io.js` | 文件/粘贴/拖拽/**URL** 导入编排，统一「解析→预览→insertMany→记录来源」；`refreshUrlFlow` 按 checksum 刷新 |
 | `modules/office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包（与导入端对称） |
 | `modules/backup.js` | 全量备份/恢复（Storage 全量枚举，覆盖/合并；有图自动 ZIP .qfbk；`confirmRestore` 供文件与 WebDAV 共用）；覆盖恢复先快照再写入，失败自动回滚（不先删后写） |
-| `modules/migrate.js` | `QB.Migration.run`：本地 schema 版本化迁移（当前 v1→v2 contentHash），启动时幂等执行，重映射题目/复习/错题/收藏/revlog（见 [DATABASE.md](DATABASE.md) §4） |
+| `modules/migrate.js` | `QB.Migration.run`：本地 schema 版本化迁移（当前 v1→v2 contentHash 与 **v2→v3 题目分片**，按 `fromVersion` 链式执行；分片迁移复用 `QB.QuestionShards.writeAll`），启动时幂等执行，重映射题目/复习/错题/收藏/revlog 并返回 `{migrated, sharded}`（见 [DATABASE.md](DATABASE.md) §4） |
 | `modules/sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象异步备份（Basic Auth，fetch 可注入测试）；CORS 受限如实报错 |
 | `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |
 | `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT 七格式（qbk 异步读 IndexedDB），题库/错题/收藏；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder）；材料题在 MD/DOCX/TXT 经公共 `materialBlock` 行式分流（M2-A），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
@@ -225,5 +225,5 @@ Exporters.openFlow({kind, bank})
 | --- | --- |
 | file:// 限制 | 不使用 ES module / fetch 本地文件；导入走 `<input type=file>` + FileReader |
 | xlsx/docx 解析 | 依赖浏览器 `DecompressionStream`；老浏览器不支持时给出明确错误提示 |
-| LocalStorage 容量 | 通常 5–10MB；分库分键存储，`usageBytes()` 可估算，超限提示导出 |
+| LocalStorage 容量 | 通常 5–10MB；分库分键 + **题目分片**（200 题/片）存储，`usageBytes()` 可估算，超限提示导出 |
 | 序列化开销 | `Storage` 防抖批写（200ms）减少写放大；`beforeunload` 强制同步 |

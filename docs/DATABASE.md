@@ -176,7 +176,9 @@ CREATE TABLE assets (
 | LocalStorage 逻辑键（含前缀 `qb:`） | 对应表 | 说明 |
 | --- | --- | --- |
 | `qb:banks` | `banks` | 数组，元素即一行 |
-| `qb:questions:<bankId>` | `questions` | 按库分键；字段名 camelCase ↔ snake_case |
+| `qb:questions:<bankId>:meta` | `questions`（分片清单） | `{v:3, shardSize, count, sizes:[...]}`；`sizes[i]`=第 i 片题数、`count`=总题数（取 total / 定位区间均免解析全库） |
+| `qb:questions:<bankId>:<i>` | `questions`（分片） | 第 i 片题目数组（`QUESTIONS_SHARD_SIZE`=200 题/片，尾片可不满）；字段名 camelCase ↔ snake_case |
+| `qb:questions:<bankId>` | `questions`（旧单 blob） | 分片前形态（单数组）；读取时回退，任一写操作触发写时迁移为分片并删除本键 |
 | `qb:user:wrong:<bankId>` | `wrong_questions` | `{questionKey, wrongCount, lastAt}` |
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
 | `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}` |
@@ -187,7 +189,7 @@ CREATE TABLE assets (
 | `qb:meta:dav` | —（前端偏好） | WebDAV 配置（目录 URL/账号/应用密码/上次同步时间），仅本机 |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
-| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 2（v2 contentHash），启动时由 `Migration.run` 幂等升级 |
+| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 3（v2 contentHash + v3 题目分片），启动时由 `Migration.run` 幂等升级（v1→v2→v3 链式） |
 
 **字段命名转换**：前端 camelCase（`contentHash`/`createdAt`）↔ 数据库 snake_case（`content_hash`/`created_at`）。迁移脚本按此映射批量 POST 到 `/api/banks/{id}/questions/batch`。
 
@@ -195,6 +197,7 @@ CREATE TABLE assets (
 
 - **去重唯一键**：`UNIQUE(bank_id, content_hash)`。`content_hash` 由前端 `QB.makeContentHash(q)` 计算：**v2（当前，前缀 `2:`）= FNV-1a(题型 + 规范化题干 + 选项文本集合 + 正确答案语义)**，选择类答案取选中文本（对选项乱序/字母重映射不变），判断取布尔语义，填空取各空答案，简答取参考答案；分类/难度/标签/解析等组织属性不进 hash。题干仅尾部空格/标点差异视为同题；**通用题干但选项或答案不同的题不再误并**（v1 仅 `type|题干` 的缺陷修复，评估报告高优先级#3）。
 - **v1→v2 存量迁移**：`js/modules/migrate.js` 在启动时按 `meta:schemaVersion` 幂等执行：题目 hash 重算后，`review/wrong/fav/revlog` 中以 contentHash 为键/字段的数据同步重映射（冲突时复习状态取最近、错题计数相加）；旧 `.qbk`/手工数据携带的裸 hash 落库时强制重算。
+- **v2→v3 题目分片（阶段 A）**：单库题目由「单 blob 数组」改为「分片 + 清单」——写放大 O(全库)→O(分片)，读按需只解析覆盖区间分片。迁移由同一 `Migration.run` 幂等完成：遍历形如 `questions:<bankId>`（不含后续冒号段）的旧 blob，用公共抽象 `QB.QuestionShards.writeAll` 切片；已存在清单则跳过（幂等，大库 450 题切 200/200/50 二次运行逐字节不变）。运行时另有**双重读兼容**：旧单 blob 在 `readAll/readRange/count/locate` 中回退读取，任一写操作（create/update/remove/insertMany）触发一次性写时迁移并删除旧键。
 - **查询索引**：`(bank_id, type)`、`(bank_id, category)` 支撑列表筛选；`attempts(bank_id, created_at)` 支撑历史分页。
 - **导入幂等**：`insertMany` 的 `mode=merge` 依赖上述唯一键跳过重复；`mode=overwrite` 先清库再写。更新来源题库时同题干的**答案修正**因 hash 变化会作为新题插入（旧题保留），不做静默覆盖。
 
@@ -208,14 +211,18 @@ CREATE TABLE assets (
 
 ## 6. 容量与性能参考（实测）
 
-Node v24.14.0，`scripts/bench.mjs` 2026-10-14 实跑（采样 10 次取中位数）：
+Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样 10 次取中位数）：
 
 | 项 | 数值 |
 | --- | --- |
-| 540 题题目载荷（JSON 字符串） | 0.28 MB（Storage 全量键估算约 0.44 MB） |
-| 单库 540 题全量替代写入耗时（中位数） | 5.78 ms（min 4.44 / max 6.97 ms） |
-| 540 题 contentHash 索引构建 | 0.04 ms |
-| 关键词检索（540 题，中位数） | 0.65 ms |
-| bench 全程 heapUsed 增量 | +18.93 MB（5.59 → 24.52 MB，含全部套件夹具） |
+| 540 题题目载荷（JSON 字符串） | 0.28 MB / 3 片（Storage 全量键估算约 0.44 MB） |
+| 3000 题单库载荷 | 1.10 MB / 15 片 |
+| 540 题全量替代写入（`insertMany` overwrite，中位数） | 4.87 ms（min 4.69 / max 7.34 ms；以 v2 哈希重算为主，分片写入本身 0.67 ms 低于旧单键 0.88 ms） |
+| 540 题按需单页冷读（读 1 分片） vs 全量冷读 | 0.27 ms vs 0.77 ms |
+| 3000 题按需单页冷读（读 1 分片） vs 全量冷读 | 0.22 ms vs 3.63 ms（约 16×） |
+| 3000 题单题 update（只重写所在分片） vs 全量重写 | 0.23 ms vs 38.56 ms |
+| contentHash 索引构建（540 题） | 0.05 ms |
+| 关键词检索（540 题，中位数） | 0.77 ms |
+| bench 全程 heapUsed 增量 | +2.56 MB（4.99 → 7.55 MB；`--expose-gc` 连跑稳定） |
 
-> 数据来源：2026-10-14 本机实测与 `CHANGELOG.internal.md`；后端选型时以此估算存储与索引规模。
+> 数据来源：2026-10-19 本机实测与 `CHANGELOG.internal.md`；后端选型时以此估算存储与索引规模（分片仅影响前端 LocalStorage 布局，后端仍按 `questions` 单表 `UNIQUE(bank_id, content_hash)` 落库）。

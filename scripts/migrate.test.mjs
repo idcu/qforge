@@ -35,9 +35,10 @@ section('全新环境：空迁移并写版本号');
   eq(QB.Migration.currentVersion(), 0, '无版本标记视为 0');
   const r = await QB.Migration.run();
   eq(r.fromVersion, 0, 'fromVersion=0');
-  eq(r.version, 2, '迁到 2');
+  eq(r.version, 3, '迁到 3');
   eq(r.migrated.questions, 0, '无存量题目');
-  eq(QB.Migration.currentVersion(), 2, '版本号已写入');
+  eq(r.sharded.banks, 0, '无存量库可分片');
+  eq(QB.Migration.currentVersion(), 3, '版本号已写入');
 }
 
 section('v1→v2：题目与全部用户数据键跟随重映射');
@@ -80,6 +81,13 @@ section('v1→v2：题目与全部用户数据键跟随重映射');
   const r = await QB.Migration.run();
   eq(r.migrated.questions, 2, '迁移 2 题');
   eq(r.migrated.states, 2, '重映射 2 条复习状态');
+  eq(r.sharded.banks, 1, '同一次 run 内接续完成分片（v2→v3）');
+  eq(r.sharded.questions, 2, '分片迁移 2 题');
+
+  ok(!QB.Storage.keys().includes(QB.KEYS.questions(bank.id)), '旧单 blob 键已删除');
+  ok(QB.Storage.keys().includes(QB.KEYS.questionsMeta(bank.id)), '分片清单 questions:<id>:meta 已写入');
+  ok(QB.Storage.keys().includes(QB.KEYS.questionShard(bank.id, 0)), '分片 questions:<id>:0 已写入');
+  eq(QB.Storage.get(QB.KEYS.questionsMeta(bank.id)).count, 2, '清单总数=2');
 
   const items = (await QB.DB.questions.list(bank.id, {})).items;
   const n1 = items.find((q) => q.id === 'q-m1');
@@ -124,10 +132,11 @@ section('幂等：再跑一次为空操作，数据不二次变化');
 {
   const before = JSON.stringify(QB.Storage.keys().sort().map((k) => [k, QB.Storage.get(k)]));
   const r2 = await QB.Migration.run();
-  eq(r2.fromVersion, 2, '第二次 fromVersion=2');
+  eq(r2.fromVersion, 3, '第二次 fromVersion=3');
   ok(r2.migrated === undefined, '已是最新，无 migrated 字段');
+  ok(r2.sharded === undefined, '已是最新，无 sharded 字段');
   const after = JSON.stringify(QB.Storage.keys().sort().map((k) => [k, QB.Storage.get(k)]));
-  eq(before, after, '存储内容逐字节不变');
+  ok(before === after, '存储内容逐字节不变');
 }
 
 section('升级后同题干异答案题可共存（评估报告高优先级#3 端到端）');
@@ -150,6 +159,44 @@ section('旧版裸 hash 数据经 stampQuestion 强制升级');
     contentHash: 'abcd1234' // 模拟旧 .qbk/手工数据携带的 v1 裸 hash
   });
   ok(QB.isCurrentHash(created.contentHash), '非 v2 hash 不被沿用，落库即重算');
+}
+
+section('v2→v3：旧单 blob 独立迁移为分片（幂等）');
+{
+  QB.Storage.clearAll();
+  const bank = await QB.DB.banks.create({ name: '分片库' });
+  const qs = [];
+  for (let i = 0; i < 450; i++) {
+    const q = {
+      id: 'q-s' + i, type: 'single', question: '分片题' + i + '？',
+      options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A', category: ''
+    };
+    qs.push(Object.assign({ bankId: bank.id, contentHash: QB.makeContentHash(q) }, q));
+  }
+  // 构造 v2 存量：单 blob 数组 + 版本标记 2
+  QB.Storage.set(QB.KEYS.questions(bank.id), qs);
+  QB.Storage.set(QB.KEYS.metaSchema, 2);
+
+  const r = await QB.Migration.run();
+  eq(r.fromVersion, 2, 'fromVersion=2');
+  eq(r.version, 3, '迁到 3');
+  ok(r.migrated === undefined, 'v1→v2 不重复执行');
+  eq(r.sharded.banks, 1, '分片迁移 1 个库');
+  eq(r.sharded.questions, 450, '分片迁移 450 题');
+  ok(!QB.Storage.keys().includes(QB.KEYS.questions(bank.id)), '旧单 blob 键已清除');
+  const meta = QB.Storage.get(QB.KEYS.questionsMeta(bank.id));
+  eq(meta.v, 3, '清单版本=3');
+  eq(meta.count, 450, '清单总数=450');
+  eq(meta.sizes.length, 3, '450 题按 200/片切 3 片');
+  eq(meta.sizes[0], 200, '分片 0 满 200');
+  eq(meta.sizes[2], 50, '尾分片 50');
+  eq((await QB.DB.questions.list(bank.id, {})).items.length, 450, '迁移后全量读取完整');
+  eq((await QB.DB.questions.list(bank.id, { offset: 200, limit: 1 })).items[0].id, 'q-s200', '按需读取跨分片定位正确');
+
+  const before = JSON.stringify(QB.Storage.keys().sort().map((k) => [k, QB.Storage.get(k)]));
+  await QB.Migration.run();
+  const after = JSON.stringify(QB.Storage.keys().sort().map((k) => [k, QB.Storage.get(k)]));
+  ok(before === after, '二次运行存储逐字节不变（幂等）');
 }
 
 console.log('\n================ 汇总 ================');

@@ -6,12 +6,17 @@
  *   修复通用题干异答案题目被去重误并的问题。以 contentHash 为键的用户数据同步重映射：
  *   题目 contentHash、user:review:<bank> 状态、user:wrong/fav 索引、user:revlog 历史。
  * 迁移先写题目再重映射用户数据，按库逐个提交；中断后重跑安全（已为 '2:' 前缀的跳过）。
+ *
+ * v2 → v3（阶段 A：题目库分片存储）：
+ *   旧单 blob questions:<bankId>（数组）切成 questions:<bankId>:<i> 分片并写下清单
+ *   questions:<bankId>:meta，随后删除旧 blob 键；分片读写统一走 QB.QuestionShards。
+ *   已存在清单的库直接跳过 → 幂等；空/缺失数组仅清理残留键。
  */
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
 
   function currentVersion() {
     return Number(QB.Storage.get(QB.KEYS.metaSchema, 0)) || 0;
@@ -121,16 +126,44 @@
     return { questions, states };
   }
 
+  const LEGACY_PREFIX = 'questions:';
+
+  /**
+   * v2 → v3：把每个题库的旧单 blob 迁为分片。
+   * 遍历逻辑键中的 questions:<bankId>（不含 ':' 后续段，即非清单/非分片），
+   * 用 QB.QuestionShards.writeAll 一次性写成清单+分片（同时清除旧 blob 键）。
+   * @returns {Promise<{banks:number, questions:number}>}
+   */
+  async function migrateV2ToV3() {
+    const shards = QB.QuestionShards;
+    let banks = 0;
+    let questions = 0;
+    QB.Storage.keys().forEach((key) => {
+      if (key.indexOf(LEGACY_PREFIX) !== 0) return;
+      if (key.indexOf(':', LEGACY_PREFIX.length) >= 0) return; // 清单/分片键，跳过
+      const bankId = key.slice(LEGACY_PREFIX.length);
+      if (!bankId || shards.metaOf(bankId)) return; // 已分片 → 幂等跳过
+      const legacy = QB.Storage.get(key, null);
+      if (!Array.isArray(legacy) || !legacy.length) { QB.Storage.remove(key); return; }
+      shards.writeAll(bankId, legacy);
+      banks++;
+      questions += legacy.length;
+    });
+    return { banks: banks, questions: questions };
+  }
+
   /**
    * 执行迁移（幂等）。已是最新版本时为空操作。
-   * @returns {Promise<{fromVersion:number, version:number, migrated?:{questions:number,states:number}}>}
+   * @returns {Promise<{fromVersion:number, version:number, migrated?:{questions:number,states:number}, sharded?:{banks:number,questions:number}}>}
    */
   async function run() {
     const fromVersion = currentVersion();
     if (fromVersion >= SCHEMA_VERSION) return { fromVersion: fromVersion, version: SCHEMA_VERSION };
-    const migrated = await migrateV1ToV2();
+    const result = { fromVersion: fromVersion, version: SCHEMA_VERSION };
+    if (fromVersion < 2) result.migrated = await migrateV1ToV2();
+    if (fromVersion < 3) result.sharded = await migrateV2ToV3();
     QB.Storage.set(QB.KEYS.metaSchema, SCHEMA_VERSION);
-    return { fromVersion: fromVersion, version: SCHEMA_VERSION, migrated: migrated };
+    return result;
   }
 
   QB.Migration = { SCHEMA_VERSION, run, currentVersion };

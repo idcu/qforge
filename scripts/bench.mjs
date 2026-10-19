@@ -6,6 +6,7 @@
  * 打点项：
  *   - JSON.parse + 适配（541 → 唯一 540 去重）/ Markdown 解析
  *   - insertMany 落库（localStorage 序列化）
+ *   - 分片读按需 / 写放大（阶段 A：分片存储 + 按需加载）
  *   - buildIndex（contentHash 索引）
  *   - SearchFilter 关键词检索 / Statistics 汇总
  *   - 选项乱序 / 多格式导出构建（文本四格式 + xlsx/docx 二进制）
@@ -42,13 +43,18 @@ async function timed(fn, n) {
 }
 function mb(bytes) { return (bytes / 1024 / 1024).toFixed(2) + ' MB'; }
 function ms(v) { return v.toFixed(2) + ' ms'; }
+/** 冷读：清空 Storage 内存缓存，迫使重新 JSON.parse（衡量"未命中缓存"的真实读取成本） */
+function coldRead() { QB.Storage.forceSync(); QB.Storage._cache.clear(); }
+/** 尽力回收（需 node --expose-gc 才有效；否则 heapUsed 含 GC 抖动，仅作参考） */
+function bestEffortGc() { if (typeof global.gc === 'function') { global.gc(); global.gc(); } }
+const HAS_GC = typeof global.gc === 'function';
 
 const report = [];
 function row(name, timeTriple, extra) {
   report.push({ name, median: timeTriple.median, min: timeTriple.min, max: timeTriple.max, extra: extra || '' });
 }
 
-const heapBefore = process.memoryUsage().heapUsed;
+const heapBefore = (bestEffortGc(), process.memoryUsage().heapUsed);
 
 /* ---------- 1. JSON 解析 + 适配 ---------- */
 const fixturePath = [path.join(ROOT, '题库-背题模式.json'), path.join(QB_DIR, 'samples', '真实-541题-背题模式.json')].find(fs.existsSync);
@@ -71,8 +77,43 @@ row('insertMany 落库（含 localStorage 序列化）', await timed(async (i) =
 
 QB.Storage.forceSync();
 const rawStorageBytes = QB.Storage.usageBytes();
-const questionsJsonBytes = Buffer.byteLength(JSON.stringify(QB.Storage.get('questions:' + benchBank.id)));
-report[report.length - 1].extra += '，载荷 ' + mb(questionsJsonBytes) + '（Storage 估算 ' + mb(rawStorageBytes) + '）';
+const qPrefix = QB.KEYS.questions(benchBank.id);
+const qPayloadKeys = QB.Storage.keys().filter((k) => k === qPrefix || k.indexOf(qPrefix + ':') === 0);
+const questionsJsonBytes = qPayloadKeys.reduce((n, k) => n + Buffer.byteLength(JSON.stringify(QB.Storage.get(k))), 0);
+const benchMeta = QB.Storage.get(QB.KEYS.questionsMeta(benchBank.id));
+report[report.length - 1].extra += '，载荷 ' + mb(questionsJsonBytes) + '（' + benchMeta.sizes.length + ' 片，Storage 估算 ' + mb(rawStorageBytes) + '）';
+
+/* ---------- 2b. 分片读按需 / 写放大（阶段 A 改造） ---------- */
+let pageItems;
+row('按需单页（冷读：清缓存后读 1 分片，50 题）', await timed(async () => {
+  coldRead();
+  pageItems = (await QB.DB.questions.list(benchBank.id, { offset: 220, limit: 50 })).items;
+}, 50), '返回 ' + pageItems.length + ' 题，仅解析覆盖区间分片');
+let allItems;
+row('全量读取（冷读：清缓存后解析全部 3 分片）', await timed(async () => {
+  coldRead();
+  allItems = (await QB.DB.questions.list(benchBank.id, {})).items;
+}, 50), '返回 ' + allItems.length + ' 题（对照基准）');
+let metaCount;
+row('count 直读清单（冷读，不解析分片）', await timed(() => {
+  coldRead();
+  metaCount = QB.QuestionShards.count(benchBank.id);
+}, 200), 'total ' + metaCount + '，仅读 1 个清单键');
+row('单题 create 追加（只重写尾分片，含落盘）', await timed(async () => {
+  await QB.DB.questions.create(benchBank.id, {
+    type: 'single', question: '追加题' + Math.random() + '？',
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  });
+  QB.Storage.forceSync();
+}, 20), '写放大 O(1 个分片)');
+row('单题 update（只重写所在分片，含落盘）', await timed(async (i) => {
+  await QB.DB.questions.update(pageItems[i % pageItems.length].id, { analysis: '改' + i });
+  QB.Storage.forceSync();
+}, 20), '写放大 O(1 个分片)，不触碰其余分片');
+row('insertMany overwrite 全量重写（对照，含落盘）', await timed(async () => {
+  await QB.DB.questions.insertMany(benchBank.id, parsed.questions, { dedupe: true, mode: 'overwrite' });
+  QB.Storage.forceSync();
+}, 5), '重写全部分片（写放大 O(库规模)）');
 
 /* ---------- 3. buildIndex ---------- */
 row('buildIndex（contentHash 索引）', await timed(async () => {
@@ -151,11 +192,51 @@ row('Markdown 导入解析（540 题 md 文本）', await timed(async () => {
   mdParsedCount = r.questions.length;
 }, 10), '解析出 ' + mdParsedCount + ' 题');
 
-const heapAfter = process.memoryUsage().heapUsed;
+const heapAfter = (bestEffortGc(), process.memoryUsage().heapUsed);
+
+/* ---------- 11. 大规模单库（3000 题）数据层打点（阶段 A 规模验收） ---------- */
+const bigBank = await QB.DB.banks.create({ name: '规模库', category: 'bench-3k' });
+const bigQs = [];
+for (let i = 0; i < 3000; i++) {
+  bigQs.push({
+    type: 'single', question: '规模题' + i + '？' + 'x'.repeat(i % 40),
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A', category: 'c' + (i % 10)
+  });
+}
+row('规模库 insertMany 落库（3000 题）', await timed(async () => {
+  await QB.DB.questions.insertMany(bigBank.id, bigQs, { dedupe: false, mode: 'overwrite' });
+}, 3), '3000 题落库');
+QB.Storage.forceSync();
+const bigMeta = QB.Storage.get(QB.KEYS.questionsMeta(bigBank.id));
+const bigPrefix = QB.KEYS.questions(bigBank.id);
+const bigBytes = QB.Storage.keys()
+  .filter((k) => k === bigPrefix || k.indexOf(bigPrefix + ':') === 0)
+  .reduce((n, k) => n + Buffer.byteLength(JSON.stringify(QB.Storage.get(k))), 0);
+report[report.length - 1].extra += '，' + bigMeta.sizes.length + ' 片，载荷 ' + mb(bigBytes);
+
+let bigPage;
+row('规模库 按需单页（冷读，offset 280/limit 20，读 1 分片）', await timed(async () => {
+  coldRead();
+  bigPage = (await QB.DB.questions.list(bigBank.id, { offset: 280, limit: 20 })).items;
+}, 30), '返回 ' + bigPage.length + ' 题');
+let bigAll;
+row('规模库 全量读取（冷读，3000 题全部解析）', await timed(async () => {
+  coldRead();
+  bigAll = (await QB.DB.questions.list(bigBank.id, {})).items;
+}, 30), '返回 ' + bigAll.length + ' 题（对照基准）');
+row('规模库 单题 update（重写满 200 题分片，含落盘）', await timed(async (i) => {
+  await QB.DB.questions.update(bigAll[i % bigAll.length].id, { analysis: '改' + i });
+  QB.Storage.forceSync();
+}, 20), '写放大 O(1 个分片)，与库规模无关');
+row('规模库 insertMany overwrite 全量重写（对照，含落盘）', await timed(async () => {
+  await QB.DB.questions.insertMany(bigBank.id, bigQs, { dedupe: false, mode: 'overwrite' });
+  QB.Storage.forceSync();
+}, 3), '重写全部分片（写放大 O(库规模)）');
+const bigHeap = (bestEffortGc(), process.memoryUsage().heapUsed);
 
 /* ---------- 汇总输出 ---------- */
 console.log('\n================ 性能打点报告 ================');
-console.log('环境：Node ' + process.version + '，采样 ' + N + ' 次取中位数\n');
+console.log('环境：Node ' + process.version + '，采样 ' + N + ' 次取中位数，分片大小 ' + QB.QuestionShards.SHARD_SIZE + '\n');
 const pad = (s, n) => String(s) + ' '.repeat(Math.max(0, n - String(s).length));
 console.log(pad('打点项', 44) + pad('中位数', 12) + pad('min', 10) + pad('max', 10) + '备注');
 console.log('-'.repeat(120));
@@ -163,6 +244,8 @@ report.forEach((r) => {
   console.log(pad(r.name, 44) + pad(ms(r.median), 12) + pad(ms(r.min), 10) + pad(ms(r.max), 10) + r.extra);
 });
 console.log('-'.repeat(120));
-console.log('heapUsed 增量：' + mb(heapAfter - heapBefore) + '（before ' + mb(heapBefore) + ' → after ' + mb(heapAfter) + '）');
-console.log('落库载荷：题目 JSON ' + mb(questionsJsonBytes) + '，Storage 全量估算 ' + mb(rawStorageBytes));
+console.log('heapUsed 增量：' + mb(heapAfter - heapBefore) + '（before ' + mb(heapBefore) + ' → after ' + mb(heapAfter) + '）'
+  + (HAS_GC ? '（--expose-gc）' : '（未 --expose-gc，含 GC 抖动，仅供参考；建议 node --expose-gc scripts/bench.mjs）'));
+console.log('落库载荷：题目 JSON ' + mb(questionsJsonBytes) + '（' + benchMeta.sizes.length + ' 片），Storage 全量估算 ' + mb(rawStorageBytes));
+console.log('规模库（3000 题）：' + bigMeta.sizes.length + ' 片，载荷 ' + mb(bigBytes) + '，末态 heapUsed ' + mb(bigHeap) + '（含 3000 题库与索引保留对象）');
 console.log('============================================\n');

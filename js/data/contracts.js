@@ -11,7 +11,12 @@
   /** LocalStorage 逻辑键（不含前缀） */
   QB.KEYS = {
     banks: 'banks',
+    // 旧版单 blob（分片前）。仅作兼容读取/迁移来源；v3 起不再写入，见 §题目分片。
     questions: (bankId) => 'questions:' + bankId,
+    // 题目分片清单（分片数、总数、各分片长度）：读 total/定位分片无需解析全部分片
+    questionsMeta: (bankId) => 'questions:' + bankId + ':meta',
+    // 第 i 个题目分片（数组）；分片按序拼接即题目顺序
+    questionShard: (bankId, i) => 'questions:' + bankId + ':' + i,
     wrong: (bankId) => 'user:wrong:' + bankId,
     favorite: (bankId) => 'user:fav:' + bankId,
     review: (bankId) => 'user:review:' + bankId,

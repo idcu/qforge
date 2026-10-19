@@ -52,11 +52,12 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `scripts/srs.test.mjs` | **60** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项） |
 | `scripts/storage.test.mjs` | **14** | setSync 即落盘/配额抛错+onError+待写重试、forceSync、跨标签 storage 事件、keys 合并 pending |
 | `scripts/backup.test.mjs` | **25** | 全量备份、覆盖/合并恢复、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项） |
-| `scripts/migrate.test.mjs` | **33** | v1→v2 contentHash 升级、review/wrong/fav/revlog 键重映射、revlog 回填 b、幂等逐字节不变、同题干异答案共存、旧裸 hash 强制重算 |
+| `scripts/migrate.test.mjs` | **55** | v1→v2 contentHash 升级、review/wrong/fav/revlog 键重映射、revlog 回填 b、幂等逐字节不变、同题干异答案共存、旧裸 hash 强制重算、**v2→v3 分片迁移（旧单 blob → 分片+清单，幂等；450 题切 200/200/50 二次运行逐字节不变）** |
+| `scripts/shard.test.mjs` | **68** | 题目库分片存储：切分与清单、追加只写尾分片、按需单页只解析覆盖分片（冷读调用捕获）、越界零读、跨分片边界、单题 update/remove 只写所在分片、空分片回收、overwrite 高位回收、removeMany 跨分片、旧单 blob 兼容与写时迁移、删库级联清分片 |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **47** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**悬浮滚动按钮（#btn-top/#btn-bottom 复用 .btn-float + .btn-top/.btn-bottom 定位 + app.js scrollTo/scrollHeight/scroll 绑定 + CSS .btn-float.show，11 项）**、**细节样式修复（`.li-meta` 不限 `.list-item`、弹窗 `.modal select`/`input.st-count` 控件样式、`.bp-n` 宽度不被覆盖、toast 置底居中避开悬浮按钮、`.qe-grid` 换行、窄屏（≤560px）提示条让位，7 项）** |
 | `scripts/ui-renderer.test.mjs` | **55** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡** |
-| **合计** | **2427 / 2427 通过 · 18 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2517 / 2517 通过 · 19 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
@@ -67,31 +68,44 @@ Get-ChildItem scripts\*.test.mjs, scripts\smoke-test.mjs | ForEach-Object { node
 ## 3. 性能打点
 
 ```bash
-node scripts/bench.mjs      # 采样 10 次取中位数，输出耗时与 heapUsed
+node --expose-gc scripts/bench.mjs   # 采样 10 次取中位数，输出耗时与 heapUsed（--expose-gc 令 heapUsed 稳定可复核）
 ```
 
-2026-10-14（Node v24.14.0，Windows）实测中位数：
+2026-10-19（Node v24.14.0，Windows，`--expose-gc`）实测中位数：
 
 | 打点项 | 中位数 | min / max |
 | --- | --- | --- |
-| JSON 解析+适配（541→唯一 540，源文本 63,286 字符） | 1.69 ms | 1.09 / 4.66 ms |
-| `insertMany` 落库（540 题，载荷 0.28 MB / Storage 估算 0.44 MB） | 5.78 ms | 4.44 / 6.97 ms |
-| contentHash 索引构建 | 0.04 ms | 0.03 / 0.20 ms |
-| 关键词检索（540 题） | 0.65 ms | 0.63 / 1.21 ms |
-| 50 题整卷 `gradeAll` | 0.11 ms | 0.06 / 0.72 ms |
-| `shuffleOptions`（540 题，实际乱序 457 道选择类） | 0.62 ms | 0.50 / 1.29 ms |
-| 文本四格式导出（JSON+CSV+MD+TXT，675.6 KB） | 3.10 ms | 2.49 / 19.56 ms |
-| XLSX 构建（667.5 KB stored ZIP） | 8.34 ms | 6.46 / 11.34 ms |
-| DOCX 构建（259.2 KB stored ZIP） | 2.88 ms | 2.42 / 5.95 ms |
-| Markdown 540 题再解析 | 3.71 ms | 2.65 / 7.88 ms |
+| JSON 解析+适配（541→唯一 540，源文本 63,286 字符） | 1.76 ms | 1.36 / 5.39 ms |
+| `insertMany` 落库（540 题，载荷 0.28 MB / 3 片 / Storage 估算 0.44 MB） | 4.87 ms | 4.69 / 7.34 ms |
+| 按需单页（冷读：清缓存后读 1 分片，50 题） | 0.27 ms | 0.26 / 4.12 ms |
+| 全量读取（冷读：解析全部 3 分片，540 题，对照基准） | 0.77 ms | 0.70 / 7.50 ms |
+| count 直读清单（冷读，不解析分片） | < 0.01 ms | 0.00 / 0.06 ms |
+| 单题 create 追加（只重写尾分片，含落盘） | 0.22 ms | 0.17 / 1.21 ms |
+| 单题 update（只重写所在分片，含落盘） | 0.27 ms | 0.24 / 1.20 ms |
+| contentHash 索引构建 | 0.05 ms | 0.03 / 0.22 ms |
+| 关键词检索（540 题） | 0.77 ms | 0.65 / 3.75 ms |
+| 50 题整卷 `gradeAll` | 0.10 ms | 0.06 / 0.96 ms |
+| `shuffleOptions`（540 题，实际乱序 457 道选择类） | 0.54 ms | 0.48 / 1.48 ms |
+| 文本四格式导出（JSON+CSV+MD+TXT，675.6 KB） | 2.46 ms | 2.27 / 17.75 ms |
+| XLSX 构建（667.5 KB stored ZIP） | 7.31 ms | 5.58 / 10.89 ms |
+| DOCX 构建（259.2 KB stored ZIP） | 2.54 ms | 2.28 / 4.00 ms |
+| Markdown 540 题再解析 | 3.25 ms | 2.70 / 5.77 ms |
+| 规模库（3000 题 / 15 片 / 载荷 1.10 MB）落库 | 16.51 ms | 15.03 / 18.73 ms |
+| 规模库 按需单页（冷读，offset 280/limit 20，读 1 分片） | 0.22 ms | 0.22 / 0.30 ms |
+| 规模库 全量读取（冷读，3000 题全解析，对照基准） | 3.63 ms | 3.35 / 9.72 ms |
+| 规模库 单题 update（重写满 200 题分片，含落盘） | 0.23 ms | 0.21 / 1.34 ms |
+| 规模库 `insertMany` overwrite 全量重写（对照，含落盘） | 38.56 ms | 20.23 / 46.32 ms |
 
-bench 全程 heapUsed：5.59 → 24.52 MB（**+18.93 MB**，含全部夹具）。首屏静态体积（index.html + css + 54 个 js + sw/manifest/icon，共 59 个文件，`gzip -9`）：**148.3 KB gzip / 419.2 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+> 阶段 A 规模验收：3000 题单库下，**按需单页冷读 0.22 ms** 与库规模解耦（全量冷读 3.63 ms，约 16×）；**单题 update 0.23 ms** 与库规模无关（全量重写 38.56 ms，约 168×）。
+> `insertMany` 落库耗时以 v2 contentHash 语义哈希重算为主（约 4.5 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体 0.67 ms）反而低于旧单键写（0.88 ms）。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化。
+
+bench 全程 heapUsed：4.99 → 7.55 MB（**+2.56 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 13.99 MB）。首屏静态体积（index.html + css + 54 个 js + sw/manifest/icon，共 59 个文件，`gzip -9`）：**148.3 KB gzip / 419.2 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 
 ## 4. CI
 
-`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 18 个套件。时区矩阵用于拦截自然日/到期时间断言的时区回归。
+`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 19 个套件。时区矩阵用于拦截自然日/到期时间断言的时区回归。
 
 ## 5. 扩展指南（最小改动路径）
 
