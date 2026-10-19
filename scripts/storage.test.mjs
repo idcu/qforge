@@ -1,7 +1,8 @@
 /**
  * Storage 可靠性单元测试（Node）
  * 覆盖：setSync 同步落盘与失败上抛（不假成功）、onError、失败后重试、
- * forceSync、跨标签 storage 事件缓存同步、remove 同步生效。
+ * forceSync、跨标签 storage 事件缓存同步、remove 同步生效；
+ * 防抖取消（`Helpers.debounce().cancel`）与「会话清空压过挂起防抖保存」的竞态回归。
  * 备份回滚见 backup.test.mjs；删库级联清理见 srs.test.mjs。
  * 运行：node scripts/storage.test.mjs
  */
@@ -11,6 +12,7 @@ import { createHarness } from './_harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { QB, window } = await createHarness(path.resolve(__dirname, '..'));
+QB.DB.init(); // 会话竞态用例经 QB.DB.progress 走本地适配器
 const S = QB.Storage;
 
 let pass = 0;
@@ -97,6 +99,32 @@ section('keys 合并磁盘与待写键');
   ok(ks.indexOf('k1') >= 0, 'keys 含已落盘键');
   ok(ks.indexOf('pending-key') >= 0, 'keys 含待写键（备份不丢未落盘数据）');
   S.clearAll();
+}
+
+section('Helpers.debounce().cancel（丢弃挂起调用）');
+{
+  let calls = 0;
+  const d = QB.Helpers.debounce(() => { calls++; }, 30);
+  d();
+  eq(d.cancel(), true, 'cancel 返回 true（存在待取消项）');
+  await new Promise((r) => setTimeout(r, 60));
+  eq(calls, 0, '取消后挂起调用不再触发');
+  d();
+  await new Promise((r) => setTimeout(r, 60));
+  eq(calls, 1, '取消不影响后续正常触发');
+  eq(d.cancel(), false, '无待取消项时 cancel 返回 false');
+}
+
+section('会话清空压过挂起的防抖保存（交卷后不再提示「继续上次」）');
+{
+  S.clearAll();
+  const engine = { getState: () => ({ questions: [{ type: 'judge', question: 'x' }], results: [null], currentIndex: 1, mode: 'practice' }) };
+  QB.ProgressSaver.saveDebounced('bank-x', engine); // 挂起一次 500ms 防抖保存
+  await QB.ProgressSaver.clear();                   // 交卷：应先取消挂起保存再清会话
+  await new Promise((r) => setTimeout(r, 600));     // 越过防抖窗口，若未取消则会被写回
+  // 先查键集合：`Storage.get(k, default)` 会把默认值写入缓存，若先取值会污染 keys()（测试顺序敏感）
+  ok(QB.Storage.keys().indexOf(QB.KEYS.session) < 0, '会话键未出现在存储键集合（无残留）');
+  eq(QB.Storage.get(QB.KEYS.session, null), null, 'clear 后挂起保存被取消，会话未被写回');
 }
 
 console.log('\n================ 汇总 ================');

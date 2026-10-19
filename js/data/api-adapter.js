@@ -13,7 +13,10 @@
  *   - `count` 走按库缓存（写操作失效，避免每次 render 打一次 REST）；
  *     `revision()` 返回客户端写修订号（写操作 +1），供 `QB.DB.loadQuestions` 缓存正确失效
  *     ——**不可返回非数值**：db.js 会把非数值折算为 -1，与缓存初值相等会导致永久命中旧数据。
- *   - 未实现的方法仍由骨架诚实拒绝（见文件末尾兜底）。
+ *   - `reviews` 亦按库缓存（`save`/`remove`/`banks.remove`/`backup.import` 失效）；`count` 与
+ *     `reviews` 两份缓存在 `backup.import` 后整表清空。
+ *   - **响应体一律消费**（二进制走 arrayBuffer，其余走 text，204 读空体）：未消费的 Response
+ *     被释放时浏览器会为「其实已成功」的请求记 `net::ERR_ABORTED`（见 CHANGELOG.internal.md）。
  */
 (function (global) {
   'use strict';
@@ -74,12 +77,15 @@
     } finally {
       if (timer) clearTimeout(timer);
     }
-    if (res.status === 204) return null;
+    // 二进制路径先消费 arrayBuffer；其余（含 204 空响应）**必须消费响应体**：
+    // 未消费的 Response 被释放时浏览器会记 `net::ERR_ABORTED`（请求其实已成功，
+    // 见 CHANGELOG.internal.md「已知噪声」），消费后即消除该噪声。
     if (opts.binary) {
-      if (!res.ok) throw httpError(res.status, null);
+      if (!res.ok) { await res.arrayBuffer(); throw httpError(res.status, null); }
       return { bytes: new Uint8Array(await res.arrayBuffer()), mime: (res.headers.get('content-type') || '').split(';')[0] };
     }
     const text = await res.text();
+    if (res.status === 204) return null;
     let payload = null;
     try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = null; }
     if (!res.ok) throw httpError(res.status, payload);
@@ -169,6 +175,17 @@
   /* ---------------- 按库 count 缓存（写操作失效） ---------------- */
   const countCache = new Map();
 
+  /* ---------------- 按库 reviews 缓存（写操作失效，兜住高频 render） ----------------
+   * app.js 的 home/stats 视图每次 render 都会经 SRSStore 读整库调度表（countDue/forecast），
+   * 无缓存则每次 render 打一次 GET。缓存后同一库在两次写之间只打一次 GET。
+   * 失效规则（与 countCache 同思路，且「写路径一律失效」）：
+   *   - save/remove 后失效（成功避免重复 GET；失败则丢弃被调用方就地改过的那份 map，防假读）；
+   *   - banks.remove 后失效（服务端级联已删 reviews）；
+   *   - backup.import 后**整表清空**（bulk 变更可能重写任意库的进度/题目）。
+   * 见 docs/API-CONTRACT.md §9。
+   */
+  const reviewCache = new Map();
+
   /* ---------------- BankRepository ---------------- */
   const banks = {
     async list() { const r = await req('GET', ROUTES.banks); return (r.items || []).map(fromWireBank); },
@@ -179,6 +196,7 @@
       const cascade = !options || options.cascade !== false;
       await req('DELETE', ROUTES.bank(enc(id)) + '?cascade=' + (cascade ? 'true' : 'false'));
       countCache.delete(id);
+      reviewCache.delete(id); // 级联已删该库 reviews，缓存须一并丢弃
     }
   };
 
@@ -302,12 +320,29 @@
 
   /* ---------------- SRS：调度状态 / 评分日志 / 权重（存储原语） ---------------- */
   const reviews = {
+    /** 该库调度状态 map（按库缓存；无缓存时 GET 并缓存） */
     async list(bankId) {
+      if (reviewCache.has(bankId)) return reviewCache.get(bankId);
       const r = await req('GET', ROUTES.reviews(enc(bankId)));
-      return (r && r.items) || {};
+      const items = (r && r.items) || {};
+      reviewCache.set(bankId, items);
+      return items;
     },
-    async save(bankId, map) { await req('PUT', ROUTES.reviews(enc(bankId)), { items: map || {} }); },
-    async remove(bankId) { await req('DELETE', ROUTES.reviews(enc(bankId))); }
+    /** 整表提交；**写路径一律失效**（finally：失败也要丢弃本地那份，避免假读） */
+    async save(bankId, map) {
+      try {
+        await req('PUT', ROUTES.reviews(enc(bankId)), { items: map || {} });
+      } finally {
+        reviewCache.delete(bankId);
+      }
+    },
+    async remove(bankId) {
+      try {
+        await req('DELETE', ROUTES.reviews(enc(bankId)));
+      } finally {
+        reviewCache.delete(bankId);
+      }
+    }
   };
 
   const revlog = {
@@ -332,7 +367,13 @@
     async import(payload, mode) {
       const data = payload && payload.data;
       if (!data || typeof data !== 'object') throw new Error('backup.import 需要 { data } 载荷');
-      return await req('POST', ROUTES.backup + '?mode=' + (mode === 'merge' ? 'merge' : 'replace'), { data: data });
+      try {
+        return await req('POST', ROUTES.backup + '?mode=' + (mode === 'merge' ? 'merge' : 'replace'), { data: data });
+      } finally {
+        // bulk 变更可能重写任意库的题目/进度：两份缓存整表清空（失败也清，防读到半写入结果）
+        countCache.clear();
+        reviewCache.clear();
+      }
     }
   };
 

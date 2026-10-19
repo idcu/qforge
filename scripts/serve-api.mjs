@@ -644,6 +644,11 @@ export function createServer(options) {
   const store = createStore(options.dataDir);
   const handler = createHandler({ store: store, root: options.root || ROOT });
   const server = http.createServer(handler);
+  // Node 默认 keepAliveTimeout=5s 明显短于浏览器复用空闲 socket 的预期：空闲 >5s 后浏览器
+  // 复用被回收的 socket 会得到 RST，DevTools 记 `net::ERR_ABORTED`（请求重发后才成功）。
+  // 抬高到 >60s（headersTimeout 需 ≥ keepAliveTimeout），消除该类噪声。
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
   const port = options.port == null ? DEFAULT_PORT : options.port;
   const host = options.host || '127.0.0.1';
   return new Promise((resolve, reject) => {

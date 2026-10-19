@@ -265,7 +265,14 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   // 两个独立 harness 上下文（同一 Node 进程内互不干扰：各自 window/Storage）
   const apiCtx = await createHarness(path.resolve(__dirname, '..'));
   const { QB } = apiCtx;
-  QB.ApiAdapter.useFetch(globalThis.fetch);
+  // fetch 计数包装：统计 reviews GET 次数，用于断言「按库缓存命中/写后失效」（不改变请求行为）
+  let reviewGets = 0;
+  const origFetch = globalThis.fetch;
+  QB.ApiAdapter.useFetch((url, opts) => {
+    const method = (opts && opts.method) || 'GET';
+    if (method === 'GET' && String(url).indexOf('/reviews') >= 0) reviewGets++;
+    return origFetch(url, opts);
+  });
   QB.CONFIG.DATA_BACKEND = 'api';
   QB.CONFIG.API_BASE_URL = base;
   QB.DB.init();
@@ -305,6 +312,34 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   eq(Object.keys(await QB.DB.reviews.list(bank.id)).length, 0, 'api：reviews 初始空');
   await QB.DB.reviews.save(bank.id, { h1: { algo: 'fsrs', stability: 4.5 } });
   eq((await QB.DB.reviews.list(bank.id)).h1.stability, 4.5, 'api：reviews save/list 往返');
+
+  // reviews 按库缓存（计划设计项「渲染热路径」）：同库两次 list 之间只打一次 GET；写路径一律失效
+  {
+    const before = reviewGets;
+    await QB.DB.reviews.save(bank.id, { h1: { algo: 'fsrs', stability: 4.5 } }); // 写 → 失效
+    await QB.DB.reviews.list(bank.id);
+    await QB.DB.reviews.list(bank.id);
+    eq(reviewGets - before, 1, 'api：reviews 缓存命中——写后连续两次 list 只打一次 GET');
+    await QB.DB.reviews.save(bank.id, { h1: { algo: 'fsrs', stability: 4.5 } }); // 再写 → 再失效
+    await QB.DB.reviews.list(bank.id);
+    eq(reviewGets - before, 2, 'api：reviews.save 再次令缓存失效——下次 list 重新 GET');
+  }
+
+  // backup.import 后两份缓存整表清空（reviews 由 GET 计数证明；count 由「旧值 vs 真值」证明）
+  {
+    const before2 = reviewGets;
+    await QB.DB.backup.import({ data: (await QB.DB.backup.export()).data }, 'merge');
+    await QB.DB.reviews.list(bank.id);
+    eq(reviewGets - before2, 1, 'api：backup.import 后 reviews 缓存被清空（下次 list 重新 GET）');
+
+    await QB.DB.questions.count(bank.id); // 预热 count 缓存（上一步 import 已清空）
+    await req('POST', '/api/banks/' + bank.id + '/questions', { type: 'judge', question: '缓存清空探针题', answer: '正确' });
+    const cachedCount = await QB.DB.questions.count(bank.id);
+    const truth = (await req('GET', '/api/banks/' + bank.id + '/questions')).body.total;
+    ok(cachedCount < truth, 'api：count 缓存命中时读到旧值（证明缓存生效：' + cachedCount + ' < ' + truth + '）');
+    await QB.DB.backup.import({ data: (await QB.DB.backup.export()).data }, 'merge');
+    eq(await QB.DB.questions.count(bank.id), truth, 'api：backup.import 后 count 缓存清空（重新 GET 到真值）');
+  }
   await QB.DB.revlog.append([{ t: 5, h: 'h1', r: 3, b: bank.id }]);
   const log = await QB.DB.revlog.list();
   ok(log.some((e) => e.h === 'h1' && e.b === bank.id), 'api：revlog append/list 往返');
@@ -344,7 +379,7 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
 
 await srv.close();
 
-section('未实现骨架的诚实拒绝（后端缺失时）');
+section('后端不可达时的诚实拒绝（无假数据）');
 {
   const ctx = await createHarness(path.resolve(__dirname, '..'));
   const { QB } = ctx;

@@ -2,8 +2,12 @@
  * qforge Service Worker —— 离线应用壳
  * 策略：安装时预缓存入口；同源 GET 采用「缓存优先 + 后台更新」（stale-while-revalidate），
  * 导航请求离线时回退到 index.html。相对路径注册使其在 GitHub Pages 子路径下同样可用。
+ *
+ * **后端 REST（`/api/*`）一律不拦截、不缓存**：api 模式（DATA_BACKEND='api'）下数据可写变，
+ * 缓存会造成「写后仍读到旧数据」；且 stale-while-revalidate 的后台 revalidate 请求在页面
+ * 切换/空闲时会被浏览器中止，产生 `net::ERR_ABORTED` 控制台噪声。见 docs/API-CONTRACT.md §9。
  */
-const CACHE = 'qforge-v2';
+const CACHE = 'qforge-v3';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
   // FSRS 训练 Worker 链（Worker 不经 <script> 加载，需显式预缓存以支持离线训练）
@@ -34,6 +38,8 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // 第三方（如 CDN）不拦截
+  // 后端 REST 不拦截（同源 API 约定挂在 /api 前缀，见 API-CONTRACT）
+  if (url.pathname === '/api' || url.pathname.indexOf('/api/') === 0) return;
 
   // 导航：网络优先，失败回退缓存的 index.html
   if (req.mode === 'navigate') {

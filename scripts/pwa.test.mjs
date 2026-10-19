@@ -35,6 +35,8 @@ ok(/addEventListener\(['"]install['"]/.test(sw), '监听 install');
 ok(/addEventListener\(['"]activate['"]/.test(sw), '监听 activate');
 ok(/addEventListener\(['"]fetch['"]/.test(sw), '监听 fetch');
 ok(sw.indexOf('mode === \'navigate\'') >= 0 || sw.indexOf("mode === \"navigate\"") >= 0, '导航请求有离线回退');
+ok(sw.indexOf("'/api/'") >= 0, '后端 REST /api 前缀被排除（api 模式不缓存可写数据，见 API-CONTRACT §9）');
+ok(sw.indexOf("'qforge-v3'") >= 0 || sw.indexOf('"qforge-v3"') >= 0, 'SW 缓存版本已换代（丢弃可能残留的 /api 缓存）');
 ok(sw.indexOf('http://') < 0 && sw.indexOf('https://') < 0, '不硬编码绝对 URL');
 
 section('FSRS 训练 Worker');

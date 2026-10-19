@@ -241,7 +241,7 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 - **读写均为异步**：`local-adapter` 返回值是普通值（`await` 零额外开销，local 行为逐字节等价），`api-adapter` 返回 Promise；调用点一律 `await`，故「切到后端后 UI 零改动」。
 - **禁止双向委托**：`local-adapter.reviews/revlog/weights` 必须直读写 LocalStorage，**不得**反向调用 `SRSStore`/`FSRSOpt`（否则与「领域模块 → `QB.DB.*`」互为委托成自递归）。`FSRSOpt.normalizeStore`（纯函数）是 `{global,banks}` 归一结构的唯一实现，被 `local-adapter.weights` 复用。
 - 纯函数（`ratingForResult`/`collectGraded`/`keyFor`/`fsrsRating`/`dayIndex`/桶计算）保持同步。
-- 已知遗留：api 模式下若频繁 render，会重复 `GET /api/banks/{id}/reviews`（计划中的适配器内 reviews 按库缓存尚未实现，见 CHANGELOG 遗留项）。
+- **api 模式按库缓存（已实现）**：`api-adapter.reviews.list` 按库缓存，`save`/`remove`/`banks.remove`/`backup.import` 一律失效——同一库在两次写之间只打一次 `GET /api/banks/{id}/reviews`，避免高频 render 逐次打 REST。
 
 ## 10. API 与测试
 
@@ -255,7 +255,7 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 | `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,opts)`（Worker 优先、自动回退；训练参数含增量热启动 `startWeights`/`iterations` 一并透传，可注入测试） |
 | `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train`（`initWeights` 基线 / `startWeights?` 热启动起点）→ `done/error`（不经 index.html 加载） |
 
-测试（2026-10-19 实跑全绿）：`fsrs.test.mjs` **135** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **60** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **114** 项（优化器 67 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5；含 23 项增量重训）。全套件 **22** 项（21 套件 + smoke）**2872** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
+测试（2026-10-19 实跑全绿）：`fsrs.test.mjs` **135** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **60** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **114** 项（优化器 67 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5；含 23 项增量重训）。全套件 **22** 项（21 套件 + smoke）**2885** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
 
 ## 11. 已知边界（设计取舍）
 

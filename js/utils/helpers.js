@@ -9,7 +9,7 @@
     /** 防抖 */
     debounce(fn, wait, immediate) {
       let timer = null;
-      return function (...args) {
+      const wrapped = function (...args) {
         const ctx = this;
         const callNow = immediate && !timer;
         if (timer) clearTimeout(timer);
@@ -19,6 +19,18 @@
         }, wait);
         if (callNow) fn.apply(ctx, args);
       };
+      /**
+       * 丢弃尚未触发的调用（返回是否存在待取消项）。
+       * 用于「清空/覆盖」类操作必须压过挂起的防抖写入，例如答题结束后清空会话，
+       * 不能让挂起的防抖保存把刚清掉的会话又写回去。
+       */
+      wrapped.cancel = function () {
+        if (!timer) return false;
+        clearTimeout(timer);
+        timer = null;
+        return true;
+      };
+      return wrapped;
     },
 
     /** 节流 */

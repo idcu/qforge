@@ -36,6 +36,9 @@
     },
 
     async clear() {
+      // 先丢弃挂起的防抖保存：否则「交卷清空会话」后，挂起的保存会把已清掉的会话又写回去
+      // （local 模式表现为下次启动仍提示「继续上次」；api 模式为 PUT 抢在 DELETE 之后落库）
+      if (this._debounced && typeof this._debounced.cancel === 'function') this._debounced.cancel();
       return QB.DB.progress.sessionClear();
     }
   };

@@ -183,7 +183,13 @@
 >
 > **接线进度（诚实标注）**：契约与两个适配器已就位，且领域模块**已完成接线**——`srs-store.js`/`fsrs-opt.js`/`backup.js` 的存储读写全部改为「经 `QB.DB.*` 异步仓库」（`SRSStore`/`FSRSOpt`/`Backup` 只保留算法与作用域过滤），`sync-dav.js` 与 `app.js` 的调用点补齐 `await`。**断开自递归**的关键：`local-adapter` 的 `reviews/revlog/weights` 直接读写 LocalStorage，**不反向调用**领域模块（否则与「领域模块 → `QB.DB.*`」互为委托死循环）；`SRSStore.readMap`/`FSRSOpt.readLog` 等改为委托 `QB.DB.*`。
 >
-> **本阶段验证**：21 套件 + smoke 共 **22** 项 / **2872** 断言在 UTC 与 Asia/Shanghai 双时区全绿；浏览器 E2E（本地后端）练习答题→交卷→结果页、统计页（到期预报 + FSRS 诊断）、今日复习、Backup 均无控制台报错。**已知遗留**：api 模式下渲染热路径每次 render 会打一次 `GET /api/banks/{id}/reviews`（计划中的「api-adapter reviews 按库内存缓存」尚未实现，见 CHANGELOG 遗留项）。
+> **本阶段验证**：21 套件 + smoke 共 **22** 项 / **2885** 断言在 UTC 与 Asia/Shanghai 双时区全绿；浏览器 E2E 分别验证了**本地模式**（练习答题→交卷→结果页、统计页到期预报 + FSRS 诊断、今日复习、备份下载）与 **`?backend=api` 真实后端**（建库→导入样例 18 题→答题→交卷→统计→备份下载；服务端 `.qforge-data/` 实际落盘 `banks.json`/`questions/*.json`/`progress/*.json`/`revlog.json`/`history.json`；拒绝「继续上次」触发 `DELETE /api/session`，服务端 `session.json` 随之消失），**控制台 0 error / 0 warning**。
+>
+> **api 模式按库缓存**：`reviews.list` 按库缓存（同一库两次 render 之间只打一次 `GET .../reviews`），`save`/`remove`/`banks.remove`/`backup.import` 一律失效；`questions.count` 同思路（`backup.import` 后整表清空）。api 模式下渲染热路径因此不再逐次打 REST。
+>
+> **已知噪声修复（2026-10-19，实测闭环）**：`req()` 原先对 204 直接 `return null` 而**不消费响应体**，浏览器会为「其实已成功」的请求记 `net::ERR_ABORTED`（已由「`DELETE /api/session` 后服务端 `session.json` 消失」证实请求成功；`keepAliveTimeout` 并非成因——其调整后错误仍在）。现改为**始终消费响应体**（二进制走 `arrayBuffer`、其余走 `text`，204 读空体），在建新标签（空控制台）实测该条目消失。
+>
+> **Service Worker 与后端**：`sw.js` 的 stale-while-revalidate **不拦截同源 `GET /api/*`**（API 约定挂在 `/api` 前缀）——api 模式数据可写变，缓存会造成「写后仍读到旧数据」；缓存名已升级 `qforge-v3` 以丢弃可能残留的 `/api` 条目。
 >
 > 资产上传为**原始字节**（`POST /api/assets`，body=bytes、`Content-Type`=图片 MIME），**不使用 multipart**；服务端按 FNV-1a 32 + 长度算 id（算法冻结见 §8，实现须与 `js/utils/assets.js::idFor` 一致）。含图备份的 `.qfbk`（ZIP）**仍在客户端组装**（图片经 §8 端点进出）。
 >
