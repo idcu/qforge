@@ -165,6 +165,7 @@
     syncTabs();
 
     let html = '';
+    let regions = null; // 区域数组：非空时走 QB.DomPatch 局部回填，否则整块 innerHTML
     switch (State.view) {
       case 'banks':
         html = UI.renderBanks(State.banks, State.bankId);
@@ -177,21 +178,22 @@
         const cq = State.engine.getCurrentQuestion();
         let favorited = false;
         if (cq) { try { favorited = await QB.Favorites.has(State.bankId, cq); } catch (e) { favorited = false; } }
-        html = UI.renderQuiz(State.engine, { favorited: favorited });
+        regions = UI.renderQuizRegions(State.engine, { favorited: favorited });
+        if (!regions) html = UI.renderQuiz(State.engine, { favorited: favorited }); // 无当前题时回退整块
         break;
       }
       case 'result':
         html = UI.renderResult(State.engine, State.bank, State.resultMeta);
         break;
       case 'wrong':
-        html = UI.renderWrongList(await QB.WrongBook.list(State.bankId), State.listPage.wrong);
+        regions = UI.renderWrongListRegions(await QB.WrongBook.list(State.bankId), State.listPage.wrong);
         break;
       case 'favorites':
-        html = UI.renderFavoritesList(await QB.Favorites.list(State.bankId), State.listPage.favorites);
+        regions = UI.renderFavoritesListRegions(await QB.Favorites.list(State.bankId), State.listPage.favorites);
         break;
       case 'history': {
         const recs = await QB.History.list(State.bankId);
-        html = UI.renderHistoryList(recs, await QB.History.stats(State.bankId));
+        regions = UI.renderHistoryListRegions(recs, await QB.History.stats(State.bankId));
         break;
       }
       case 'stats': {
@@ -219,7 +221,7 @@
           tag: State.search.tag,
           keyword: State.search.keyword
         });
-        html = UI.renderSearch(State.bank, State.allQuestions.length, results, {
+        regions = UI.renderSearchRegions(State.bank, State.allQuestions.length, results, {
           keyword: State.search.keyword,
           type: State.search.type,
           category: State.search.category,
@@ -233,7 +235,11 @@
         html = UI.renderHome(State.bank, State.counts);
     }
 
-    view().innerHTML = html;
+    if (regions) {
+      QB.DomPatch.patch(view(), regions); // 局部回填：仅重建内容变化的区域（列表 / 答题区）
+    } else {
+      view().innerHTML = html;
+    }
     QB.RichText.hydrate(view()); // IndexedDB 图片异步换 src（无图时为空操作）
     syncStickyOffset();          // 实测顶栏+菜单栏高度，供 sticky 区块定位
     syncScrollButtons();         // 依滚动位置/当前视图切换「回到顶部/直达底部」按钮显隐

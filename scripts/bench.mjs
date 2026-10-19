@@ -7,6 +7,7 @@
  *   - JSON.parse + 适配（541 → 唯一 540 去重）/ Markdown 解析
  *   - insertMany 落库（localStorage 序列化）
  *   - 分片读按需 / 写放大（阶段 A：分片存储 + 按需加载）
+ *   - DOM 增量更新：答题区/列表区域构建 + plan 对账（阶段 A：列表与答题区局部回填）
  *   - buildIndex（contentHash 索引）
  *   - SearchFilter 关键词检索 / Statistics 汇总
  *   - 选项乱序 / 多格式导出构建（文本四格式 + xlsx/docx 二进制）
@@ -28,7 +29,10 @@ const { QB, window } = await createHarness(QB_DIR);
 globalThis.location = { protocol: 'https:', href: 'https://qforge.local/' };
 window.location = globalThis.location;
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
+// DOM 增量更新的对账逻辑（plan 不触碰 DOM，可在 Node 量测；DOM 写入由浏览器验证）
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/dom-patch.js'), 'utf8'))(window, window);
 const UI = QB.UIRenderer;
+const DP = QB.DomPatch;
 
 /* ---------- 计时与内存工具 ---------- */
 const N = 10; // 每项重复次数，取中位数以抵消抖动
@@ -288,6 +292,56 @@ row('答题区渲染 HTML 构建（' + QUIZ_N + ' 题作答卡，3000 题库）'
 
 const bigHeap = (bestEffortGc(), process.memoryUsage().heapUsed);
 
+/* ---------- 11d. DOM 增量更新（阶段 A·列表与答题区局部回填）：区域构建 + 对账 ---------- */
+/** 区域 HTML 字节统计（衡量「重建量」）：keys 缺省为全部区域 */
+function regionBytes(regions, keys) {
+  const set = keys || regions.map((r) => r.key);
+  return regions.reduce((n, r) => n + (set.indexOf(r.key) >= 0 ? r.html.length : 0), 0);
+}
+function pct(a, b) { return b ? (a / b * 100).toFixed(1) + '%' : '0%'; }
+
+// 答题交互热路径：勾选选项（未提交）——头部/进度条/材料应保持不重建
+const engPick = new QB.QuizEngine();
+engPick.loadQuestions(bigAll.slice(0, QUIZ_N), 'mixed', {});
+engPick.mode = 'practice';
+let quizRegionsIdle;
+row('答题区 区域数组构建（' + QUIZ_N + ' 题作答卡，未答）', await timed(() => {
+  quizRegionsIdle = UI.renderQuizRegions(engPick, {});
+}, 50), quizRegionsIdle.length + ' 个区域，HTML ' + quizRegionsIdle.reduce((n, r) => n + r.html.length, 0) + ' 字符');
+const prevQuiz = {};
+quizRegionsIdle.forEach((r) => { prevQuiz[r.key] = r.html; });
+engPick.selectAnswer('A'); // 仅勾选，不提交
+let quizRegionsPick;
+row('答题区 区域数组构建（勾选选项后）', await timed(() => {
+  quizRegionsPick = UI.renderQuizRegions(engPick, {});
+}, 50), '同结构，仅选项态/答题卡/按钮变化');
+let planQuiz;
+row('勾选选项 区域对账（plan：算出需重建的区域）', await timed(() => {
+  planQuiz = DP.plan(prevQuiz, quizRegionsPick);
+}, 200), '重建 ' + planQuiz.changed.length + '/' + quizRegionsPick.length + ' 区域，占 HTML 字节 '
+  + pct(regionBytes(quizRegionsPick, planQuiz.changed), regionBytes(quizRegionsPick)));
+
+// 列表：错题本 20 条/页，移除一条只重建「被移除 + 计数」相关区域
+const wrongItems = bigAll.slice(0, 20).map((q, i) => ({ questionKey: 'wk' + i, question: q, wrongCount: (i % 3) + 1 }));
+let wrongRegions;
+row('错题本 区域数组构建（20 条/页）', await timed(() => {
+  wrongRegions = UI.renderWrongListRegions(wrongItems, 0);
+}, 50), wrongRegions.length + ' 个区域（工具栏 + 20 条 + 分页条），HTML '
+  + wrongRegions.reduce((n, r) => n + r.html.length, 0) + ' 字符');
+const prevWrong = {};
+wrongRegions.forEach((r) => { prevWrong[r.key] = r.html; });
+let wrongAfter;
+row('错题本 区域数组构建（移除首条后）', await timed(() => {
+  wrongAfter = UI.renderWrongListRegions(wrongItems.slice(1), 0);
+}, 50), '结构少 1 条');
+let planWrong;
+row('错题本 移除一条 区域对账（plan）', await timed(() => {
+  planWrong = DP.plan(prevWrong, wrongAfter);
+}, 200), '移除 ' + planWrong.removed.length + ' 条区域，仅重建 ' + planWrong.changed.length + '/' + wrongRegions.length
+  + ' 区域，占 HTML 字节 ' + pct(regionBytes(wrongAfter, planWrong.changed), regionBytes(wrongAfter)));
+
+const uiPatchHeap = (bestEffortGc(), process.memoryUsage().heapUsed);
+
 /* ---------- 汇总输出 ---------- */
 console.log('\n================ 性能打点报告 ================');
 console.log('环境：Node ' + process.version + '，采样 ' + N + ' 次取中位数，分片大小 ' + QB.QuestionShards.SHARD_SIZE + '\n');
@@ -310,4 +364,11 @@ console.log('首屏/答题渲染 HTML 构建（字符串，不含浏览器 DOM �
   + '（HTML ' + homeHtml540Len + ' 字符）→ 3000 题 ' + ms(rowBy('首页渲染 HTML 构建（3000').median)
   + '（' + homeHtml3k.length + ' 字符，与题库规模无关）；答题区 ' + ms(rowBy('答题区渲染').median)
   + '（HTML ' + quizHtml.length + ' 字符）');
+console.log('DOM 增量更新（区域对账，非整块 innerHTML）：勾选选项 需重建 ' + planQuiz.changed.length + '/' + quizRegionsPick.length
+  + ' 区域（占 HTML 字节 ' + pct(regionBytes(quizRegionsPick, planQuiz.changed), regionBytes(quizRegionsPick)) + '）'
+  + '，对账 ' + ms(rowBy('勾选选项 区域对账').median)
+  + '；错题本移除一条 仅重建 ' + planWrong.changed.length + '/' + wrongRegions.length + ' 区域'
+  + '（占 HTML 字节 ' + pct(regionBytes(wrongAfter, planWrong.changed), regionBytes(wrongAfter)) + '），对账 '
+  + ms(rowBy('错题本 移除一条 区域对账').median) + '，' + planWrong.unchanged.length + ' 个区域保持原 DOM 节点');
+console.log('DOM 增量更新内存末态 heapUsed ' + mb(uiPatchHeap) + '（含 3000 题库 + 全部区域快照对象）');
 console.log('============================================\n');

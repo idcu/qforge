@@ -15,8 +15,9 @@
     { letter: 'B', text: '错误', value: false }
   ];
 
-  function progressBar(pct) {
-    return '<div class="progress-bar"><i style="width:' + (pct || 0) + '%"></i></div>';
+  function progressBar(pct, region) {
+    return '<div class="progress-bar"' + (region ? ' data-region="' + region + '"' : '') +
+      '><i style="width:' + (pct || 0) + '%"></i></div>';
   }
 
   function emptyState(text, actionHtml) {
@@ -305,10 +306,16 @@
       (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + '</div>';
   }
 
-  function renderQuiz(engine, opts) {
+  /**
+   * 答题视图区域数组（阶段 A·答题区 DOM 增量更新）：
+   * 每个区域的顶层元素带 `data-region` 标记，交由 QB.DomPatch 对账，仅重建变化的区域。
+   * 作答一次（pick/toggle）通常只重建「题干+选项」「操作按钮」「答题卡」三块，
+   * 头部、进度条、材料卡、反馈卡保持不变，避免整棵答题视图被拆掉重建。
+   */
+  function renderQuizRegions(engine, opts) {
     opts = opts || {};
     const q = engine.getCurrentQuestion();
-    if (!q) return emptyState('没有可作答的题目。');
+    if (!q) return null;
 
     const prog = engine.getProgress();
     const score = engine.getScore();
@@ -316,55 +323,65 @@
     const result = engine.results[engine.currentIndex] || null;
     const userAns = engine.answers[engine.currentIndex];
     const isExam = engine.mode === 'exam';
+    const regions = [];
 
-    let html = '<div class="quiz-head">' +
+    regions.push({ key: 'quiz-head', html: '<div class="quiz-head" data-region="quiz-head">' +
       '<div><span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span> ' +
       '<span class="q-progress">第 ' + prog.current + ' / ' + prog.total + ' 题</span>' +
       (q.category ? ' <span class="q-progress">· ' + esc(q.category) + '</span>' : '') + '</div>' +
       '<div class="q-score">得分 ' + score.score + ' · ✔ ' + score.correct + ' · ✘ ' + score.wrong +
       (opts.timerText ? ' · ⏱ ' + esc(opts.timerText) : '') + '</div>' +
-      '</div>';
-    html += progressBar(prog.percentage);
+      '</div>' });
+    regions.push({ key: 'quiz-progress', html: progressBar(prog.percentage, 'quiz-progress') });
 
     // 材料题：共享材料置顶
     if (q.type === 'material' && q.material) {
-      html += '<div class="card material-box"><div class="li-meta">共享材料</div>' +
-        '<div class="material-text">' + rich(q.material) + '</div></div>';
+      regions.push({ key: 'quiz-material', html: '<div class="card material-box" data-region="quiz-material">' +
+        '<div class="li-meta">共享材料</div>' +
+        '<div class="material-text">' + rich(q.material) + '</div></div>' });
     }
 
-    html += '<div class="card">' +
+    regions.push({ key: 'quiz-question', html: '<div class="card" data-region="quiz-question">' +
       (q.question ? '<div class="question-text">' + rich(q.question) + '</div>' : '') +
       renderAnswerArea(q, userAns, result, answered) +
-      '</div>';
+      '</div>' });
 
     // 操作按钮
-    html += '<div class="quiz-actions">';
+    let actions = '<div class="quiz-actions" data-region="quiz-actions">';
     if (!isExam && !answered) {
-      html += '<button class="btn" data-action="submit"' + (engine.canSubmit() ? '' : ' disabled') + '>提交答案</button>';
+      actions += '<button class="btn" data-action="submit"' + (engine.canSubmit() ? '' : ' disabled') + '>提交答案</button>';
     }
     if (isExam) {
-      html += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
-      html += '<button class="btn btn-ghost" data-action="next"' + (engine.isLastQuestion() ? ' disabled' : '') + '>下一题</button>';
-      html += '<button class="btn btn-danger" data-action="finish-exam">交卷</button>';
+      actions += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
+      actions += '<button class="btn btn-ghost" data-action="next"' + (engine.isLastQuestion() ? ' disabled' : '') + '>下一题</button>';
+      actions += '<button class="btn btn-danger" data-action="finish-exam">交卷</button>';
     } else if (answered) {
-      html += '<button class="btn" data-action="next">' + (engine.isLastQuestion() ? '查看结果' : '下一题') + '</button>';
-      html += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
-      html += '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
+      actions += '<button class="btn" data-action="next">' + (engine.isLastQuestion() ? '查看结果' : '下一题') + '</button>';
+      actions += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
+      actions += '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
     } else {
-      html += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
-      html += '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
+      actions += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
+      actions += '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
     }
-    html += '<button class="btn btn-ghost' + (opts.favorited ? ' fav-on' : '') + '" data-action="fav-toggle" title="收藏本题">' +
+    actions += '<button class="btn btn-ghost' + (opts.favorited ? ' fav-on' : '') + '" data-action="fav-toggle" title="收藏本题">' +
       (opts.favorited ? '★ 已收藏' : '☆ 收藏') + '</button>';
-    html += '</div>';
+    actions += '</div>';
+    regions.push({ key: 'quiz-actions', html: actions });
 
     // 答题卡（题目较多时才显示，支持点击跳转）
-    if (engine.questions.length > 1) html += renderAnswerCard(engine);
+    if (engine.questions.length > 1) regions.push({ key: 'quiz-card', html: renderAnswerCard(engine) });
 
     if (!isExam && answered) {
-      html += q.type === 'material' ? renderMaterialOverall(result) : renderFeedback(q, result);
+      regions.push({ key: 'quiz-feedback', html: q.type === 'material' ? renderMaterialOverall(result) : renderFeedback(q, result) });
     }
-    return html;
+    return regions;
+  }
+
+  /** 整块字符串（向后兼容；由区域数组拼接，内容完全一致） */
+  function renderQuiz(engine, opts) {
+    const regions = renderQuizRegions(engine, opts);
+    if (!regions) return emptyState('没有可作答的题目。');
+    return regions.map((r) => r.html).join('');
   }
 
   /** 答题卡网格：空/已答/对错状态，点击跳转 */
@@ -375,7 +392,7 @@
       return '<button type="button" class="ac-cell ac-' + st + cur + '" data-action="card-jump" data-idx="' + i + '" title="第 ' + (i + 1) + ' 题">' + (i + 1) + '</button>';
     }).join('');
     const done = engine.answeredCount();
-    return '<details class="answer-card" open><summary>答题卡（已答 ' + done + ' / ' + engine.questions.length + '）</summary>' +
+    return '<details class="answer-card" data-region="quiz-card" open><summary>答题卡（已答 ' + done + ' / ' + engine.questions.length + '）</summary>' +
       '<div class="ac-grid">' + cells + '</div>' +
       '<div class="ac-legend"><span class="ac-dot ac-empty"></span>未答 ' +
       '<span class="ac-dot ac-answered"></span>已答 ' +
@@ -465,10 +482,11 @@
 
   const LIST_PAGE_SIZE = 20;
 
-  /** 通用分页条（仅控制渲染窗口，不改变数据顺序） */
-  function pager(page, pageCount, action, rangeText) {
-    if (pageCount <= 1) return rangeText ? '<div class="li-meta pager-meta">' + rangeText + '</div>' : '';
-    return '<nav class="pager" aria-label="分页">' +
+  /** 通用分页条（仅控制渲染窗口，不改变数据顺序）；region 用于 DOM 增量更新的区域标记 */
+  function pager(page, pageCount, action, rangeText, region) {
+    const reg = region ? ' data-region="' + region + '"' : '';
+    if (pageCount <= 1) return rangeText ? '<div class="li-meta pager-meta"' + reg + '>' + rangeText + '</div>' : '';
+    return '<nav class="pager"' + reg + ' aria-label="分页">' +
       (page > 0 ? '<button type="button" class="btn btn-sm btn-ghost" data-action="' + action + '" data-page="' + (page - 1) + '">上一页</button>'
         : '<span class="btn btn-sm btn-ghost" disabled>上一页</span>') +
       '<span class="li-meta">' + (page + 1) + ' / ' + pageCount + (rangeText ? '　' + rangeText : '') + '</span>' +
@@ -484,49 +502,66 @@
     return { items: items.slice(p * size, p * size + size), page: p, pageCount: pageCount };
   }
 
-  function renderWrongList(items, page) {
-    if (!items.length) return emptyState('错题本是空的，继续加油！');
+  /**
+   * 错题本区域数组：工具栏/分页条各为一个稳定区域；每道错题按 questionKey 独立成区域，
+   * 移出一道题时只重建被移除/后续变化的区域，其余条目原地保留。
+   */
+  function renderWrongListRegions(items, page) {
+    if (!items.length) return [{ key: 'wrong-empty', html: emptyState('错题本是空的，继续加油！') }];
     const win = pageSlice(items, page, LIST_PAGE_SIZE);
-    let html = '<div class="toolbar"><button class="btn" data-action="start-wrong">错题重练</button>' +
+    const regions = [];
+    regions.push({ key: 'wrong-toolbar', html: '<div class="toolbar" data-region="wrong-toolbar">' +
+      '<button class="btn" data-action="start-wrong">错题重练</button>' +
       '<button class="btn btn-ghost" data-action="export-wrong">导出错题</button>' +
-      '<button class="btn btn-ghost" data-action="wrong-clear">清空错题本</button></div>';
+      '<button class="btn btn-ghost" data-action="wrong-clear">清空错题本</button></div>' });
     win.items.forEach((it) => {
       const q = it.question;
-      html += '<div class="list-item"><div class="li-head">' +
+      regions.push({ key: 'wrong-item-' + it.questionKey, html: '<div class="list-item" data-region="wrong-item-' + esc(it.questionKey) + '"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
         '<span class="li-title">' + plain(q.question) + '</span>' +
         '<span class="li-meta">错 ' + (it.wrongCount || 1) + ' 次</span></div>' +
         renderAnswerText(q) +
         '<div class="li-actions">' +
         '<button class="btn btn-sm btn-ghost" data-action="wrong-remove" data-key="' + esc(it.questionKey) + '">移出错题本</button>' +
-        '</div></div>';
+        '</div></div>' });
     });
     const start = win.page * LIST_PAGE_SIZE + 1;
     const end = start + win.items.length - 1;
-    html += pager(win.page, win.pageCount, 'page-wrong', start + '–' + end + ' / 共 ' + items.length + ' 题');
-    return html;
+    regions.push({ key: 'wrong-pager', html: pager(win.page, win.pageCount, 'page-wrong', start + '–' + end + ' / 共 ' + items.length + ' 题', 'wrong-pager') });
+    return regions;
   }
 
-  function renderFavoritesList(items, page) {
-    if (!items.length) return emptyState('收藏夹是空的。答题时可点击「收藏」加入。');
+  function renderWrongList(items, page) {
+    return renderWrongListRegions(items, page).map((r) => r.html).join('');
+  }
+
+  /** 收藏夹区域数组：结构同错题本（工具栏 / 逐条收藏 / 分页条） */
+  function renderFavoritesListRegions(items, page) {
+    if (!items.length) return [{ key: 'fav-empty', html: emptyState('收藏夹是空的。答题时可点击「收藏」加入。') }];
     const win = pageSlice(items, page, LIST_PAGE_SIZE);
-    let html = '<div class="toolbar"><button class="btn" data-action="start-favorite">收藏练习</button>' +
+    const regions = [];
+    regions.push({ key: 'fav-toolbar', html: '<div class="toolbar" data-region="fav-toolbar">' +
+      '<button class="btn" data-action="start-favorite">收藏练习</button>' +
       '<button class="btn btn-ghost" data-action="export-fav">导出收藏</button>' +
-      '<button class="btn btn-ghost" data-action="fav-clear">清空收藏夹</button></div>';
+      '<button class="btn btn-ghost" data-action="fav-clear">清空收藏夹</button></div>' });
     win.items.forEach((it) => {
       const q = it.question;
-      html += '<div class="list-item"><div class="li-head">' +
+      regions.push({ key: 'fav-item-' + it.questionKey, html: '<div class="list-item" data-region="fav-item-' + esc(it.questionKey) + '"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
         '<span class="li-title">' + esc(q.question) + '</span></div>' +
         renderAnswerText(q) +
         '<div class="li-actions">' +
         '<button class="btn btn-sm btn-ghost" data-action="fav-remove" data-key="' + esc(it.questionKey) + '">取消收藏</button>' +
-        '</div></div>';
+        '</div></div>' });
     });
     const start = win.page * LIST_PAGE_SIZE + 1;
     const end = start + win.items.length - 1;
-    html += pager(win.page, win.pageCount, 'page-fav', start + '–' + end + ' / 共 ' + items.length + ' 题');
-    return html;
+    regions.push({ key: 'fav-pager', html: pager(win.page, win.pageCount, 'page-fav', start + '–' + end + ' / 共 ' + items.length + ' 题', 'fav-pager') });
+    return regions;
+  }
+
+  function renderFavoritesList(items, page) {
+    return renderFavoritesListRegions(items, page).map((r) => r.html).join('');
   }
 
   function renderAnswerText(q) {
@@ -544,17 +579,19 @@
     return s;
   }
 
-  function renderHistoryList(records, stats) {
-    if (!records.length) return emptyState('还没有答题记录。');
-    let html = '<div class="card stick-head"><h3 class="card-title">历史统计</h3><div class="stat-grid">' +
+  /** 历史区域数组：统计卡（sticky 顶栏）/ 操作栏 / 逐条记录（按 id 独立区域，删除只重建该条及后续变化） */
+  function renderHistoryListRegions(records, stats) {
+    if (!records.length) return [{ key: 'history-empty', html: emptyState('还没有答题记录。') }];
+    const regions = [];
+    regions.push({ key: 'history-stats', html: '<div class="card stick-head" data-region="history-stats"><h3 class="card-title">历史统计</h3><div class="stat-grid">' +
       '<div class="stat-box"><div class="st-num">' + stats.total + '</div><div class="st-label">测试次数</div></div>' +
       '<div class="stat-box"><div class="st-num">' + stats.avgScore + '</div><div class="st-label">平均分</div></div>' +
       '<div class="stat-box"><div class="st-num">' + stats.avgAccuracy + '%</div><div class="st-label">平均正确率</div></div>' +
       '<div class="stat-box"><div class="st-num">' + stats.bestScore + '</div><div class="st-label">最高分</div></div>' +
-      '</div></div>';
-    html += '<div class="toolbar"><button class="btn btn-ghost" data-action="export-history">导出历史</button><button class="btn btn-ghost" data-action="history-clear">清空历史</button></div>';
+      '</div></div>' });
+    regions.push({ key: 'history-toolbar', html: '<div class="toolbar" data-region="history-toolbar"><button class="btn btn-ghost" data-action="export-history">导出历史</button><button class="btn btn-ghost" data-action="history-clear">清空历史</button></div>' });
     records.forEach((r) => {
-      html += '<div class="list-item"><div class="li-head">' +
+      regions.push({ key: 'history-item-' + r.id, html: '<div class="list-item" data-region="history-item-' + esc(r.id) + '"><div class="li-head">' +
         '<span class="type-badge">' + (r.mode === 'exam' ? '考试' : '练习') + '</span>' +
         '<span class="li-title">' + esc(r.bankName || '') + '</span>' +
         '<span class="li-meta">' + esc(QB.Helpers.formatDate(r.createdAt)) + '</span></div>' +
@@ -562,9 +599,13 @@
         ' · 正确率 ' + (r.accuracy || 0) + '%' + (r.durationMs ? ' · 用时 ' + esc(QB.Helpers.formatDuration(r.durationMs)) : '') +
         (r.mode === 'exam' && r.focusLeaves ? ' · ⚠ 切出 ' + r.focusLeaves + ' 次' : '') + '</div>' +
         '<div class="li-actions"><button class="btn btn-sm btn-ghost" data-action="history-remove" data-id="' + esc(r.id) + '">删除</button></div>' +
-        '</div>';
+        '</div>' });
     });
-    return html;
+    return regions;
+  }
+
+  function renderHistoryList(records, stats) {
+    return renderHistoryListRegions(records, stats).map((r) => r.html).join('');
   }
 
   function renderFsrsCard(info) {
@@ -648,14 +689,19 @@
     return html;
   }
 
-  function renderSearch(bank, allCount, results, criteria, page) {
+  /**
+   * 搜索区域数组：工具栏（含输入框）为稳定区域——翻页/改筛选时输入框不被重建，
+   * 焦点与滚动自然保留；结果条目按题目内容哈希独立成区域。
+   */
+  function renderSearchRegions(bank, allCount, results, criteria, page) {
     criteria = criteria || {};
     const practiceBtn = results.length
       ? '<button class="btn" data-action="search-practice">用搜索结果练习（' + results.length + ' 题，取前 ' +
         QB.CONFIG.QUESTIONS_PER_QUIZ + '）</button>'
       : '';
     // 搜索工具栏（筛选 + 计数 + 练习入口）固定为一行
-    let html = '<div class="toolbar stick-head search-bar">' +
+    const regions = [];
+    regions.push({ key: 'search-bar', html: '<div class="toolbar stick-head search-bar" data-region="search-bar">' +
       '<input type="search" class="grow" data-action="search-input" placeholder="关键词搜索题目 / 解析 / 标签…" aria-label="关键词搜索" value="' + esc(criteria.keyword || '') + '" />' +
       '<select data-action="search-type" aria-label="题型筛选">' +
       '<option value="">全部题型</option>' +
@@ -671,22 +717,28 @@
         '</select>' : '') +
       '<span class="li-meta search-count">共 ' + results.length + ' / ' + allCount + ' 题</span>' +
       practiceBtn +
-      '</div>';
+      '</div>' });
 
     if (!results.length) {
-      return html + emptyState('没有匹配的题目。');
+      regions.push({ key: 'search-empty', html: emptyState('没有匹配的题目。') });
+      return regions;
     }
     const win = pageSlice(results, page, LIST_PAGE_SIZE);
     win.items.forEach((q) => {
-      html += '<div class="list-item"><div class="li-head">' +
+      const rk = QB.makeContentHash(q);
+      regions.push({ key: 'search-item-' + rk, html: '<div class="list-item" data-region="search-item-' + esc(rk) + '"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
         '<span class="li-title">' + QB.SearchFilter.highlight(QB.RichText.toPlain(q.question), criteria.keyword) + '</span></div>' +
-        renderAnswerText(q) + '</div>';
+        renderAnswerText(q) + '</div>' });
     });
     const start = win.page * LIST_PAGE_SIZE + 1;
     const end = start + win.items.length - 1;
-    html += pager(win.page, win.pageCount, 'page-search', start + '–' + end + ' / 共 ' + results.length + ' 题');
-    return html;
+    regions.push({ key: 'search-pager', html: pager(win.page, win.pageCount, 'page-search', start + '–' + end + ' / 共 ' + results.length + ' 题', 'search-pager') });
+    return regions;
+  }
+
+  function renderSearch(bank, allCount, results, criteria, page) {
+    return renderSearchRegions(bank, allCount, results, criteria, page).map((r) => r.html).join('');
   }
 
   /* ---------------- 通用：toast / modal ---------------- */
@@ -826,6 +878,9 @@
   QB.UIRenderer = {
     renderBanks, renderHome, renderQuiz, renderResult,
     renderWrongList, renderFavoritesList, renderHistoryList, renderStats, renderSearch,
+    // 区域数组（阶段 A·DOM 增量更新）：供 app.js 交给 QB.DomPatch 做局部回填
+    renderQuizRegions, renderWrongListRegions, renderFavoritesListRegions,
+    renderHistoryListRegions, renderSearchRegions,
     renderAnswerText, emptyState, progressBar,
     renderMixDialog, renderStartDialog,
     toast, openModal, closeModal, confirmDialog

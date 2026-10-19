@@ -18,14 +18,18 @@ const { QB, window } = await createHarness(QB_DIR);
 
 // 手动加载纯 HTML 渲染器（与 _harness 的加载方式一致：以 window 作为 global 执行 IIFE）
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
+// DOM 增量更新的纯对账逻辑（plan 不触碰 DOM，可直接在 Node 跑）
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/dom-patch.js'), 'utf8'))(window, window);
 
 const UI = window.QB.UIRenderer;
+const DP = window.QB.DomPatch;
 const NTYPES = QB.CONFIG.TYPES.length;
 
 let pass = 0;
 const failures = [];
 function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); } }
 function eq(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
+function deepEq(a, b, l) { eq(JSON.stringify(a), JSON.stringify(b), l); }
 function section(t) { console.log('\n== ' + t + ' =='); }
 
 const avail = {};
@@ -183,6 +187,83 @@ section('开始弹窗：自定义标题（错题重练等场景）');
   const html = UI.renderStartDialog('practice', avail, cats, { title: '错题重练（7 题）' });
   ok(html.indexOf('错题重练（7 题）') >= 0, '弹窗标题使用自定义文案');
   ok(html.indexOf('id="st-timer"') >= 0, '错题重练（练习）仍含计时开关');
+}
+
+section('区域数组：键序稳定、拼接等于整块字符串、顶层带 data-region（阶段 A·DOM 增量更新）');
+{
+  const mkQ = (mode, qs, idx, answered) => ({
+    mode: mode, questions: qs, currentIndex: idx,
+    results: qs.map(() => (answered ? { isCorrect: true, correctAnswer: 'A', userAnswer: 'A' } : null)),
+    answers: qs.map(() => 'A'),
+    getCurrentQuestion: () => qs[idx],
+    getProgress: () => ({ current: idx + 1, total: qs.length, percentage: 0 }),
+    getScore: () => ({ score: 0, correct: 0, wrong: 0 }),
+    hasAnswered: () => answered, canSubmit: () => true,
+    isLastQuestion: () => idx === qs.length - 1,
+    statusAt: () => 'empty', answeredCount: () => 0
+  });
+  const s1 = { type: 'single', question: '题一', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
+  const s2 = { type: 'judge', question: '题二', answer: 'A' };
+
+  const qr = UI.renderQuizRegions(mkQ('practice', [s1], 0, false), {});
+  eq(qr.map((r) => r.key).join(','), 'quiz-head,quiz-progress,quiz-question,quiz-actions', '单选单题：区域键序');
+  eq(qr.map((r) => r.html).join(''), UI.renderQuiz(mkQ('practice', [s1], 0, false), {}), '区域拼接 = renderQuiz 整块字符串');
+  ok(qr[2].html.indexOf('data-region="quiz-question"') >= 0, '题面区域顶层带 data-region');
+  ok(qr[0].html.indexOf('data-region="quiz-head"') >= 0, '头部区域顶层带 data-region');
+
+  const qr2 = UI.renderQuizRegions(mkQ('practice', [s1, s2], 1, true), {});
+  ok(qr2.map((r) => r.key).indexOf('quiz-card') >= 0, '多题：含 quiz-card 区域');
+  ok(qr2.map((r) => r.key).indexOf('quiz-feedback') >= 0, '已答：含 quiz-feedback 区域');
+  eq(qr2.map((r) => r.html).join(''), UI.renderQuiz(mkQ('practice', [s1, s2], 1, true), {}), '多题区域拼接一致');
+  ok(UI.renderQuizRegions(mkQ('practice', [], 0, false), {}) === null, '无当前题：区域返回 null（调用方回退整块）');
+}
+
+section('DOM 增量对账：作答区/列表仅重建变化区域（QB.DomPatch.plan）');
+{
+  const mkQ = (mode, qs, idx, answered) => ({
+    mode: mode, questions: qs, currentIndex: idx,
+    results: qs.map(() => (answered ? { isCorrect: true, correctAnswer: 'A', userAnswer: 'A' } : null)),
+    answers: qs.map(() => 'A'),
+    getCurrentQuestion: () => qs[idx],
+    getProgress: () => ({ current: idx + 1, total: qs.length, percentage: 0 }),
+    getScore: () => ({ score: 0, correct: 0, wrong: 0 }),
+    hasAnswered: () => answered, canSubmit: () => true,
+    isLastQuestion: () => idx === qs.length - 1,
+    statusAt: () => 'empty', answeredCount: () => 0
+  });
+  const s1 = { type: 'single', question: '题一', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
+  const s2 = { type: 'judge', question: '题二', answer: 'A' };
+
+  // 作答一次：头部/进度条不重建，题面/按钮/答题卡重建
+  const before = {};
+  UI.renderQuizRegions(mkQ('practice', [s1, s2], 0, false), {}).forEach((r) => { before[r.key] = r.html; });
+  const plan1 = DP.plan(before, UI.renderQuizRegions(mkQ('practice', [s1, s2], 0, true), {}));
+  ok(plan1.unchanged.indexOf('quiz-head') >= 0, '作答后：头部「不重建」');
+  ok(plan1.unchanged.indexOf('quiz-progress') >= 0, '作答后：进度条「不重建」');
+  ok(plan1.changed.indexOf('quiz-question') >= 0, '作答后：题面需重建（选项态变化）');
+  ok(plan1.changed.indexOf('quiz-actions') >= 0, '作答后：按钮区需重建（提交→下一题）');
+  eq(plan1.removed.length, 0, '作答后：无区域被移除');
+
+  // 错题本移除一条：工具栏保持，仅该条消失 + 分页条重建
+  const items = [
+    { questionKey: 'k1', question: { type: 'single', question: 'q1', options: ['1', '2'], answer: 'A' }, wrongCount: 2 },
+    { questionKey: 'k2', question: { type: 'judge', question: 'q2', answer: 'A' }, wrongCount: 1 }
+  ];
+  const wr = UI.renderWrongListRegions(items, 0);
+  eq(wr.map((r) => r.key).join(','), 'wrong-toolbar,wrong-item-k1,wrong-item-k2,wrong-pager', '错题本：区域键序（逐条 keyed）');
+  eq(wr.map((r) => r.html).join(''), UI.renderWrongList(items, 0), '错题本：区域拼接 = 整块字符串');
+  const prvW = {};
+  wr.forEach((r) => { prvW[r.key] = r.html; });
+  const planW = DP.plan(prvW, UI.renderWrongListRegions(items.slice(1), 0));
+  eq(planW.unchanged.join(','), 'wrong-toolbar,wrong-item-k2', '错题本：工具栏与未涉及条目均「不重建」');
+  deepEq(planW.removed, ['wrong-item-k1'], '错题本：被移除条目区域随之移除');
+  ok(planW.changed.indexOf('wrong-pager') >= 0, '错题本：分页条需重建（计数变化）');
+
+  // 搜索：工具栏为稳定区域；翻页时工具栏不重建（焦点/滚动自然保留）
+  const sr = UI.renderSearchRegions({ name: 'B' }, 2, [s1], { keyword: 'x', categories: ['c'], tags: [] }, 0);
+  eq(sr[0].key, 'search-bar', '搜索：首个区域为工具栏');
+  ok(sr[0].html.indexOf('data-region="search-bar"') >= 0, '搜索：工具栏顶层带 data-region');
+  eq(sr.map((r) => r.html).join(''), UI.renderSearch({ name: 'B' }, 2, [s1], { keyword: 'x', categories: ['c'], tags: [] }, 0), '搜索：区域拼接 = 整块字符串');
 }
 
 console.log('\n================ 汇总 ================');

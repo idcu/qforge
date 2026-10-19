@@ -56,8 +56,9 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `scripts/shard.test.mjs` | **82** | 题目库分片存储：切分与清单、追加只写尾分片、按需单页只解析覆盖分片（冷读调用捕获）、越界零读、跨分片边界、单题 update/remove 只写所在分片、空分片回收、overwrite 高位回收、removeMany 跨分片、旧单 blob 兼容与写时迁移、删库级联清分片；**UI 级按需装载（阶段 A）：`count` 直读清单零分片解析、`loadQuestions` 缓存命中同一数组实例、`buildIndex` 复用缓存、create/update/remove 使修订号 +1 并令缓存失效重读、refresh 强制重读、空 bankId 安全返回** |
 | `scripts/sync-dav.test.mjs` | **32** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404 |
 | `scripts/pwa.test.mjs` | **47** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**悬浮滚动按钮（#btn-top/#btn-bottom 复用 .btn-float + .btn-top/.btn-bottom 定位 + app.js scrollTo/scrollHeight/scroll 绑定 + CSS .btn-float.show，11 项）**、**细节样式修复（`.li-meta` 不限 `.list-item`、弹窗 `.modal select`/`input.st-count` 控件样式、`.bp-n` 宽度不被覆盖、toast 置底居中避开悬浮按钮、`.qe-grid` 换行、窄屏（≤560px）提示条让位，7 项）** |
-| `scripts/ui-renderer.test.mjs` | **55** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡** |
-| **合计** | **2531 / 2531 通过 · 19 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| `scripts/ui-renderer.test.mjs` | **76** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡**；**区域数组与 DOM 对账（阶段 A）：5 个 `*Regions` 变体键序稳定、拼接逐字节等于旧整块字符串、顶层带 `data-region`；`QB.DomPatch.plan` 对账（作答区仅重建变化区域、错题本 keyed 条目保留未变节点）** |
+| `scripts/dom-patch.test.mjs` | **27** | `QB.DomPatch` 区域对账（`plan`/`normalize`，DOM-free）：首次全变化、内容一致全不重建、单区域变化、区域新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全、列表移除场景 |
+| **合计** | **2579 / 2579 通过 · 20 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
@@ -101,18 +102,24 @@ node --expose-gc scripts/bench.mjs   # 采样 10 次取中位数，输出耗时�
 | 首页渲染 HTML 构建（540 题库，不含题目列表） | 0.03 ms | 0.02 / 0.46 ms |
 | 首页渲染 HTML 构建（3000 题库，与库规模无关） | 0.02 ms | 0.02 / 0.12 ms |
 | 答题区渲染 HTML 构建（50 题作答卡，3000 题库） | 0.01 ms | 0.01 / 0.99 ms |
+| 答题区 区域数组构建（50 题作答卡，未答，5 区域） | < 0.02 ms | 0.01 / 0.15 ms |
+| 答题区 区域数组构建（勾选选项后） | 0.02 ms | 0.01 / 0.10 ms |
+| 勾选选项 区域对账（`plan`，重建 3/5 区域，占字节 95.6%） | < 0.01 ms | 0.00 / 0.19 ms |
+| 错题本 区域数组构建（20 条/页，22 区域） | 0.09 ms | 0.06 / 0.49 ms |
+| 错题本 移除一条 区域对账（`plan`，仅重建 1/22，占字节 0.9%） | < 0.01 ms | 0.00 / 0.06 ms |
 
 > 阶段 A 规模验收：3000 题单库下，**按需单页冷读 0.22 ms** 与库规模解耦（全量冷读 3.63 ms，约 16×）；**单题 update 0.23 ms** 与库规模无关（全量重写 38.56 ms，约 168×）。
 > **UI 级按需加载验收（阶段 A）**：改造前每次 `render` 均整库全量冷读（3000 题 3.70 ms）→ 改造后**装载缓存命中 0.00 ms、答题交互视图装载 0.00 ms**；装载仅在题库或题目变动（写修订号变化）后首次付出一次（3.42 ms）。首屏/答题 HTML 构建 0.02/0.01 ms 且**与库规模无关**（首页 HTML 2411 字符、答题区 6771 字符，随本场题数而非库规模）。
+> **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账。**列表侧收益显著**——错题本移除一条时仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）；**答题区为部分收益**——答题卡 `<details>` 整卡为一个区域，勾选选项时该卡整体重建（占答题区 HTML 字节约 95.6%），对账自身 0.00 ms。格级增量（答题卡逐格对账）为遗留 TODO。
 > `insertMany` 落库耗时以 v2 contentHash 语义哈希重算为主（约 4.5 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体 0.67 ms）反而低于旧单键写（0.88 ms）。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化。
 
-bench 全程 heapUsed：5.19 → 7.67 MB（**+2.48 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 14.58 MB）。首屏静态体积（index.html + css + 54 个 js + sw/manifest/icon，共 59 个文件，`gzip -9`）：**148.3 KB gzip / 419.2 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：5.14 → 7.70 MB（**+2.55 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 14.62 MB；DOM 增量末态 14.76 MB）。首屏静态体积（index.html + css + 55 个 js + sw/manifest/icon，共 60 个文件，`gzip -9`）：**164.2 KB gzip / 463.7 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 
 ## 4. CI
 
-`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 19 个套件。时区矩阵用于拦截自然日/到期时间断言的时区回归。
+`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 20 个套件。时区矩阵用于拦截自然日/到期时间断言的时区回归。
 
 ## 5. 扩展指南（最小改动路径）
 
