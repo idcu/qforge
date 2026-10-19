@@ -1320,7 +1320,7 @@
 
 ---
 
-## `（待回填）` · fix(assets,ui): 材料题图片资产收集 + 窄屏提示条让位（历史遗留项全量复核）
+## `b1edf1b` · fix(assets,ui): 材料题图片资产收集 + 窄屏提示条让位（历史遗留项全量复核）
 
 **背景**：用户指令「开始修复剩余问题（全量）」。逐条复核 CHANGELOG 全文「遗留 TODO / 风险」（约 60 处）后，绝大多数为**按设计放弃**（后端/DB、云同步、LocalStorage 上限、数学公式库、P3 超范围、Word 桌面/GUI 人工验收）或**已被后续批次关闭**（xlsx 多表 `5450a7a`、xlsx/docx 导出写入端 `b041b6b`、题目管理 UI、历史记录导出 `f8c5799`）；真正「仍开放且可修」的缺陷类只有两项，本轮修复。
 
@@ -1378,7 +1378,7 @@
 > 直达底部按钮（2026-10-18）：`eda51ba` feat(ui) 「直达底部」悬浮按钮（抽取共享 .btn-float，syncTopButton→syncScrollButtons 双向管理）（18 套 2379 断言，pwa 35→40）
 > 细节样式审计修复（2026-10-18）：`752a969` fix(ui) .li-meta 作用域解除 / 弹窗 select·题量框控件样式 / toast 置底居中不遮挡悬浮按钮 / .qe-grid 换行（18 套 2385 断言，pwa 40→46）
 > 本场组卷参数（2026-10-19）：`9382053` feat(quiz) 按题型抽取数量·每题分值 + 考试时长可设 + 练习可选正计时（新增 QB.childPoints/QuizEngine.pointOf/readTypeInputs，createExamTimer 支持 countUp；18 套 2416 断言，smoke 436→461，ui-renderer 49→55）
-> 遗留项清理（2026-10-19）：`（待回填）` fix(assets,ui) 材料题图片资产收集（material+递归 children；questionAssetIds 唯一实现，惠及 qbk 导出/导入校验/孤儿清理）+ 窄屏提示条让位悬浮按钮；浏览器 E2E 实测练习正计时 00:05→00:17 / 考试倒计时 29:57→29:50（18 套 2427 断言，assets 54→62，rich-text 45→47，pwa 46→47）
+> 遗留项清理（2026-10-19）：`b1edf1b` fix(assets,ui) 材料题图片资产收集（material+递归 children；questionAssetIds 唯一实现，惠及 qbk 导出/导入校验/孤儿清理）+ 窄屏提示条让位悬浮按钮；浏览器 E2E 实测练习正计时 00:05→00:17 / 考试倒计时 29:57→29:50（18 套 2427 断言，assets 54→62，rich-text 45→47，pwa 46→47）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。
