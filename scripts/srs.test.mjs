@@ -51,17 +51,17 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
   // 新题全部到期：库1 有 2 题到期，库2 有 1 题
   eq(QB.SRSStore.countDue(b1.id, allQ, T0), 2, '库1 新题 2 道到期');
 
-  // again（qa）：初始稳定度 0.4 天（约 9.6h），当日仍到期
+  // again（qa）：新卡 again 进 1 分钟学习步，当日仍到期
   const againState = QB.SRSStore.grade(b1.id, qa, QB.SRS.RATINGS.again, T0);
   eq(againState.algo, 'fsrs', 'again：状态 algo=fsrs');
-  ok(againState.stability > 0 && againState.due > T0 && againState.due <= T0 + DAY, 'again：当天稍晚再到期（0.4 天）');
+  ok(againState.stability > 0 && againState.due > T0 && againState.due <= T0 + DAY, 'again：进入 1 分钟学习步（当日到期）');
   eq(QB.SRSStore.countDue(b1.id, allQ, T0 + 1000), 2, '评 again 后当天仍 2 道到期');
   eq(againState.lapses, 1, 'again：lapses=1');
 
-  // good（qb，新题）：初始稳定度 2.4 天 → 1 天后不到期、3 天后到期
+  // good（qb，新题）：初始稳定度 2.3065 天（py-fsrs 6.3.2 w2）→ round 2 天，1 天后不到期、3 天后到期
   const goodState = QB.SRSStore.grade(b1.id, qb, QB.SRS.RATINGS.good, T0);
-  eq(Math.round(goodState.stability * 100) / 100, 2.4, 'good：初始稳定度 2.4 天');
-  eq(QB.SRSStore.countDue(b1.id, allQ, T0 + DAY + 1000), 1, '次日：good 题未到期，仅 again 题（0.4 天到期，已逾期）到期，共 1 道');
+  eq(goodState.stability, 2.3065, 'good：初始稳定度 2.3065 天');
+  eq(QB.SRSStore.countDue(b1.id, allQ, T0 + DAY + 1000), 1, '次日：good 题未到期，仅 again 题（学习步已逾期）到期，共 1 道');
   eq(QB.SRSStore.countDue(b1.id, allQ, T0 + 3 * DAY + 1000), 2, '第 3 天：两题均到期，2 道');
 
   // 跨库隔离
@@ -75,7 +75,7 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
   QB.Storage.set(legacyKey, legacyMap);
   const migrated = QB.SRSStore.grade(b1.id, qa, QB.SRS.RATINGS.good, T0);
   eq(migrated.algo, 'fsrs', '旧 SM-2 状态评分后迁移为 fsrs');
-  eq(migrated.stability, 2.4, '迁移：首次 good 按新卡稳定度 2.4 初始化（不继承 ease/interval）');
+  eq(migrated.stability, 2.3065, '迁移：首次 good 按新卡稳定度 2.3065 初始化（不继承 ease/interval）');
 
   // forecast：未学新题计入今天；评分后落到对应自然日
   {
@@ -84,12 +84,12 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
     eq(bf.today, 2, 'forecast：清空后今天到期 2（含新题）');
     eq(bf.newCount, 2, 'forecast：新题 2');
     eq(bf.learned, 0, 'forecast：已学 0');
-    QB.SRSStore.grade(b1.id, allQ[0], QB.SRS.RATINGS.good, T0); // due≈2.4 天 → 第 3 个自然日
+    QB.SRSStore.grade(b1.id, allQ[0], QB.SRS.RATINGS.good, T0); // S≈2.31 → round 2 天 → 第 3 个自然日
     const af = QB.SRSStore.forecast(b1.id, allQ, 7, T0);
     eq(af.today, 1, 'forecast：good 后今天剩 1 道新题');
     eq(af.learned, 1, 'forecast：已学 1');
-    // due 为 T0+2.4天，dayIndex 差为 2 → 落在「3 天后」桶
-    eq(af.days[2].count, 1, 'forecast：第 3 天 1 道（2.4 天间隔）');
+    // due 为 T0+2 天（整日反解 round(2.3065)=2），dayIndex 差为 2 → 落在「3 天后」桶
+    eq(af.days[2].count, 1, 'forecast：第 3 天 1 道（2 天整日间隔）');
     eq(af.days[1].count, 0, 'forecast：明天 0 道');
     // 逾期并入今天
     QB.SRSStore.grade(b1.id, allQ[1], QB.SRS.RATINGS.again, T0 - 10 * DAY);
@@ -98,7 +98,7 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
   }
   QB.SRSStore.clear(b1.id);
 
-  // gradeMany：清空后两题重新都 good，2.4 天后到期 → 次日 0 道
+  // gradeMany：清空后两题重新都 good，2 天后到期 → 次日 0 道
   const qs = allQ;
   QB.SRSStore.gradeMany(b1.id, qs.map((question) => ({ question, rating: QB.SRS.RATINGS.good })), T0);
   eq(QB.SRSStore.countDue(b1.id, qs, T0 + DAY + 1000), 0, '批量 good 后次日无到期');

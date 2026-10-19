@@ -124,7 +124,7 @@ CREATE TABLE sessions (
 ```
 > 每用户每库至多一条有效会话（本期单用户全局一条，存 `qb:user:session`）。
 
-### 2.7 review_schedule（SRS 间隔重复，FSRS-4.5）
+### 2.7 review_schedule（SRS 间隔重复，FSRS-6）
 
 > 算法公式、学习步骤状态机与字段语义的权威说明见 [SRS.md](SRS.md)。
 ```sql

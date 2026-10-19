@@ -31,11 +31,15 @@
   const WORKER_TIMEOUT_MS = 30000;  // Worker 往返保险超时（正常训练约 2~3s）
 
   // 权重取值边界（防止优化跑出物理上无意义的区域）
+  // 21 行逐项对齐 py-fsrs 6.3.2 scheduler.LOWER_BOUNDS_PARAMETERS / UPPER_BOUNDS_PARAMETERS
   const BOUNDS = [
-    [0.01, 30], [0.01, 30], [0.01, 30], [0.01, 30], // w0..w3 初始稳定度
-    [1, 10], [-5, 0], [0, 2], [0.01, 1],             // w4..w7 初始难度/难度更新
-    [0, 5], [0.01, 2], [0.01, 10], [0.01, 10],       // w8..w11
-    [0, 20], [0, 2], [0.1, 5], [0.01, 1], [0.1, 10]  // w12..w16
+    [0.001, 100], [0.001, 100], [0.001, 100], [0.001, 100], // w0..w3 初始稳定度（STABILITY_MIN..INITIAL_STABILITY_MAX）
+    [1, 10], [0.001, 4], [0.001, 4], [0.001, 0.75],         // w4..w7 初始难度/难度更新/均值回归
+    [0, 4.5], [0, 0.8], [0.001, 3.5], [0.001, 5],           // w8..w11 召回稳定度 / 遗忘稳定度
+    [0.001, 0.25], [0.001, 0.9], [0, 4],                    // w12..w14 遗忘稳定度（D 幂次 / (S+1) 幂次 / 恢复率）
+    [0, 1], [1, 6],                                         // w15 hard 惩罚 / w16 easy 奖励
+    [0, 2], [0, 2], [0, 0.8],                               // w17..w19 同日（short-term）稳定度
+    [0.1, 0.8]                                              // w20 可学习衰减（FSRS-6 新增）
   ];
 
   /* ---------------- 样本构造 ---------------- */
@@ -88,7 +92,8 @@
       for (let i = 0; i < s.ratings.length; i++) {
         if (i > 0) {
           const elapsedDays = Math.max(0, (s.times[i] - s.times[i - 1]) / DAY);
-          const p = QB.FSRS.powerDecay(elapsedDays, state.stability);
+          // 必须传入当前权重：FSRS-6 衰减由 w20 决定，漏传 w 会用官方默认衰减致 loss 与重放不自洽
+          const p = QB.FSRS.powerDecay(elapsedDays, state.stability, weights);
           const pc = Math.min(1 - EPS_LOSS, Math.max(EPS_LOSS, p));
           const y = s.ratings[i] === QB.FSRS.RATINGS.again ? 0 : 1;
           sum += -(y * Math.log(pc) + (1 - y) * Math.log(1 - pc));
@@ -100,7 +105,7 @@
     return n ? sum / n : Infinity;
   }
 
-  /** 中心差分数值梯度（17 维） */
+  /** 中心差分数值梯度（21 维，与权重维数一致） */
   function gradient(weights, seqs) {
     const grad = new Array(weights.length).fill(0);
     for (let i = 0; i < weights.length; i++) {

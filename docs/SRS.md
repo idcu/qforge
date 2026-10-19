@@ -1,4 +1,4 @@
-# 间隔重复（SRS / FSRS-4.5）专章
+# 间隔重复（SRS / FSRS-6）专章
 
 > 本文档是淬题（qforge）间隔重复子系统的唯一权威说明，收敛原先散落在 README、ARCHITECTURE、DATABASE、user-guide 中的算法描述。
 > 修改 `js/modules/fsrs.js`、`fsrs-opt.js`、`srs.js`、`srs-store.js` 业务逻辑时须同步更新本文档。
@@ -7,7 +7,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 算法 | **FSRS-4.5**（忠实移植 [open-spaced-repetition/fsrs4anki](https://github.com/open-spaced-repetition/fsrs4anki) 官方公式，17 个权重 w0–w16） |
+| 算法 | **FSRS-6**（逐项对齐官方 [py-fsrs 6.3.2](https://github.com/open-spaced-repetition/py-fsrs) / fsrs-rs 6.6.2 公式，21 个权重 w0–w20；黄金对照值由 py-fsrs 6.3.2 生成） |
 | 目标保留率 | 0.9（到期时刻预期可提取性 R ≈ 90%） |
 | 核心变量 | 稳定度 S（天）、难度 D（1–10） |
 | 卡片键 | 题目 `contentHash`（与去重/错题/收藏同键，跨导入稳定） |
@@ -23,8 +23,8 @@
 {
   algo: 'fsrs',          // 算法标记；旧 SM-2 行无此字段，首次评分自动迁移
   due: 1728950400000,    // 下次到期时间戳（学习步骤期间为分钟级）
-  stability: 5.8,        // 稳定度 S（天）；0 = 未初始化
-  difficulty: 4.5,       // 难度 D，钳制在 1..10
+  stability: 10.5,       // 稳定度 S（天）；0 = 未初始化
+  difficulty: 5.1,       // 难度 D，钳制在 1..10
   reps: 7,               // 累计评分次数
   lapses: 1,             // 遗忘（again）次数
   last: 1728864000000,   // 上次评分时间
@@ -66,16 +66,20 @@
 - 毕业前 `due` 为分钟级，只出现在「今日复习」队列，不参与长期预报。
 - 毕业后续接的长期间隔由 FSRS 公式用毕业时刻的 S/D 计算（不是固定一天）。
 
-## 5. FSRS-4.5 调度公式（`fsrs.js`）
+## 5. FSRS-6 调度公式（`fsrs.js`）
 
-常量：
+对齐 [py-fsrs 6.3.2](https://github.com/open-spaced-repetition/py-fsrs) `fsrs/scheduler.py` 与 fsrs-rs 6.6.2 官方公式，**21 个权重 w0–w20**。
+
+常量（DECAY/FACTOR 由权重派生，不再是固定值）：
 
 | 常量 | 值 | 含义 |
 | --- | --- | --- |
-| `DECAY` | -0.5 | 遗忘曲线幂次 |
-| `FACTOR` | 0.9^(1/-0.5) - 1 = 19/81 | 由目标保留率反推 |
+| `DECAY` | -w20 = -0.1542 | 遗忘曲线幂次（4.5 版为固定 -0.5） |
+| `FACTOR` | 0.9^(1/DECAY) − 1 = 0.9803465 | 由目标保留率反推，保证 R(S,S)=0.9 |
 | `REQUEST_RETENTION` | 0.9 | 目标保留率 |
+| `STABILITY_MIN` | 0.001 | 稳定度下限（官方） |
 | `MAX_INTERVAL_DAYS` | 36500 | 间隔上限（天） |
+| `SAME_DAY_LIMIT_DAYS` | 1 | elapsed < 1 天走同日（short-term）公式 |
 
 可提取性（到期压力）：
 
@@ -86,39 +90,52 @@ R(t, S) = (1 + FACTOR · t / S) ^ DECAY
 初始状态（新卡首次评分 r）：
 
 ```
-D₀ = clamp(w4 − w5 · (r − 3), 1, 10)
-S₀ = max(w[r−1], 0.1)                       // w0..w3 对应 again/hard/good/easy
+D₀ = clamp(w4 − e^(w5·(r−1)) + 1, 1, 10)   // 指数式；均值回归目标是**未钳制**的 D₀(4)
+S₀ = max(w[r−1], 0.001)                     // w0..w3 对应 again/hard/good/easy
 ```
 
-复习后更新（**先更新难度 D，再以新 D 计算稳定度 S**；结果保留 2 位小数，与 scheduler 一致）：
+复习后更新（**先更新难度 D，再以新 D 计算稳定度 S**；保留全精度，对齐官方不取整）：
 
 ```
-next = D − w6 · (r − 3)
-D'   = clamp(w7 · w4 + (1 − w7) · next, 1, 10)     // 均值回归目标在 v4.5.0 标签源码中固定为 w4
+ΔD = −w6 · (r − 3)
+D′ = clamp( w7 · D₀(4)|未钳制 + (1 − w7) · (D + (10 − D)/9 · ΔD), 1, 10 )   // 线性阻尼 + 均值回归
 
-r = again:
-    S' = min(S, w11 · D'^(−w12) · ((S+1)^w13 − 1) · exp((1−R) · w14))
-r = hard/good/easy:
-    S' = S · (1 + exp(w8) · (11−D') · S^(−w9) · (exp((1−R) · w10) − 1)
-              · hardPenalty · easyBonus)
+r = again（遗忘，G=1）：
+    S′ = min( w11 · D′^(−w12) · ((S+1)^w13 − 1) · e^(w14·(1−R)),  S / e^(w17·w18) )
+r = hard/good/easy（召回，G≥2）：
+    S′ = S · (1 + e^(w8) · (11 − D′) · S^(−w9) · (e^(w10·(1−R)) − 1) · hardPenalty · easyBonus)
 hardPenalty = (r=hard) ? w15 : 1；easyBonus = (r=easy) ? w16 : 1
+
+同日复习（elapsed < 1 天，short-term）：
+    S′_s = S · e^(w17·(r−3+w18)) · S^(−w19)   （G≥2 时下限 max(S′_s, S)，即同日不降）
 ```
 
-黄金对照（默认权重，S=10、D=5、R=0.9、good）：**S'=29.01**；R=1 时稳定度不增长（S'=S）。
+黄金对照（默认权重，py-fsrs 6.3.2 独立复算，自动化断言在 `scripts/fsrs.test.mjs`）：
 
-下次间隔按 `R(interval, S') = 0.9` 反解（FSRS 标准间隔公式），上限 36500 天。
+- S=10、D=5、R=0.9、good → **S′=32.026729**（4.5 版为 29.01）；R=1 时 S′=S（不增长）。
+- 难度 D′(输入 5)：again 8.341762 / hard 6.665995 / good 4.990228 / easy 3.314461。
+- 遗忘 S′_f(5,10,0.9)=1.391987；同日 S′_s(10)：again 3.051249 / hard·good 10 / easy 15.534308。
+- 初始 D₀：again 6.4133 / hard 5.112171 / good 2.118104 / easy 1（未钳制 D₀(4)=−4.771631，即均值回归目标）。
 
-**17 个官方默认权重（冷启动，逐字对齐 v4.5.0 标签默认值）**：
+下次间隔按 `R(interval, S′) = 0.9` 反解并**按整日取整**（`round`，下限 1 天、上限 36500 天）。目标保留率 0.9 时间隔恰等于稳定度（官方定义：S 使 R(S,S)=0.9）。
+
+**21 个官方默认权重（冷启动，逐项对齐 py-fsrs 6.3.2 / fsrs-rs 6.6.2）**：
 
 ```
-w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy）
-     4.93, 0.94, 0.86, 0.01,    // w4..w7 初始难度与难度更新
-     1.49, 0.14, 0.94, 2.18, 0.05, // w8..w12 稳定度更新/又错惩罚
-     0.34, 1.26,                // w13..w14 平均稳定度相关
-     0.29, 2.61]                // w15 hard 惩罚 / w16 easy 奖励
+w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/good/easy）
+     6.4133, 0.8334, 3.0194, 0.001,   // w4..w7  初始难度（指数式）/ 难度更新 / 均值回归
+     1.8722, 0.1666, 0.796, 1.4835,   // w8..w11 召回稳定度（w8/w9/w10）/ 遗忘稳定度（w11）
+     0.0614, 0.2629, 1.6483,          // w12..w14 遗忘稳定度（D 幂次 /(S+1) 幂次 / 恢复率）
+     0.6014, 1.8729,                  // w15 hard 惩罚 / w16 easy 奖励
+     0.5425, 0.0912, 0.0658,          // w17..w19 同日（short-term）稳定度
+     0.1542]                         // w20 可学习衰减（取代 4.5 固定 -0.5）
 ```
 
-> 稳定度/难度更新公式与默认权重逐项对齐 [fsrs4anki v4.5.0 标签调度器](https://github.com/open-spaced-repetition/fsrs4anki/blob/v4.5.0/fsrs4anki_scheduler.js)（黄金对照 29.01 有自动化断言）。保留率曲线采用 fsrs-rs 幂律（DECAY=-0.5、FACTOR=19/81）；scheduler 写的 `(1+t/(9S))^-1` 仅曲线形状不同，在到期点 R=0.9 与幂律重合，不影响稳定度更新。本实现**不包含 Anki 的 fuzz（间隔抖动）与提前/延后复习的双向修正项**，属有意的范围裁剪。
+> **与 FSRS-4.5 的关键差异（本次升级）**：权重 17→21；衰减改为可学习（`DECAY=-w20`）；初始难度改指数式；难度更新加线性阻尼、均值回归目标改为**未钳制的 D₀(4)**；遗忘稳定度加 `S/e^(w17·w18)` 上限；新增同日 short-term 稳定度；稳定度统一钳制下限 0.001；**不再对 S/D 做 2 位小数取整**。旧 17 维 FSRS-4.5 权重与 6.x 不兼容：`fsrs-opt` 按长度自动拒绝并回落官方默认（§8.5），无需手工迁移。
+
+> **fuzz（间隔抖动）为 opt-in**：经 `review(..., { fuzzSeed })` 显式开启，算法与官方 `FUZZ_RANGES`（2.5/7/20 天分段，factor 0.15/0.10/0.05）一致，随机源为确定性 mulberry32（可复现）；**默认关闭**以保证「间隔反解 R=目标保留率」定义成立。Anki 默认开启且用 `(card_id+reps)→ChaCha12`，本实现不复刻其逐位分布。
+
+> 本实现的两处**有意裁剪**（非算法偏离）：① learning steps（1m/10m）是应用层「Anki 风格叠加层」，learning/relearning 期间仅推进步骤与分钟级 due，S/D 沿用；② fuzz 默认关闭（见上）。
 
 ## 6. 到期判定（`srs.js`，与算法解耦）
 
@@ -158,7 +175,7 @@ w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy
 - 样本 = 同一 contentHash **相邻两次评分**：`(上次评分, 间隔 Δt, 本次评分)`，用 FSRS 公式从上次状态预测本次时刻的保留率，以本次是否 again 为伯努利结果。
 - 损失 = 伯努利**负对数似然（logloss）**；梯度为数值梯度（`EPS_P=1e-4` 中心差分），**Adam**（学习率 `LR=0.04`，`ITERATIONS=150`）。
 - 单次训练对训练序列确定性等距抽样，上限 `TRAIN_SUBSAMPLE=1500` 条完整序列（同数据复训结果一致）。
-- 17 个权重各有物理取值边界 `BOUNDS`，优化结果钳制在边界内。
+- 21 个权重各有物理取值边界 `BOUNDS`（逐项对齐 py-fsrs 6.3.2 官方 `LOWER/UPPER_BOUNDS_PARAMETERS`），优化结果钳制在边界内。
 - `optimize` 返回训练过程中 **loss 历史最低点的权重快照**（不是最后一轮），返回的权重与其 loss 严格自洽。
 
 ### 8.4 采纳门控（四条件全部满足才写盘）
@@ -179,15 +196,17 @@ w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy
 存储结构 `qb:meta:fsrsWeights`：
 
 ```js
-{ global?: { w:[...17], trainedAt, samples, defaultLoss, loss, improvement, scope },
+{ global?: { w:[...21], trainedAt, samples, defaultLoss, loss, improvement, scope },
   banks?:  { [bankId]: 同结构 } }
 ```
 
-活动权重回退顺序：**题库 preset → 全局权重 → 官方 17 默认权重**。各作用域可单独「恢复官方默认」；旧版本单组 `{w:[]}` 结构读取时自动归一为 global。训练只影响**之后**的评分，已有复习计划不重算。
+活动权重回退顺序：**题库 preset → 全局权重 → 官方 21 默认权重**。各作用域可单独「恢复官方默认」；旧版本单组 `{w:[]}` 结构读取时自动归一为 global。**旧 17 维 FSRS-4.5 权重因长度不符被自动拒绝**（`validMeta` 校验 `w.length === 21`）并回落官方默认。训练只影响**之后**的评分，已有复习计划不重算。
 
 ### 8.6 有效性验证（自动化，非人工声称）
 
-`fsrs-opt.test.mjs`（**91 项断言**）用 mulberry32 确定性 PRNG + 伯努利抽样造合成日志：800 张卡 × 5 次复习 = 3200 个相邻评分样本，整条序列切出 640 个留出样本。当真权重相对默认值扰动 ±40% 时，采纳权重在**留出集** logloss **0.3374** 优于默认 **0.3388**（改善 0.42%，超过 0.2% 门控），训练集 logloss 0.3018 与采纳权重严格自洽（历史最佳快照，1e-9）；扰动较小（±25%、420 卡）时留出改善不达标会被**诚实拒绝**（旧训练集门控会误采纳，已由测试如实记录）；默认权重生成的日志无显著改善时不写盘；同数据重复训练结果逐位一致。另含 33 项 Worker 化断言（Core 与存储层同源、门控不写盘、supported 判定矩阵、假 Worker 消息协议、构造/onerror 回退、trainAsync 写盘作用域）与 9 项按库训练隔离断言。
+`fsrs-opt.test.mjs`（**91 项断言**）用 mulberry32 确定性 PRNG + 伯努利抽样造合成日志：800 张卡 × 5 次复习 = 3200 个相邻评分样本，整条序列确定性切出 640 个留出样本。当"真权重"刻意显著偏离默认（初始稳定度×1.5、难度更新 w6×0.5、召回增长×1.3、hard 惩罚×0.6）时，采纳权重在**留出集** logloss 改善 **2.84%**（远超 0.2% 门控，`gateBasis='holdout'`），训练集 logloss 0.2926 与采纳权重严格自洽（历史最佳快照，1e-9）；默认权重生成的日志无显著改善时**诚实拒绝不写盘**；同数据重复训练结果逐位一致。
+
+> 夹具口径变更（如实记录）：旧夹具用 ±40% 随机扰动，在 FSRS-6 下留出集改善仅 0.04%（与噪声不可分辨，且加大迭代反而更差 → 属夹具信号不足而非优化器缺陷），故改为「刻意显著偏离」的可解释真权重。另含 33 项 Worker 化断言（Core 与存储层同源、门控不写盘、supported 判定矩阵、假 Worker 消息协议、构造/onerror 回退、trainAsync 写盘作用域）与 9 项按库训练隔离断言。
 
 ## 9. 存储键一览
 
@@ -201,7 +220,7 @@ w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy
 
 | 模块 | 关键导出 |
 | --- | --- |
-| `fsrs.js` | `QB.FSRS.review(state, rating, now, weights)`、`initialState(rating, now, weights)`、`isLearning(state)`、`DEFAULT_W`、`REQUEST_RETENTION` |
+| `fsrs.js` | `QB.FSRS.review(state, rating, now, weights, opts?)`（`opts.fuzzSeed` 启用 fuzz）、`initialState(now)`、`isLearning(state)`、`DEFAULT_W`（21）、`DECAY`/`FACTOR`/`REQUEST_RETENTION`/`STABILITY_MIN`/`MAX_INTERVAL_DAYS`/`SAME_DAY_LIMIT_DAYS`/`FUZZ_RANGES`、`decayOf`/`factorOf`/`powerDecay`/`retrievability`、`initStability`/`initDifficulty`/`nextStability`/`nextDifficulty`、`recallStability`/`forgetStability`/`stabilityShortTerm`、`nextIntervalDays`/`applyFuzz` |
 | `srs.js` | `QB.SRS.RATINGS`、`isDue`、`isDueToday`、`dueQuestions` |
 | `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/...`（0–3→1–4 映射、SM-2 迁移） |
 | `fsrs-opt.js` | revlog/权重存储层：`appendLog`、`readLogForScope`、`diagnose`、`train`（同步）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights` |
@@ -209,11 +228,11 @@ w = [0.4, 0.6, 2.4, 5.8,        // w0..w3 初始稳定度（again/hard/good/easy
 | `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,deps)`（Worker 优先、自动回退，可注入测试） |
 | `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train` → `done/error`（不经 index.html 加载） |
 
-测试（2026-10-14 实跑全绿）：`fsrs.test.mjs` **77** 项（含官方 v4.5.0 黄金对照：S10/D5/R0.9/good→29.01、R=1 不增长、难度 6.81/5.87/4.93/3.99；稳定度/难度/保留率/又错惩罚/钳制/迁移、learning steps、relearning）、`srs.test.mjs` **60** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **91** 项（优化器 44 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5）。
+测试（2026-10-19 实跑全绿）：`fsrs.test.mjs` **135** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **60** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **91** 项（优化器 44 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5）。全套件 20 项（19 套件 + smoke）**2661** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
 
 ## 11. 已知边界（设计取舍）
 
-- 无 Anki 式 fuzz 间隔抖动、无 lapses 手动重学卡的「提前毕业」微调。
-- 优化器只做离线批训练（手动一键），不做在线增量更新；http(s) 下计算在专用 Worker、file:// 回退主线程（无共享内存/进度百分比，30s 超时保险）。
+- fuzz（间隔抖动）已实现且与官方 `FUZZ_RANGES` 一致，但**默认关闭**（opt-in：`review(..., { fuzzSeed })`）；生产调度保持确定性以便「间隔反解 R=目标保留率」成立、且同数据可复现。无 lapses 手动重学卡的「提前毕业」微调。
+- 优化器只做离线批训练（手动一键），不做在线增量更新；http(s) 下计算在专用 Worker、file:// 回退主线程（无共享内存/进度百分比，30s 超时保险）。**单次训练成本（21 权重数值梯度）实测中位约 4.2s / 3200 样本 / 150 迭代**（见 `scripts/bench.mjs`），仍在 30s Worker 超时内；P1 增量训练可显著降低单次成本。
 - 历史评分不回填：升级前没有 revlog，需从升级后积累样本。
 - 不做多用户/云协同权重；权重随全量备份迁移（`meta:fsrsWeights`），revlog 同理。

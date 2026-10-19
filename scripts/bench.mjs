@@ -9,6 +9,7 @@
  *   - 分片读按需 / 写放大（阶段 A：分片存储 + 按需加载）
  *   - DOM 增量更新：答题区/列表区域构建 + plan 对账（阶段 A：列表与答题区局部回填；答题卡格级增量）
  *   - buildIndex（contentHash 索引）
+ *   - FSRS-6 调度（单次 review / fuzz）+ 个性化训练（computeTrain，阶段 B）
  *   - SearchFilter 关键词检索 / Statistics 汇总
  *   - 选项乱序 / 多格式导出构建（文本四格式 + xlsx/docx 二进制）
  *   - heapUsed 增量 / localStorage 载荷字节
@@ -352,6 +353,48 @@ row('错题本 移除一条 区域对账（plan）', await timed(() => {
   + ' 区域，占 HTML 字节 ' + pct(regionBytes(wrongAfter, planWrong.changed), regionBytes(wrongAfter)));
 
 const uiPatchHeap = (bestEffortGc(), process.memoryUsage().heapUsed);
+
+/* ---------- 5. FSRS-6 调度与个性化训练（阶段 B · 追算法） ---------- */
+const FW = QB.FSRS.DEFAULT_W;
+const FS_DAY = 24 * 3600 * 1000;
+const fsAnchor = Date.UTC(2026, 0, 1);
+let fsGrad = { algo: 'fsrs', stability: 20, difficulty: 5, reps: 4, lapses: 0, last: fsAnchor };
+row('FSRS.review 单次调度（毕业卡到期复习）', await timed(() => {
+  fsGrad = QB.FSRS.review(fsGrad, QB.FSRS.RATINGS.good, fsAnchor + 20 * FS_DAY, FW);
+}, 200), '21 权重 / 全精度 S·D（无取整）');
+row('FSRS.review 带 fuzz（opt-in 间隔抖动）', await timed(() => {
+  QB.FSRS.review(fsGrad, QB.FSRS.RATINGS.good, fsAnchor + 20 * FS_DAY, FW, { fuzzSeed: 1 });
+}, 200), '确定性 mulberry32 + 官方 FUZZ_RANGES');
+row('FSRS.review 新卡首次评分', await timed(() => {
+  QB.FSRS.review(null, QB.FSRS.RATINGS.good, fsAnchor, FW);
+}, 200), '含指数式 D₀ / S₀ 初始化');
+
+// 合成评分日志（可解释的显著偏离真权重，与 fsrs-opt.test 同一夹具口径）
+const fsSynth = [];
+{
+  let a = 777 >>> 0;
+  const rnd = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const wTrue = FW.map((v, i) => (i < 4 ? v * 1.5 : (i === 6 ? v * 0.5 : (i >= 8 && i <= 10 ? v * 1.3 : (i === 15 ? v * 0.6 : v)))));
+  for (let c = 0; c < 800; c++) {
+    let st = null; let t = fsAnchor + c * 1000; const h = 'fs' + c;
+    for (let i = 0; i < 5; i++) {
+      let r;
+      if (st === null) { const x = rnd(); r = x < 0.25 ? 2 : (x < 0.8 ? 3 : 4); }
+      else {
+        const dt = st.stability * (0.4 + rnd() * 1.4); t += dt * FS_DAY;
+        const R = QB.FSRS.powerDecay(dt, st.stability, wTrue);
+        if (rnd() >= R) { r = 1; } else { const x = rnd(); r = x < 0.25 ? 2 : (x < 0.85 ? 3 : 4); }
+      }
+      st = QB.FSRS.review(st, r, t, wTrue);
+      fsSynth.push({ t: Math.round(t), h: h, r: r });
+    }
+  }
+}
+let fsTrain;
+row('FSRS 优化器 computeTrain（' + fsSynth.length + ' 条 revlog / 150 迭代）', await timed(() => {
+  fsTrain = QB.FSRSTrainCore.computeTrain(fsSynth);
+}, 3), fsTrain.samples + ' 个相邻样本，21 权重数值梯度 + Adam，留出集改善 '
+  + (fsTrain.improvement * 100).toFixed(2) + '%（gate=' + fsTrain.gateBasis + '）');
 
 /* ---------- 汇总输出 ---------- */
 console.log('\n================ 性能打点报告 ================');

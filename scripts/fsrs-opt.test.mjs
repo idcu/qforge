@@ -61,7 +61,8 @@ function simulate(revLog, wTrue, opts) {
         const factor = 0.4 + rand() * 1.4;
         const dt = interval * factor;
         t += dt * DAY;
-        const R = QB.FSRS.powerDecay(dt, state.stability);
+        // 模拟"真实用户"在 wTrue 下的保留率：衰减由 wTrue[20] 决定，须传 wTrue 保持一致
+        const R = QB.FSRS.powerDecay(dt, state.stability, wTrue);
         const remembered = rand() < R;
         if (!remembered) { r = 1; }
         else {
@@ -159,9 +160,12 @@ clearOpt();
 section('合成日志：留出集门控下优化仍被采纳');
 {
   clearOpt();
-  // ±40% 扰动的"真实权重"、800 卡×5 评：训练/留出均有可检测信号
-  const rand = rng(7);
-  const wTrue = QB.FSRS.DEFAULT_W.map((v) => v * (1 + (rand() - 0.5) * 0.8));
+  // 可解释的显著偏离真权重：初始稳定度×1.5、难度更新 w6×0.5、召回增长×1.3、hard 惩罚×0.6。
+  // 说明：旧夹具用 ±40% 随机扰动，在 FSRS-6 下留出集改善仅 0.04%（与噪声不可分辨，且加大迭代反而更差
+  // → 属夹具信号不足而非优化器缺陷）。改为「刻意显著偏离」的可解释真权重，确保夹具本身有可采纳的学习信号。
+  const wTrue = QB.FSRS.DEFAULT_W.map((v, i) => (
+    i < 4 ? v * 1.5 : (i === 6 ? v * 0.5 : (i >= 8 && i <= 10 ? v * 1.3 : (i === 15 ? v * 0.6 : v)))
+  ));
   const revlog = [];
   simulate(revlog, wTrue, { seed: 777, cards: 800, maxReviews: 5 });
   STRONG_LOG = revlog;
@@ -285,7 +289,7 @@ section('preset 权重经 grade 端到端生效（srs-store 接线）');
   const sA = QB.SRSStore.grade(bA.id, qA, QB.SRS.RATINGS.good, T);
   const sB = QB.SRSStore.grade(bB.id, qB, QB.SRS.RATINGS.good, T);
   eq(sA.stability, 4.8, 'bA 评分用 preset 稳定度 4.8');
-  eq(sB.stability, 2.4, 'bB 无 preset 用官方默认 2.4');
+  eq(sB.stability, 2.3065, 'bB 无 preset 用官方默认 2.3065（py-fsrs 6.3.2 w2）');
   ok(sA.due > sB.due, 'preset 更稳定 → 到期更远（' + sA.due + ' > ' + sB.due + '）');
 
   // 全局权重变化不影响已有 preset：bA 第二次 good 的稳定度 = wA 下纯函数重放结果

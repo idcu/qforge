@@ -99,7 +99,7 @@
 | `modules/statistics.js` | `overview`/`typePerformance`/`suggestions`/`dailyActivity`（近 N 周答题热力，周一列首对齐） |
 | `modules/search-filter.js` | `search`/`filter`/`highlight`/`categories` |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
-| `modules/fsrs.js` | **FSRS-4.5 纯调度器**（17 个官方默认权重）：`review/initialState/isLearning`、稳定度/难度/目标保留率、新卡/重学 learning steps（1m/10m 状态机），无 DOM/存储依赖。公式/状态机/边界见 [SRS.md](SRS.md) |
+| `modules/fsrs.js` | **FSRS-6 纯调度器**（21 个官方默认权重，逐项对齐 py-fsrs 6.3.2）：`review(state,rating,now,weights,opts?)`/`initialState/isLearning`、指数式初始难度、可学习衰减（DECAY=-w20）、召回/遗忘/同日稳定度、整日间隔反解、opt-in fuzz、新卡/重学 learning steps（1m/10m 状态机），无 DOM/存储依赖。公式/状态机/边界见 [SRS.md](SRS.md) |
 | `modules/fsrs-train-core.js` | 训练**纯计算核心**（Storage/DOM 零依赖）：computeTrain/diagnose/序列/NLL/梯度/Adam/门控常量；Worker 与主线程共用同一数值来源，见 [SRS.md](SRS.md) §8.2 |
 | `modules/fsrs-opt.js` | revlog/权重**存储层** + 一键训练：`train`（同步）/`trainAsync`（Worker 优先自动回退）；门控采纳后唯一写盘点；权重支持全局 + 按题库 preset（旧单组结构自动归一）。细节见 [SRS.md](SRS.md) §8 |
 | `modules/fsrs-train-client.js` | 训练执行选择器：`supported(env)` 判定（http(s)+Worker）、`run(revlog,deps)` 消息往返（30s 超时）、构造/运行失败自动回退主线程；env/createWorker/compute 可注入测试 |
