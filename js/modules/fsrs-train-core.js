@@ -12,6 +12,10 @@
  * 留出集（不参与梯度），采纳判定比较默认/优化权重在留出集上的 NLL；留出集无
  * again 信号时回退训练集口径（gateBasis='train'）。optimize 返回训练全程
  * 历史最佳权重快照（非最后一轮），保证权重与其 loss 自洽。
+ *
+ * 增量重训（P1）：门控基线 `initWeights`（默认官方权重，决定 improvement 口径）与
+ * 优化起点 `startWeights` 分离；传入上次采纳权重即「热启动」，配合较少迭代
+ * （WARM_ITERATIONS）降低单次训练成本，门控仍以官方默认为基准（不因热启动放宽）。
  */
 (function (global) {
   'use strict';
@@ -25,10 +29,11 @@
   const HOLDOUT_RATIO = 0.2;        // 确定性留出比例（每第 5 条序列入留出集）
   const HOLDOUT_MIN_AGAIN = 1;      // 留出集至少含 1 个 again 才用于门控
   const ITERATIONS = 150;
+  const WARM_ITERATIONS = 60;       // 增量重训（热启动）迭代数：起点已接近最优，少迭代即可收敛
   const EPS_P = 1e-4;
   const LR = 0.04;
   const EPS_LOSS = 1e-4;
-  const WORKER_TIMEOUT_MS = 30000;  // Worker 往返保险超时（正常训练约 2~3s）
+  const WORKER_TIMEOUT_MS = 30000;  // Worker 往返保险超时（实测 3200 样本/150 迭代约 4.2s，见 bench.mjs）
 
   // 权重取值边界（防止优化跑出物理上无意义的区域）
   // 21 行逐项对齐 py-fsrs 6.3.2 scheduler.LOWER_BOUNDS_PARAMETERS / UPPER_BOUNDS_PARAMETERS
@@ -184,16 +189,22 @@
    * 纯计算训练：门控 → 训练/留出切分 → 训练集 Adam → 留出集门控。**不写盘**。
    * 采纳判定基于独立留出集（holdout，整条序列确定性切分，不参与梯度），
    * 避免在训练集自身损失上自证；留出集无 again 信号时回退训练集口径并标注 gateBasis。
+   *
+   * 门控基线（`initWeights`）与优化起点（`startWeights`）**分离**：
+   *   - 基线恒为「对外回退口径」（默认官方权重），决定 defaultLoss/improvement 的含义；
+   *   - 起点用于**增量重训**热启动（传上次采纳的权重），不改变门控口径。
    * @param {Array} revlog 评分日志
-   * @param {{initWeights?:number[], iterations?:number, subsample?:number}} [opts]
-   * @returns {{ok:boolean, reason?:string, samples:number, trainedSamples?:number,
+   * @param {{initWeights?:number[], startWeights?:number[], iterations?:number, subsample?:number}} [opts]
+   * @returns {{ok:boolean, reason?:string, samples:number, trainedSamples?:number, warmStarted?:boolean,
    *           gateBasis?:'holdout'|'train', holdoutSamples?:number,
    *           defaultLoss?:number, loss?:number, trainLoss?:number, defaultTrainLoss?:number,
    *           improvement?:number, weights?:number[]}}
    */
   function computeTrain(revlog, opts) {
     opts = opts || {};
-    const initWeights = opts.initWeights || QB.FSRS.DEFAULT_W;
+    const baselineWeights = opts.initWeights || QB.FSRS.DEFAULT_W; // 门控/回退基线（默认官方）
+    const startWeights = opts.startWeights || baselineWeights;      // 优化起点（增量热启动）
+    const warmStarted = startWeights !== baselineWeights;
     const iterations = opts.iterations || ITERATIONS;
     const subsample = opts.subsample || TRAIN_SUBSAMPLE;
     const diag = diagnose(revlog);
@@ -213,15 +224,15 @@
     diag.seqs.forEach((s, i) => { (i % Math.round(1 / HOLDOUT_RATIO) === 0 ? holdoutSeqs : trainRaw).push(s); });
     const trainSeqs = sampleSequences(trainRaw, subsample);
 
-    const defaultTrainLoss = loss(initWeights, trainSeqs);
-    const res = optimize(trainSeqs, { initWeights: initWeights, iterations: iterations });
+    const defaultTrainLoss = loss(baselineWeights, trainSeqs);
+    const res = optimize(trainSeqs, { initWeights: startWeights, iterations: iterations });
 
     // 门控口径：留出集含 again 时以留出集 NLL 为准（独立验证），否则回退训练集
     const holdoutSamples = countSamples(holdoutSeqs);
     const holdoutAgain = againInSeqs(holdoutSeqs);
     let gateDefault, gateLoss, gateBasis;
     if (holdoutSamples > 0 && holdoutAgain >= HOLDOUT_MIN_AGAIN) {
-      gateDefault = loss(initWeights, holdoutSeqs);
+      gateDefault = loss(baselineWeights, holdoutSeqs);
       gateLoss = loss(res.weights, holdoutSeqs);
       gateBasis = 'holdout';
     } else {
@@ -235,13 +246,14 @@
         ok: false,
         reason: '个性化权重未在' + (gateBasis === 'holdout' ? '留出集' : '训练集') +
           '带来 ≥0.2% 的改善（实际 ' + (improvement * 100).toFixed(2) + '%），保留官方默认',
-        samples: diag.samples, gateBasis: gateBasis, holdoutSamples: holdoutSamples,
+        samples: diag.samples, warmStarted: warmStarted,
+        gateBasis: gateBasis, holdoutSamples: holdoutSamples,
         defaultLoss: gateDefault, loss: gateLoss, improvement: improvement,
         trainLoss: res.loss, defaultTrainLoss: defaultTrainLoss
       };
     }
     return {
-      ok: true, samples: diag.samples, trainedSamples: countSamples(trainSeqs),
+      ok: true, samples: diag.samples, trainedSamples: countSamples(trainSeqs), warmStarted: warmStarted,
       gateBasis: gateBasis, holdoutSamples: holdoutSamples,
       defaultLoss: gateDefault, loss: gateLoss,
       trainLoss: res.loss, defaultTrainLoss: defaultTrainLoss,
@@ -250,7 +262,8 @@
   }
 
   QB.FSRSTrainCore = {
-    MIN_SAMPLES, MIN_IMPROVE, MIN_AGAIN, TRAIN_SUBSAMPLE, HOLDOUT_RATIO, ITERATIONS, EPS_P, LR, EPS_LOSS,
+    MIN_SAMPLES, MIN_IMPROVE, MIN_AGAIN, TRAIN_SUBSAMPLE, HOLDOUT_RATIO, ITERATIONS, WARM_ITERATIONS,
+    EPS_P, LR, EPS_LOSS,
     WORKER_TIMEOUT_MS, BOUNDS,
     buildSequences, countSamples, sampleSequences, loss, gradient, clampWeights, optimize,
     againInSeqs, diagnose, computeTrain

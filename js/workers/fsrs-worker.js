@@ -4,13 +4,14 @@
  * 不通过 index.html 加载，由 fsrs-train-client.js 在 http(s) 环境构造：
  *   new Worker('js/workers/fsrs-worker.js')
  * 依赖以 importScripts 注入（路径相对本 worker 文件）：
- *   ../modules/fsrs.js          —— FSRS-4.5 公式纯函数
+ *   ../modules/fsrs.js          —— FSRS-6 公式纯函数
  *   ../modules/fsrs-train-core.js —— 样本/损失/Adam 纯计算
  * Worker 不碰 LocalStorage：revlog 与初始权重由主线程消息传入，结果回传后
  * 由主线程 FSRSOpt.trainAsync 统一写盘（保证存储只有一个写入点）。
  *
  * 消息协议：
- *   收 {type:'train', revlog, initWeights, iterations, subsample}
+ *   收 {type:'train', revlog, initWeights, startWeights?, iterations, subsample}
+ *      initWeights = 门控基线（官方默认）；startWeights = 增量重训热启动起点（可空）
  *   发 {type:'done', result} | {type:'error', message}
  */
 'use strict';
@@ -31,6 +32,7 @@ self.addEventListener('message', (event) => {
   try {
     const result = self.QB.FSRSTrainCore.computeTrain(msg.revlog || [], {
       initWeights: msg.initWeights,
+      startWeights: msg.startWeights || undefined,
       iterations: msg.iterations,
       subsample: msg.subsample
     });

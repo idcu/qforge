@@ -391,10 +391,26 @@ const fsSynth = [];
   }
 }
 let fsTrain;
-row('FSRS 优化器 computeTrain（' + fsSynth.length + ' 条 revlog / 150 迭代）', await timed(() => {
+const fsTrainTriple = await timed(() => {
   fsTrain = QB.FSRSTrainCore.computeTrain(fsSynth);
-}, 3), fsTrain.samples + ' 个相邻样本，21 权重数值梯度 + Adam，留出集改善 '
+}, 3);
+row('FSRS 优化器 computeTrain（' + fsSynth.length + ' 条 revlog / 150 迭代）', fsTrainTriple,
+  fsTrain.samples + ' 个相邻样本，21 权重数值梯度 + Adam，留出集改善 '
   + (fsTrain.improvement * 100).toFixed(2) + '%（gate=' + fsTrain.gateBasis + '）');
+
+// 增量重训（P1）：以全量训练结果为热启动起点、迭代数减半，量测提速与门控是否仍达标
+const fsWarmTriple = await timed(() => {
+  QB.FSRSTrainCore.computeTrain(fsSynth, {
+    startWeights: fsTrain.weights,
+    iterations: QB.FSRSTrainCore.WARM_ITERATIONS
+  });
+}, 3);
+const warmRes = QB.FSRSTrainCore.computeTrain(fsSynth, {
+  startWeights: fsTrain.weights, iterations: QB.FSRSTrainCore.WARM_ITERATIONS
+});
+row('FSRS 优化器 computeTrain（增量热启动 / ' + QB.FSRSTrainCore.WARM_ITERATIONS + ' 迭代）', fsWarmTriple,
+  '起点=上次采纳权重，留出集改善 ' + (warmRes.improvement * 100).toFixed(2) + '%（gate=' + warmRes.gateBasis
+  + '），较全量提速 ' + (fsTrainTriple.median / fsWarmTriple.median).toFixed(2) + '×');
 
 /* ---------- 汇总输出 ---------- */
 console.log('\n================ 性能打点报告 ================');

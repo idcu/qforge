@@ -457,6 +457,72 @@ section('F3 trainAsync：Worker 回包采纳后由主线程写盘到作用域');
   clearOpt();
 }
 
+section('增量重训（P1）：训练点记录 + shouldRetrain 增量触发 + 热启动');
+{
+  clearOpt();
+  const bank = 'warmBank';
+  // 强信号夹具写入该库作用域（补 b=bank），用「作用域读」训练（贴近生产路径）
+  O.appendLog(STRONG_LOG.map((e) => ({ t: e.t, h: e.h, r: e.r, b: bank })));
+  const scoped = O.readLogForScope(bank);
+  eq(scoped.length, STRONG_LOG.length, '作用域日志就绪（' + scoped.length + ' 条）');
+
+  // 首次训练：无历史权重 → 起点为官方默认（非热启动）
+  const r1 = O.train(null, bank);
+  ok(r1.ok, '首次训练被采纳：' + (r1.ok ? (r1.improvement * 100).toFixed(2) + '%' : r1.reason));
+  eq(r1.warmStarted, false, '首次训练 warmStarted=false（起点=官方默认）');
+  const meta1 = O.getWeightsMeta(bank);
+  eq(meta1.trainedLogLen, scoped.length, 'meta 记录训练点日志长度（增量判定基准）');
+  eq(meta1.warmStarted, false, 'meta 记录 warmStarted=false');
+
+  // 立即判定：无新增 → 不建议重训
+  const s0 = O.shouldRetrain(bank);
+  eq(s0.newCount, 0, '刚训练完：新增 0');
+  eq(s0.sinceLen, scoped.length, 'sinceLen=训练点日志长度');
+  eq(s0.hasWeights, true, 'hasWeights=true');
+  eq(s0.retrain, false, '无新增：不建议重训');
+  eq(s0.minNew, O.RETRAIN_MIN_NEW, '阈值默认 = MIN_SAMPLES');
+
+  // 追加 40 条（< 阈值 100）→ 仍不建议
+  const extra = [];
+  for (let i = 0; i < 40; i++) extra.push({ t: 1e13 + i * DAY, h: 'warm_a' + i, r: i % 2 ? 3 : 1, b: bank });
+  O.appendLog(extra);
+  const s1 = O.shouldRetrain(bank);
+  eq(s1.newCount, 40, '新增 40 条');
+  eq(s1.retrain, false, '新增 40 < 100：不建议重训');
+
+  // 再追加 60 条（累计 100）→ 建议重训；阈值可调
+  const extra2 = [];
+  for (let i = 0; i < 60; i++) extra2.push({ t: 2e13 + i * DAY, h: 'warm_b' + i, r: i % 2 ? 3 : 1, b: bank });
+  O.appendLog(extra2);
+  const s2 = O.shouldRetrain(bank);
+  eq(s2.newCount, 100, '新增累计 100 条');
+  eq(s2.retrain, true, '新增 ≥ 阈值：建议重训');
+  eq(O.shouldRetrain(bank, { minNew: 1000 }).retrain, false, 'minNew 可调（1000 时不建议）');
+
+  // 第二次训练走热启动：起点=上次采纳权重，但门控基线仍为官方默认（口径不放宽）
+  const r2 = O.train(null, bank);
+  eq(r2.warmStarted, true, '第二次训练 warmStarted=true（起点=上次采纳权重）');
+  eq(O.WARM_ITERATIONS < O.ITERATIONS, true, '热启动迭代数更少（' + O.WARM_ITERATIONS + ' < ' + O.ITERATIONS + '）');
+  if (r2.ok) {
+    eq(r2.gateBasis, 'holdout', '热启动后门控仍基于独立留出集');
+    ok(r2.improvement >= 0.002, '热启动后仍达 0.2% 门控（' + (r2.improvement * 100).toFixed(2) + '%）');
+    eq(O.getWeightsMeta(bank).trainedLogLen, O.readLogForScope(bank).length, '采纳后训练点前移到最新日志长度');
+  } else {
+    ok(/改善|样本不足/.test(r2.reason), '未采纳时如实给出原因（' + r2.reason + '）');
+  }
+
+  // Worker 路径同样透传热启动参数（基线仍 21 维官方默认）
+  let seenMsg = null;
+  const fakeWarm = makeFakeWorker({
+    respond: (m) => { seenMsg = m; return { type: 'done', result: { ok: false, reason: 'spy', samples: 0 } }; }
+  });
+  await O.trainAsync(bank, { env: { protocol: 'https:', hasWorker: true }, createWorker: () => fakeWarm.worker });
+  ok(seenMsg && Array.isArray(seenMsg.startWeights) && seenMsg.startWeights.length === 21, 'trainAsync 向 Worker 透传热启动起点（21 维）');
+  eq(seenMsg.iterations, O.WARM_ITERATIONS, 'trainAsync 透传热启动迭代数');
+  eq(seenMsg.initWeights.length, 21, '门控基线仍为官方默认（21 维）');
+  clearOpt();
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

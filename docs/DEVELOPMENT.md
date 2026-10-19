@@ -48,7 +48,7 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `scripts/blueprint.test.mjs` | **18** | 题型×分类×难度筛选/抽题/缺口、种子可复现 |
 | `scripts/source.test.mjs` | **29** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入） |
 | `scripts/fsrs.test.mjs` | **135** | py-fsrs 6.3.2 黄金对照（S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f 1.391987、同日 S′_s 3.051249/10/10/15.534308）、衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term 阈值、1m/10m learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz（区间/分布/确定性） |
-| `scripts/fsrs-opt.test.mjs` | **91** | revlog/FIFO/作用域隔离、四门控、**留出门控（holdout 20%/gateBasis）+历史最佳权重-loss 自洽**、合成日志留出 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
+| `scripts/fsrs-opt.test.mjs` | **114** | revlog/FIFO/作用域隔离、四门控、**留出门控（holdout 20%/gateBasis）+历史最佳权重-loss 自洽**、合成日志留出 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；**增量重训（P1，23 项）：`trainedLogLen` 训练点、`shouldRetrain` 阈值与 `minNew` 可调、热启动 `warmStarted`、Worker 透传 `startWeights`/`WARM_ITERATIONS`**；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
 | `scripts/srs.test.mjs` | **60** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项） |
 | `scripts/storage.test.mjs` | **14** | setSync 即落盘/配额抛错+onError+待写重试、forceSync、跨标签 storage 事件、keys 合并 pending |
 | `scripts/backup.test.mjs` | **25** | 全量备份、覆盖/合并恢复、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项） |
@@ -58,7 +58,7 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `scripts/pwa.test.mjs` | **47** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**悬浮滚动按钮（#btn-top/#btn-bottom 复用 .btn-float + .btn-top/.btn-bottom 定位 + app.js scrollTo/scrollHeight/scroll 绑定 + CSS .btn-float.show，11 项）**、**细节样式修复（`.li-meta` 不限 `.list-item`、弹窗 `.modal select`/`input.st-count` 控件样式、`.bp-n` 宽度不被覆盖、toast 置底居中避开悬浮按钮、`.qe-grid` 换行、窄屏（≤560px）提示条让位，7 项）** |
 | `scripts/ui-renderer.test.mjs` | **87** | 组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例（ac-correct/ac-wrong/ac-pending/ac-empty + cur 叠加）**；**收藏按钮已收藏态（★ 已收藏 + fav-on）**；**搜索单行 sticky（筛选/计数/练习入口同容器）**；**历史统计 sticky 卡**；**区域数组与 DOM 对账（阶段 A）：5 个 `*Regions` 变体键序稳定、拼接逐字节等于旧整块字符串、顶层带 `data-region`；`QB.DomPatch.plan` 对账（作答区仅重建变化区域、错题本 keyed 条目保留未变节点）**；**答题卡格级增量（阶段 A）：`quiz-card` 区域含 `frame`+`sub`、帧不含格子状态跨作答逐字节不变、子区域键序/容器归属、作答/跳题仅「计数 + 受影响格」变化（其余格不重建）** |
 | `scripts/dom-patch.test.mjs` | **40** | `QB.DomPatch` 区域对账（`plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`，DOM-free）：首次全变化、内容一致全不重建、单区域变化、区域新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全、列表移除场景；**子区域（格级）：`contentOf` 取 frame、帧未变→顶层不重建、`snapshot` 以 frame 为基准、`normalize` 保留 `frame`/`sub`、`groupSub` 按容器归组去重剔除非法项** |
-| **合计** | **2661 / 2661 通过 · 20 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
+| **合计** | **2684 / 2684 通过 · 20 个套件**（UTC 与 Asia/Shanghai 双时区 CI 矩阵实跑） | |
 
 一键全跑（PowerShell）：
 
@@ -111,9 +111,11 @@ node --expose-gc scripts/bench.mjs   # 采样 10 次取中位数，输出耗时�
 | **FSRS.review 单次调度（毕业卡到期复习，21 权重）** | **< 0.01 ms** | 0.00 / 0.29 ms |
 | **FSRS.review 带 fuzz（opt-in 间隔抖动）** | **< 0.01 ms** | 0.00 / 0.13 ms |
 | **FSRS.review 新卡首次评分（指数式 D₀/S₀）** | **< 0.01 ms** | 0.00 / 0.10 ms |
-| **FSRS 优化器 computeTrain（4000 条 revlog / 3200 样本 / 150 迭代）** | **4183.87 ms** | 4006.65 / 4230.67 ms |
+| **FSRS 优化器 computeTrain（4000 条 revlog / 3200 样本 / 150 迭代）** | **3893.58 ms** | 3850.12 / 3908.13 ms |
+| **FSRS 优化器 computeTrain（增量热启动 / 60 迭代，起点=上次权重）** | **1548.56 ms** | 1521.78 / 1571.99 ms |
 
-> 阶段 B 验收（FSRS-6）:调度为纯函数、单次 review 亚毫秒（与题量无关）；个性化训练 21 权重数值梯度（中心差分 ×2 + 迭代内 loss）实测中位 **4.18 s / 3200 样本**，仍在 Worker 30 s 超时内，留出集改善 2.84%。训练成本显著高于调度（可离线一键触发、Worker 执行），P1 增量训练将进一步降低。
+> 阶段 B 验收（FSRS-6）:调度为纯函数、单次 review 亚毫秒（与题量无关）；个性化训练 21 权重数值梯度（中心差分 ×2 + 迭代内 loss）实测中位 **3.89 s / 3200 样本**，仍在 Worker 30 s 超时内，留出集改善 2.84%。
+> **阶段 B 增量重训（P1）验收**：以全量训练结果为热启动起点、迭代减半（150→60），同一 bench 内 **3893.58 ms → 1548.56 ms（2.51× 提速）**，留出集改善 **2.89%**（≥ 全量 2.84%），门控基线仍为官方默认（口径不放宽）。
 
 > 阶段 A 规模验收：3000 题单库下，**按需单页冷读 0.22 ms** 与库规模解耦（全量冷读 3.63 ms，约 16×）；**单题 update 0.23 ms** 与库规模无关（全量重写 38.56 ms，约 168×）。
 > **UI 级按需加载验收（阶段 A）**：改造前每次 `render` 均整库全量冷读（3000 题 3.70 ms）→ 改造后**装载缓存命中 0.00 ms、答题交互视图装载 0.00 ms**；装载仅在题库或题目变动（写修订号变化）后首次付出一次（3.42 ms）。首屏/答题 HTML 构建 0.02/0.02 ms 且**与库规模无关**（首页 HTML 2414/2411 字符、答题区 6954 字符，随本场题数而非库规模）。

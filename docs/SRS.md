@@ -177,6 +177,7 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 - 单次训练对训练序列确定性等距抽样，上限 `TRAIN_SUBSAMPLE=1500` 条完整序列（同数据复训结果一致）。
 - 21 个权重各有物理取值边界 `BOUNDS`（逐项对齐 py-fsrs 6.3.2 官方 `LOWER/UPPER_BOUNDS_PARAMETERS`），优化结果钳制在边界内。
 - `optimize` 返回训练过程中 **loss 历史最低点的权重快照**（不是最后一轮），返回的权重与其 loss 严格自洽。
+- **门控基线与优化起点分离**（增量重训基础）：`initWeights` 恒为门控/回退基线（默认官方权重，决定 `improvement` 口径），`startWeights` 仅为优化起点；传入上次采纳权重即「热启动」，**不因热启动放宽门控**。
 
 ### 8.4 采纳门控（四条件全部满足才写盘）
 
@@ -204,9 +205,19 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 
 ### 8.6 有效性验证（自动化，非人工声称）
 
-`fsrs-opt.test.mjs`（**91 项断言**）用 mulberry32 确定性 PRNG + 伯努利抽样造合成日志：800 张卡 × 5 次复习 = 3200 个相邻评分样本，整条序列确定性切出 640 个留出样本。当"真权重"刻意显著偏离默认（初始稳定度×1.5、难度更新 w6×0.5、召回增长×1.3、hard 惩罚×0.6）时，采纳权重在**留出集** logloss 改善 **2.84%**（远超 0.2% 门控，`gateBasis='holdout'`），训练集 logloss 0.2926 与采纳权重严格自洽（历史最佳快照，1e-9）；默认权重生成的日志无显著改善时**诚实拒绝不写盘**；同数据重复训练结果逐位一致。
+`fsrs-opt.test.mjs`（**114 项断言**）用 mulberry32 确定性 PRNG + 伯努利抽样造合成日志：800 张卡 × 5 次复习 = 3200 个相邻评分样本，整条序列确定性切出 640 个留出样本。当"真权重"刻意显著偏离默认（初始稳定度×1.5、难度更新 w6×0.5、召回增长×1.3、hard 惩罚×0.6）时，采纳权重在**留出集** logloss 改善 **2.84%**（远超 0.2% 门控，`gateBasis='holdout'`），训练集 logloss 0.2926 与采纳权重严格自洽（历史最佳快照，1e-9）；默认权重生成的日志无显著改善时**诚实拒绝不写盘**；同数据重复训练结果逐位一致。
 
-> 夹具口径变更（如实记录）：旧夹具用 ±40% 随机扰动，在 FSRS-6 下留出集改善仅 0.04%（与噪声不可分辨，且加大迭代反而更差 → 属夹具信号不足而非优化器缺陷），故改为「刻意显著偏离」的可解释真权重。另含 33 项 Worker 化断言（Core 与存储层同源、门控不写盘、supported 判定矩阵、假 Worker 消息协议、构造/onerror 回退、trainAsync 写盘作用域）与 9 项按库训练隔离断言。
+> 夹具口径变更（如实记录）：旧夹具用 ±40% 随机扰动，在 FSRS-6 下留出集改善仅 0.04%（与噪声不可分辨，且加大迭代反而更差 → 属夹具信号不足而非优化器缺陷），故改为「刻意显著偏离」的可解释真权重。另含 **23 项增量重训断言**（训练点记录、`shouldRetrain` 阈值与 `minNew` 可调、热启动 `warmStarted` 与 Worker 透传）、33 项 Worker 化断言（Core 与存储层同源、门控不写盘、supported 判定矩阵、假 Worker 消息协议、构造/onerror 回退、trainAsync 写盘作用域）与 9 项按库训练隔离断言。
+
+### 8.7 增量重训（P1）
+
+目标：避免每次训练都从官方权重冷启动、且不必在样本几乎没变时反复重训。
+
+- **训练点记录**：采纳后把训练时的日志长度写入权重 meta（`trainedLogLen`），作为「上次训练到哪」的基准。
+- **增量触发（纯读）**：`FSRSOpt.shouldRetrain(bankId, { minNew })` 返回 `{retrain, newCount, sinceLen, logLen, hasWeights}`；当「距上次训练新增 revlog 条数 ≥ `RETRAIN_MIN_NEW`（默认 = `MIN_SAMPLES` = 100）」时 `retrain=true`。**只读不写、不自动训练**，供 UI 提示「有新数据可训练」。
+- **热启动**：`train`/`trainAsync` 发现该作用域已有采纳权重时，以其为优化**起点**并只用 `WARM_ITERATIONS`（=60，全量为 150）；**门控基线仍是官方默认**，`improvement` 口径不变。
+- **工作路径一致**：热启动起点与迭代数经 `FSRSTrain.run` 一并透传给 Worker（消息 `startWeights`）与主线程回退路径，两条路径结果一致。
+- **实测收益**（`scripts/bench.mjs`，3200 样本）：全量训练中位 **3893.58 ms** → 热启动 **1548.56 ms**（**2.51×**），留出集改善 2.89%（≥ 全量 2.84%），门控仍达标。
 
 ## 9. 存储键一览
 
@@ -223,16 +234,16 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 | `fsrs.js` | `QB.FSRS.review(state, rating, now, weights, opts?)`（`opts.fuzzSeed` 启用 fuzz）、`initialState(now)`、`isLearning(state)`、`DEFAULT_W`（21）、`DECAY`/`FACTOR`/`REQUEST_RETENTION`/`STABILITY_MIN`/`MAX_INTERVAL_DAYS`/`SAME_DAY_LIMIT_DAYS`/`FUZZ_RANGES`、`decayOf`/`factorOf`/`powerDecay`/`retrievability`、`initStability`/`initDifficulty`/`nextStability`/`nextDifficulty`、`recallStability`/`forgetStability`/`stabilityShortTerm`、`nextIntervalDays`/`applyFuzz` |
 | `srs.js` | `QB.SRS.RATINGS`、`isDue`、`isDueToday`、`dueQuestions` |
 | `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/...`（0–3→1–4 映射、SM-2 迁移） |
-| `fsrs-opt.js` | revlog/权重存储层：`appendLog`、`readLogForScope`、`diagnose`、`train`（同步）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights` |
-| `fsrs-train-core.js` | 纯计算：`computeTrain(revlog,opts)`、`diagnose`、`buildSequences/loss/gradient/optimize`、门控/边界常量（Worker 与主线程共用） |
-| `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,deps)`（Worker 优先、自动回退，可注入测试） |
-| `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train` → `done/error`（不经 index.html 加载） |
+| `fsrs-opt.js` | revlog/权重存储层：`appendLog`、`readLogForScope`、`diagnose`、`train`（同步）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights`、**`shouldRetrain`/`warmWeightsFor`**（增量重训）；常量 `WARM_ITERATIONS`/`RETRAIN_MIN_NEW` |
+| `fsrs-train-core.js` | 纯计算：`computeTrain(revlog,opts)`（`initWeights` 门控基线 / `startWeights` 优化起点）、`diagnose`、`buildSequences/loss/gradient/optimize`、门控/边界常量（Worker 与主线程共用） |
+| `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,opts)`（Worker 优先、自动回退；训练参数含增量热启动 `startWeights`/`iterations` 一并透传，可注入测试） |
+| `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train`（`initWeights` 基线 / `startWeights?` 热启动起点）→ `done/error`（不经 index.html 加载） |
 
-测试（2026-10-19 实跑全绿）：`fsrs.test.mjs` **135** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **60** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **91** 项（优化器 44 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5）。全套件 20 项（19 套件 + smoke）**2661** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
+测试（2026-10-19 实跑全绿）：`fsrs.test.mjs` **135** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **60** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **114** 项（优化器 67 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5；含 23 项增量重训）。全套件 20 项（19 套件 + smoke）**2684** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
 
 ## 11. 已知边界（设计取舍）
 
 - fuzz（间隔抖动）已实现且与官方 `FUZZ_RANGES` 一致，但**默认关闭**（opt-in：`review(..., { fuzzSeed })`）；生产调度保持确定性以便「间隔反解 R=目标保留率」成立、且同数据可复现。无 lapses 手动重学卡的「提前毕业」微调。
-- 优化器只做离线批训练（手动一键），不做在线增量更新；http(s) 下计算在专用 Worker、file:// 回退主线程（无共享内存/进度百分比，30s 超时保险）。**单次训练成本（21 权重数值梯度）实测中位约 4.2s / 3200 样本 / 150 迭代**（见 `scripts/bench.mjs`），仍在 30s Worker 超时内；P1 增量训练可显著降低单次成本。
+- 优化器只做离线批训练（手动一键），不做在线增量更新；http(s) 下计算在专用 Worker、file:// 回退主线程（无共享内存/进度百分比，30s 超时保险）。单次训练成本（21 权重数值梯度）实测中位约 **3.89s** / 3200 样本 / 150 迭代；**增量重训热启动**将其降至约 **1.55s**（2.51×，见 §8.7 与 `scripts/bench.mjs`），均在 30s Worker 超时内。
 - 历史评分不回填：升级前没有 revlog，需从升级后积累样本。
 - 不做多用户/云协同权重；权重随全量备份迁移（`meta:fsrsWeights`），revlog 同理。
