@@ -354,6 +354,11 @@ row('错题本 移除一条 区域对账（plan）', await timed(() => {
 
 const uiPatchHeap = (bestEffortGc(), process.memoryUsage().heapUsed);
 
+/* ---------- 4b. 富文本公式子集渲染（阶段 B · P2，零依赖） ---------- */
+row('富文本公式子集渲染（\\frac / \\sqrt 混排）', await timed(() => {
+  QB.RichText.render('解方程 \\frac{-b+\\sqrt{b^{2}-4ac}}{2a}，求根 \\sqrt[3]{x_{1}} 的值');
+}, 200), '零依赖 CSS 排版（分式/根号/上下标，无公式库）');
+
 /* ---------- 5. FSRS-6 调度与个性化训练（阶段 B · 追算法） ---------- */
 const FW = QB.FSRS.DEFAULT_W;
 const FS_DAY = 24 * 3600 * 1000;

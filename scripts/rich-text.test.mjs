@@ -43,12 +43,53 @@ eq(render('snake_case 命名'), 'snake_case 命名', '裸 _ 原样');
 eq(render('2^3 与 a_b'), '2^3 与 a_b', '裸 ^ _ 均原样');
 eq(render('^{}'), '<sup></sup>', '空上标也转换（显式语法）');
 
+section('轻量公式子集：\\frac / \\sqrt（零依赖，CSS 排版）');
+eq(render('\\frac{a}{b}'),
+  '<span class="rt-frac"><span class="rt-num">a</span><span class="rt-den">b</span></span>', '基本分式');
+eq(render('速度 v = \\frac{s}{t} 米每秒'),
+  '速度 v = <span class="rt-frac"><span class="rt-num">s</span><span class="rt-den">t</span></span> 米每秒', '分式嵌在文本中');
+eq(render('\\sqrt{x}'),
+  '<span class="rt-sqrt"><span class="rt-radicand">x</span></span>', '基本根号');
+eq(render('\\sqrt[3]{x}'),
+  '<span class="rt-sqrt"><sup class="rt-index">3</sup><span class="rt-radicand">x</span></span>', '带指数根号');
+// 递归：公式内部继续渲染上下标 / 嵌套公式
+eq(render('\\frac{x^{2}}{y_{1}}'),
+  '<span class="rt-frac"><span class="rt-num">x<sup>2</sup></span><span class="rt-den">y<sub>1</sub></span></span>',
+  '分式内部上下标递归渲染');
+eq(render('\\sqrt{\\frac{a}{b}}'),
+  '<span class="rt-sqrt"><span class="rt-radicand"><span class="rt-frac"><span class="rt-num">a</span><span class="rt-den">b</span></span></span></span>',
+  '根号内嵌分式（递归展开）');
+eq(render('\\frac{a{1}}{b}'),
+  '<span class="rt-frac"><span class="rt-num">a{1}</span><span class="rt-den">b</span></span>',
+  '参数组支持嵌套大括号（内层花括号原样保留）');
+// 未闭合 / 缺参数 → 原样保留，不误伤普通文本
+eq(render('\\frac{a}{b 没闭合'), '\\frac{a}{b 没闭合', '分母未闭合：原样保留');
+eq(render('\\frac{a}'), '\\frac{a}', '缺分母：原样保留');
+eq(render('\\sqrt x'), '\\sqrt x', '根号缺参数组：原样保留');
+eq(render('路径 C:\\temp\\frac'), '路径 C:\\temp\\frac', '普通反斜杠文本不受影响');
+// 注入防护：公式内部同样经过转义
+eq(render('\\sqrt{<script>x</script>}'),
+  '<span class="rt-sqrt"><span class="rt-radicand">&lt;script&gt;x&lt;/script&gt;</span></span>',
+  '公式内部转义（无注入）');
+// 与图片记号组合：alt 属性内剥离公式标签
+{
+  const id = 'as1a2b3c4d-12345';
+  const imgHtml = render('![\\frac{a}{b}](asset:' + id + ')');
+  ok(imgHtml.indexOf('data-asset="' + id + '"') >= 0, '公式 + 图片：占位仍生成');
+  ok(imgHtml.indexOf('<span', imgHtml.indexOf('alt=')) < 0, 'alt 内不出现公式标签（整体剥离）');
+}
+
 section('toPlain 去记号');
 eq(toPlain('x^{2}'), 'x2', '上标去记号保留内容');
 eq(toPlain('a_{n+1}^{2}'), 'an+12', '连续记号展开');
 eq(toPlain('E=mc^2'), 'E=mc^2', '裸符号保留');
 eq(toPlain('<b>x'), '<b>x', 'toPlain 不转义（契约：HTML 前调用方自行转义）');
 eq(toPlain(null), '', 'toPlain(null)');
+eq(toPlain('\\frac{a}{b}'), 'a/b', '分式去记号 → a/b');
+eq(toPlain('\\sqrt{x}'), '√(x)', '根号去记号 → √(x)');
+eq(toPlain('\\sqrt[3]{x}'), '√[3](x)', '带指数根号 → √[3](x)');
+eq(toPlain('\\frac{x^{2}}{y_{1}}'), 'x2/y1', '分式内上下标一并去记号');
+eq(toPlain('\\frac{a}{b'), '\\frac{a}{b', 'toPlain 未闭合原样保留');
 
 section('图片资产占位');
 {

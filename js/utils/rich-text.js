@@ -6,9 +6,12 @@
  *   - HTML 转义（复用 Helpers.escapeHtml，防注入）
  *   - 上标：x^{2}   → x<sup>2</sup>
  *   - 下标：a_{n}   → a<sub>n</sub>
+ *   - 分式：\frac{a}{b}  → .rt-frac（分子/分母两行 + 分数线，CSS 排版）
+ *   - 根号：\sqrt{x} / \sqrt[n]{x} → .rt-sqrt（CSS √ + 根号上划线，可选指数）
  *   - 图片：![说明](asset:asXXXXXXXX-123) → <img data-asset>，由 hydrate() 从
  *     IndexedDB 异步换 src（见 utils/assets.js）；列表/搜索等紧凑场景用 toPlain()。
- * 花括号必须显式定界，普通文本里的 ^ 与 _ 原样显示，避免误伤。
+ * 花括号必须显式定界，普通文本里的 ^ 与 _ 原样显示，避免误伤；\frac/\sqrt 的参数组
+ * 支持嵌套大括号，未闭合时原样保留。**不含**文字上下标、矩阵、求和号等完整 LaTeX。
  */
 (function (global) {
   'use strict';
@@ -29,17 +32,79 @@
     activeUrls = [];
   }
 
-  /** 模型内容 → 安全 HTML（图片为无 src 占位，需随后 hydrate） */
-  function render(text) {
-    if (text === null || text === undefined) return '';
-    return QB.Helpers.escapeHtml(String(text))
+  /** 读取配对大括号组（支持嵌套）；s[i] 必须是 '{'，不闭合返回 null */
+  function readGroup(s, i) {
+    if (s[i] !== '{') return null;
+    let depth = 0;
+    for (let j = i; j < s.length; j++) {
+      if (s[j] === '{') depth++;
+      else if (s[j] === '}') { depth--; if (depth === 0) return { inner: s.slice(i + 1, j), end: j + 1 }; }
+    }
+    return null;
+  }
+
+  /**
+   * 展开公式子集 `\frac{..}{..}` 与 `\sqrt{..}` / `\sqrt[n]{..}`（零依赖，**递归**处理内部）。
+   * 参数组未闭合/不匹配时原样保留，避免误伤普通文本。内部内容交给 renderInner（即 render/toPlain 自身）。
+   */
+  function expandFormula(t, renderInner, forms) {
+    let out = '';
+    let i = 0;
+    while (i < t.length) {
+      if (t.charCodeAt(i) === 92 /* 反斜杠 */) {
+        if (t.startsWith('\\frac', i)) {
+          const num = readGroup(t, i + 5);
+          const den = num && readGroup(t, num.end);
+          if (den) { out += forms.frac(renderInner(num.inner), renderInner(den.inner)); i = den.end; continue; }
+        } else if (t.startsWith('\\sqrt', i)) {
+          let j = i + 5;
+          let idx = '';
+          if (t[j] === '[') {
+            const close = t.indexOf(']', j + 1);
+            if (close > j + 1) { idx = t.slice(j + 1, close); j = close + 1; }
+          }
+          const g = readGroup(t, j);
+          if (g) { out += forms.sqrt(idx ? renderInner(idx) : '', renderInner(g.inner)); i = g.end; continue; }
+        }
+      }
+      out += t[i];
+      i++;
+    }
+    return out;
+  }
+
+  /** 公式 → HTML 片段（分式/根号用 CSS 排版，不引入公式库） */
+  const HTML_FORMS = {
+    frac: function (n, d) {
+      return '<span class="rt-frac"><span class="rt-num">' + n + '</span><span class="rt-den">' + d + '</span></span>';
+    },
+    sqrt: function (idx, rad) {
+      return '<span class="rt-sqrt">' + (idx ? '<sup class="rt-index">' + idx + '</sup>' : '')
+        + '<span class="rt-radicand">' + rad + '</span></span>';
+    }
+  };
+  /** 公式 → 纯文本（搜索高亮/列表标题用；不转义，调用方自行转义） */
+  const PLAIN_FORMS = {
+    frac: function (n, d) { return n + '/' + d; },
+    sqrt: function (idx, rad) { return idx ? '√[' + idx + '](' + rad + ')' : '√(' + rad + ')'; }
+  };
+
+  /** 单层渲染：先展开公式子集（内部递归 renderInline），再套用上下标与图片记号 */
+  function renderInline(t) {
+    return expandFormula(t, renderInline, HTML_FORMS)
       .replace(SUP_RE, function (_m, inner) { return '<sup>' + inner + '</sup>'; })
       .replace(SUB_RE, function (_m, inner) { return '<sub>' + inner + '</sub>'; })
       .replace(ASSET_RE, function (_m, alt, id) {
-        // alt 可能已被上一步插入 <sup>/<sub>，属性内不允许标签，剥掉
-        const safeAlt = alt.replace(/<\/?su[bp]>/g, '');
+        // alt 属性内不允许标签（公式/上下标会产出标签），整体剥离
+        const safeAlt = alt.replace(/<[^>]*>/g, '');
         return '<img class="rt-img" data-asset="' + id + '" alt="' + safeAlt + '" />';
       });
+  }
+
+  /** 模型内容 → 安全 HTML（图片为无 src 占位，需随后 hydrate） */
+  function render(text) {
+    if (text === null || text === undefined) return '';
+    return renderInline(QB.Helpers.escapeHtml(String(text)));
   }
 
   /**
@@ -48,7 +113,7 @@
    */
   function toPlain(text) {
     if (text === null || text === undefined) return '';
-    return String(text)
+    return expandFormula(String(text), toPlain, PLAIN_FORMS)
       .replace(ASSET_RE, function (_m, alt) { return '[' + (alt || '图') + ']'; })
       .replace(SUP_RE, '$1')
       .replace(SUB_RE, '$1');
