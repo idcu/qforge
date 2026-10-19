@@ -14,6 +14,33 @@
 
 ---
 
+## 9f7b431 · refactor(data): 领域模块存储经 QB.DB 契约层异步化，启用后端 UI 零改动（阶段 C · S4）
+
+**核心改动**
+- `js/data/local-adapter.js`：`reviews/revlog/weights` 三组仓库**反转为唯一存储权威**——直接读写 LocalStorage（`Storage.get/setSync/remove`），不再反向调用领域模块；`revlog.append` 在此层补 id/时间戳与 FIFO 裁剪（`REVLOG_MAX` 常量唯一来源，已导出）。
+- `js/modules/fsrs-opt.js`：`readLog/readLogForScope/appendLog/readStore/writeStore/saveWeights/resetWeights/getActiveWeights/getWeightsMeta/warmWeightsFor/shouldRetrain/diagnose/train/trainAsync` **全部 async**，经 `QB.DB.revlog/weights` 存取；删除本模块直连 Storage 的读写与私有 FIFO 逻辑；`LOG_LIMIT` 改为再导出 `QB.LocalAdapter.REVLOG_MAX`（消除同值常量重复定义）；`normalizeStore` 仍是纯函数（归一唯一实现，被 local-adapter.weights 复用）。
+- `js/modules/srs-store.js`：`readMap/writeMap` → `QB.DB.reviews`；`getState/grade/gradeMany/dueToday/countDue/stats/forecast/clear` 均 async；`keyFor/fsrsRating/ratingForResult/collectGraded/dayIndex` 与到期桶计算保持同步纯函数。
+- `js/modules/backup.js`：`buildBackup`/`applyBackup` → `QB.DB.backup.export/import`（异步）；`buildAssetBundle`/`download`/`confirmRestore` 补齐 `await`。
+- `js/modules/sync-dav.js`：修复 `JSON.stringify(await QB.Backup.buildBackup())`（**原实现会把 Promise 序列化成 `{}`**，无图备份经 WebDAV 上传即丢内容——真实缺陷，本轮修复）。
+- `js/app.js`：7 处 SRS/FSRSOpt 调用点 `await` 化、`startReview` 改 `async`（调用点无需改）、`boot` 在 `DATA_BACKEND==='api'` 时**跳过 `Migration.run`**。
+- 测试机械 `await` 化（**断言数不变**）：`srs.test` 60、`fsrs-opt.test` 114、`backup.test` 25、`contract.test` 52、`assets.test` 62、`sync-dav.test` 32、`migrate.test` 55；`sync-dav.test` 补 `QB.DB.init()`（备份载荷现经数据层）。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **22 个测试运行项 2872/2872 断言通过**，UTC 与 Asia/Shanghai 双时区均 0 失败（断言数与 S2/S3 后一致 → 纯机械 await 化，零回归、零新增断言）。
+- `scripts/bench.mjs`（`--expose-gc`，采样 10 次）：**热路径无回归**——按需单页冷读 0.21ms、全量冷读 3.15ms、单题 update 0.21ms、装载缓存命中 0.00ms、DOM 区域对账 0.00ms、错题本移除一条对账 0.00ms；heapUsed 增量 **+2.54 MB**（before 5.26 → after 7.81 MB）；3000 题规模库末态 heapUsed 14.77 MB、DOM 增量末态 14.95 MB。首屏静态体积（index.html + css + 54 个 index 内联 js + 训练 Worker + sw.js + manifest/icon，共 60 文件，逐文件 `gzip -9` 合计）**178.8 KB gzip / 503.5 KB raw**。
+- 浏览器 E2E（`node scripts/serve.mjs`，本地模式，无 SW 缓存）：建库→练习答题（提交后出现 ✅/❌ 标记与解析）→下一题→结束练习→**结果页显示「20 得分 / 2 正确 / 1 错误 / 67% 正确率」**→统计页渲染「复习调度（FSRS）/ 未来 7 天每日到期 / 学习热力」→今日复习入口可二次进入；**控制台 0 error / 0 warning**（异步 SRS 评分、revlog 写入、forecast/diagnose/getWeightsMeta 全链路无报错）。
+
+**遗留 TODO / 风险**
+- **api 模式的 reviews 无适配器内缓存**：计划（设计决策表「渲染热路径」行）曾要求 `api-adapter.reviews` 加**按库内存缓存**（写即失效，类比 `countCache`），本轮**未实现**——故 api 模式下每次需要 SRS 的 render 会打一次 `GET /api/banks/{id}/reviews`。已在 API-CONTRACT §9 与 SRS.md §9.1 显式标注为已知遗留；**未量化 api 模式 render 额外请求数**（无打点数据，如实记录）。
+- **浏览器端未用 `?backend=api` 跑通全链路**：api 模式仅由 Node 端 `api-backend.test.mjs`（117 项）覆盖 parity（真实 HTTP + 适配器）；**浏览器 + 真实后端**的界面级 E2E 本轮**未执行**（无数据可报）。
+- **浏览器端 Backup 弹窗未真机点击验证**：`buildBackup/applyBackup/回滚/脱敏` 由 `backup.test.mjs`（25 项）在 Node 覆盖；下载/恢复/WebDAV 的界面链路本轮未在浏览器实操。
+- api 模式下 `usageBytes` 仍只反映本地缓存占用（既有标注，未变）；`reviews.save` 仍为整表 **last-write-wins**（既有阶段 C 后续项）。
+- 多端并发写下的「可分辨冲突/不丢数据」仍在阶段 C 后续项（未变）。
+- `.trae/`（计划文档）、`.trae-html-share-packages/`、`qforge-evaluation/` 仍为未跟踪目录，未纳入提交。
+- 本轮仅 `git commit`，**未 push**（等用户明确指示）。
+
+---
+
 ## d258b23 · feat(api): 参考后端 serve-api.mjs + api-adapter 真实实现 + 资产 REST 驱动 + E2E parity（阶段 C · S2+S3）
 
 > S2（后端）与 S3（适配器）的验证共用同一 E2E 套件，故合并为一个提交（如实说明）。
