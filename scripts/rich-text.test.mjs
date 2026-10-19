@@ -76,6 +76,17 @@ section('图片资产占位');
     analysis: '解析无图'
   });
   eq(qIds.length, 2, 'questionAssetIds 扫描题干/选项/分析去重');
+  const mIds = QB.RichText.questionAssetIds({
+    type: 'material',
+    question: '引导语无图',
+    material: '共享材料正文 ![](asset:as00000003-3)',
+    options: [],
+    children: [
+      { type: 'single', question: '小问 ![](asset:as00000004-4)', options: [{ text: '![](asset:as00000003-3)' }], analysis: '' }
+    ]
+  });
+  eq(mIds.length, 2, 'questionAssetIds 扫材料正文 + 递归小问（去重）');
+  ok(mIds[0] === 'as00000003-3' && mIds[1] === 'as00000004-4', '材料题资产顺序：材料正文→小问');
 }
 
 section('编辑器光标插入（insertAtCursor）');

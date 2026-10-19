@@ -84,6 +84,7 @@ ok(/\.modal\s+input\.st-count/.test(css), '弹窗题量数字框 .st-count 有�
 ok(css.indexOf('.bp-n') >= 0 && !/\.modal\s+input\[type='number'\]/.test(css), '抽题行 .bp-n（90px）不被通用数字控件样式覆盖宽度');
 ok(/\.toast-wrap[^}]*left:\s*50%/.test(css) && /\.toast-wrap[^}]*translateX\(-50%\)/.test(css), 'toast 置底居中，避开右下角悬浮滚动按钮（回归：曾与直达底部按钮重叠）');
 ok(/\.qe-grid\s*\{[^}]*flex-wrap:\s*wrap/.test(css), '.qe-grid 支持换行（窄屏筛选控件不再被挤压）');
+ok(/@media\s*\(max-width:\s*560px\)[\s\S]*\.toast-wrap[^}]*right:\s*72px/.test(css), '窄屏（≤560px）提示条改左对齐并让出右下悬浮按钮区（x 方向不再交叠）');
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

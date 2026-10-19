@@ -586,6 +586,9 @@ body {
   .bank-switch { max-width: 150px; }
   .topbar { padding: 8px 10px; }
   .tabs { padding: 6px 10px 0; }
+  /* 窄屏下提示条收进左侧，让出右下角悬浮滚动按钮区（回到顶部/直达底部），避免 x 方向交叠 */
+  .toast-wrap { left: 10px; right: 72px; transform: none; }
+  .toast { max-width: min(360px, 100%); }
 }
 /* ===== 列表分页与标签 ===== */
 .pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 14px 0 4px; }

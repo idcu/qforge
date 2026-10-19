@@ -1320,6 +1320,34 @@
 
 ---
 
+## `（待回填）` · fix(assets,ui): 材料题图片资产收集 + 窄屏提示条让位（历史遗留项全量复核）
+
+**背景**：用户指令「开始修复剩余问题（全量）」。逐条复核 CHANGELOG 全文「遗留 TODO / 风险」（约 60 处）后，绝大多数为**按设计放弃**（后端/DB、云同步、LocalStorage 上限、数学公式库、P3 超范围、Word 桌面/GUI 人工验收）或**已被后续批次关闭**（xlsx 多表 `5450a7a`、xlsx/docx 导出写入端 `b041b6b`、题目管理 UI、历史记录导出 `f8c5799`）；真正「仍开放且可修」的缺陷类只有两项，本轮修复。
+
+**核心改动**
+- `js/utils/rich-text.js`：`QB.RichText.questionAssetIds(q)` 补扫材料题 —— 新增 `question.material` 字段并**递归 `question.children`**（与普通题同构），跨层去重保序。
+  - 缺陷根因：该函数是 `QB.Qbk.referencedIds` 的**唯一实现**，被三处复用 —— qbk 导出（`exporter.js`）、qbk 导入校验（`qbk-importer.js`）、备份孤儿清理（`backup.js` `globallyReferencedAssetIds → removeOrphans`）。此前只扫 `question/analysis/reference_answer/options[].text`，**漏扫材料正文与各小问**。
+  - 后果：材料题在材料正文或小问题干/选项/解析中带图时，`.qbk` 导出**不打包该图**、导入端报「缺失」、孤儿清理**会把该图误判为未引用而删除**。
+- `css/style.css`：窄屏（≤560px）媒体查询内 `.toast-wrap { left:10px; right:72px; transform:none }`（容器右边界让出 62px 悬浮按钮区）、`.toast { max-width: min(360px,100%) }`，消除提示条与右下 `.btn-float`（right:18px, 44px）的 x 方向交叠。
+- 文档同步：ARCHITECTURE（rich-text `questionAssetIds` 描述）、user-guide §3.3（材料题图片随 .qbk/.qfbk 携带）、DEVELOPMENT/README（计数与覆盖）。
+
+**公共抽象 / 影响面**
+- `QB.RichText.questionAssetIds` 语义**扩面**（引用集更全），签名不变；对既有非材料题**逐字节等价**（只多出 `material` 字段（非材料题为空跳过）+ `children` 递归）。
+- 复用面 3 处无需改动、自动受益：`exporter.js`（qbk 导出）、`qbk-importer.js`、`backup.js`（孤儿清理）。
+
+**验证数据**
+- 全量 **18 套 2427 / 2427 通过 0 失败**（Node v24.14.0 / Windows）：assets 54→**62**（+8：材料题 qbk 往返 —— `referencedIds`=2、包内 2 图、材料正文/小问选项占位随 JSON 往返保留、导入 `assetCount`=2、两图入库、无缺失警告）、rich-text 45→**47**（+2：`questionAssetIds` 扫材料正文 + 递归小问并去重保序）、pwa 46→**47**（+1：窄屏 `.toast-wrap` 让位 `right:72px` 静态断言）。
+- **浏览器 E2E 实测（真实证据，补上批遗留缺口）**：练习模式弹窗 7×`data-bp-type` + 7×`data-bp-pts`、`#st-timer` 默认未勾选、无 `#st-duration`；练习正计时 `#status-extra` **00:05 → 00:12 → 00:17**（递增）；考试模式弹窗 `#st-duration` 默认 30、无 `#st-timer`；考试倒计时 **29:57 → 29:50**（递减）；无 console 报错。
+- 未触性能热路径，`scripts/bench.mjs` 未重跑。
+
+**遗留 TODO / 风险**
+- 材料题 M3/M4 功能项（嵌套编辑器、结果页内联自评、材料正文纳入检索、小问乱序开关、子问题配分 UI）属**里程碑计划功能**，非缺陷，维持规划未做。
+- 全局跨题库历史导出维持「**候选**」（需新 UI 入口；`History.list` 已支持 `bankId=null`）。
+- 老浏览器无 `DecompressionStream` 时 xlsx/docx 导入给明确报错，属环境限制（按设计）。
+- 交互式浏览器 E2E 仍为人工触发（本轮实跑留痕），未纳入 CI 自动化。
+
+---
+
 > 各 Commit Hash 一览（`git log --oneline`）：
 > 评估整改批次：`3bcf58f` FSRS 公式对齐 · `0a594a2` changelog · `644bd41` 一次一评分 ·
 > `06c0971` contentHash v2+迁移 · `2f0b437` revlog 按库隔离 · `89a07ec` 考试待自评 ·
@@ -1350,6 +1378,7 @@
 > 直达底部按钮（2026-10-18）：`eda51ba` feat(ui) 「直达底部」悬浮按钮（抽取共享 .btn-float，syncTopButton→syncScrollButtons 双向管理）（18 套 2379 断言，pwa 35→40）
 > 细节样式审计修复（2026-10-18）：`752a969` fix(ui) .li-meta 作用域解除 / 弹窗 select·题量框控件样式 / toast 置底居中不遮挡悬浮按钮 / .qe-grid 换行（18 套 2385 断言，pwa 40→46）
 > 本场组卷参数（2026-10-19）：`9382053` feat(quiz) 按题型抽取数量·每题分值 + 考试时长可设 + 练习可选正计时（新增 QB.childPoints/QuizEngine.pointOf/readTypeInputs，createExamTimer 支持 countUp；18 套 2416 断言，smoke 436→461，ui-renderer 49→55）
+> 遗留项清理（2026-10-19）：`（待回填）` fix(assets,ui) 材料题图片资产收集（material+递归 children；questionAssetIds 唯一实现，惠及 qbk 导出/导入校验/孤儿清理）+ 窄屏提示条让位悬浮按钮；浏览器 E2E 实测练习正计时 00:05→00:17 / 考试倒计时 29:57→29:50（18 套 2427 断言，assets 54→62，rich-text 45→47，pwa 46→47）
 > P1/P0 批次：`78ecaa7` FSRS-4.5 · `bafa6fa` P0 五项（标签/分页/存储健康/快捷键/打印） · `d752673` P1 三项（粘贴拖拽/切出信号/SW 更新） · `5450a7a` 学习体验四项（章节练/预报/多表/交卷明细） · `3b0a845` 热力日历/管理器筛选/题序开关 · `d920e08` 来源溯源/URL 导入 · `e63acbd` FSRS 个性化参数优化器
 >
 > 远端：`origin git@gitee.com:idcu/qforge.git`，默认分支 `main`（截至 `4483cfe` 已 push；FSRS/P0/P1 批次推送状态以 git status 为准），镜像同步 GitHub。

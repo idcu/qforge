@@ -69,12 +69,19 @@
     return ids;
   }
 
-  /** 题目对象中可能含图片占位的全部文本字段（qbk 打包/孤儿清理共用） */
+  /**
+   * 题目对象中可能含图片占位的全部文本字段（qbk 打包/孤儿清理共用）。
+   * 材料题：额外扫描共享材料正文 `material`，并递归各小问 `children`（与普通题同构）。
+   */
   function questionAssetIds(question) {
     if (!question) return [];
-    const fields = [question.question, question.analysis, question.reference_answer];
+    const fields = [question.question, question.analysis, question.reference_answer, question.material];
     (question.options || []).forEach((o) => fields.push(o && o.text));
-    return collectAssets.apply(null, fields);
+    const ids = collectAssets.apply(null, fields);
+    (question.children || []).forEach((child) => {
+      questionAssetIds(child).forEach((id) => { if (ids.indexOf(id) < 0) ids.push(id); });
+    });
+    return ids;
   }
 
   /**

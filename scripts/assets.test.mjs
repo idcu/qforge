@@ -116,6 +116,42 @@ section('qbk 导入：缺图给警告');
   ok(res.warnings.some((w) => w.indexOf('1 张图片') >= 0), '缺失 1 张有警告（实际：' + res.warnings.join('；') + '）');
 }
 
+section('材料题 qbk 往返（材料正文 + 小问图片均收集）');
+{
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  const mBytes = bytes('material-body-image');
+  const cBytes = bytes('child-option-image');
+  const mId = QB.Assets.idFor(mBytes);
+  const cId = QB.Assets.idFor(cBytes);
+  const materialQ = {
+    type: 'material',
+    question: '阅读材料回答',
+    material: '共享材料正文 ![](asset:' + mId + ')',
+    options: [],
+    children: [
+      { type: 'single', question: '小问1', options: [{ letter: 'A', text: '![](asset:' + cId + ')' }, { letter: 'B', text: '无图' }], answer: 'A' },
+      { type: 'judge', question: '小问2 无图', options: [], answer: '正确' }
+    ]
+  };
+  const refs = QB.Qbk.referencedIds([materialQ]);
+  eq(refs.length, 2, 'referencedIds 收集材料正文+小问图片（2 个）');
+  ok(refs.indexOf(mId) >= 0 && refs.indexOf(cId) >= 0, '材料正文图与小问图均在引用集');
+
+  const buf = QB.Qbk.buildBundle('bank.json', JSON.stringify({
+    app: QB.CONFIG.APP_NAME, bank: { name: '材料图包' }, questions: [materialQ]
+  }), [{ id: mId, bytes: mBytes, mime: 'image/png' }, { id: cId, bytes: cBytes, mime: 'image/png' }]);
+  const parsed = await QB.Qbk.parseBundle(buf);
+  eq(parsed.assets.length, 2, '材料题 qbk 包内含 2 张图');
+  const back = JSON.parse(parsed.text);
+  ok(back.questions[0].material.indexOf('asset:' + mId) >= 0, '材料正文占位随 JSON 往返保留');
+  ok(back.questions[0].children[0].options[0].text.indexOf('asset:' + cId) >= 0, '小问选项占位随 JSON 往返保留');
+
+  const res = await QB.QbkImporter.parse({ arrayBuffer: buf, fileName: 'm.qbk' });
+  eq(res.assetCount, 2, '材料题导入 assetCount=2');
+  ok(!!(await QB.Assets.get(mId)) && !!(await QB.Assets.get(cId)), '材料正文图与小问图均已入库');
+  eq(res.warnings.filter((w) => w.indexOf('缺失') >= 0).length, 0, '材料题无缺失资产警告');
+}
+
 section('导出器 qbk 格式');
 {
   QB.Assets.useDriver(QB.Assets.memoryDriver());
