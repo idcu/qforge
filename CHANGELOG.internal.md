@@ -14,6 +14,31 @@
 
 ---
 
+## 34e465b · perf(ui): UI 级按需加载——视图感知装载 + 整库读缓存（阶段 A）
+
+**核心改动**
+- `contracts.js`：`questions` 契约增 `count` / `revision` 两个只读方法（api-adapter 由契约自动补 `notImplemented` 骨架）。
+- `local-adapter.js`：新增全库写修订号 `writeRev`（`create/update/remove/insertMany/removeMany` 及 `banks.remove` 级联清分片后自增），暴露 `questions.revision()`；`questions.count(bankId)` 直读分片清单（不解析分片）。
+- `db.js`：新增门面级**整库读缓存 `loadQuestions(bankId,{refresh})`**（按 `bankId`+写修订号失效；命中复用同一数组、零分片解析）；`buildIndex` 改为复用该缓存，不再各自 `questions.list(bankId,{})`。
+- `app.js`：`loadBankData` 视图感知——新增 `needsFullQuestions()`，仅 home/search/stats 解析整库，quiz/result/wrong/favorites/history 不再触库（总数一律走 `questions.count`）。
+- `question-editor.js`：管理器列表/标签的全量读取改复用 `QB.DB.loadQuestions`，删除重复整库读取实现。
+- `scripts/bench.mjs`：新增「装载缓存命中 / 写后失效 / 答题交互视图装载 / 首页与答题 HTML 构建」打点（额外加载 ui-renderer 纯字符串渲染器，仅需 `location` 全局）。
+- `scripts/shard.test.mjs`：**68→82** 断言，新增 UI 级按需装载段（count 零分片解析、loadQuestions 命中同数组、buildIndex 复用缓存、写操作令修订号 +1 并失效重读、refresh 强制重读、空 bankId 安全）。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- 19 套件 **2531/2531 通过**（UTC 与 Asia/Shanghai 双时区均 0 失败）：冒烟 461、XML 39、导出 160、Office 1148、编辑器 29、富文本 47、资产 62、组卷 18、UI 渲染器 55、来源 29、FSRS 77、FSRS 优化器 91、SRS 60、存储 14、备份 25、迁移 55、**分片 82**、WebDAV 32、PWA 47。
+- bench（`node --expose-gc scripts/bench.mjs`，采样 10 中位数）：
+  - **改造前每次 render 全量冷读 3.70ms → 改造后装载缓存命中 0.00ms（max 0.12）、答题交互视图装载 0.00ms（max 0.08）**；装载仅在题库/题目变动（写修订号变化）后首次付出（3.42ms，max 20.09）。
+  - 首屏/答题 **HTML 构建** 0.02/0.01ms（首页 2411 字符、答题区 6771 字符）**与库规模无关**（不含浏览器 DOM 解析/布局）。
+  - heapUsed 增量 **+2.48 MB**（5.19→7.67）；3000 题规模库末态 **14.58 MB**。
+
+**遗留 TODO / 风险**
+- **列表/答题区局部 DOM 更新未做**：现仍整块 `#view` innerHTML 回填；但实测首页/答题 HTML 构建 0.02/0.01ms 且与库规模无关（列表 20/页、答题卡 ≤ 本场题数），非 3000 题规模下的瓶颈——是否需要 DOM 增量更新待评审确认。
+- **浏览器端真实 DOM 解析/布局的 P95 未在本机 bench 覆盖**（Node 只量字符串构建）；如需端到端口径需补浏览器 E2E 打点。
+- 读缓存令门面层持有最近一次整库数组引用（3000 题约 +0.3MB 常驻），随单库规模增长。
+
+---
+
 ## 2e0ec6a · feat(data): 题目库分片存储与按需读取（阶段 A）
 
 **核心改动**
