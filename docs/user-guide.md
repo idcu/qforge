@@ -198,7 +198,7 @@ node scripts/serve-api.mjs
 
 - **下载全量备份**：得到单文件，建议定期保存；换设备/换浏览器时用它迁移。无图为 `.json`，含图片自动打包为 `.qfbk`（ZIP）。**WebDAV 密码不写入备份**（地址/账号保留，恢复后重新填密码），备份文件可安全分享。
 - **从备份恢复**：选择备份文件（.json/.qfbk 自动识别），可选「覆盖恢复」（清空现有数据与图片后写入，推荐）或「合并恢复」（同名键覆盖、保留其余数据与图片）。恢复后刷新页面。
-- **☁ WebDAV 云备份**：配置 WebDAV 目录（坚果云/Nextcloud/群晖等）后一键 PUT 上传全量备份、GET 拉取并走同一恢复确认；固定对象名 `qforge-backup-latest.bin`，账号密码仅存本机 LocalStorage，**上传的备份包已脱敏密码**（换机恢复后需重填）。**CORS 限制**：浏览器要求 WebDAV 服务允许本站跨域，坚果云等公共服务默认可能被拦截（报错属浏览器/服务端策略），自建服务通常可配置。
+- **☁ WebDAV 云备份**：配置 WebDAV 目录（坚果云/Nextcloud/群晖等）后一键 PUT 上传全量备份、GET 拉取并走同一恢复确认；固定对象名 `qforge-backup-latest.bin`，账号密码仅存本机 LocalStorage，**上传的备份包已脱敏密码**（换机恢复后需重填）。**CORS 限制**：浏览器要求 WebDAV 服务允许本站跨域，坚果云等公共服务默认可能被拦截（报错属浏览器/服务端策略），自建服务通常可配置。**自测真机**：仓库自带本地验证端点 `node scripts/serve-webdav.mjs`（127.0.0.1:8899，账号/密码 `u`/`p`，已开 CORS，仅用于验证 WebDAV 链路；见 [DEVELOPMENT.md](DEVELOPMENT.md) §1）。
 - 弹窗显示本地存储占用，超过约 4MB 会提示尽快备份、分库；图片在 IndexedDB 不占用该配额。
 
 > WebDAV 是手动触发的异步备份，不是实时多端同步；真正的账号化实时同步走 `DATA_BACKEND=api` 后端契约（见 §1.1 与 [DATABASE.md](DATABASE.md)、[API-CONTRACT.md](API-CONTRACT.md)）。

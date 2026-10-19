@@ -141,7 +141,7 @@
 | GET | `/api/backup` | 导出全量数据载荷 → `{ data }`。**载荷口径由后端定义**（参考后端为 `{ banks, questions:{bankId:[]}, progress:{bankId:{}}, history, session, revlog, weights }`）；JSON 直出，**不用 ZIP**——含图备份的 `.qfbk`（ZIP）由**客户端**组装，图片经 §8 端点进出 |
 | POST | `/api/backup?mode=replace\|merge` | 按载荷恢复（`replace` 先清后写；`merge` 同名段覆盖）→ `{ keys, mode }` |
 
-> WebDAV 固定对象（`qforge-backup-latest.bin`）是纯前端的旁路云备份，不经此后端，见 user-guide §9.1。
+> WebDAV 固定对象（`qforge-backup-latest.bin`）是纯前端的旁路云备份，不经此后端，见 user-guide §9.1。**真机验收**可用内置的本地 WebDAV 验证端点 `node scripts/serve-webdav.mjs`（PUT/GET + Basic + CORS 预检，见 DEVELOPMENT §1）；真实坚果云/Nextcloud 默认不发 CORS 头，浏览器会直接拦截（服务端策略，非前端缺陷）。
 > `mode` 取值与前端 `QB.Backup.applyData` 对齐（`replace`/`merge`）；**参考后端不支持 multipart**（资产走原始字节，见 §8）。
 
 ## 8. 资源：图片资产（Assets）

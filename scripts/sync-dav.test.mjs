@@ -1,16 +1,21 @@
 /**
- * WebDAV 云备份单元测试（Node，fetch 注入）
+ * WebDAV 云备份单元测试（Node，fetch 注入 + 真实 HTTP 集成）
  * 覆盖：配置存取/校验、URL 拼接、Basic 认证、PUT 上传（JSON/ZIP）、
- * 401/404 错误、GET 下载解析。真机 CORS 行为需人工验证。
+ * 401/404 错误、GET 下载解析；**并起本地 CORS WebDAV 验证端点（`serve-webdav.mjs`）跑真实 HTTP**，
+ * 覆盖浏览器真机才有差异的 CORS 预检与真实字节落盘。真机 CORS 行为另经浏览器验收（见 CHANGELOG）。
  * 运行：node scripts/sync-dav.test.mjs
  */
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createWebdavServer } from './serve-webdav.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { QB } = await createHarness(path.resolve(__dirname, '..'));
 QB.DB.init(); // 备份载荷经 QB.DB.backup，需初始化数据层（local 适配器）
+const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qforge-dav-'));
 
 let pass = 0;
 const failures = [];
@@ -113,6 +118,51 @@ section('下载并解析');
 
   await throwsAsync(() => D.fetchBackup({ config: CONF, fetch: fakeFetch({}, { status: 404 }) }), /没有备份/, '404 提示先上传');
   await throwsAsync(() => D.fetchBackup({ config: CONF, fetch: fakeFetch({}, { status: 403 }) }), /认证失败/, '403 认证错误');
+}
+
+section('真实 HTTP 集成：本地 CORS WebDAV 验证端点（预检 / PUT / GET / Basic）');
+{
+  const srv = await createWebdavServer({ port: 0, dataDir: tmpDir() });
+  const baseUrl = 'http://127.0.0.1:' + srv.port + '/dav/';
+  const conf = { baseUrl: baseUrl, user: 'u', pass: 'p' };
+
+  // CORS 预检：PUT 携带 Authorization 属「非简单请求」，浏览器必先 OPTIONS（Node 单测不会触发）
+  const pre = await fetch(baseUrl + D.FILE_NAME, { method: 'OPTIONS', headers: { Origin: 'http://127.0.0.1:9999' } });
+  eq(pre.status, 204, '预检 OPTIONS → 204');
+  ok(/Authorization/.test(pre.headers.get('access-control-allow-headers') || ''), '预检放行 Authorization 头');
+  eq(pre.headers.get('access-control-allow-origin'), 'http://127.0.0.1:9999', '预检回显 Origin（跨域放行）');
+
+  // 无图 → JSON PUT（走真实 fetch，不用注入桩）
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  await QB.Assets.clear();
+  QB.Storage.set('banks', []);
+  const r1 = await D.upload({ config: conf, fetch: globalThis.fetch });
+  eq(r1.status, 201, '真实 PUT → 201');
+  ok(fs.existsSync(srv.file) && fs.statSync(srv.file).size > 0, '端点已落盘备份文件（' + fs.statSync(srv.file).size + ' B）');
+  eq(JSON.parse(fs.readFileSync(srv.file, 'utf8')).app, 'qforge-backup', '落盘内容是可解析的备份 JSON');
+
+  // 认证失败（错误密码）
+  await throwsAsync(() => D.upload({ config: { baseUrl: baseUrl, user: 'u', pass: 'bad' }, fetch: globalThis.fetch }), /认证失败/, '错误密码 → 401 认证失败');
+
+  // 有图 → ZIP（.qfbk）PUT
+  await QB.Assets.put(new TextEncoder().encode('png-bytes'), 'image/png');
+  const r2 = await D.upload({ config: conf, fetch: globalThis.fetch });
+  eq(r2.status, 201, '有图 PUT（.qfbk ZIP）→ 201');
+  const bytes = fs.readFileSync(srv.file);
+  ok(bytes[0] === 0x50 && bytes[1] === 0x4b, '端点收到 ZIP（PK 头）');
+
+  // GET 下载并解析
+  const parsed = await D.fetchBackup({ config: conf, fetch: globalThis.fetch });
+  eq(parsed.backup.app, 'qforge-backup', '真实 GET 下载并解析为备份对象');
+  eq(parsed.assets.length, 1, '下载包内资产 1 个');
+
+  // 端点无对象 → 404 提示先上传
+  const srv2 = await createWebdavServer({ port: 0, dataDir: tmpDir() });
+  await throwsAsync(
+    () => D.fetchBackup({ config: { baseUrl: 'http://127.0.0.1:' + srv2.port + '/dav/', user: 'u', pass: 'p' }, fetch: globalThis.fetch }),
+    /没有备份/, '端点无对象 → 404 提示先上传');
+  await Promise.all([srv.close(), srv2.close()]);
+  await QB.Assets.clear();
 }
 
 console.log('\n================ 汇总 ================');

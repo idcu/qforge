@@ -88,6 +88,9 @@
       headers: { Authorization: authHeader(checked.user, checked.pass), 'Content-Type': mime },
       body: body
     });
+    // 消费响应体（WebDAV/代理可能回非空 body）：未消费的 Response 被释放时浏览器会记
+    // `net::ERR_ABORTED`——请求其实已成功（与 api-adapter.req 同一类噪声，见 CHANGELOG.internal.md）。
+    try { await res.arrayBuffer(); } catch (e) { /* 消费失败不影响状态判定 */ }
     if (!res || OK_STATUS.indexOf(res.status) < 0) {
       const status = res && res.status;
       throw new Error(status === 401 || status === 403
@@ -115,6 +118,7 @@
     });
     if (!res || res.status !== 200) {
       const status = res && res.status;
+      if (res) { try { await res.arrayBuffer(); } catch (e) { /* 同上：消费以免记 ERR_ABORTED */ } }
       throw new Error(status === 401 || status === 403
         ? 'WebDAV 认证失败（401/403）'
         : status === 404 ? '云端没有备份文件（先上传一次）' : 'WebDAV 下载失败（HTTP ' + (status || '无响应') + '）');

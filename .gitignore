@@ -3,3 +3,6 @@
 
 # 开发子任务计时记录（scripts/task-timer.mjs 生成，勿入库）
 .qforge-timings.json
+
+# WebDAV 验证端点数据目录（scripts/serve-webdav.mjs 运行时生成，勿入库）
+.qforge-webdav/
