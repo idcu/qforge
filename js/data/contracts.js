@@ -37,8 +37,21 @@
     progress: ['wrongList', 'wrongAdd', 'wrongRemove', 'wrongClear',
       'favoriteList', 'favoriteToggle', 'favoriteClear',
       'historyList', 'historyAdd', 'historyRemove', 'historyClear',
-      'sessionSave', 'sessionLoad', 'sessionClear']
+      'sessionSave', 'sessionLoad', 'sessionClear'],
+    // 阶段 C（开生态）：SRS / 评分日志 / 个性化权重 / 备份 —— 只暴露「存储原语」，
+    // 算法（FSRS 调度、留出门控、到期桶计算）留在领域模块（见 docs/SRS.md §8/§12）。
+    reviews: ['list', 'save', 'remove'],       // 按库调度状态 map（contentHash → state）
+    revlog: ['list', 'append'],                // 评分日志（追加 + FIFO 保留策略在存储层）
+    weights: ['read', 'write', 'remove'],      // 全局 + 按题库 preset 权重
+    backup: ['export', 'import']               // 全量数据载荷（含图 ZIP 组装仍在客户端）
   };
+
+  /**
+   * 资产存储驱动契约（IndexedDB 驱动 / REST 驱动须实现）。
+   * 独立于 QB.CONTRACTS：资产走 QB.Assets.useDriver 注入，若并入 CONTRACTS 会让
+   * 「仓库→驱动→仓库」自递归，并打乱测试注入的驱动次序（assets.test.mjs）。
+   */
+  QB.ASSET_DRIVER_CONTRACT = ['put', 'get', 'all', 'ids', 'remove', 'clear'];
 
   /** 校验适配器是否满足契约 */
   QB.assertAdapter = function assertAdapter(adapter, name) {
@@ -57,5 +70,15 @@
       throw new Error((name || '适配器') + ' 未实现契约方法：' + missing.join(', '));
     }
     return adapter;
+  };
+
+  /** 校验资产驱动是否满足驱动契约（与 assertAdapter 同风格） */
+  QB.assertDriver = function assertDriver(driver, name) {
+    const d = driver || {};
+    const missing = QB.ASSET_DRIVER_CONTRACT.filter((m) => typeof d[m] !== 'function');
+    if (missing.length) {
+      throw new Error((name || '资产驱动') + ' 未实现驱动契约方法：' + missing.join(', '));
+    }
+    return driver;
   };
 })(window);

@@ -209,27 +209,7 @@
       const cascade = !options || options.cascade !== false;
       const list = (await banks.list()).filter((b) => b.id !== id);
       Storage.setSync(K.banks, list);
-      if (cascade) {
-        QuestionShards.clear(id); // 题目分片 + 清单 + 旧单 blob 一并清除
-        bumpRev();
-        Storage.remove(K.wrong(id));
-        Storage.remove(K.favorite(id));
-        Storage.remove(K.review(id)); // 评估报告中优先级#6：旧实现残留 user:review:<bankId>
-        // 该库的 FSRS preset（meta:fsrsWeights.banks[bankId]）
-        const weights = Storage.get(K.metaFsrsWeights, null);
-        if (weights && weights.banks && Object.prototype.hasOwnProperty.call(weights.banks, id)) {
-          delete weights.banks[id];
-          Storage.setSync(K.metaFsrsWeights, weights);
-        }
-        // 该库评分日志（revlog 条目 b=bankId，F4 起记录；旧无 b 日志保留）
-        const revlog = Storage.get(K.revlog, []);
-        const keptRevlog = revlog.filter((e) => !e || e.b !== id);
-        if (keptRevlog.length !== revlog.length) Storage.setSync(K.revlog, keptRevlog);
-        const hist = Storage.get(K.history, []).filter((h) => h.bankId !== id);
-        Storage.setSync(K.history, hist);
-        const cur = Storage.get(K.metaCurrentBank, null);
-        if (cur === id) Storage.setSync(K.metaCurrentBank, null);
-      }
+      if (cascade) cascadeDelete(id); // 级联清理由唯一入口负责（见下方 cascadeDelete）
     }
   };
 
@@ -523,6 +503,67 @@
     }
   };
 
-  QB.LocalAdapter = { banks, questions, progress };
+  /* ---------------- SRS / 评分日志 / 权重 / 备份 Repository ----------------
+   * 阶段 C（开生态）把这三处「原先直连存储」的能力纳入契约层。本实现在本地模式下
+   * **委托既有领域模块的导出入参**（fsrs-opt / srs-store / backup），不复制算法、
+   * 留出门控或 FIFO 保留策略 —— 同一逻辑只有一份实现；api 适配器以同名方法对应
+   * docs/API-CONTRACT.md §6–§8 端点，故上层（SRSStore/FSRSOpt/Backup）调用面不变。
+   */
+  const reviews = {
+    /** 该库调度状态 map（contentHash → state）；无记录返回 {} */
+    list(bankId) { return QB.SRSStore.readMap(bankId); },
+    /** 整表落盘（一次评分/整卷结算后提交），失败即抛 */
+    save(bankId, map) { QB.SRSStore.writeMap(bankId, map || {}); },
+    remove(bankId) { QB.SRSStore.clear(bankId); }
+  };
+
+  const revlog = {
+    list() { return QB.FSRSOpt.readLog(); },
+    /** 追加条目（存储层负责补 id/时间戳与 FIFO 上限），返回追加后的完整日志 */
+    append(entries) { return QB.FSRSOpt.appendLog(entries); }
+  };
+
+  const weights = {
+    /** 全局 + 按题库 preset（已归一为 { global, banks }） */
+    read() { return QB.FSRSOpt.readStore(); },
+    write(store) { QB.FSRSOpt.writeStore(QB.FSRSOpt.normalizeStore(store)); },
+    /** 删除某作用域（scope 为空/缺省 = 全局），回到官方默认 */
+    remove(scope) { QB.FSRSOpt.resetWeights(scope); }
+  };
+
+  const backup = {
+    /** 全量数据载荷 { data }（未脱敏；备份文件外壳与脱敏由 QB.Backup 负责） */
+    export() { return { data: QB.Backup.readAllData() }; },
+    /** 恢复数据载荷 { data }；mode = 'replace' | 'merge' */
+    import(payload, mode) {
+      const data = payload && payload.data;
+      if (!data || typeof data !== 'object') throw new Error('backup.import 需要 { data } 载荷');
+      return QB.Backup.applyData(data, mode);
+    }
+  };
+
+  /**
+   * 删库级联清理（唯一入口）：题目分片 + 错题/收藏/复习计划/评分日志/权重 preset/历史/当前库。
+   * 服务端 DELETE /api/banks/{id}?cascade=true 实现同一语义（见 docs/API-CONTRACT.md §2），
+   * E2E parity 测试断言两侧一致，防语义漂移。
+   */
+  function cascadeDelete(id) {
+    QuestionShards.clear(id); // 题目分片 + 清单 + 旧单 blob 一并清除
+    bumpRev();
+    Storage.remove(K.wrong(id));
+    Storage.remove(K.favorite(id));
+    reviews.remove(id); // 评估报告中优先级#6：旧实现残留 user:review:<bankId>
+    weights.remove(id); // 该库 FSRS preset（meta:fsrsWeights.banks[bankId]）
+    // 该库评分日志（revlog 条目 b=bankId，F4 起记录；旧无 b 日志保留）
+    const log = revlog.list();
+    const kept = log.filter((e) => !e || e.b !== id);
+    if (kept.length !== log.length) Storage.setSync(K.revlog, kept);
+    const hist = Storage.get(K.history, []).filter((h) => h.bankId !== id);
+    Storage.setSync(K.history, hist);
+    const cur = Storage.get(K.metaCurrentBank, null);
+    if (cur === id) Storage.setSync(K.metaCurrentBank, null);
+  }
+
+  QB.LocalAdapter = { banks, questions, progress, reviews, revlog, weights, backup };
   QB.QuestionShards = QuestionShards; // 分片读写公共抽象（migrate 等复用，避免重复实现）
 })(window);

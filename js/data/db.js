@@ -18,6 +18,11 @@
     banks: null,
     questions: null,
     progress: null,
+    // 阶段 C（开生态）：SRS/评分日志/权重/备份 四组存储原语（见 contracts.js）
+    reviews: null,
+    revlog: null,
+    weights: null,
+    backup: null,
 
     init() {
       const backend = (QB.CONFIG && QB.CONFIG.DATA_BACKEND) || 'local';
@@ -32,6 +37,10 @@
       this.banks = adapter.banks;
       this.questions = adapter.questions;
       this.progress = adapter.progress;
+      this.reviews = adapter.reviews;
+      this.revlog = adapter.revlog;
+      this.weights = adapter.weights;
+      this.backup = adapter.backup;
       return this;
     },
 

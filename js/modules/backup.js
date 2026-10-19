@@ -27,17 +27,21 @@
     return out;
   }
 
+  /** 读取全部应用数据键 → {key: value}（唯一实现：buildBackup 与数据层 backup.export 共用） */
+  function readAllData() {
+    QB.Storage.forceSync(); // 确保防抖写入的数据已落盘
+    const data = {};
+    QB.Storage.keys().forEach((k) => { data[k] = QB.Storage.get(k); });
+    return data;
+  }
+
   /** 读取全部应用数据 → 备份对象（值为已解析的 JS 对象；敏感密码已脱敏） */
   function buildBackup(now) {
-    QB.Storage.forceSync(); // 确保防抖写入的数据已落盘
-    const keys = QB.Storage.keys();
-    const data = {};
-    keys.forEach((k) => { data[k] = QB.Storage.get(k); });
     return {
       app: MAGIC,
       version: QB.CONFIG.VERSION,
       exportedAt: new Date(now == null ? Date.now() : now).toISOString(),
-      data: redactSecrets(data)
+      data: redactSecrets(readAllData())
     };
   }
 
@@ -46,35 +50,34 @@
   }
 
   /**
-   * 恢复备份
-   * @param {Object} backup 备份对象
-   * @param {{mode?:'replace'|'merge'}} opts
-   *   replace（默认）= 先内存快照旧数据，全量写入成功后再删除备份中不存在的旧键，
+   * 恢复「数据载荷」（不含 app/version 外壳）。**唯一实现**：applyBackup 与数据层 backup.import 共用。
+   * @param {Object} data 逻辑键 → 值
+   * @param {'replace'|'merge'} mode
+   *   replace（默认）= 先内存快照旧数据，全量写入成功后再删除载荷中不存在的旧键，
    *     任一步失败尽力回滚到快照后抛出（不再先删后写、失败即全丢）；
    *   merge = 同名逻辑键覆盖（保留其余现有数据）。
    * @returns {{keys:number, mode:string}}
    */
-  function applyBackup(backup, opts) {
-    if (!isBackup(backup)) throw new Error('不是有效的 qforge 备份文件');
-    opts = opts || {};
-    const mode = opts.mode === 'merge' ? 'merge' : 'replace';
+  function applyData(data, mode) {
+    data = data || {};
+    const m = mode === 'merge' ? 'merge' : 'replace';
 
-    if (mode === 'merge') {
-      Object.keys(backup.data).forEach((k) => QB.Storage.set(k, backup.data[k]));
+    if (m === 'merge') {
+      Object.keys(data).forEach((k) => QB.Storage.set(k, data[k]));
       QB.Storage.forceSync();
-      return { keys: Object.keys(backup.data).length, mode };
+      return { keys: Object.keys(data).length, mode: m };
     }
 
     const oldKeys = QB.Storage.keys();
     const snapshot = oldKeys.map((k) => [k, QB.Storage.get(k)]);
     const written = [];
     try {
-      Object.keys(backup.data).forEach((k) => {
-        QB.Storage.set(k, backup.data[k]);
+      Object.keys(data).forEach((k) => {
+        QB.Storage.set(k, data[k]);
         written.push(k);
       });
       QB.Storage.forceSync();
-      oldKeys.filter((k) => !Object.prototype.hasOwnProperty.call(backup.data, k))
+      oldKeys.filter((k) => !Object.prototype.hasOwnProperty.call(data, k))
         .forEach((k) => QB.Storage.remove(k));
       QB.Storage.forceSync();
     } catch (e) {
@@ -91,7 +94,18 @@
       }
       throw e;
     }
-    return { keys: Object.keys(backup.data).length, mode };
+    return { keys: Object.keys(data).length, mode: m };
+  }
+
+  /**
+   * 恢复备份（含外壳校验）
+   * @param {Object} backup 备份对象
+   * @param {{mode?:'replace'|'merge'}} opts
+   * @returns {{keys:number, mode:string}}
+   */
+  function applyBackup(backup, opts) {
+    if (!isBackup(backup)) throw new Error('不是有效的 qforge 备份文件');
+    return applyData(backup.data, (opts || {}).mode);
   }
 
   /* ---------------- 含图片资产的备份包（.qfbk：backup.json + assets/*） ---------------- */
@@ -275,7 +289,7 @@
   }
 
   QB.Backup = {
-    buildBackup, applyBackup, isBackup, redactSecrets,
+    buildBackup, applyBackup, isBackup, redactSecrets, readAllData, applyData,
     buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,
     confirmRestore,
     download, pickAndRestore, openFlow

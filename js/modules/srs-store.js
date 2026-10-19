@@ -170,5 +170,5 @@
     QB.Storage.remove(keyOf(bankId));
   }
 
-  QB.SRSStore = { getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear, keyFor, ratingForResult, collectGraded };
+  QB.SRSStore = { getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear, keyFor, ratingForResult, collectGraded, readMap, writeMap };
 })(window);

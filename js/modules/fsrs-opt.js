@@ -62,8 +62,9 @@
     return bankId ? all.filter((e) => e && e.b === bankId) : all;
   }
 
+  /** 追加评分日志（补 id/时间戳、FIFO 裁剪），返回追加后的完整日志（数据层 revlog.append 复用） */
   function appendLog(entries) {
-    if (!entries || !entries.length) return;
+    if (!entries || !entries.length) return readLog();
     const list = readLog();
     const now = Date.now();
     entries.forEach((e) => {
@@ -78,6 +79,7 @@
     });
     if (list.length > LOG_LIMIT) list.splice(0, list.length - LOG_LIMIT);
     QB.Storage.setSync(QB.KEYS.revlog, list);
+    return list;
   }
 
   /* ---------------- 权重存取（全局 + 按题库 preset） ----------------
@@ -203,6 +205,8 @@
     // 存储与训练
     readLog, readLogForScope, appendLog, getActiveWeights, getWeightsMeta, saveWeights, resetWeights,
     shouldRetrain, warmWeightsFor,
+    // 存储原语（数据层 weights 仓库复用，见 js/data/local-adapter.js）
+    normalizeStore, readStore, writeStore,
     train, trainAsync,
     // 纯函数透传（历史调用方/测试用，逻辑唯一来源为 Core）
     buildSequences: Core.buildSequences,

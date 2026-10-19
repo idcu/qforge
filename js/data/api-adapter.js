@@ -28,16 +28,12 @@
     };
   }
 
-  const NOT_IMPL_METHODS = [
-    ['banks', QB.CONTRACTS.banks],
-    ['questions', QB.CONTRACTS.questions],
-    ['progress', QB.CONTRACTS.progress]
-  ];
-
+  // 未实现骨架按 QB.CONTRACTS **自动派生**（新增契约组无需改本文件）：
+  // 后端未就绪时调用即诚实拒绝，不会静默返回假数据。
   const adapter = { ROUTES };
-  NOT_IMPL_METHODS.forEach(([group, methods]) => {
+  Object.keys(QB.CONTRACTS).forEach((group) => {
     adapter[group] = {};
-    methods.forEach((m) => {
+    QB.CONTRACTS[group].forEach((m) => {
       adapter[group][m] = notImplemented(group + '.' + m);
     });
   });

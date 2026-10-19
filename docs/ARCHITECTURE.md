@@ -65,10 +65,10 @@
 ### 3.3 数据访问层（data）
 | 文件 | 职责 |
 | --- | --- |
-| `data/contracts.js` | `QB.KEYS`（逻辑键，含题目分片键 `questionsMeta`/`questionShard`）、`QB.CONTRACTS`（接口方法名）、`QB.assertAdapter`（自检） |
-| `data/local-adapter.js` | 三个 Repository 的 LocalStorage 实现；`insertMany` 是导入落库唯一入口。单库题目按 `LIMITS.QUESTIONS_SHARD_SIZE`（200）分片存 `questions:<bankId>:<i>` + 清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`），单题增删改只重写所在分片、列表按区间只解析覆盖分片；分片读写收敛为公共抽象 **`QB.QuestionShards`**（`readAll/readRange/count/writeAll/append/locate/clear` 等，供 migrate 复用，双重实现者禁止各自复制） |
-| `data/api-adapter.js` | REST 实现骨架（`notImplemented`），定义方法签名供后续填充 |
-| `data/db.js` | 门面：`init()` 按 `DATA_BACKEND` 选适配器；**`loadQuestions(bankId)` 整库读缓存**（按 `bankId` + 适配器写修订号失效，供各视图按需装载，命中即复用同一数组、0 分片解析）；`buildIndex(bankId)` 复用该缓存建 contentHash 索引 |
+| `data/contracts.js` | `QB.KEYS`（逻辑键，含题目分片键 `questionsMeta`/`questionShard`）、`QB.CONTRACTS`（**7 组**接口方法名：banks/questions/progress + 阶段 C 新增 reviews/revlog/weights/backup，只暴露存储原语）、`QB.ASSET_DRIVER_CONTRACT`（资产驱动 6 方法，独立于仓库契约以避免「仓库→驱动→仓库」自递归）、`QB.assertAdapter`/`QB.assertDriver`（自检） |
+| `data/local-adapter.js` | 七个 Repository 的 LocalStorage 实现；`insertMany` 是导入落库唯一入口。单库题目按 `LIMITS.QUESTIONS_SHARD_SIZE`（200）分片存 `questions:<bankId>:<i>` + 清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`），单题增删改只重写所在分片、列表按区间只解析覆盖分片；分片读写收敛为公共抽象 **`QB.QuestionShards`**（`readAll/readRange/count/writeAll/append/locate/clear` 等，供 migrate 复用，双重实现者禁止各自复制）。阶段 C 的 `reviews/revlog/weights/backup` **委托既有领域模块导出**（`SRSStore.readMap/writeMap`、`FSRSOpt.readLog/appendLog/readStore/writeStore/normalizeStore/resetWeights`、`Backup.readAllData/applyData`），零算法复制；删库级联收敛为私有唯一入口 `cascadeDelete(bankId)`（题目分片 + 错题/收藏/复习/评分日志/权重 preset/历史/当前库） |
+| `data/api-adapter.js` | REST 实现：照 `QB.CONTRACTS` 对接 `API-CONTRACT.md`；**未实现方法骨架按 `QB.CONTRACTS` 自动派生**（新增契约组无需改本文件），后端未就绪时调用即诚实拒绝 |
+| `data/db.js` | 门面：`init()` 按 `DATA_BACKEND` 选适配器并暴露 **7 个仓库**（banks/questions/progress/reviews/revlog/weights/backup）；**`loadQuestions(bankId)` 整库读缓存**（按 `bankId` + 适配器写修订号失效，供各视图按需装载，命中即复用同一数组、0 分片解析）；`buildIndex(bankId)` 复用该缓存建 contentHash 索引 |
 | `data/sample-data.js` | `QB.SAMPLE`：18 道内置样例（判断/单选/多选/填空/简答各 3 + 不定项 3，覆盖六题型） |
 
 ### 3.4 导入器（importers）
@@ -217,7 +217,7 @@ Exporters.openFlow({kind, bank})
 
 1. 本期 LocalStorage 逻辑键与数据库表**字段一一对应**（见 [DATABASE.md](DATABASE.md)）。
 2. 后端就绪后：
-   - 实现 `api-adapter.js`（照 `QB.CONTRACTS` 的方法签名对接 REST，见 [API-CONTRACT.md](API-CONTRACT.md)）。
+   - 实现 `api-adapter.js`（照 `QB.CONTRACTS` 的 **7 组**方法签名对接 REST，见 [API-CONTRACT.md](API-CONTRACT.md)）；资产走 `QB.ASSET_DRIVER_CONTRACT`（`QB.Assets.useDriver`）。
    - 将 `config.js` 的 `DATA_BACKEND` 改为 `'api'`，并配置 `NETWORK.API_BASE_URL`（留空走同源相对路径）。
    - 前端 UI 代码**无需改动**（所有仓库方法早已是 Promise 风格）。
 3. 存量数据迁移：写一次性脚本读取 `qb:*` 键，按表结构 POST 到后端。

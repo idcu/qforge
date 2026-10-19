@@ -161,7 +161,17 @@
 | `progress.favoriteList/favoriteToggle/favoriteClear` | Progress 的 favorites 端点 |
 | `progress.historyList/historyAdd/historyRemove/historyClear` | history 端点 |
 | `progress.sessionSave/sessionLoad/sessionClear` | session 端点 |
+| `reviews.list(bankId)` / `reviews.save(bankId, map)` / `reviews.remove(bankId)` | `GET`/`PUT`/`DELETE` `§6 /api/banks/{id}/reviews` |
+| `revlog.list()` / `revlog.append(entries)` | `GET`/`POST` `§6 /api/revlog` |
+| `weights.read()` / `weights.write(store)` / `weights.remove(scope)` | `GET`/`PUT`/`DELETE` `§6 /api/fsrs-weights[/{scope}]` |
+| `backup.export()` / `backup.import({data}, mode)` | `GET`/`POST` `§7 /api/backup?mode=` |
+| 资产驱动（`QB.ASSET_DRIVER_CONTRACT`：`put/get/all/ids/remove/clear`） | `§8 /api/assets`（原始字节上传，见下） |
+| `QB.Assets.useDriver(restDriver)` | 由 `QB.DB.init()` 在 `DATA_BACKEND='api'` 时装配 |
 
-> SRS（§6）、备份（§7）、资产（§8）三组能力当前在前端分别由 `SRSStore/fsrs-opt`、`Backup`、`Assets` 直接持有存储，**不在 `QB.CONTRACTS` 三仓库方法表内**；接入后端时需同步扩展 `contracts.js` 与 `api-adapter.js`，届时 UI 改动仍限制在这些模块的存储调用点。
+> **契约归属（2026-10-19 阶段 C 起）**：`reviews/revlog/weights/backup` 已进入 `QB.CONTRACTS`（只暴露「存储原语」，算法留在领域模块）；**资产不进 `QB.CONTRACTS`**，改走独立的 `QB.ASSET_DRIVER_CONTRACT`（避免 `DB.init → useDriver → getDriver` 自递归）。
+>
+> **接线进度（诚实标注）**：契约与两个适配器已就位；`srs-store.js`/`fsrs-opt.js`/`backup.js` 的调用点改为「经 `QB.DB.*` 异步仓库」随参考后端一并落地（同一阶段内完成，届时 UI 仅在这些模块的存储调用处加 `await`）。
+>
+> 资产上传为**原始字节**（`POST /api/assets`，body=bytes、`Content-Type`=图片 MIME），**不使用 multipart**；服务端按 FNV-1a 32 + 长度算 id（算法冻结见 §8，实现须与 `js/utils/assets.js::idFor` 一致）。含图备份的 `.qfbk`（ZIP）**仍在客户端组装**（图片经 §8 端点进出）。
 >
 > 切换后端：`config.js` 设 `DATA_BACKEND: 'api'` 且 `API_BASE_URL` 指向服务端即可。
