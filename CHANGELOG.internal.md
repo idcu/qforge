@@ -14,6 +14,30 @@
 
 ---
 
+## 9d537c5 · feat(srs): FSRS-4.5 → FSRS-6（21 权重＋可学习衰减＋opt-in fuzz），逐项对齐 py-fsrs 6.3.2（阶段 B · 追算法 P0）
+
+**核心改动**
+- `fsrs.js` 重写为 **FSRS-6**，公式与 21 个默认权重逐项对齐官方（py-fsrs 6.3.2 `fsrs/scheduler.py` / fsrs-rs 6.6.2）：`DECAY=-w20`、`FACTOR=0.9^(1/DECAY)-1`（保证 R(S,S)=0.9）；指数式初始难度 `D0=w4-e^(w5(r-1))+1`；难度更新加线性阻尼、均值回归目标改为**未钳制的 D0(4)**；遗忘稳定度加 `min(…, S/e^(w17·w18))` 上限；新增同日 `short-term` 稳定度；`STABILITY_MIN=0.001`；间隔**整日 round**（下限 1、上限 36500）；**移除 S/D 的 2 位小数取整**（对齐官方全精度）。
+- 新增 `applyFuzz`（官方 `FUZZ_RANGES` 2.5/7/20 天分段 + 确定性 mulberry32），经 `review(..., { fuzzSeed })` **显式启用（默认关）**：保证「间隔反解 R=目标保留率」定义成立且同数据可复现。`review` 增第 5 参 `opts`。
+- `fsrs-train-core.js`：`BOUNDS` **17→21**（逐项对齐官方 `LOWER/UPPER_BOUNDS_PARAMETERS`）；`loss` 内 `powerDecay` **改传当前权重**（修 FSRS-6 下 loss 与重放不自洽的缺陷——旧实现对全部权重共用官方默认衰减）。
+- 公共抽象：`fsrs.js` 新增可复用纯函数 `decayOf/factorOf/nextStability/recallStability/forgetStability/stabilityShortTerm/nextIntervalDays/applyFuzz/retrievability`（原导出全部保留，**无公共 API 破坏、无新增依赖**）；BOUNDS 由 17 维硬边界改为 21 维官方边界。旧 17 维 FSRS-4.5 权重由 `fsrs-opt` 按长度自动拒绝并回落官方默认（无需迁移）。
+- 测试：`fsrs.test.mjs` **77→135**（py-fsrs 6.3.2 黄金对照 + 衰减校准 + 整日反解 + 同日阈值 + fuzz 区间/分布/确定性）；`fsrs-opt.test.mjs` 合成夹具由「±40% 随机扰动」改为**可解释的显著偏离真权重**（见下）；`srs.test.mjs` 期望值同步（good 初始稳定度 2.4→2.3065、间隔改为整日）。`scripts/bench.mjs` 新增 FSRS-6 调度/训练打点。
+- 文档同步（同一提交）：`docs/SRS.md`（§1/§5 公式与权重全章升级 FSRS-6、§8.3/§8.5/§8.6、§10 API 与测试数、§11 边界）、`ARCHITECTURE.md`、`DATABASE.md`、`COMPETITORS.md`、`user-guide.md`、`README.md`、`DEVELOPMENT.md`。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **20 项（19 套件 + smoke）2661/2661 断言全通过**，UTC 与 Asia/Shanghai 双时区均 **0 失败**（较上一版 2603 增 +58：fsrs +58）。分套件：冒烟 461、XML 39、导出 160、Office 1148、编辑器 29、富文本 47、资产 62、组卷 18、UI 渲染 87、DOM 增量 40、来源 29、**FSRS 135**、FSRS 优化器 91、SRS 60、存储 14、备份 25、迁移 55、分片 82、WebDAV 32、PWA 47。
+- **黄金对照（py-fsrs 6.3.2 独立复算，全部有自动化断言）**：`S=10,D=5,R=0.9,good → S'=32.026729`（4.5 版 29.01）；`R=1` 不增长；`D0` = 6.4133 / 5.112171 / 2.118104 / 1（未钳制 D0(4)=**-4.771631**）；`D'(5)` = 8.341762 / 6.665995 / 4.990228 / 3.314461；`S'f(5,10,0.9)=1.391987`；同日 `S's(10)` = 3.051249 / 10 / 10 / 15.534308。
+- **优化器留出门控**：可解释显著偏离真权重（初始稳定度×1.5、w6×0.5、召回增长×1.3、hard 惩罚×0.6）合成日志 800 卡×5 评（3200 相邻样本，640 留出样本）→ 留出集 logloss 改善 **2.84%**（超 0.2% 门控），训练 loss 0.2926 与采纳权重自洽（1e-9）；默认权重自生成日志无显著改善时诚实拒绝不写盘；同数据复训逐位一致。
+- bench（`node --expose-gc scripts/bench.mjs`，采样中位数）：`FSRS.review` 单次调度 / 带 fuzz / 新卡首次均 **< 0.01 ms**；优化器 `computeTrain` **4183.87 ms**（min 4006.65 / max 4230.67）@ 3200 样本 / 150 迭代 / 21 权重数值梯度；heapUsed 增量 **+2.55 MB**（5.19→7.74）。
+
+**遗留 TODO / 风险**
+- **优化器单次训练成本显著上升**（21 权重中心差分 ×2 + 迭代内 loss）：实测中位约 **4.2 s**（旧 17 权重更低）。仍在 Worker `WORKER_TIMEOUT_MS=30 s` 保险内、且为离线一键触发（http(s) 走 Worker），未触发超时；**P1 增量训练**为既定优化项。
+- **fuzz 默认关闭（设计取舍）**：生产调度保持确定性；能力已实现且经测试覆盖区间/分布/确定性，但**尚未接入 `srs-store` 生产路径**（如需 Anki 式抖动需另行决策开启口径）。已在 SRS.md §11 如实标注。
+- 本轮未做**浏览器实机**回环（纯函数改动；bench 仅量字符串/纯函数侧）。如需端到端口径需补浏览器打点。
+- 本轮仅 `git commit`，**未 push**（等用户明确指示）。
+
+---
+
 ## 4389bd7 · perf(ui): 答题卡格级增量——区域细化 frame+sub，整卡 <details> 不再重建（阶段 A）
 
 **核心改动**
