@@ -14,6 +14,53 @@
 
 ---
 
+## da7c197 · fix(backup): 备份载荷跨布局自动转换（后端布局 ⇄ 本地布局）
+
+**缺陷定位（真实复现，非推测）**
+- 症状：真机验收中发现——local 模式下「从备份恢复」一个来自 api 后端的备份文件后，首页显示「测试题库 · **共 0 题**」，且**零报错 / 零警告**。
+- 根因：`QB.Backup.applyBackup` / `applyData` **不校验载荷格式**，直接按「逻辑键 → 值」写入。后端布局的 7 个无前缀键里 `banks` 与本地**同名**（本地也读 `banks`）→ 题库名照常显示；而题目/进度/历史在后端布局是 `questions:{bankId:[]}` / `progress:{...}` / `history` 等**本地读不到的键**（本地读 `questions:<bankId>:meta`+分片、`user:*`）→ 表现为「题库在、题目 0 题」。反向（本地备份 → api 模式 `POST /api/backup`）同样错配。
+- 证据留档：`C:\Users\Administrator\Desktop\qforge-api-format-backup.json`（10247 B，**14 键**：后端 7 键 + 本机 `meta:*` + 本地布局残留的缓存产物），由 app 自身「WebDAV 上传」链路导出，可稳定复现。
+
+**核心改动**
+- 新增 `js/data/wire.js`：`QB.Wire` = wire(snake_case) ↔ 本地(camelCase) **字段映射唯一实现**（`bank/question/wrong/favorite/attempt` 各 `from`/`to`，含材料题 `children` 递归与 `content_hash`）；`api-adapter.js` 的 `fromWire*` 改为委托（**消除重复映射**）。
+- `js/modules/backup.js`：新增纯函数 `isServerFormat` / `isLocalFormat` / `serverToLocal` / `localToServer`；`applyBackup` 按 `QB.DB.backend` 判方向——local + 后端布局 → `serverToLocal`，api + 本地布局 → `localToServer`，已是本端布局则透传。题目 `{bankId:[题]}` ⇄ `questions:<bankId>:meta` + 分片（**切分复用 `QB.QuestionShards.plan`、反向重组复用 `concatShards`**）；进度按库拆成 `user:wrong|fav|review:<bankId>`；历史/会话/日志/权重落到对应本地键；本机专有 `meta:*` 偏好直通，后端布局缺这些键时**保留本机现值**（否则覆盖恢复会清空主题/WebDAV 配置）。
+- `js/data/local-adapter.js`：`QB.QuestionShards` 提取纯函数 `plan`（切分工规则）、`parseMeta`（清单解析）、`concatShards`（按序拼接），原 `writeAll` / `metaOf` / `readAll` 改为复用（**零行为变更、零分片逻辑复制**）。
+- `index.html` 与 `scripts/_harness.mjs` 加载 `js/data/wire.js`；`scripts/backup.test.mjs` 新增 65 项（25 → **90**）。
+
+**新增 / 调整的公共抽象（本次）**
+| 抽象 | 位置 | 影响范围 |
+| --- | --- | --- |
+| `QB.Wire`（`bank/question/wrong/favorite/attempt` 各 `from`/`to`） | `js/data/wire.js`（新增） | `api-adapter` 的 `fromWire*` 改为委托（**行为不变**）；`backup.js` 跨布局转换复用。api-adapter 的 `toWire*`（请求体塑形，服务端补戳 id）用途不同，**未合并** |
+| `QB.Backup.isServerFormat/isLocalFormat/serverToLocal/localToServer` | `js/modules/backup.js`（新增导出） | 新公共面（纯函数），供 `applyBackup` 与测试直接调用 |
+| `QB.QuestionShards.plan/parseMeta/concatShards` | `js/data/local-adapter.js`（新增；从既有 `writeAll`/`metaOf`/`readAll` 提取） | `writeAll`/`metaOf`/`readAll` 内部改为复用（**行为不变**）；`backup.js` 复用。既有调用方（migrate/local-adapter/shard.test）零改动 |
+
+**验证数据（Node v24.14.0 / Windows，2026-10-19 实跑）**
+- **22 个测试运行项 2962/2962 断言通过**，UTC 与 Asia/Shanghai 双时区均 0 失败（2897 → 2962：backup.test 25 → **90**，+65 覆盖识别/双向转换/往返一致/`applyBackup` 路由回归）。
+- **真实留档载荷 Node 重放**（非构造夹具）：`applyBackup` → 1 库「测试题库」/ **18 题**（判断·单选·多选·不定项·填空·简答**各 3**）/ 首题「串联电路中，各处的电流相等。」/ 历史 1 / revlog 2 / 会话 `currentIndex=1` / WebDAV 配置保留（`{baseUrl,user}`）/ 分片清单 `{v:3,shardSize:200,count:18,sizes:[18]}` / **本机无后端残留键**（`questions`、`progress` 均为 null）。
+- **真机（浏览器 127.0.0.1:8796）**：清 SW + Cache Storage 后「从备份恢复」人工点选该文件 → 覆盖恢复 toast「**已恢复 12 个数据键**」→ 刷新后首页「**测试题库 · 共 18 题**」、题目统计齐全（六题型各 3）/ 控制台 **0 error / 0 warning**。
+- **转换耗时（3000 题单库，实测）**：`serverToLocal` **1.36 ms**、`localToServer` **0.86 ms**（24 键 → 7 键）；转换在恢复路径上一次完成，非热路径。
+- 首屏静态体积：**185.9 KB gzip / 522.8 KB raw**（61 文件 / 55 内联 js，随 `wire.js` 新增重测；旧值 178.8 KB 为更早时点口径）。
+
+**过程记录（如实标注，含一次首轮失败）**
+- 首轮真机重放**失败**：恢复 toast「已恢复 7 个数据键」、刷新后仍 0 题、控制台无报错。诊断得页面实际在跑**旧版 JS**（`navigator.serviceWorker.controller=true`、Cache Storage 名 `qforge-v3`）；执行「注销 SW + 清空 Cache Storage + 硬刷新」后确认 `QB.Wire` 已在位，同一操作即得「12 个数据键」→ 18 题。**属 `sw.js` stale-while-revalidate 的已知一次刷新延迟**（与 97b0046 记录同类），非功能缺陷；但该延迟会让「升级后首次加载」表现为修复未生效（见遗留项）。
+- 本轮**由人工接管**（`browser_waiting_for_user_interaction`）点选备份文件，补齐 97b0046 遗留的「`pickAndRestore` 文件选取 → 读字节」未验段。
+
+**子任务计时（实测，`scripts/task-timer.mjs`；数据源 `.qforge-timings.json`）**
+
+| 子任务 | 内容 | 耗时(min) |
+| --- | --- | --- |
+| t1 | 缺陷定位 + 载荷识别/双向转换 + 公共抽象提取 + 测试（65 项）+ 文档同步（7 份） | 23.3 |
+| t2 | CHANGELOG 回填 + 两段提交 | 1.2 |
+| **合计** | （已完成 2 项） | **24.6** |
+
+**遗留 TODO / 风险**
+- **`sw.js` 一次刷新延迟**：升级后首次加载仍可能由 SW 返回旧 JS（本轮实测需手动清 SW/缓存才生效）。如需确定性生效，可在 `sw.js` 提升 `CACHE` 版本号——代价是全体用户一次性重下全部资源，**本轮未做**（权衡记录于此，见 API-CONTRACT §9）。
+- **api 方向未接真实后端端到端**：本地备份 → api 模式的转换由 `backup.test` 的路由段覆盖（stub `DB.backup.import` 捕获载荷并断言 7 键/snake_case/题目归集），REST 传输与 `POST /api/backup` 服务端语义已由 `api-backend.test`（122 项）覆盖；但**未**跑「真实 `serve-api.mjs` 上 POST 本地备份再读回」的整链 E2E。
+- 第三方后端若自定义 `data` 口径，需与前端约定同样的两种布局语义（已在 API-CONTRACT §7 注明：可只支持其一但必须文档化）。
+- 本机专有 `meta:*` 偏好在「后端布局载荷」中**无对应字段**，恢复时按「保留本机现值」处理；跨设备迁移这类偏好仍不经后端备份（属后端布局的固有边界）。
+
+---
+
 ## 97b0046 · fix(sync-dav): 响应体消费修复 + WebDAV 真机验收端点；Backup/WebDAV 恢复真机验证通过
 
 **核心改动**
