@@ -1,2 +1,5 @@
 # 参考后端数据目录（scripts/serve-api.mjs 运行时生成，勿入库）
 .qforge-data/
+
+# 开发子任务计时记录（scripts/task-timer.mjs 生成，勿入库）
+.qforge-timings.json

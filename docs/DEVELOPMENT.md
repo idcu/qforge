@@ -144,9 +144,24 @@ bench 全程 heapUsed：5.26 → 7.81 MB（**+2.54 MB**；`--expose-gc` 连跑�
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 
+### 3.1 开发子任务计时埋点（`scripts/task-timer.mjs`）
+
+`bench.mjs` 量的是**代码热路径耗时**；开发流程要求的「每个子任务耗时 / subtask 明细表」由 `task-timer.mjs` 量**开发墙钟**（谁在什么时间开始/结束）：
+
+```bash
+node scripts/task-timer.mjs reset                       # 开新会话前清空
+node scripts/task-timer.mjs start s4-timer "计时埋点 CLI + 文档"
+node scripts/task-timer.mjs end   s4-timer              # 结算耗时并打印
+node scripts/task-timer.mjs report                      # 明细表 + 已完成合计 + 会话墙钟
+```
+
+- 记录落 `<工程根>/.qforge-timings.json`（已 gitignore）：**仅本地开发用，不入库、不参与构建、不被应用运行时读取**。
+- 用途：任务收尾报告的「subtask 时间明细表」以**实测**为准（对应红线「没有数据就是没做」），不凭记忆估算。
+- 数据误差声明：测量点是「两次 CLI 调用之间」，包含开发者在该子任务上的全部时间（含思考/工具往返），非纯编码时长。
+
 ## 4. CI
 
-`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 20 个套件。时区矩阵用于拦截自然日/到期时间断言的时区回归。
+`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 **22 个运行项（冒烟 + 21 套件）**。时区矩阵用于拦截自然日/到期时间断言的时区回归。
 
 ## 5. 扩展指南（最小改动路径）
 
