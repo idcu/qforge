@@ -14,6 +14,60 @@
 
 ---
 
+## d258b23 · feat(api): 参考后端 serve-api.mjs + api-adapter 真实实现 + 资产 REST 驱动 + E2E parity（阶段 C · S2+S3）
+
+> S2（后端）与 S3（适配器）的验证共用同一 E2E 套件，故合并为一个提交（如实说明）。
+
+**核心改动**
+- 新增 `scripts/lib/static-server.mjs`（MIME / `resolveSafePath` 越界守卫 / `sendFile`），`scripts/serve.mjs` 改为调用它 —— **消除两处复制**，行为不变。
+- 新增 `scripts/serve-api.mjs`：静态文件 + `/api/*`（照 API-CONTRACT §2–§8），数据落 `.qforge-data/`（JSON + **tmp+rename 原子写** + 内存缓存），默认 `127.0.0.1:8788`，仅在直接执行时 `listen`（测试可 `import`）；服务端实现与 `local-adapter.cascadeDelete` **同语义**的删库级联；资产走**原始字节**（不支持 multipart，如实拒绝 400/NOT_IMPLEMENTED）。
+- 新增 `.gitignore`（**仓库此前没有该文件**）忽略 `.qforge-data/`。
+- CI（`.github/workflows/test.yml`）：**补上此前缺失的两步** `shard.test.mjs`、`dom-patch.test.mjs`（此前 CI 仅 19 步，与仓库「20 套件」口径不符），并新增 `contract.test.mjs`、`api-backend.test.mjs` 两步。
+- `js/data/api-adapter.js`：真实 REST 实现（7 组仓库 + `assetDriver()`），`useFetch` 注入、`NETWORK.API_TIMEOUT_MS` 超时、统一错误体（`.status/.code`）、camelCase↔snake_case **wire 映射表**、`count` 按库缓存、`revision()` 客户端写修订号。
+- `js/data/db.js`：**仅 api 模式**注入 `QB.ApiAdapter.assetDriver()`（`QB.ASSET_DRIVER_CONTRACT` 校验）；local 模式保持默认 IDB 驱动不注入（避免覆盖测试注入的 memory 驱动、避免 getDriver 自递归）。
+- `js/config.js`：新增**配置层**后端覆盖（`window.__QF_BACKEND__`/`__QF_API__` 或 `?backend=api&api=…`），未提供时不改变默认 `local`（既有行为不变）。
+- 测试：新增 `scripts/api-backend.test.mjs`（**117 项**）。文档：`API-CONTRACT` §6/§7/§8/§9、`DEVELOPMENT` §1/§2、`README` 命令表与断言数。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **22 个测试运行项 2872/2872 断言通过**（2755 + 新增 117），本地模式**零回归**。
+- 后端 E2E：真实 HTTP 起服务覆盖 banks CRUD/错误体(404/405/`{error:{code}}`)/路径穿越 403；questions 单题+`batch`(add 去重 1/空题干跳过 1/delete)+`import` JSON 分支（multipart 400 NOT_IMPLEMENTED）；wrong 重复 `wrong_count+1`、favorites toggle、history 按库、session 404/存取/清除；reviews 整表/revlog 补 id·保留 `b`/weights 整仓；backup `merge` 覆盖指定段、`replace` 清旧键；资产原始字节（id `asbfe534e8-5`，**两端 FNV 一致**、同内容幂等同 id）；**同目录重启后** banks.json 与 `questions/<id>.json` 仍在、revlog 2 条仍在、无 `.tmp` 残留。
+- parity（`DATA_BACKEND='api'` + 适配器指向真实服务，用与 UI 相同的仓库调用面）：banks/questions/progress/reviews/revlog/weights/backup/assets 全部往返；**写操作令 `revision()` +1 且写后 `loadQuestions` 读到新数据（缓存正确失效、无旧数据残留）**；级联删库同语义。
+- 后端不可达（`127.0.0.1:1`）时适配器**诚实抛错**，不静默返回假数据。
+
+**与批准计划的偏差（如实标注，依据均为正确性/实测）**
+1. 计划的「api 模式 `revision()` 返回**非数值**使整库读缓存恒不命中」**经验证有缺陷**：`db.js` 会把非数值折算为 `-1`，恰是缓存初值 → 首次装载后**永久命中旧数据**。改为返回**客户端写修订号**（写 +1），并以「写后读到新数据」断言替代原断言。
+2. 计划未预见的两处真实缺陷并修复：服务端 `history` 需按 **wire 的 `bank_id`** 过滤（原按 `bankId` 恒空）；服务端级联同步改用 `h.bank_id`。
+3. 计划 S2/S3 分两次提交，因验证共用同一套件而**合并为一次**提交。
+
+**遗留 TODO / 风险**
+- 参考后端**无鉴权/单用户**；`reviews` 为整表 **last-write-wins**（「多端冲突可分辨且不丢数据」属阶段 C 后续项，已在 API-CONTRACT §6 显式标注）。
+- **不支持 multipart 上传**（资产原始字节）；`POST /api/banks/{id}/import` 仅 JSON 分支；`GET /api/reviews/due` 与 `POST /api/fsrs-weights/train` **未实现**（前端本地算/本地训，如实标注）。
+- api 模式 `questions.list` 的 `offset/limit` 映射为服务端 `page/size`（offset 非 limit 整数倍时语义有差）；`usageBytes` 在 api 模式仅反映本地缓存占用（文档标注）。
+- `.trae/`（计划文档目录）与 `.trae-html-share-packages/`、`qforge-evaluation/` 仍为未跟踪目录，未纳入本次提交。
+- 本轮仅 `git commit`，**未 push**（等用户明确指示）。
+
+---
+
+## f4b08a6 · feat(data): 契约层扩展至 7 组 + local-adapter 四组存储原语 + 删库级联唯一入口（阶段 C · S1）
+
+**核心改动**
+- `js/data/contracts.js`：`QB.CONTRACTS` 由 3 组扩为 **7 组**，新增 `reviews:[list,save,remove]`、`revlog:[list,append]`、`weights:[read,write,remove]`、`backup:[export,import]`——**只暴露存储原语**，算法/门控/保留策略留在领域模块；新增 `QB.ASSET_DRIVER_CONTRACT`（6 方法）与 `QB.assertDriver`。**资产不进 CONTRACTS**：避免 `DB.init → useDriver → getDriver` 自递归与测试驱动次序冲突。
+- `js/data/local-adapter.js`：新增四组仓库实现，**委托既有领域模块导出**（`SRSStore.readMap/writeMap`、`FSRSOpt.readLog/appendLog/readStore/writeStore/normalizeStore/resetWeights`、`Backup.readAllData/applyData`）——**零算法复制**；删库级联收敛为私有唯一入口 `cascadeDelete(bankId)`。
+- `js/data/api-adapter.js`：未实现骨架改为按 `QB.CONTRACTS` **自动派生**（此后新增契约组无需改本文件）。
+- `js/data/db.js`：`init()` 暴露 **7 个仓库**。
+- 为复用提升的公共抽象（无新依赖、无公共 API 破坏）：`backup.js` 抽出 `readAllData`/`applyData`（`buildBackup`/`applyBackup` 与数据层共用同一实现）；`srs-store` 导出 `readMap`/`writeMap`；`fsrs-opt` 导出 `normalizeStore`/`readStore`/`writeStore`，并让 `appendLog` 返回追加后的完整日志（**返回值是新增信息，原调用方忽略返回值，行为不变**）。
+- 测试：新增 `scripts/contract.test.mjs`（**52 项**）。文档：`API-CONTRACT` §9、`ARCHITECTURE` §3.3/§7、`DEVELOPMENT` 测试矩阵、`README` 命令与断言数。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **21 个测试运行项 2755/2755 通过**（2703 + 52），**无回归**。
+- contract.test 覆盖：契约/驱动契约清单、`assertAdapter`/`assertDriver` 精确报缺（`banks.*`、`reviews.save`、`get`）、四组仓库读写语义与领域模块同源、**`cascadeDelete` 全键清理**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库；他库日志与旧无归属日志保留）+ 非级联路径。
+
+**遗留 TODO / 风险**
+- S1 仅落「契约 + 本地实现」；`srs-store`/`fsrs-opt`/`backup` 的调用点仍直连 `QB.Storage`，改为「经 `QB.DB.*` 异步仓库」在 S4 完成（届时也一并删除领域模块内的重复存储逻辑）。
+- `backup.export/import` 的载荷口径由后端定义（api 模式为后端口径），本地模式为「全部逻辑键」——已在 API-CONTRACT §7 标注。
+
+---
+
 ## bb66bf1 · feat(rich-text): 轻量公式子集渲染器——零依赖 \frac/\sqrt + 上下标（阶段 B · P2）
 
 **核心改动**
