@@ -365,10 +365,10 @@
     return new Promise((resolve) => {
       const finish = () => { UI.closeModal(); resolve(); };
 
-    /** 全量读取后在客户端按 题型/标签/难度/关键词 过滤再分页（与搜索页同一套 SearchFilter） */
+    /** 全量读取后在客户端按 题型/标签/难度/关键词 过滤再分页（与搜索页同一套 SearchFilter）。
+     *  读取复用 QB.DB.loadQuestions 整库缓存：仅当题库或题目被改动时才重新解析。 */
     async function fetchPage() {
-      const res = await QB.DB.questions.list(bank.id, {});
-      const all = res.items || [];
+      const { items: all } = await QB.DB.loadQuestions(bank.id);
       let list = QB.SearchFilter.filter(all, {
         type: state.type || undefined,
         tag: state.tag || undefined,
@@ -422,7 +422,7 @@
 
     function show() {
     // 标签/难度候选项来自当前题库
-    const allTagsPromise = QB.DB.questions.list(bank.id, {}).then((r) => QB.SearchFilter.tags(r.items || []));
+    const allTagsPromise = QB.DB.loadQuestions(bank.id).then((r) => QB.SearchFilter.tags(r.items || []));
     allTagsPromise.then((allTags) => {
       const tagSel = document.querySelector('[data-qm="tag"]');
       if (!tagSel) return;

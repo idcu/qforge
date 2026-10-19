@@ -21,7 +21,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
 const ROOT = path.resolve(QB_DIR, '..');
 
-const { QB } = await createHarness(QB_DIR);
+const { QB, window } = await createHarness(QB_DIR);
+
+/* 额外加载纯 HTML 渲染器：ui-renderer 只产出 HTML 字符串，不需要真实 DOM，仅需 location
+   （与 scripts/ui-renderer.test.mjs 同一加载方式，不改共享 harness）；用于量测「首屏/答题」渲染侧成本。 */
+globalThis.location = { protocol: 'https:', href: 'https://qforge.local/' };
+window.location = globalThis.location;
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
+const UI = QB.UIRenderer;
 
 /* ---------- 计时与内存工具 ---------- */
 const N = 10; // 每项重复次数，取中位数以抵消抖动
@@ -232,6 +239,53 @@ row('规模库 insertMany overwrite 全量重写（对照，含落盘）', await
   await QB.DB.questions.insertMany(bigBank.id, bigQs, { dedupe: false, mode: 'overwrite' });
   QB.Storage.forceSync();
 }, 3), '重写全部分片（写放大 O(库规模)）');
+/* ---------- 11b. UI 级按需加载（阶段 A 验收）：装载缓存命中 / 写后失效 ---------- */
+let uiLoaded;
+row('规模库 装载·写后首次（loadQuestions 冷读+refresh，等价改造前每次 render）', await timed(async () => {
+  coldRead();
+  uiLoaded = await QB.DB.loadQuestions(bigBank.id, { refresh: true });
+  QB.Storage.forceSync();
+}, 30), '解析 ' + uiLoaded.total + ' 题');
+const uiRefreshMs = report[report.length - 1].median;
+
+await QB.DB.loadQuestions(bigBank.id); // 预热缓存
+row('规模库 装载·缓存命中（loadQuestions 二次调用）', await timed(async () => {
+  uiLoaded = await QB.DB.loadQuestions(bigBank.id);
+}, 200), '复用缓存数组，0 分片解析');
+const uiHitMs = report[report.length - 1].median;
+
+row('规模库 答题交互·视图装载（banks.list+get+count，无整库解析）', await timed(async () => {
+  await QB.DB.banks.list();
+  await QB.DB.banks.get(bigBank.id);
+  await QB.DB.questions.count(bigBank.id);
+}, 200), '改造后每次 render 的数据成本（对照：改造前为整库全量读取）');
+const uiRenderMs = report[report.length - 1].median;
+
+/* ---------- 11c. UI 渲染成本（HTML 字符串构建；不含浏览器 DOM 解析/布局） ---------- */
+const counts540 = { total: idx.items.length, byType: {}, dueReview: 0 };
+QB.CONFIG.TYPES.forEach((t) => { counts540.byType[t] = idx.items.filter((q) => q.type === t).length; });
+let homeHtml540;
+row('首页渲染 HTML 构建（540 题库，不含题目列表）', await timed(() => {
+  homeHtml540 = UI.renderHome(benchBank, counts540);
+}, 50), 'HTML ' + homeHtml540.length + ' 字符');
+const homeHtml540Len = homeHtml540.length;
+
+const counts3k = { total: bigAll.length, byType: {}, dueReview: 0 };
+QB.CONFIG.TYPES.forEach((t) => { counts3k.byType[t] = bigAll.filter((q) => q.type === t).length; });
+let homeHtml3k;
+row('首页渲染 HTML 构建（3000 题库，与题库规模无关）', await timed(() => {
+  homeHtml3k = UI.renderHome(bigBank, counts3k);
+}, 50), 'HTML ' + homeHtml3k.length + ' 字符');
+
+const QUIZ_N = QB.CONFIG.QUESTIONS_PER_QUIZ;
+const eng = new QB.QuizEngine();
+eng.loadQuestions(bigAll.slice(0, QUIZ_N), 'mixed', {});
+eng.mode = 'practice';
+let quizHtml;
+row('答题区渲染 HTML 构建（' + QUIZ_N + ' 题作答卡，3000 题库）', await timed(() => {
+  quizHtml = UI.renderQuiz(eng, {});
+}, 50), 'HTML ' + quizHtml.length + ' 字符（与题库规模无关）');
+
 const bigHeap = (bestEffortGc(), process.memoryUsage().heapUsed);
 
 /* ---------- 汇总输出 ---------- */
@@ -248,4 +302,12 @@ console.log('heapUsed 增量：' + mb(heapAfter - heapBefore) + '（before ' + m
   + (HAS_GC ? '（--expose-gc）' : '（未 --expose-gc，含 GC 抖动，仅供参考；建议 node --expose-gc scripts/bench.mjs）'));
 console.log('落库载荷：题目 JSON ' + mb(questionsJsonBytes) + '（' + benchMeta.sizes.length + ' 片），Storage 全量估算 ' + mb(rawStorageBytes));
 console.log('规模库（3000 题）：' + bigMeta.sizes.length + ' 片，载荷 ' + mb(bigBytes) + '，末态 heapUsed ' + mb(bigHeap) + '（含 3000 题库与索引保留对象）');
+const rowBy = (n) => report.find((r) => r.name.indexOf(n) === 0);
+console.log('UI 级按需加载（3000 题）：改造前每次 render = 整库全量读取 ' + ms(rowBy('规模库 全量读取').median)
+  + '；改造后装载首次（写后失效）' + ms(uiRefreshMs) + '、缓存命中 ' + ms(uiHitMs)
+  + '、答题交互视图装载 ' + ms(uiRenderMs));
+console.log('首屏/答题渲染 HTML 构建（字符串，不含浏览器 DOM 解析/布局）：首页 540 题 ' + ms(rowBy('首页渲染 HTML 构建（540').median)
+  + '（HTML ' + homeHtml540Len + ' 字符）→ 3000 题 ' + ms(rowBy('首页渲染 HTML 构建（3000').median)
+  + '（' + homeHtml3k.length + ' 字符，与题库规模无关）；答题区 ' + ms(rowBy('答题区渲染').median)
+  + '（HTML ' + quizHtml.length + ' 字符）');
 console.log('============================================\n');

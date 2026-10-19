@@ -111,6 +111,17 @@
 
   /* ---------------- 数据装载 ---------------- */
 
+  /**
+   * 当前视图是否需要整库题目（阶段 A·UI 级按需加载）：
+   *   home / search / stats 需要（首页统计、搜索过滤、到期预报）；
+   *   quiz / result / wrong / favorites / history 不需要——答题用 engine、列表读各自存储，
+   *   从而避免每次作答交互都解析整库。
+   */
+  function needsFullQuestions() {
+    if (State.view === 'home' || State.view === 'search' || State.view === 'stats') return true;
+    return State.view === 'quiz' && !State.engine; // 无引擎时 quiz 视图回退渲染首页
+  }
+
   async function loadBankData() {
     State.banks = await QB.DB.banks.list();
     if (State.bankId) {
@@ -120,15 +131,25 @@
     if (!State.bankId) {
       State.bank = null;
       State.allQuestions = [];
-      State.counts = { total: 0, byType: {} };
+      State.counts = { total: 0, byType: {}, dueReview: 0 };
       return;
     }
-    const res = await QB.DB.questions.list(State.bankId, {});
+    // 总数直读分片清单（O(1)），供状态栏显示，与是否装载整库无关
+    const total = await QB.DB.questions.count(State.bankId);
+    if (!needsFullQuestions()) {
+      State.counts = {
+        total: total,
+        byType: State.counts.byType || {},
+        dueReview: State.counts.dueReview || 0
+      };
+      return;
+    }
+    const { items } = await QB.DB.loadQuestions(State.bankId); // 缓存命中则不重复解析整库
     const byType = {};
     QB.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
-    res.items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
-    State.allQuestions = res.items;
-    State.counts = { total: res.items.length, byType: byType, dueReview: QB.SRSStore.countDue(State.bankId, res.items) };
+    items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
+    State.allQuestions = items;
+    State.counts = { total: items.length, byType: byType, dueReview: QB.SRSStore.countDue(State.bankId, items) };
   }
 
   /* ---------------- 渲染分发 ---------------- */

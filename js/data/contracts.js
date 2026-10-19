@@ -33,7 +33,7 @@
   /** 需实现的接口方法名（用于自检与文档一致性） */
   QB.CONTRACTS = {
     banks: ['list', 'get', 'create', 'update', 'remove'],
-    questions: ['list', 'get', 'create', 'update', 'remove', 'insertMany', 'removeMany'],
+    questions: ['list', 'count', 'revision', 'get', 'create', 'update', 'remove', 'insertMany', 'removeMany'],
     progress: ['wrongList', 'wrongAdd', 'wrongRemove', 'wrongClear',
       'favoriteList', 'favoriteToggle', 'favoriteClear',
       'historyList', 'historyAdd', 'historyRemove', 'historyClear',

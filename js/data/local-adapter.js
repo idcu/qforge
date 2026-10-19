@@ -47,6 +47,12 @@
   const SHARD_SIZE = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.QUESTIONS_SHARD_SIZE) || 200;
   const META_VERSION = 3;
 
+  /* 题目写修订号：任意题目写操作自增（全库级，非按库）。
+     上层读缓存（QB.DB.loadQuestions）据此判断失效，从机制上避免"忘记手动失效"读到旧数据。
+     见 js/data/db.js。 */
+  let writeRev = 0;
+  function bumpRev() { writeRev += 1; }
+
   function emptyMeta() {
     return { v: META_VERSION, shardSize: SHARD_SIZE, count: 0, sizes: [] };
   }
@@ -205,6 +211,7 @@
       Storage.setSync(K.banks, list);
       if (cascade) {
         QuestionShards.clear(id); // 题目分片 + 清单 + 旧单 blob 一并清除
+        bumpRev();
         Storage.remove(K.wrong(id));
         Storage.remove(K.favorite(id));
         Storage.remove(K.review(id)); // 评估报告中优先级#6：旧实现残留 user:review:<bankId>
@@ -270,6 +277,16 @@
       return { items, total: outTotal, page, size };
     },
 
+    /** 题目总数（直读分片清单，O(1)，不解析任何分片） */
+    async count(bankId) {
+      return QuestionShards.count(bankId);
+    },
+
+    /** 写修订号：任意题目写操作后自增，供上层读缓存做失效判定 */
+    revision() {
+      return writeRev;
+    },
+
     async get(id) {
       const bankList = await banks.list();
       for (const b of bankList) {
@@ -284,6 +301,7 @@
     async create(bankId, question) {
       const item = stampQuestion(question, bankId);
       QuestionShards.append(bankId, [item]); // 只重写尾分片/新增分片
+      bumpRev();
       return item;
     },
 
@@ -298,6 +316,7 @@
           merged.contentHash = QB.makeContentHash(merged);
           list[loc.pos] = merged;
           QuestionShards.writeAll(b.id, list); // 旧单 blob：一次性迁移为分片
+          bumpRev();
           return merged;
         }
         const shard = QuestionShards.shardOf(b.id, loc.idx);
@@ -305,6 +324,7 @@
         merged.contentHash = QB.makeContentHash(merged);
         shard[loc.pos] = merged;
         QuestionShards.setShard(b.id, loc.idx, shard); // 只重写所在分片
+        bumpRev();
         return merged;
       }
       throw new Error('题目不存在: ' + id);
@@ -319,6 +339,7 @@
           const list = QuestionShards.readAll(b.id);
           const [removed] = list.splice(loc.pos, 1);
           QuestionShards.writeAll(b.id, list);
+          bumpRev();
           return removed;
         }
         const meta = QuestionShards.metaOf(b.id);
@@ -333,6 +354,7 @@
         }
         meta.count -= 1;
         QuestionShards.setMeta(b.id, meta);
+        bumpRev();
         return removed;
       }
       return null;
@@ -376,6 +398,7 @@
       } else if (fresh.length) {
         QuestionShards.append(bankId, fresh);
       }
+      if (mode === 'overwrite' || fresh.length) bumpRev();
       const total = mode === 'overwrite' ? fresh.length : existing.length + fresh.length;
       return { inserted, duplicates, skipped, total };
     },
@@ -413,6 +436,7 @@
         meta.count = count;
         QuestionShards.setMeta(b.id, meta);
       });
+      if (removed) bumpRev();
       return { removed };
     }
   };

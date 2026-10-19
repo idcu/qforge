@@ -236,6 +236,56 @@ section('删库级联：分片与清单全清');
   eq(await QB.QuestionShards.count(casBank.id), 0, '总数为 0');
 }
 
+section('UI 级按需加载：count 直读清单、revision 失效、loadQuestions 缓存复用');
+{
+  QB.Storage.clearAll();
+  const uiBank = await QB.DB.banks.create({ name: '装载库' });
+  const qs = [];
+  for (let i = 0; i < SHARD * 2 + 7; i++) qs.push(mkQ(i));
+  await QB.DB.questions.insertMany(uiBank.id, qs, { dedupe: false });
+
+  // count：直读清单，不解析任何分片
+  const gotCount = await capturedGetsAsync(async () => {
+    eq(await QB.DB.questions.count(uiBank.id), SHARD * 2 + 7, 'count 返回总数 ' + (SHARD * 2 + 7));
+  });
+  eq(gotCount.filter((k) => k.indexOf('questions:' + uiBank.id + ':') === 0 && !k.endsWith(':meta')).length, 0, 'count 不解析任何分片');
+
+  // loadQuestions：首次解析整库，二次命中缓存（同一数组实例、零分片读取）
+  const first = await QB.DB.loadQuestions(uiBank.id);
+  eq(first.total, SHARD * 2 + 7, 'loadQuestions total 正确');
+  const again = await QB.DB.loadQuestions(uiBank.id);
+  ok(again.items === first.items, '缓存命中：返回同一数组实例（不重复解析）');
+  const gotHit = await capturedGetsAsync(async () => { await QB.DB.loadQuestions(uiBank.id); });
+  eq(gotHit.filter((k) => k.indexOf('questions:' + uiBank.id + ':') === 0 && !k.endsWith(':meta')).length, 0, '缓存命中不读取任何分片');
+
+  // buildIndex 复用缓存
+  const idx2 = await QB.DB.buildIndex(uiBank.id);
+  ok(idx2.items === first.items, 'buildIndex 复用 loadQuestions 缓存');
+  eq(idx2.map.size, SHARD * 2 + 7, 'buildIndex 索引覆盖全部题目');
+
+  // 任一写操作使修订号 +1 → 缓存失效并重读
+  const rev0 = QB.DB.questions.revision();
+  await QB.DB.questions.create(uiBank.id, mkQ(9000));
+  eq(QB.DB.questions.revision(), rev0 + 1, 'create 后修订号 +1');
+  const afterCreate = await QB.DB.loadQuestions(uiBank.id);
+  ok(afterCreate.items !== first.items, '写后缓存失效：重新解析');
+  eq(afterCreate.total, SHARD * 2 + 8, '写后重读含新题');
+
+  const rev1 = QB.DB.questions.revision();
+  await QB.DB.questions.update(afterCreate.items[0].id, { analysis: 'x' });
+  eq(QB.DB.questions.revision(), rev1 + 1, 'update 后修订号 +1');
+  const rev2 = QB.DB.questions.revision();
+  await QB.DB.questions.remove(afterCreate.items[0].id);
+  eq(QB.DB.questions.revision(), rev2 + 1, 'remove 后修订号 +1');
+
+  // refresh=true 强制重读
+  const forced = await QB.DB.loadQuestions(uiBank.id, { refresh: true });
+  ok(forced.items !== afterCreate.items, 'refresh=true 强制重读');
+
+  // bankId 为空安全返回
+  eq((await QB.DB.loadQuestions(null)).total, 0, 'bankId 为空返回空列表');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

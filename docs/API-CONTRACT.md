@@ -154,7 +154,7 @@
 | 适配器方法 | HTTP |
 | --- | --- |
 | `banks.list/get/create/update/remove` | Banks 表对应行 |
-| `questions.list/get/create/update/remove` | Questions 表对应行 |
+| `questions.list/count/revision/get/create/update/remove` | Questions 表对应行（`count`/`revision` 为前端只读辅助：清单直读总数 / 写修订号，无对应 REST） |
 | `questions.insertMany` | `POST /api/banks/{id}/questions/batch`（`op=add`） |
 | `questions.removeMany` | `POST /api/banks/{id}/questions/batch`（`op=delete`） |
 | `progress.wrongList/wrongAdd/wrongRemove/wrongClear` | Progress 的 wrong 端点 |
