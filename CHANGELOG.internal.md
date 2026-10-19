@@ -14,6 +14,43 @@
 
 ---
 
+## f7eaaa3 · test(e2e): api-backend 增加跨布局整链 E2E（33 项）+ 加固「后端不可达」断言
+
+**动因（da7c197 的遗留项）**
+- da7c197 的 api 方向（本地备份 → api 模式 `POST /api/backup`）当时只有 **stub 路由单测**（捕获 `DB.backup.import` 的载荷并断言 7 键/snake_case/题目归集），**未跑真实后端整链**。本轮把它升级为真实 HTTP 闭环。
+
+**核心改动**
+- 新增段「跨布局整链 E2E：本地备份 → 真实后端 → 读回 → 再恢复到本地」（**+33 断言**）：
+  1. local 模式造数（库 + 2 题 + 错题 + 历史 + revlog + 权重）→ `Backup.buildBackup()` 得**本地布局**载荷（断言 `isServerFormat=false`、含分片清单 `v=3/count=2`）；
+  2. 另起 api 模式上下文（注入 fetch、`API_BASE_URL` 指向真实 `serve-api.mjs`）→ `applyBackup(..., {mode:'replace'})`，经 `localToServer` + 真实 `POST /api/backup?mode=replace` 落服务端；
+  3. 直读 `GET /api/backup` 核对**接管后的后端口径**：`banks[].id` 保留、`created_at`、题目 `bank_id`/`content_hash`、`progress.{wrong[].question_key|wrong_count}`、`history[].duration_ms|created_at`、`revlog[].b`、`weights.global.w`（snake_case + 按库归集全部成立）；
+  4. 把该后端载荷喂回**另一个 local 上下文** → 库 id/库名/createdAt、题目数/题面/contentHash、错题键/wrongCount、历史用时、revlog 归属、权重 meta 逐项等价（**整链闭环**）。
+- 「后端不可达时的诚实拒绝」段**加固**：此前该段未注入 fetch，`api-adapter.req` 会在「环境没有 fetch」一步就抛错，断言 `ok(/fetch|ECONNREFUSED|.../)` 实际命中的是 **`api-adapter：当前环境没有 fetch`**，与本段标题「网络失败」不符（**发现于本轮新增整链段时需要注入 fetch，顺带暴露**）。现注入 fetch 并断言错误信息为**真实网络失败**（实测 `fetch failed`），并显式排除「没有 fetch」文案；断言条数不变（2 项）。
+
+**验证数据（Node v24.14.0 / Windows，2026-10-19 实跑）**
+- **22 个测试运行项 2996/2996 断言通过**，UTC 与 Asia/Shanghai 双时区均 0 失败（2963 → 2996：api-backend.test 122 → **155**，+33）。
+- 整链断言的期望值**均取自同一份源数据**（库 id/createdAt、题目 contentHash、错题键、历史用时 34127 ms、权重 `trainedAt=8`），非手写常量对拍；闭环对比是「源本地上下文 vs 恢复后的本地上下文」逐项相等。
+
+**第三个诉求（SW 换代真机复测）未完成 —— 如实标注**
+- 在**全新源** `127.0.0.1:8797` 复测时，浏览器子代理连 `browser_navigate` / `browser_tabs` 都直接返回 **IDE Command timeout**（13 步全部 BLOCKED，无一次 evaluate 落地）；**同一时刻**我用 `Invoke-WebRequest http://127.0.0.1:8797/sw.js` 得到 **HTTP 200 / 2470 B / `const CACHE = 'qforge-v4';`** ⇒ **故障在浏览器工具宿主，与应用/服务端无关**（上一轮 8796 已出现同类超时 5 次；两源连续失败，浏览器工具链本轮完全不可用）。
+- 按建议**停止浏览器重试**（换端口无意义）。故 SW 换代目前仍只有：`pwa.test` 的静态不变量断言（50 项）+ 服务端字节核对（v4 已部署）+ `17f4302` 的代码路径推理（activate 清理分支）；**没有浏览器运行时证据**（运行时 active cache 名、旧缓存被 purge）。
+
+**子任务计时（实测，`scripts/task-timer.mjs`；数据源 `.qforge-timings.json`）**
+
+| 子任务 | 内容 | 耗时(min) |
+| --- | --- | --- |
+| t1 | 整链 E2E 文档同步 + 提交 + SW 换代复测尝试 | 10.0 |
+| **合计** | （已完成 1 项） | **10.0** |
+
+> 计时自 t1 启动时开始，**E2E 编码/调试段未单独打点**（session 内计时器在上一任务结束时被 reset），实际本轮墙钟长于上表。
+
+**遗留 TODO / 风险**
+- **SW 换代真机验证仍未闭环**（浏览器工具不可用）：如需闭环，请在正常浏览器中手动执行——打开应用 → DevTools → Application：确认 Cache Storage 只有 `qforge-v4`；再手工建一个 `qforge-v3` 缓存 + 更新 `sw.js` 触发 activate → 确认旧缓存被删。
+- api 方向的整链 E2E 现已覆盖 `replace` 模式；`merge` 模式的跨布局转换沿用同一 `localToServer` 产物，未单独跑整链（合并语义本身由 `backup.test` 覆盖）。
+- 本轮提交已按用户指示 push（含 `17f4302` / `ba73c42`）。
+
+---
+
 ## 17f4302 · fix(sw): Service Worker 缓存版本号换代（v3 → v4）+ 换代机制不变量断言
 
 **动因（da7c197 的遗留项）**
