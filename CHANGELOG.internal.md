@@ -14,6 +14,30 @@
 
 ---
 
+## 3da7ced · perf(ui): 列表与答题区 DOM 区域级增量回填（阶段 A）
+
+**核心改动**
+- 新增 `js/modules/dom-patch.js`（`QB.DomPatch`）：`plan(prev, regions)` **纯对账**（不触碰 DOM，可在 Node 单测）+ `patch(root, regions)` 应用到真实 DOM（内容未变的区域**保留原节点**，仅重建变化区域）+ `normalize`（过滤空区域、去重 key）。区域顶层以 `data-region="KEY"` 标记，上次 HTML 记于节点 `__regionHtml`（免再序列化）。
+- `ui-renderer.js`：新增 5 个区域数组变体 `renderQuizRegions`/`renderWrongListRegions`/`renderFavoritesListRegions`/`renderHistoryListRegions`/`renderSearchRegions`；`progressBar`/`pager` 增可选 `region` 参数输出 `data-region`；答题卡 `<details>` 加 `data-region="quiz-card"`；**原整块函数保留为 `regions.map(r=>r.html).join('')` 薄包装（输出逐字节一致，smoke/pwa 零回归）**。
+- `app.js`：`render()` 结尾改为按区域数组走 `QB.DomPatch.patch(view(), regions)`（quiz/wrong/favorites/history/search 五视图；quiz 无当前题时 `renderQuizRegions` 返回 null → 回退整块 `renderQuiz`）；其余视图仍整块 `innerHTML`。
+- `index.html`：在 `ui-renderer.js` 之后、`bank-manager.js` 之前加载 `dom-patch.js`。
+- `scripts/dom-patch.test.mjs` 新增（**27 断言**，DOM-free 测 `plan`/`normalize`）；`scripts/ui-renderer.test.mjs` **55→76**（新增区域数组键序稳定/拼接等值/data-region + `plan` 对账断言）；`scripts/bench.mjs` 新增区域数组构建与对账打点。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **20 套件 2579/2579 通过**（UTC 与 Asia/Shanghai 双时区均 0 失败）：冒烟 461、XML 39、导出 160、Office 1148、编辑器 29、富文本 47、资产 62、组卷 18、**UI 渲染器 76**、**DOM 增量 27**、来源 29、FSRS 77、FSRS 优化器 91、SRS 60、存储 14、备份 25、迁移 55、分片 82、WebDAV 32、PWA 47。
+- bench（`node --expose-gc scripts/bench.mjs`，采样 10 中位数）：
+  - 区域对账（`plan`）**均 < 0.01 ms**：错题本移除一条 **仅重建 1/22 区域（占其 HTML 字节 0.9%）**，其余 20 个区域保持原 DOM 节点；答题区勾选选项重建 **3/5 区域（占答题区 HTML 字节 95.6%）**。
+  - 区域数组构建：答题区未答 **< 0.02 ms**（5 区域 / 6902 字符）、勾选后 0.02 ms；错题本 20 条/页 **0.09 ms**（22 区域 / 8631 字符）。
+  - heapUsed 增量 **+2.55 MB**（5.14→7.70，`--expose-gc`）；3000 题规模库末态 14.62 MB；**DOM 增量末态 14.76 MB**。
+  - 首屏静态体积 **164.2 KB gzip / 463.7 KB raw**（60 文件 / 55 js，含新增 `dom-patch.js`；开发/README 旧值 148.3/419.2 系滞后口径，经 Node zlib gzip -9 复测更新）。
+
+**遗留 TODO / 风险**
+- **答题区仅区域级部分收益**：答题卡 `<details>` 整卡为单区域，勾选选项时该卡整体重建（占答题区 HTML 字节 **95.6%**），几乎等同该区域整块重绘——**格级增量（答题卡逐格对账）未做**。实现需给 `<details>`/`.ac-grid` 加嵌套 scope + 每格 `data-region`，而该 DOM 递归逻辑**无 DOM stub 无法在 Node 单测**，只能浏览器验证，风险较高，待评审决策。
+- **浏览器真实 DOM 解析/布局 P95 未单独测量**（Node bench 只量字符串构建与纯函数对账）；如需端到端口径需补浏览器 E2E 打点。
+- 区域对账依赖节点的 `__regionHtml` 记录上次 HTML；跨「整块回填视图」切换后的无标记遗留节点会被清理（已覆盖，见 `patch` 第 2 步）。
+
+---
+
 ## 34e465b · perf(ui): UI 级按需加载——视图感知装载 + 整库读缓存（阶段 A）
 
 **核心改动**
