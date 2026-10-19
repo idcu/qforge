@@ -14,6 +14,30 @@
 
 ---
 
+## 3958861 · feat(fsrs): 增量重训——门控基线/优化起点分离 + 训练点增量触发 + 热启动（阶段 B · P1）
+
+**核心改动**
+- `fsrs-train-core.js`：`computeTrain` 把**门控/回退基线** `initWeights`（默认官方权重，决定 `improvement` 口径）与**优化起点** `startWeights`（增量热启动）分离，返回 `warmStarted`；新增常量 `WARM_ITERATIONS = 60`（全量 150）。`startWeights` 缺省时行为与旧版完全一致。
+- `fsrs-opt.js`：采纳后 meta 记录 `trainedLogLen`（训练点日志长度）与 `warmStarted`；`train`/`trainAsync` 发现该作用域已有采纳权重时以其为**热启动起点**并仅用 `WARM_ITERATIONS` 迭代（**门控基线仍为官方默认，口径不放宽**）；新增纯读 `shouldRetrain(bankId,{minNew})`（返回 `{retrain,newCount,sinceLen,logLen,hasWeights}`，阈值 `RETRAIN_MIN_NEW = MIN_SAMPLES = 100`）与 `warmWeightsFor(bankId)`。公共抽象：`metaOf()` 统一训练写盘元数据，避免两处重复。
+- `fsrs-train-client.js` / `fsrs-worker.js`：训练参数（`startWeights`/`iterations`）经 `FSRSTrain.run` 在 **Worker 与主线程回退路径一致透传**（消息新增 `startWeights`），`trainOptsOf()` 统一参数归一。
+- 测试：`fsrs-opt.test.mjs` **91→114**（+23：训练点记录、`shouldRetrain` 阈值/`minNew` 可调、热启动 `warmStarted`、Worker 透传）；`scripts/bench.mjs` 新增「增量热启动」打点。
+- 文档同步（同一提交）：`SRS.md`（§8.3 基线与起点分离、新增 §8.7 增量重训、§10 API 与测试数、§11 成本）、`ARCHITECTURE.md`（fsrs-opt/train-core/client/worker 四行）、`README.md`、`DEVELOPMENT.md`（测试矩阵 + bench 表）。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **20 项（19 套件 + smoke）2684/2684 断言全通过**，UTC 与 Asia/Shanghai 双时区均 0 失败（较 P0 的 2661 增 +23）。
+- bench（`node --expose-gc scripts/bench.mjs`，**同一轮内对比**，3200 样本 / 4000 条 revlog）：
+  - 全量 `computeTrain`（150 迭代）中位 **3893.58 ms**（3850.12 / 3908.13）。
+  - 增量热启动（起点=全量结果、60 迭代）中位 **1548.56 ms**（1521.78 / 1571.99）→ **提速 2.51×**。
+  - 热启动留出集改善 **2.89%**（≥ 全量 2.84%），`gateBasis='holdout'`，门控未因热启动放宽。
+  - `FSRS.review` 单次调度 / fuzz / 新卡首次仍 **< 0.01 ms**；heapUsed 增量 +2.55 MB。
+
+**遗留 TODO / 风险**
+- `shouldRetrain` 以 **revlog 条数**为增量口径（未换算成相邻评分样本数）：阈值 `100` 是 `MIN_SAMPLES` 的代理量，对「单次评分的新卡」会略高估增量。**未接入 UI**（无调用方，仅提供纯读入口与测试）；如需「有新数据可训练」提示需另行接线（属阶段 C/UI 范畴）。
+- 热启动固定 60 迭代：对**分布发生大幅漂移**的用户可能收敛不足（仍受留出门控保护，最坏是不采纳而保留官方默认，不会更差）；如需自适应迭代数属后续增强。
+- 本轮仅 `git commit`，**未 push**（等用户明确指示）。
+
+---
+
 ## 9d537c5 · feat(srs): FSRS-4.5 → FSRS-6（21 权重＋可学习衰减＋opt-in fuzz），逐项对齐 py-fsrs 6.3.2（阶段 B · 追算法 P0）
 
 **核心改动**
