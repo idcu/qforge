@@ -191,7 +191,7 @@
 >
 > **已知噪声修复（2026-10-19，实测闭环）**：`req()` 原先对 204 直接 `return null` 而**不消费响应体**，浏览器会为「其实已成功」的请求记 `net::ERR_ABORTED`（已由「`DELETE /api/session` 后服务端 `session.json` 消失」证实请求成功；`keepAliveTimeout` 并非成因——其调整后错误仍在）。现改为**始终消费响应体**（二进制走 `arrayBuffer`、其余走 `text`，204 读空体），在建新标签（空控制台）实测该条目消失。
 >
-> **Service Worker 与后端**：`sw.js` 的 stale-while-revalidate **不拦截同源 `GET /api/*`**（API 约定挂在 `/api` 前缀）——api 模式数据可写变，缓存会造成「写后仍读到旧数据」；缓存名已升级 `qforge-v3` 以丢弃可能残留的 `/api` 条目。
+> **Service Worker 与后端**：`sw.js` 的 stale-while-revalidate **不拦截同源 `GET /api/*`**（API 约定挂在 `/api` 前缀）——api 模式数据可写变，缓存会造成「写后仍读到旧数据」；缓存名换代以丢弃旧缓存（`v1→v2` 壳资源刷新、`v2→v3` 清可能残留的 `/api` 条目、**`v3→v4` 让改动过 js 的版本确定性生效**）。**改动 js/css 后必须提升 `CACHE` 版本号**：同名缓存会让新 SW 直接命中旧资源，表现为「升级后首次加载仍跑旧 JS」（实测见 CHANGELOG.internal.md `da7c197`）；换代后 activate 删除旧缓存，新 SW 下首次请求未命中即回源。
 >
 > 资产上传为**原始字节**（`POST /api/assets`，body=bytes、`Content-Type`=图片 MIME），**不使用 multipart**；服务端按 FNV-1a 32 + 长度算 id（算法冻结见 §8，实现须与 `js/utils/assets.js::idFor` 一致）。含图备份的 `.qfbk`（ZIP）**仍在客户端组装**（图片经 §8 端点进出）。
 >

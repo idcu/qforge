@@ -36,7 +36,11 @@ ok(/addEventListener\(['"]activate['"]/.test(sw), '监听 activate');
 ok(/addEventListener\(['"]fetch['"]/.test(sw), '监听 fetch');
 ok(sw.indexOf('mode === \'navigate\'') >= 0 || sw.indexOf("mode === \"navigate\"") >= 0, '导航请求有离线回退');
 ok(sw.indexOf("'/api/'") >= 0, '后端 REST /api 前缀被排除（api 模式不缓存可写数据，见 API-CONTRACT §9）');
-ok(sw.indexOf("'qforge-v3'") >= 0 || sw.indexOf('"qforge-v3"') >= 0, 'SW 缓存版本已换代（丢弃可能残留的 /api 缓存）');
+// 缓存名必须换代（≥ v4：v2→v3 清残留 /api 条目，v3→v4 让改动过 js 的版本确定性生效）
+const cacheVer = /qforge-v(\d+)/.exec(sw);
+ok(!!cacheVer && Number(cacheVer[1]) >= 4, 'SW 缓存版本已换代（当前 ' + (cacheVer ? cacheVer[0] : '缺失') + '，须 ≥ qforge-v4）');
+ok(/\.filter\(\s*\(k\)\s*=>\s*k\s*!==\s*CACHE\s*\)/.test(sw) && /caches\.delete\(k\)/.test(sw),
+  'activate 删除非当前版本缓存（换代后旧缓存被清 → 新 SW 首次请求未命中即回源，不再吃一次刷新延迟）');
 ok(sw.indexOf('http://') < 0 && sw.indexOf('https://') < 0, '不硬编码绝对 URL');
 
 section('FSRS 训练 Worker');
