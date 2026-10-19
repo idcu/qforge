@@ -14,6 +14,45 @@
 
 ---
 
+## 4f7b41b · feat(api): api 模式按库缓存落地 + 后端链路三处缺陷修复（阶段 C 收尾）
+
+**核心改动**
+- `js/data/api-adapter.js`：新增 `reviews` **按库内存缓存**（计划「渲染热路径」设计项，此前未实现）——`save`/`remove` 写路径一律失效（`finally`，失败也丢弃被调用方就地改过的那份）、`banks.remove` 级联失效、`backup.import` 与 `countCache` **一并整表清空**；`req()` 改为**始终消费响应体**（二进制 `arrayBuffer`、其余 `text`、204 读空体）。
+- `sw.js`：stale-while-revalidate **不拦截同源 `GET /api/*`**（api 模式数据可写变，缓存会造成「写后仍读到旧数据」；且后台 revalidate 挂起请求会被浏览器中止）；缓存名 `qforge-v2 → qforge-v3`。
+- `js/utils/helpers.js`：`debounce()` 返回的函数新增 **`.cancel()`**（丢弃挂起调用；纯增量，既有调用方零影响）。
+- `js/modules/progress-saver.js`：`clear()` 先取消挂起的防抖保存——否则「交卷清空会话」后挂起的保存会把已清掉的会话又写回（local：下次启动仍提示「继续上次」；api：`PUT` 抢在 `DELETE` 之后落库）。
+- `scripts/serve-api.mjs`：`keepAliveTimeout 5s → 65s`、`headersTimeout → 66s`（长空闲后复用被回收 socket 的稳健性改进；**并非控制台报错主因，见下**）。
+
+**缺陷定位（如实记录：首个假设被证伪）**
+- 现象：浏览器控制台对 `DELETE /api/session` 记 `net::ERR_ABORTED`。
+- 证据一（**证伪** keepAlive 假设）：服务端已改 `keepAliveTimeout=65s` 并重启后，**错误依旧出现**；且 `.qforge-data/session.json` 已消失、`GET /api/session` 返回 404 → **请求其实成功**。
+- 证据二：把 `req()` 改为消费响应体后，**新建标签（空控制台）**实测同一 `DELETE` 流程 → **无 error / 无 warning** ⇒ 真因为「未消费的 204 响应体被释放时浏览器记 `ERR_ABORTED`（请求已完成）」。
+
+**验证数据（Node v24.14.0，Windows，2026-10-19 实跑）**
+- **22 个测试运行项 2885/2885 断言通过**，UTC 与 Asia/Shanghai 双时区均 0 失败（2872 → 2885：api-backend 117→**122**、storage 14→**20**、pwa 47→**49**）。
+- 浏览器 E2E · 本地模式（`serve.mjs`）：练习答题→提交（✅/❌ 标记）→交卷→结果页「20 得分 / 2 正确 / 1 错误 / 67% 正确率」→统计页（7 日到期预报 + FSRS 参数卡）→今日复习→备份 toast「备份已生成（.json）」；控制台 0 error。
+- 浏览器 E2E · **`?backend=api` 真实后端**：建库→导入样例 18 题→练习答题→交卷→统计页→备份下载；**服务端实际落盘** `banks.json`、`questions/bank_*.json`(8440B)、`progress/bank_*.json`、`revlog.json`、`history.json`（证明数据确在后端）；拒绝「继续上次」触发 `DELETE /api/session` 后服务端 `session.json` 消失。
+- 修复后回归：新源 + 新标签（空控制台）跑同一 DELETE 流程 → **0 error / 0 warning**。
+
+**子任务计时（实测，`scripts/task-timer.mjs`；数据源 `.qforge-timings.json`）**
+
+| 子任务 | 内容 | 耗时(min) |
+| --- | --- | --- |
+| c1 | api reviews 缓存 + 失效级联 + 5 项断言 | 2.0 |
+| c2 | 浏览器 + 真实后端 E2E + 缺陷定位（含 4 次浏览器代理往返、证伪 keepAlive 假设） | 14.6 |
+| c3 | 文档同步（含「遗留」清零） | 2.0 |
+| **合计** | （已完成 3 项） | **18.6** |
+
+**遗留 TODO / 风险**
+- `keepAliveTimeout` 调整**不是**该控制台报错的主因（假设被证伪）；保留其值仅作长空闲场景的稳健性改进，**未单独量化收益**（无打点数据）。
+- 浏览器端 Backup 的**恢复**链路（选文件/覆盖/合并）与 WebDAV 的界面链路本轮仍未真机点击（数据层由 `backup.test` 25 项 + `sync-dav.test` 32 项覆盖）。
+- E2E 的「下载全量备份」只校验了 toast 文案，**未校验浏览器实际落盘文件内容**；`GET /api/backup` 载荷口径由 `api-backend.test` 覆盖。
+- SW 排除**只覆盖同源 `/api` 前缀**：若把 `API_BASE_URL` 配成同源非 `/api` 路径，SW 仍会缓存其 GET（API-CONTRACT §9 已注明「同源 API 约定挂在 `/api` 前缀」）。
+- 参考后端仍**无鉴权/单用户**；`reviews` 为整表 last-write-wins；多端冲突消解仍属阶段 C 后续项。
+- 本轮仅 `git commit`，**未 push**（用户本轮未指示 push）。
+
+---
+
 ## c022d25 · feat(dev): 新增开发子任务计时埋点 CLI（scripts/task-timer.mjs）
 
 **核心改动**
