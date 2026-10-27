@@ -266,6 +266,20 @@ section('DOM 增量对账：作答区/列表仅重建变化区域（QB.DomPatch.
   eq(sr.map((r) => r.html).join(''), UI.renderSearch({ name: 'B' }, 2, [s1], { keyword: 'x', categories: ['c'], tags: [] }, 0), '搜索：区域拼接 = 整块字符串');
 }
 
+section('错题本/收藏夹：简答题解析展示（回归）');
+{
+  const essay = { type: 'essay', question: '简答解析题', reference_answer: '参考答案XYZ', analysis: '解析ABC' };
+  const answerText = UI.renderAnswerText(essay);
+  ok(answerText.indexOf('参考答案：参考答案XYZ') >= 0, '简答：参考答案可见');
+  ok(answerText.indexOf('解析：解析ABC') >= 0, '简答：解析可见');
+  const wrong = UI.renderWrongList([{ questionKey: 'k-essay', question: essay, wrongCount: 1 }], 0);
+  ok(wrong.indexOf('解析：解析ABC') >= 0, '错题本简答：解析可见');
+  const fav = UI.renderFavoritesList([{ questionKey: 'k-essay', question: essay, addedAt: 0 }], 0);
+  ok(fav.indexOf('解析：解析ABC') >= 0, '收藏夹简答：解析可见');
+  const noAnalysis = UI.renderAnswerText({ type: 'essay', question: 'x', reference_answer: '参考' });
+  ok(noAnalysis.indexOf('解析：') < 0, '简答：无解析时不渲染空标签');
+}
+
 section('答题卡格级增量：帧稳定 + 子区域仅变化一格 + 计数（阶段 A）');
 {
   const sA = { type: 'single', question: 'A', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };

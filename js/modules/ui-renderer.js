@@ -596,7 +596,8 @@
       (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '');
     if (q.type === 'fill') return '<div class="li-meta">答案：' + plain(q.answer) + '</div>' +
       (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '');
-    if (q.type === 'essay') return '<div class="li-meta">参考答案：' + plain(q.reference_answer) + '</div>';
+    if (q.type === 'essay') return '<div class="li-meta">参考答案：' + plain(q.reference_answer) + '</div>' +
+      (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '');
     let s = '<div class="li-meta">答案：' + plain(q.answer) + '</div>';
     s += (q.options || []).map((o) => '<div class="li-meta">' + esc(o.letter) + '. ' + plain(o.text) + '</div>').join('');
     if (q.analysis) s += '<div class="li-meta">解析：' + plain(q.analysis) + '</div>';
