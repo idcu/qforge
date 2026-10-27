@@ -9,8 +9,40 @@
 ## 环境
 
 - Node v24.14.0；Windows。
-- 真实数据：`题库-背题模式.json`（541 题）、`题库-分类.json`（13 分类）、问卷星 425 题/30 题（见 a003115）。
+- 真实数据：`题库-背题模式.json`（541 题）、`题库-分类.json`（13 分类）、问卷星 425 题/30 题（见 a003115）、多列解题思路材料题样本（见 5e3150b）。
 - xlsx/docx 的 DOMParser：浏览器原生运行时无需处理；Node 验证时注入 `@xmldom/xmldom`（仅测试用，项目运行时零依赖）。
+
+---
+
+## 5e3150b · fix(import): 材料题多列解析回读闭环 + 真实多列样本验收
+
+**背景**
+- 用户要求补「多列解题思路」真实样本验收；仓库原有两个真实样本（425/30）只有单一 `analysis`/`reference_answer`，没有独立的解题思路/考点/释义列。
+- 用户选择「授权公开页面抽取 + 四类全覆盖」。本次从 21世纪教育网公开解析页（`mip.21cnjy.com/P/19649466.html`）《次北固山下》第 1 题抽取真实内容，整理为 1 道材料题 + 2 小问的多列夹具。
+
+**核心改动**
+- 新增 `samples/真实-多列解题思路-次北固山下.json/.csv/.xlsx`：父子分别带独立的解析/解题思路/考点/释义字段；JSON 用多键，CSV/XLSX 用多列（列序故意打乱，验证合并按字段定义顺序而非列序）。
+- **内容透明性**：原页面【解析】整段按原文「本题考查…」/「答题注意…」拆为解析与解题思路，【知识点】→考点，【译文】→释义，文字未改写；页面来源与拆分规则写入 `bank.description` 与 IMPORT-FORMAT 样例表。
+- 修复验收暴露的两处材料题回读缺陷：
+  1. `tableToQuestions`：导出回读子行写 `difficulty=0`，原逻辑把字符串 `"0"` 当 truthy，误报「小问行的分类/难度/标签已忽略」；改为 `(Number(difficulty)||0) > 0` 才告警。
+  2. `line-parser`：MD 父题多行合并解析（`【释义】/【考点】` 续行）在小问前被归入材料正文，导致父题解析截断、contentHash 不一致；新增 `parentAnalysisOpen` 状态，父题解析标记后的续行归父题，遇到材料/元数据/小问标记时关闭。
+- 文档：IMPORT-FORMAT 新增夹具行与父题多行解析规则；ARCHITECTURE 同步 line-parser 行为；README/DEVELOPMENT/COMPETITORS 测试矩阵更新为 3145。
+
+**验证数据（2026-10-27 本机实跑）**
+- `node scripts/smoke-test.mjs` **604/604**（532→604，+72）；全量 22 套件 **3145/3145** 通过（Asia/Shanghai；UTC 未本地复跑，由 CI 矩阵覆盖）。
+- 多列样本：JSON/CSV/XLSX 三种导入均 **1 道材料题 + 2 小问、零警告**；父子合并顺序 `解析→思路→考点→释义`；五格式（JSON/CSV/MD/XLSX/DOCX）往返题量、contentHash 集合、父子合并解析逐题一致。
+- 新增集中断言：子行 `difficulty=0` 零误报；MD 父题多行解析续行归父题。
+- 导入耗时中位（100 次采样，单题夹具）：JSON 0.017ms、CSV 0.057ms、XLSX 0.336ms、MD 0.045ms；XLSX min 0.240/max 3.932。
+
+**公共抽象清单（新增/调整）**
+- 无新增公共 API；复用上一提交的 `ANALYSIS_FIELDS` / `mergeAnalysisPieces` / `appendAnalysis` / `matchAnalysisMarker`。
+- 调整：`Adapters.tableToQuestions` 子行难度 0 告警条件；`LineParser.parseLines` 材料块新增内部状态 `parentAnalysisOpen`。影响范围仅材料题表格/行式回读，不改 schema、contentHash 算法、导出格式。
+
+**遗留 TODO / 风险**
+- 夹具为「公开页面内容 + 人工拆分为多列」的整理样本，不是站点官方导出文件；解析/解题思路的拆分边界按原文显式句子，未改写文字，但列标签由本项目定义。版权/合规留存需项目方确认。
+- 未覆盖「同一题内四类字段全部来自同一官方导出表」的场景；当前已覆盖父子两类载体与三种导入器。
+- UTC 双时区未本地复跑；CI 矩阵需在 push/PR 后确认。
+- 本轮未启用 `scripts/task-timer.mjs` 分点，无精确子任务墙钟；仅有上述测试/耗时数据。
 
 ---
 
