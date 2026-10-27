@@ -663,6 +663,61 @@ const setNested = new Set(nested.questions.map((q) => QB.makeContentHash(q)));
 let inter = 0; setNested.forEach((h) => { if (setFlat.has(h)) inter++; });
 eq(inter, 540, '两种来源题目 contentHash 完全一致（540 唯一题）');
 
+/* ================= 3.3 真实问卷星题库：解析/参考答案五格式往返 ================= */
+section('真实问卷星题库（425 + 30）：解析/参考答案五格式往返');
+{
+  const countByType = (qs) => qs.reduce((m, q) => { m[q.type] = (m[q.type] || 0) + 1; return m; }, {});
+  const sameHashSet = (a, b) => a.size === b.size && Array.from(a).every((h) => b.has(h));
+  const cases = [
+    { file: '原始-问卷星-物业管理师-425题.json', count: 425, types: { single: 210, judge: 170, multi: 45 }, field: 'analysis', fieldName: '解析', label: '425 题' },
+    { file: '原始-问卷星-物业管理师技能操作-30题.json', count: 30, types: { essay: 30 }, field: 'reference_answer', fieldName: '参考答案', label: '30 题（简答）' }
+  ];
+
+  for (const c of cases) {
+    const parsed = await QB.JsonImporter.parse({
+      text: fs.readFileSync(path.join(QB_DIR, 'samples', c.file), 'utf8'), fileName: c.file
+    });
+    const qs = parsed.questions;
+    const val = QB.Adapters.validateQuestions(qs);
+    eq(qs.length, c.count, c.label + '：总题数');
+    eq(parsed.warnings.length, 0, c.label + '：解析零警告');
+    eq(val.warnings.length, 0, c.label + '：校验零警告');
+    eq(val.stats.inFileDuplicates, 0, c.label + '：文件内零重复');
+    const hashes = new Set(qs.map((q) => QB.makeContentHash(q)));
+    eq(hashes.size, c.count, c.label + '：contentHash 唯一');
+    eq(qs.filter((q) => String(q[c.field] || '').trim()).length, c.count, c.label + '：' + c.fieldName + ' 全部非空');
+    const tc = countByType(qs);
+    Object.keys(c.types).forEach((t) => eq(tc[t] || 0, c.types[t], c.label + '：' + QB.typeLabel(t) + ' ' + c.types[t]));
+
+    const payload = {
+      kind: 'bank', bank: { name: c.file.replace(/\.json$/, ''), description: '', category: '' },
+      entries: qs.map((q) => ({ question: q, meta: {} }))
+    };
+    const built = {
+      json: QB.Exporters.buildContent('json', payload),
+      csv: QB.Exporters.buildContent('csv', payload),
+      markdown: QB.Exporters.buildContent('markdown', payload),
+      xlsx: QB.Exporters.buildContent('xlsx', payload),
+      docx: QB.Exporters.buildContent('docx', payload)
+    };
+    const back = {
+      json: await QB.JsonImporter.parse({ text: built.json.content, fileName: 'rt.json' }),
+      csv: await QB.CsvImporter.parse({ text: built.csv.content.replace(/^\uFEFF/, ''), fileName: 'rt.csv' }),
+      markdown: await QB.MdImporter.parse({ text: built.markdown.content, fileName: 'rt.md' }),
+      xlsx: await QB.XlsxImporter.parse({ arrayBuffer: built.xlsx.content, fileName: 'rt.xlsx' }),
+      docx: await QB.DocxImporter.parse({ arrayBuffer: built.docx.content, fileName: 'rt.docx' })
+    };
+
+    Object.keys(back).forEach((fmt) => {
+      const bq = back[fmt].questions;
+      eq(bq.length, c.count, c.label + '/' + fmt + '：题量');
+      eq(back[fmt].warnings.length, 0, c.label + '/' + fmt + '：零警告');
+      ok(sameHashSet(hashes, new Set(bq.map((q) => QB.makeContentHash(q)))), c.label + '/' + fmt + '：contentHash 集合相等');
+      ok(bq.every((q, i) => String(q[c.field] || '') === String(qs[i][c.field] || '')), c.label + '/' + fmt + '：' + c.fieldName + ' 逐题原样');
+    });
+  }
+}
+
 /* ================= 4. CSV 导入 ================= */
 section('CSV 导入');
 const csv = [
