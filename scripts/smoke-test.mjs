@@ -56,6 +56,17 @@ function expectMaterialRoundTrip(qs, hashRef, tag) {
   return mq;
 }
 
+/** 题型计数（真实题库 / 多列样本共用） */
+function countByType(qs) {
+  return qs.reduce((m, q) => { m[q.type] = (m[q.type] || 0) + 1; return m; }, {});
+}
+/** 两个 contentHash 集合是否相等（真实题库 / 多列样本共用） */
+function sameHashSet(a, b) {
+  if (a.size !== b.size) return false;
+  for (const h of a) if (!b.has(h)) return false;
+  return true;
+}
+
 /* ================= 1. 答案规范化 / 判分 ================= */
 section('全局配置契约（config.js 分组 + 旧键兼容）');
 {
@@ -486,6 +497,17 @@ section('材料题 M2 行式格式（Markdown/DOCX）导入导出');
   ok(lenient.warnings.some((w) => w.indexOf('材料') >= 0), '容错：无「材料：」标记给警告');
   ok(lenient.warnings.some((w) => w.indexOf('不连续') >= 0), '容错：小问序号不连续给警告');
   eq(lenient.questions[0].children.length, 2, '容错：2 个小问');
+
+  // 父题解析为多行合并文本（【释义】/【考点】续行）时，小问前的续行归父题解析
+  const mdParent = await QB.MdImporter.parse({
+    text: [
+      '## 1. [材料题] 引导语。', '材料：材料正文。', '> 解析：第一行',
+      '【释义】第二行', '【考点】第三行',
+      '(1). [判断] 小问一。', '**答案：正确**',
+      '(2). [判断] 小问二。', '**答案：错误**'
+    ].join('\n'), fileName: 'parent-analysis.md'
+  });
+  eq(mdParent.questions[0].analysis, '第一行\n【释义】第二行\n【考点】第三行', '材料题父题：多行解析续行归父题');
 }
 
 /* ================= 2.10 材料题 M2-B：表格材料块（CSV/XLSX）往返 ================= */
@@ -501,6 +523,16 @@ section('材料题 M2-B 表格材料块（CSV/XLSX）导入导出');
   eq(QB.Adapters.matchHeader('共享材料'), 'material', '表头别名：共享材料 → material');
   eq(QB.Adapters.matchHeader('小问序号'), 'childNo', '表头别名：小问序号 → childNo');
   eq(QB.Adapters.matchHeader('passage'), 'material', '表头别名：passage → material');
+
+  // 导出回读时子行会写 difficulty=0（未设置），不应误报「小问行的分类/难度/标签已忽略」
+  const zeroDiff = QB.Adapters.tableToQuestions([
+    ['题型', '材料', '小问', '题目', '答案', '解析', '分类', '难度', '标签'],
+    ['材料题', '材料正文', '', '引导语', '', '', '', '', ''],
+    ['简答', '', '1', '小问一', '答', '', '', '0', ''],
+    ['简答', '', '2', '小问二', '答', '', '', '0', '']
+  ]);
+  eq(zeroDiff.questions[0].children.length, 2, '材料表格：子行归组 2 个');
+  eq(zeroDiff.warnings.length, 0, '材料表格：子行难度 0 不误报继承警告');
 
   /* ---- CSV 夹具 ---- */
   const csvRes = await QB.CsvImporter.parse({
@@ -666,8 +698,6 @@ eq(inter, 540, '两种来源题目 contentHash 完全一致（540 唯一题）')
 /* ================= 3.3 真实问卷星题库：解析/参考答案五格式往返 ================= */
 section('真实问卷星题库（425 + 30）：解析/参考答案五格式往返');
 {
-  const countByType = (qs) => qs.reduce((m, q) => { m[q.type] = (m[q.type] || 0) + 1; return m; }, {});
-  const sameHashSet = (a, b) => a.size === b.size && Array.from(a).every((h) => b.has(h));
   const cases = [
     { file: '原始-问卷星-物业管理师-425题.json', count: 425, types: { single: 210, judge: 170, multi: 45 }, field: 'analysis', fieldName: '解析', label: '425 题' },
     { file: '原始-问卷星-物业管理师技能操作-30题.json', count: 30, types: { essay: 30 }, field: 'reference_answer', fieldName: '参考答案', label: '30 题（简答）' }
@@ -716,6 +746,85 @@ section('真实问卷星题库（425 + 30）：解析/参考答案五格式往�
       ok(bq.every((q, i) => String(q[c.field] || '') === String(qs[i][c.field] || '')), c.label + '/' + fmt + '：' + c.fieldName + ' 逐题原样');
     });
   }
+}
+
+/* ================= 3.4 真实多列解题思路样本：四类字段合并与五格式往返 ================= */
+section('真实多列解题思路样本（解析/解题思路/考点/释义）');
+{
+  const base = path.join(QB_DIR, 'samples', '真实-多列解题思路-次北固山下');
+  const rawBank = JSON.parse(fs.readFileSync(base + '.json', 'utf8'));
+  const rawQ = rawBank.questions[0];
+  eq(rawBank.questions.length, 1, '多列样本：1 道材料题');
+  eq(rawQ.type, 'material', '多列样本：题型 material');
+  eq(rawQ.children.length, 2, '多列样本：2 个小问');
+  eq(rawQ.analysis, '', '多列样本：父题 analysis 为空（字段独立）');
+  ['考点', '释义'].forEach((k) => ok(String(rawQ[k] || '').trim().length > 0, '多列样本：父题「' + k + '」非空'));
+  rawQ.children.forEach((c, i) => {
+    ['解析', '解题思路', '考点', '释义'].forEach((k) => {
+      ok(String(c[k] || '').trim().length > 0, '多列样本：小问 ' + (i + 1) + '「' + k + '」非空');
+    });
+  });
+  // 期望值由源字段直接拼接（不复用被测实现），顺序固定为 解析→思路→考点→释义
+  const expectParent = ['【考点】' + rawQ['考点'], '【释义】' + rawQ['释义']].join('\n');
+  const expectChildren = rawQ.children.map((c) => [
+    c['解析'],
+    '【解题思路】' + c['解题思路'],
+    '【考点】' + c['考点'],
+    '【释义】' + c['释义']
+  ].join('\n'));
+
+  const csvText = fs.readFileSync(base + '.csv', 'utf8').replace(/^\uFEFF/, '');
+  const csvHeader = csvText.split(/\r?\n/)[0].split(',');
+  ['材料', '小问'].forEach((k) => ok(csvHeader.indexOf(k) >= 0, 'CSV 表头含材料块列「' + k + '」'));
+  ['解析', '解题思路', '考点', '释义'].forEach((k) => ok(csvHeader.indexOf(k) >= 0, 'CSV 表头含独立列「' + k + '」'));
+  ok(csvHeader.indexOf('释义') < csvHeader.indexOf('解析'), 'CSV 列顺序非解析优先（验证按字段定义顺序合并）');
+
+  const jsonRes = await QB.JsonImporter.parse({ text: fs.readFileSync(base + '.json', 'utf8'), fileName: 'multi.json' });
+  const csvRes = await QB.CsvImporter.parse({ text: csvText, fileName: 'multi.csv' });
+  const xlsxRes = await QB.XlsxImporter.parse({ arrayBuffer: toArrayBuffer(fs.readFileSync(base + '.xlsx')), fileName: 'multi.xlsx' });
+
+  [['JSON', jsonRes], ['CSV', csvRes], ['XLSX', xlsxRes]].forEach(([tag, res]) => {
+    const q = res.questions[0] || {};
+    const kids = q.children || [];
+    eq(res.questions.length, 1, tag + '：1 道材料题');
+    eq(q.type, 'material', tag + '：题型 material');
+    eq(kids.length, 2, tag + '：2 个小问');
+    eq(res.warnings.length, 0, tag + '：零警告');
+    eq(q.analysis, expectParent, tag + '：父题 考点→释义 合并');
+    eq(JSON.stringify(kids.map((c) => c.analysis)), JSON.stringify(expectChildren), tag + '：小问四类字段按 解析→思路→考点→释义 合并');
+  });
+
+  // 五格式导出→再导入：材料题父子合并解析原样保留（导出写单列「解析」）
+  const qs = jsonRes.questions;
+  const hashes = new Set(qs.map((q) => QB.makeContentHash(q)));
+  const payload = {
+    kind: 'bank', bank: { name: '真实多列解题思路-次北固山下', description: '', category: '' },
+    entries: qs.map((q) => ({ question: q, meta: {} }))
+  };
+  const built = {
+    json: QB.Exporters.buildContent('json', payload),
+    csv: QB.Exporters.buildContent('csv', payload),
+    markdown: QB.Exporters.buildContent('markdown', payload),
+    xlsx: QB.Exporters.buildContent('xlsx', payload),
+    docx: QB.Exporters.buildContent('docx', payload)
+  };
+  const back = {
+    json: await QB.JsonImporter.parse({ text: built.json.content, fileName: 'rt.json' }),
+    csv: await QB.CsvImporter.parse({ text: built.csv.content.replace(/^\uFEFF/, ''), fileName: 'rt.csv' }),
+    markdown: await QB.MdImporter.parse({ text: built.markdown.content, fileName: 'rt.md' }),
+    xlsx: await QB.XlsxImporter.parse({ arrayBuffer: built.xlsx.content, fileName: 'rt.xlsx' }),
+    docx: await QB.DocxImporter.parse({ arrayBuffer: built.docx.content, fileName: 'rt.docx' })
+  };
+  Object.keys(back).forEach((fmt) => {
+    const bq = back[fmt].questions[0] || {};
+    const kids = bq.children || [];
+    eq(back[fmt].questions.length, 1, '多列/' + fmt + '：1 道材料题');
+    eq(kids.length, 2, '多列/' + fmt + '：2 个小问');
+    eq(back[fmt].warnings.length, 0, '多列/' + fmt + '：零警告');
+    ok(sameHashSet(hashes, new Set(back[fmt].questions.map((q) => QB.makeContentHash(q)))), '多列/' + fmt + '：contentHash 集合相等');
+    eq(bq.analysis, qs[0].analysis, '多列/' + fmt + '：父题合并解析原样');
+    eq(JSON.stringify(kids.map((c) => c.analysis)), JSON.stringify(qs[0].children.map((c) => c.analysis)), '多列/' + fmt + '：小问合并解析原样');
+  });
 }
 
 /* ================= 4. CSV 导入 ================= */

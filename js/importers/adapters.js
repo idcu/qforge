@@ -555,7 +555,8 @@
       // 2) 小问行：仅材料块内且「小问」列显式带序号才归组（防止吞掉块后普通题）
       if (mt && childNo !== '') {
         const child = rowToRaw(row);
-        if (child.category || child.difficulty || child.tags) {
+        // 导出回读时子行会写 difficulty=0；0 表示「未设置」，不应误报「已忽略」
+        if (child.category || (Number(child.difficulty) || 0) > 0 || child.tags) {
           warnings.push('第 ' + r + ' 行：小问行的分类/难度/标签已忽略（子问题继承父题）');
         }
         child.category = ''; child.difficulty = ''; child.tags = '';

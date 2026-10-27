@@ -115,6 +115,7 @@
     let started = false;     // 是否已出现首道题（普通模式前言过滤）
     let mb = null;           // 当前材料块（null=普通模式）
     let collectingMaterial = false;
+    let parentAnalysisOpen = false; // 父题解析已开始：小问前的续行归父题解析（多行合并文本）
     let lastChildNo = 0;
 
     const pushNormal = () => {
@@ -127,11 +128,13 @@
       blocks.push(mb);
       mb = null;
       collectingMaterial = false;
+      parentAnalysisOpen = false;
       lastChildNo = 0;
     };
     const openChild = (no, rest) => {
       if (cur) mb.children.push(cur);
       collectingMaterial = false;
+      parentAnalysisOpen = false;
       if (no !== lastChildNo + 1) {
         mb.warnings.push('小问序号不连续：期望 (' + (lastChildNo + 1) + ')，实际 (' + no + ')');
       }
@@ -164,14 +167,14 @@
             mb = { isMaterial: true, stem: stem, material: '', children: [],
               analysis: cur.analysis || '', category: cur.category || '',
               difficulty: cur.difficulty || 0, tags: cur.tags || [], warnings: [] };
-            cur = null; collectingMaterial = false; lastChildNo = 0;
+            cur = null; collectingMaterial = false; parentAnalysisOpen = false; lastChildNo = 0;
           }
           return;
         }
 
         // 3) 材料标记行
         const mm = t.match(RE_MATERIAL_PREFIX);
-        if (mm) { collectingMaterial = true; if (mm[1].trim()) mb.material += (mb.material ? '\n' : '') + mm[1].trim(); return; }
+        if (mm) { collectingMaterial = true; parentAnalysisOpen = false; if (mm[1].trim()) mb.material += (mb.material ? '\n' : '') + mm[1].trim(); return; }
 
         // 4) 已进入小问：答案/解析/分类/选项等归属当前小问
         if (cur) {
@@ -191,13 +194,19 @@
         // 5) 还没有小问：父题元数据（分类/难度/标签/解析）在小问出现前可识别；
         //    小问开始后这些行被忽略（子问继承父题）
         let pm = t.match(RE_CATEGORY);
-        if (pm) { mb.category = pm[1].trim(); return; }
+        if (pm) { parentAnalysisOpen = false; mb.category = pm[1].trim(); return; }
         pm = t.match(RE_DIFFICULTY);
-        if (pm) { mb.difficulty = QB.Adapters.normalizeDifficulty(pm[1].trim()); return; }
+        if (pm) { parentAnalysisOpen = false; mb.difficulty = QB.Adapters.normalizeDifficulty(pm[1].trim()); return; }
         pm = t.match(RE_TAGS);
-        if (pm) { mb.tags = QB.Adapters.normalizeTags(pm[1].trim()); return; }
+        if (pm) { parentAnalysisOpen = false; mb.tags = QB.Adapters.normalizeTags(pm[1].trim()); return; }
         const am = QB.Adapters.matchAnalysisMarker(t);
-        if (am) { mb.analysis = QB.Adapters.appendAnalysis(mb.analysis, am.label, am.text); return; }
+        if (am) { mb.analysis = QB.Adapters.appendAnalysis(mb.analysis, am.label, am.text); parentAnalysisOpen = true; return; }
+
+        // 父题解析已开始且尚未进入小问：多行合并解析的续行归父题（如「【释义】…」分段）
+        if (parentAnalysisOpen) {
+          mb.analysis = mb.analysis ? mb.analysis + '\n' + t : t;
+          return;
+        }
 
         // 其余行归入材料（无「材料：」标记时容错并警告一次）
         if (!collectingMaterial) {
@@ -222,6 +231,7 @@
             analysis: '', category: '', difficulty: 0, tags: [], warnings: [] };
           cur = null;
           collectingMaterial = false;
+          parentAnalysisOpen = false;
           lastChildNo = 0;
         }
         return;
