@@ -347,6 +347,12 @@
       renderAnswerArea(q, userAns, result, answered) +
       '</div>' });
 
+    // 作答反馈（正确答案/你的答案/解析）紧随题面，位于操作按钮与答题卡之上：
+    // 解析是作答后最需要阅读的内容，不应被压到页面最底部（答题卡之后）。
+    if (!isExam && answered) {
+      regions.push({ key: 'quiz-feedback', html: q.type === 'material' ? renderMaterialOverall(result) : renderFeedback(q, result) });
+    }
+
     // 操作按钮
     let actions = '<div class="quiz-actions" data-region="quiz-actions">';
     if (!isExam && !answered) {
@@ -369,12 +375,8 @@
     actions += '</div>';
     regions.push({ key: 'quiz-actions', html: actions });
 
-    // 答题卡（题目较多时才显示，支持点击跳转）：格级增量 —— 帧稳定 + 子区域（计数/逐格）
+    // 答题卡（题目较多时才显示，支持点击跳转）保持在最下方：格级增量 —— 帧稳定 + 子区域（计数/逐格）
     if (engine.questions.length > 1) regions.push(answerCardRegion(engine));
-
-    if (!isExam && answered) {
-      regions.push({ key: 'quiz-feedback', html: q.type === 'material' ? renderMaterialOverall(result) : renderFeedback(q, result) });
-    }
     return regions;
   }
 

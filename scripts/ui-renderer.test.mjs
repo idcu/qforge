@@ -280,6 +280,31 @@ section('错题本/收藏夹：简答题解析展示（回归）');
   ok(noAnalysis.indexOf('解析：') < 0, '简答：无解析时不渲染空标签');
 }
 
+section('作答反馈位置：解析在操作按钮与答题卡之上');
+{
+  const q1 = { type: 'single', question: '位置题一', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A', analysis: '解析位置ABC' };
+  const q2 = { type: 'judge', question: '位置题二', answer: 'A' };
+  const engine = {
+    mode: 'practice', questions: [q1, q2], currentIndex: 0,
+    results: [{ isCorrect: true, correctAnswer: 'A', userAnswer: 'A', analysis: '解析位置ABC' }, null],
+    answers: ['A', undefined],
+    getCurrentQuestion: () => q1,
+    getProgress: () => ({ current: 1, total: 2, percentage: 50 }),
+    getScore: () => ({ score: 10, correct: 1, wrong: 0 }),
+    hasAnswered: () => true, canSubmit: () => true, isLastQuestion: () => false,
+    statusAt: (i) => (i === 0 ? 'correct' : 'empty'), answeredCount: () => 1
+  };
+  const regions = UI.renderQuizRegions(engine, {});
+  const keys = regions.map((r) => r.key);
+  ok(keys.indexOf('quiz-feedback') >= 0, '已答：含反馈区');
+  ok(keys.indexOf('quiz-feedback') < keys.indexOf('quiz-actions'), '反馈区在操作按钮之前');
+  ok(keys.indexOf('quiz-feedback') < keys.indexOf('quiz-card'), '反馈区在答题卡之前');
+  const html = UI.renderQuiz(engine, {});
+  ok(html.indexOf('解析：解析位置ABC') >= 0, '解析文本可见');
+  ok(html.indexOf('解析：解析位置ABC') < html.indexOf('答题卡'), '解析位于答题卡之前');
+  ok(html.indexOf('解析：解析位置ABC') < html.indexOf('data-action="next"'), '解析位于「下一题」按钮之前');
+}
+
 section('答题卡格级增量：帧稳定 + 子区域仅变化一格 + 计数（阶段 A）');
 {
   const sA = { type: 'single', question: 'A', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
