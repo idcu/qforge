@@ -14,6 +14,61 @@
 
 ---
 
+## a233923 · feat(import): 解析类多字段合并到 analysis（解题思路/考点/释义）
+
+**背景（需求评估结论）**
+- 评估「是否新增解题思路/释义字段」：现有 `analysis` 已贯通导入/编辑/判分/列表/搜索/导出/备份；仓库内真实夹具 541 题与去重后 538 题的解析填充率均为 **0**，瓶颈是内容生产而非字段结构。结论：**不新增 schema 字段**，采用零 schema 的方案 A。
+- 现状缺陷：表头/JSON 多解析列时只取第一个命中键（`colIndex` 后写覆盖、`firstOf` 只取首个），其余列静默丢弃；行式解析只识别 `解析/答案解析/试题解析/分析`。
+
+**核心改动**
+- `js/importers/adapters.js`：新增公共抽象 `ANALYSIS_FIELDS`（解析/解题思路/考点/释义 + 中英别名）、`mergeAnalysisPieces`、`appendAnalysis`、`matchAnalysisMarker`；`toStandard`/`toStandardMaterial` 改为合并全部解析类别名键；`tableToQuestions` 改为多解析列 `analysisCols` 合并（不再后写覆盖）。
+- `js/importers/line-parser.js`：解析类标记改由 `Adapters.matchAnalysisMarker` 统一识别（含 解题思路/考点/释义 等），增量合并走 `appendAnalysis`；删除本地 `RE_ANALYSIS`，避免与表头别名两套清单。
+- 合并口径：仅「解析」一类时原样；仅思路/考点/释义时保留并加标签；多类时 JSON/CSV/XLSX 按 解析→解题思路→考点→释义、行式按出现顺序，以 `【标签】` 分段；同文去重。导出仍单列「解析」。
+- 文档：IMPORT-FORMAT（别名表/合并口径/行式标记）、EXPORT-FORMAT（单列说明）、ARCHITECTURE（公共抽象与影响范围）、user-guide、README/DEVELOPMENT/COMPETITORS（测试矩阵 3017）。
+
+**验证数据（2026-10-27 本机实跑）**
+- 全量 22 套件 **3017/3017 通过**（Asia/Shanghai；UTC 未本地复跑，由 CI 矩阵覆盖）。本次新增 16 项：smoke 461→**476**、exporter 160→**161**；另有 UI 修复 5 项见 928dbba。
+- bench（`node --expose-gc scripts/bench.mjs`，10 次中位数）：JSON 导入 541 题 **1.72 ms**（min 1.45 / max 6.06；文档基线 1.69–1.76 ms）；Markdown 导入 540 题 2.85 ms；导出构建 2.40 ms；heapUsed 增量 **+2.56 MB**（before 5.31 → after 7.86；基线 +2.54/+2.56 MB）。
+- A/B（HEAD 旧 adapters vs 工作区新 adapters，交替采样 300 次 × 3 轮）：旧中位 0.917/0.997/1.007 ms，新中位 1.011/1.111/1.124 ms，增量 **+0.094~0.117 ms（+10.3%~11.6%）**；绝对量 <0.2 ms/541 题，且总量仍落在基线内。
+- CSV 往返：合并后的 `解析正文\n【解题思路】…\n【释义】…` 原样保留（exporter.test 新增断言）。
+
+**子任务计时**
+- 本次未用 `scripts/task-timer.mjs` 分点；仅记录任务开始/结束墙钟：2026-10-27 02:55:56Z → 03:13:13Z，合计 **17.3 分钟**（含评估结论落地、实现、21 项断言、全量回归、bench/A-B、文档同步、2 次提交）。
+
+**公共抽象清单（新增/调整）**
+- 新增：`QB.Adapters.ANALYSIS_FIELDS`、`mergeAnalysisPieces(pieces)`、`appendAnalysis(current, rawLabel, text)`、`matchAnalysisMarker(text)`。
+- 调整：`Adapters.toStandard`/`toStandardMaterial`/`tableToQuestions`、`matchHeader`（别名派生）、`LineParser.parseLines`（解析类标记接入公共匹配器）。
+- 影响范围：仅导入层（JSON/CSV/XLSX/MD/DOCX/粘贴）；导出与存储无 schema 变更，导出仍写单列 `analysis`。
+
+**遗留 TODO / 风险**
+- **未拿到真实多列题库**：合并路径由合成夹具覆盖；拿到含「解题思路/释义」列的真实样本后需补一次导入→导出→再导入验收（并确认是否需要无损还原多列）。
+- 导入结果变化：此前被静默丢弃的解析类列现在会进入 `analysis`，同一文件重新导入会出现带 `【标签】` 的分段；`analysis` 不参与 contentHash，错题/收藏/SRS 关联不受影响。
+- 多列来源导出后合并为单列，原表结构不可还原；已在 IMPORT-FORMAT/EXPORT-FORMAT 明示。
+- UTC 双时区未本地复跑；CI 矩阵需在 push/PR 后确认。
+
+---
+
+## 928dbba · fix(ui): 错题本/收藏夹补显简答题解析
+
+**背景（缺陷）**
+- `js/modules/ui-renderer.js::renderAnswerText` 对 `essay` 只输出「参考答案」，遗漏 `analysis`；同文件的判分反馈与其他题型列表都会显示解析。简答题最需要思路/解析，错题本/收藏夹看不到属展示遗漏。
+
+**核心改动**
+- `js/modules/ui-renderer.js`：essay 分支追加 `(q.analysis ? '<div class="li-meta">解析：…' : '')`，复用已有 `plain()` 转义；无解析时不渲染空标签。
+- `scripts/ui-renderer.test.mjs`：新增 5 项断言（`renderAnswerText`、错题本、收藏夹、无解析不渲染空标签）。
+
+**验证数据（2026-10-27 本机实跑）**
+- `node scripts/ui-renderer.test.mjs` **92/92 通过**（87→92，+5）。
+- 全量 22 套件 **3017/3017**（含本修复与 a233923 的导入改动；Asia/Shanghai；UTC 未本地复跑，由 CI 覆盖）。
+
+**子任务计时**
+- 与 a233923 同一任务窗口，未单独打点；总墙钟 17.3 分钟。
+
+**遗留 TODO / 风险**
+- 材料题父题/子问题在错题本/收藏夹仍只显示父题 `analysis`，子问题解析不在列表展开；本次未改动，避免扩大范围。
+
+---
+
 ## 2151613 · chore(repo): .gitignore 忽略代理/IDE 工具产物目录（.trae、分享包、评估报告）
 
 **背景（工作区审计结果）**
