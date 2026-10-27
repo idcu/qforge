@@ -14,6 +14,32 @@
 
 ---
 
+## 3d12f3b · fix(ui): 作答反馈/解析移至操作按钮与答题卡之上
+
+**背景**
+- 用户反馈：练习模式作答后，解析被压在页面最底部（底部答题卡之后），需要上移到答题卡之上或更靠上。
+- 原 `renderQuizRegions` 区域顺序为 head/progress/material/question/actions/card/feedback；`quiz-feedback`（正确答案/你的答案/解析）最后插入。
+
+**核心改动**
+- `js/modules/ui-renderer.js`：`quiz-feedback` 改插入 `quiz-question` 之后、`quiz-actions` 之前；答题卡保持最下方。
+- 新区域顺序：`quiz-head → quiz-progress → [quiz-material] → quiz-question → quiz-feedback → quiz-actions → [quiz-card]`。
+- 考试模式不显示反馈，行为不变；材料题反馈仍走 `renderMaterialOverall`。
+- 文档：user-guide 增加「作答反馈位置」说明；ARCHITECTURE 同步区域顺序；README/DEVELOPMENT/COMPETITORS 测试矩阵更新为 3151。
+
+**验证数据（2026-10-27 本机实跑）**
+- `node scripts/ui-renderer.test.mjs` **98/98**（92→98，+6）：反馈区存在、位于操作按钮之前、位于答题卡之前；解析文本位于答题卡与「下一题」按钮之前。
+- 全量 22 套件 **3151/3151** 通过（Asia/Shanghai；UTC 未本地复跑，由 CI 矩阵覆盖）。
+- 仅调整区域插入顺序，无 schema/存储/网络/性能改动。
+
+**公共抽象清单（新增/调整）**
+- 无新增公共 API；调整 `UIRenderer.renderQuizRegions` 的区域插入顺序。影响范围：练习模式答题页；考试模式、结果页、错题/收藏/列表页不变。
+
+**遗留 TODO / 风险**
+- 未做真实浏览器视觉回归（CSS 间距/滚动位置），当前用区域顺序与 HTML 位置断言验证；建议 push 后在 Pages/本地服务目测一次。
+- 本轮未启用 `scripts/task-timer.mjs`，无精确子任务墙钟。
+
+---
+
 ## 5e3150b · fix(import): 材料题多列解析回读闭环 + 真实多列样本验收
 
 **背景**
