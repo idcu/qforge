@@ -61,6 +61,111 @@
     return out;
   }
 
+  /* ---------------- 解析类字段合并（公共抽象） ----------------
+   * 外部题库常把解释拆成「解析 / 解题思路 / 考点 / 释义」多列或多键；qforge 仅保留
+   * 一个 analysis 字段，故导入时统一合并为分段文本：
+   *   - 仅一类内容 → 原样返回（单列解析的既有行为与导出往返不变）
+   *   - 多类内容 → 首段为解析时不加标签，其余段加「【标签】」；重复文本自动去重
+   * 唯一实现：toStandard / toStandardMaterial / tableToQuestions / line-parser 共用。
+   */
+  const ANALYSIS_FIELDS = [
+    { label: '解析', aliases: ['analysis', '解析', '答案解析', '试题解析', '分析', 'explanation'] },
+    { label: '解题思路', aliases: ['approach', 'solution', '解题思路', '解题方法', '思路'] },
+    { label: '考点', aliases: ['point', '考点', '考查点', '考察点'] },
+    { label: '释义', aliases: ['definition', 'meaning', 'translation', '释义', '译文', '定义', '词义'] }
+  ];
+
+  /** 表头/键名归一（表头别名与行式标记共用同一口径） */
+  function normalizeHeaderName(name) {
+    return String(name || '').trim().toLowerCase().replace(/\s/g, '');
+  }
+
+  // 别名 → 统一标签 的反查表（模块加载时建一次，避免逐题遍历别名表）
+  const ANALYSIS_BY_LABEL = {};
+  const ANALYSIS_ALIAS_MAP = {};
+  const ANALYSIS_FIELD_ORDER = {};
+  const ANALYSIS_RAW_KEYS = [];
+  ANALYSIS_FIELDS.forEach((f, i) => {
+    ANALYSIS_BY_LABEL[f.label] = f;
+    ANALYSIS_FIELD_ORDER[f.label] = i;
+    f.aliases.forEach((a) => {
+      ANALYSIS_ALIAS_MAP[normalizeHeaderName(a)] = f.label;
+      ANALYSIS_RAW_KEYS.push({ key: a, label: f.label });
+    });
+  });
+
+  /** 原始标签（试题解析/思路/译文…）→ 统一分段标签；未知返回 null */
+  function analysisFieldOf(rawLabel) {
+    const label = ANALYSIS_ALIAS_MAP[normalizeHeaderName(rawLabel)];
+    return label ? ANALYSIS_BY_LABEL[label] : null;
+  }
+
+  /** 行式解析的标记正则：由别名表生成，避免与表头别名两套维护 */
+  const ANALYSIS_MARKER_RE = new RegExp(
+    '^\\s*(' + ANALYSIS_FIELDS
+      .reduce((acc, f) => acc.concat(f.aliases), [])
+      .filter((a) => /[\u4e00-\u9fa5]/.test(a))
+      .sort((a, b) => b.length - a.length)
+      .map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|') + ')\\s*[:：]\\s*([\\s\\S]*)$'
+  );
+
+  /** 行式「解析：/解题思路：/释义：…」标记匹配；非标记行返回 null */
+  function matchAnalysisMarker(text) {
+    const m = String(text === undefined || text === null ? '' : text).match(ANALYSIS_MARKER_RE);
+    return m ? { label: m[1], text: m[2] } : null;
+  }
+
+  /**
+   * 合并解析类文本段（唯一实现）。
+   * 同标签多段按出现顺序拼成一段；首段若为「解析」不加标签，其余段加「【标签】」。
+   * @param {Array<{label:string,text:string}>} pieces
+   */
+  function mergeAnalysisPieces(pieces) {
+    if (!pieces || !pieces.length) return '';
+    const order = [];
+    const groups = {};
+    (pieces || []).forEach((p) => {
+      const label = (p && p.label) || '解析';
+      const text = String(p && p.text !== undefined && p.text !== null ? p.text : '').trim();
+      if (!text) return;
+      if (!groups[label]) { groups[label] = []; order.push(label); }
+      if (groups[label].indexOf(text) < 0) groups[label].push(text);
+    });
+    return order.map((label, i) => {
+      const text = groups[label].join('\n');
+      return i === 0 && label === '解析' ? text : '【' + label + '】' + text;
+    }).join('\n');
+  }
+
+  /** 行式解析增量追加：空值/重复文本忽略；首段为解析时不加标签 */
+  function appendAnalysis(current, rawLabel, text) {
+    const s = String(text === undefined || text === null ? '' : text).trim();
+    if (!s) return current || '';
+    const field = analysisFieldOf(rawLabel);
+    const label = field ? field.label : '解析';
+    const cur = String(current || '').trim();
+    if (!cur) return label === '解析' ? s : '【' + label + '】' + s;
+    const stripLabel = (line) => line.replace(/^【[^】]*】/, '').trim();
+    if (cur === s || cur.split('\n').some((line) => line.trim() === s || stripLabel(line) === s)) return cur;
+    return cur + '\n【' + label + '】' + s;
+  }
+
+  /** 从松散 JSON 对象收集全部解析类别名键（固定别名键探测，多键合并保留全部内容） */
+  function analysisFromRaw(raw) {
+    if (!raw || typeof raw !== 'object') return '';
+    const pieces = [];
+    for (let i = 0; i < ANALYSIS_RAW_KEYS.length; i++) {
+      const meta = ANALYSIS_RAW_KEYS[i];
+      const v = raw[meta.key];
+      if (v === undefined || v === null || !String(v).trim()) continue;
+      pieces.push({ label: meta.label, text: v });
+    }
+    if (pieces.length <= 1) return mergeAnalysisPieces(pieces);
+    pieces.sort((a, b) => ANALYSIS_FIELD_ORDER[a.label] - ANALYSIS_FIELD_ORDER[b.label]);
+    return mergeAnalysisPieces(pieces);
+  }
+
   /** 统一题型名 → 内部 type */
   function normalizeType(rawType, fallback) {
     if (!rawType) return fallback || '';
@@ -169,7 +274,7 @@
       answer: '',
       blanks: [],
       reference_answer: '',
-      analysis: String(firstOf(raw.analysis, raw.解析, raw.答案解析, raw.explanation, '')).trim(),
+      analysis: analysisFromRaw(raw),
       category: String(firstOf(raw.category, raw.分类, raw.类别, raw.章节, raw.chapter, '')).trim(),
       source: String(firstOf(raw.source, raw.序号, raw.编号, raw.来源, raw.id, '')).trim(),
       difficulty: normalizeDifficulty(firstOf(raw.difficulty, raw.难度, raw.d, '')),
@@ -215,7 +320,7 @@
       answer: '',
       blanks: [],
       reference_answer: '',
-      analysis: String(firstOf(raw.analysis, raw.解析, '')).trim(),
+      analysis: analysisFromRaw(raw),
       category: String(firstOf(raw.category, raw.分类, raw.类别, raw.章节, raw.chapter, '')).trim(),
       source: String(firstOf(raw.source, raw.序号, raw.编号, raw.来源, raw.id, '')).trim(),
       difficulty: normalizeDifficulty(firstOf(raw.difficulty, raw.难度, raw.d, '')),
@@ -307,7 +412,8 @@
     question: ['题目', '题干', '问题', '试题', 'question', 'stem', 'content'],
     type: ['题型', '类型', '题类', 'type'],
     answer: ['答案', '正确答案', '标准答案', 'answer', 'key', 'correct'],
-    analysis: ['解析', '答案解析', '试题解析', 'analysis', 'explanation'],
+    // 解析类别名由 ANALYSIS_FIELDS 派生（含解题思路/考点/释义），避免两套别名表
+    analysis: ANALYSIS_FIELDS.reduce((acc, f) => acc.concat(f.aliases), []),
     category: ['分类', '类别', '章节', 'category', 'chapter'],
     source: ['序号', '编号', '来源', '题号', 'source', 'id', 'no'],
     reference: ['参考答案', 'reference', 'reference_answer'],
@@ -319,7 +425,7 @@
   };
 
   function matchHeader(name) {
-    const n = String(name || '').trim().toLowerCase().replace(/\s/g, '');
+    const n = normalizeHeaderName(name);
     if (!n) return null;
     for (const key in HEADER_ALIASES) {
       if (HEADER_ALIASES[key].some((a) => a.toLowerCase() === n)) return key;
@@ -345,7 +451,16 @@
 
     const header = rows[0].map((h) => matchHeader(h));
     const colIndex = {};
-    header.forEach((key, i) => { if (key) colIndex[key] = i; });
+    // analysis 不放进单值 colIndex：解析类允许多列并存，统一走 analysisCols 合并
+    header.forEach((key, i) => { if (key && key !== 'analysis') colIndex[key] = i; });
+
+    // 解析类多列（解析/解题思路/考点/释义…）：按 ANALYSIS_FIELDS 定义顺序合并到 analysis
+    const analysisCols = [];
+    rows[0].forEach((h, i) => {
+      const f = analysisFieldOf(h);
+      if (f) analysisCols.push({ idx: i, label: f.label, order: ANALYSIS_FIELDS.indexOf(f) });
+    });
+    analysisCols.sort((a, b) => a.order - b.order);
 
     if (colIndex.question === undefined) {
       throw new Error('未找到「题目/题干」列，请检查表头');
@@ -353,20 +468,25 @@
     const hasMaterialCol = colIndex.material !== undefined;
     const hasChildCol = colIndex.childNo !== undefined;
 
-    /** 单元格取值（按逻辑列名；缺列/空单元格 → ''） */
-    function cell(row, key) {
-      const idx = colIndex[key];
+    /** 单元格取值（按下标；缺列/空单元格 → ''） */
+    function cellAt(row, idx) {
       if (idx === undefined) return '';
       return String(row[idx] === undefined || row[idx] === null ? '' : row[idx]).trim();
     }
 
+    /** 单元格取值（按逻辑列名；缺列/空单元格 → ''） */
+    function cell(row, key) {
+      return cellAt(row, colIndex[key]);
+    }
+
     /** 数据行 → 普通题 raw（单行一题与材料小问共用，禁止两套字段映射） */
     function rowToRaw(row) {
+      const analysisPieces = analysisCols.map((c) => ({ label: c.label, text: cellAt(row, c.idx) }));
       const raw = {
         question: cell(row, 'question'),
         type: cell(row, 'type'),
         answer: cell(row, 'answer'),
-        analysis: cell(row, 'analysis'),
+        analysis: mergeAnalysisPieces(analysisPieces),
         category: cell(row, 'category'),
         source: cell(row, 'source'),
         reference_answer: cell(row, 'reference'),
@@ -512,6 +632,11 @@
   QB.Adapters = {
     MATERIAL_MIN_CHILDREN,
     MATERIAL_MAX_CHILDREN,
+    // 解析类字段合并（公共抽象）：别名表 / 多段合并 / 行式标记匹配与增量追加
+    ANALYSIS_FIELDS,
+    mergeAnalysisPieces,
+    appendAnalysis,
+    matchAnalysisMarker,
     normalizeType,
     normalizeDifficulty,
     normalizeTags,

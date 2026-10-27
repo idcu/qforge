@@ -201,6 +201,76 @@ eq(metaVal.stats.byDifficulty[4], 1, '校验：难度 4 计数 1');
 eq(metaVal.stats.byDifficulty[2], 1, '校验：难度 2 计数 1');
 eq(metaVal.stats.tagCount, 4, '校验：去重标签总数 4');
 
+/* ================= 2.6.1 解析类多字段合并（解析/解题思路/考点/释义） ================= */
+section('解析类多字段合并');
+{
+  // JSON：多键合并（首段解析不加标签，其余分段）
+  const merged = QB.Adapters.toStandard({
+    type: 'single', question: '解析合并题', options: ['A.甲', 'B.乙'], answer: 'A',
+    analysis: '这是解析', 解题思路: '先排除乙，再选甲', 释义: '甲：第一位'
+  }).question;
+  eq(merged.analysis, '这是解析\n【解题思路】先排除乙，再选甲\n【释义】甲：第一位', 'JSON：解析+思路+释义 合并分段');
+
+  const onlyApproach = QB.Adapters.toStandard({
+    type: 'judge', question: '只有思路', answer: '正确', 思路: '按题干条件判断'
+  }).question;
+  eq(onlyApproach.analysis, '【解题思路】按题干条件判断', 'JSON：仅思路保留并加标签');
+
+  const plainOnly = QB.Adapters.toStandard({
+    type: 'judge', question: '只有解析', answer: '正确', 解析: '原样解析'
+  }).question;
+  eq(plainOnly.analysis, '原样解析', 'JSON：仅解析保持原样（既有行为不变）');
+
+  const dup = QB.Adapters.toStandard({
+    type: 'judge', question: '重复解析', answer: '正确', 解析: '同一段', analysis: '同一段'
+  }).question;
+  eq(dup.analysis, '同一段', 'JSON：同文多键去重');
+
+  // 表格：同一行多个解析列（中英文表头均识别）
+  const tableMerged = QB.Adapters.tableToQuestions([
+    ['题型', '题目', '选项A', '选项B', '答案', '解析', '解题思路', '释义'],
+    ['单选', '表格合并题', '甲', '乙', 'A', '表格解析', '表格思路', '表格释义']
+  ]).questions[0];
+  eq(tableMerged.analysis, '表格解析\n【解题思路】表格思路\n【释义】表格释义', '表格：多解析列合并');
+
+  const tableEnglish = QB.Adapters.tableToQuestions([
+    ['题型', '题目', '选项A', '选项B', '答案', 'explanation', 'definition'],
+    ['单选', '英文表头题', '甲', '乙', 'A', 'english explanation', 'english definition']
+  ]).questions[0];
+  eq(tableEnglish.analysis, 'english explanation\n【释义】english definition', '表格：英文别名合并');
+
+  // 材料题：父题与子问题各自合并
+  const matMerged = QB.Adapters.toStandard({
+    type: 'material', material: '材料正文', question: '引导语',
+    analysis: '父解析', 解题思路: '父思路',
+    children: [
+      { type: 'judge', question: '小问1', answer: '正确', 解析: '子解析', 释义: '子释义' },
+      { type: 'judge', question: '小问2', answer: '错误' }
+    ]
+  }).question;
+  eq(matMerged.analysis, '父解析\n【解题思路】父思路', '材料题父题：解析合并');
+  eq(matMerged.children[0].analysis, '子解析\n【释义】子释义', '材料题子问题：解析合并');
+
+  // 行式（Markdown/DOCX/粘贴）：多种解析标记合并
+  const lineMerged = QB.LineParser.blocksToQuestions(QB.LineParser.parseLines([
+    '1. [判断] 行式合并题。', '答案：正确', '解析：行式解析', '解题思路：行式思路', '考点：行式考点', '释义：行式释义'
+  ])).questions[0];
+  eq(lineMerged.analysis, '行式解析\n【解题思路】行式思路\n【考点】行式考点\n【释义】行式释义', '行式：多标记合并');
+
+  // 既有别名「分析：」仍归入解析（回归）
+  const legacyMarker = QB.LineParser.blocksToQuestions(QB.LineParser.parseLines([
+    '1. [判断] 旧标记题。', '答案：正确', '分析：旧的解析标记'
+  ])).questions[0];
+  eq(legacyMarker.analysis, '旧的解析标记', '行式：分析标记仍归入解析');
+
+  // 标记识别与表头共用同一别名表
+  ok(!!QB.Adapters.matchAnalysisMarker('解题思路：先看题干'), '行式标记：解题思路命中');
+  ok(!!QB.Adapters.matchAnalysisMarker('释义：词条定义'), '行式标记：释义命中');
+  ok(QB.Adapters.matchAnalysisMarker('答案：A') === null, '行式标记：答案行不误判为解析');
+  eq(QB.Adapters.matchHeader('解题思路'), 'analysis', '表头别名：解题思路 → analysis');
+  eq(QB.Adapters.matchHeader('释义'), 'analysis', '表头别名：释义 → analysis');
+}
+
 
 /* ================= 2.7 不定项选择（少选半分） ================= */
 section('不定项 indefinite');

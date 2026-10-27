@@ -198,6 +198,20 @@ eq(metaMulti.difficulty, 4, 'CSV 往返：难度保留（4）');
 ok(metaMulti.tags.join('、') === '基础、高频考点', 'CSV 往返：标签保留（、分隔）');
 assertSelfConsistent(csvRt, 'CSV 往返');
 
+// 解析类合并文本：导出为单列「解析」，再导入应原样保留分段（不拆回多列）
+section('CSV 往返：合并解析文本（单列）');
+const mergedBuilt = QB.Exporters.buildContent('csv', {
+  kind: 'bank', bank: { name: '合并解析往返' },
+  entries: [{ question: {
+    type: 'judge', question: '合并解析往返题', answer: '正确',
+    analysis: '解析正文\n【解题思路】思路正文\n【释义】释义正文'
+  }, meta: {} }]
+});
+const mergedBack = (await QB.CsvImporter.parse({
+  text: mergedBuilt.content.replace(/^\uFEFF/, ''), fileName: 'merged.csv'
+})).questions[0];
+eq(mergedBack.analysis, '解析正文\n【解题思路】思路正文\n【释义】释义正文', 'CSV 往返：合并解析文本原样保留');
+
 /* ================= 5. Markdown 导出与往返 ================= */
 section('Markdown 导出与往返');
 const mdBuilt = QB.Exporters.buildContent('markdown', payload);

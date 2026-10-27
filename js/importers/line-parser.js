@@ -20,7 +20,8 @@
   const RE_Q_CN = /^\s*第\s*(\d+)\s*题\s*[.、．:：]?\s*(.*)$/;
   const RE_OPTION = /^\s*([A-Ha-h])\s*[.、．)）:：]\s*(.+)$/;
   const RE_ANSWER = /^\s*(?:答案|参考答案|正确答案)\s*[:：]\s*(.*)$/;
-  const RE_ANALYSIS = /^\s*(?:解析|答案解析|试题解析|分析)\s*[:：]\s*(.*)$/;
+  // 解析类标记（解析/解题思路/考点/释义…）由 QB.Adapters.matchAnalysisMarker 统一识别，
+  // 避免与导入表头别名维护两套清单（见 adapters.js ANALYSIS_FIELDS）。
   const RE_CATEGORY = /^\s*(?:分类|类别|章节)\s*[:：]\s*(.*)$/;
   const RE_DIFFICULTY = /^\s*(?:难度|difficulty)\s*[:：]\s*(.*)$/;
   const RE_TAGS = /^\s*(?:标签|知识点|关键词)\s*[:：]\s*(.*)$/;
@@ -176,8 +177,8 @@
         if (cur) {
           let m = t.match(RE_ANSWER);
           if (m) { cur.answer = m[1].trim(); return; }
-          m = t.match(RE_ANALYSIS);
-          if (m) { cur.analysis = m[1].trim(); return; }
+          const am = QB.Adapters.matchAnalysisMarker(t);
+          if (am) { cur.analysis = QB.Adapters.appendAnalysis(cur.analysis, am.label, am.text); return; }
           m = t.match(RE_OPTION);
           if (m && cur.options.length < 26) { cur.options.push({ letter: m[1].toUpperCase(), text: m[2].trim() }); return; }
           // 材料块内小问不单独设分类/难度/标签（继承父题）；这些行出现在此忽略
@@ -195,8 +196,8 @@
         if (pm) { mb.difficulty = QB.Adapters.normalizeDifficulty(pm[1].trim()); return; }
         pm = t.match(RE_TAGS);
         if (pm) { mb.tags = QB.Adapters.normalizeTags(pm[1].trim()); return; }
-        pm = t.match(RE_ANALYSIS);
-        if (pm) { mb.analysis = pm[1].trim(); return; }
+        const am = QB.Adapters.matchAnalysisMarker(t);
+        if (am) { mb.analysis = QB.Adapters.appendAnalysis(mb.analysis, am.label, am.text); return; }
 
         // 其余行归入材料（无「材料：」标记时容错并警告一次）
         if (!collectingMaterial) {
@@ -231,8 +232,8 @@
 
       let m = t.match(RE_ANSWER);
       if (m) { cur.answer = m[1].trim(); return; }
-      m = t.match(RE_ANALYSIS);
-      if (m) { cur.analysis = m[1].trim(); return; }
+      const am = QB.Adapters.matchAnalysisMarker(t);
+      if (am) { cur.analysis = QB.Adapters.appendAnalysis(cur.analysis, am.label, am.text); return; }
       m = t.match(RE_CATEGORY);
       if (m) { cur.category = m[1].trim(); return; }
       m = t.match(RE_DIFFICULTY);
