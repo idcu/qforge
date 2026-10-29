@@ -266,6 +266,24 @@ row('规模库 答题交互·视图装载（banks.list+get+count，无整库解�
 }, 200), '改造后每次 render 的数据成本（对照：改造前为整库全量读取）');
 const uiRenderMs = report[report.length - 1].median;
 
+/* ---------- 11b-2. 今日复习队列（P2：限额裁剪 + 分组排序） ---------- */
+const qNow = Date.now();
+const qMap = {};
+bigAll.forEach((q, i) => {
+  if (i % 3 !== 0) return; // 1/3 有调度状态（到期/逾期分布），其余为新题
+  qMap[q.contentHash || QB.makeContentHash(q)] = {
+    algo: 'fsrs', stability: 5, difficulty: 5, reps: 3, lapses: 0,
+    due: qNow - (i % 5) * 24 * 60 * 60 * 1000
+  };
+});
+let queueRes;
+row('今日复习队列 build（3000 题：约 1000 到期 + 2000 新，限额 200/20）', await timed(() => {
+  queueRes = QB.ReviewQueue.build(bigAll, qMap, {
+    settings: { newPerDay: 20, reviewPerDay: 200 }, now: qNow, seed: 1
+  });
+}, 100), '队列 ' + queueRes.counts.total + ' 题（到期 ' + queueRes.counts.duePicked +
+  ' / 新 ' + queueRes.counts.newPicked + '，原始到期池 ' + queueRes.counts.due + '，新题池 ' + queueRes.counts.new + '）');
+
 /* ---------- 11c. UI 渲染成本（HTML 字符串构建；不含浏览器 DOM 解析/布局） ---------- */
 const counts540 = { total: idx.items.length, byType: {}, dueReview: 0 };
 QB.CONFIG.TYPES.forEach((t) => { counts540.byType[t] = idx.items.filter((q) => q.type === t).length; });
