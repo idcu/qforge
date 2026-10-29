@@ -14,6 +14,50 @@
 
 ---
 
+## 4444f2c · perf(srs): 每日额度推导基准 + 门禁两项
+
+**核心改动**
+- bench 新增 `dailyFromLog`（2 万 revlog）与「build + 每日额度」两行，门禁阈值各 10ms。
+
+**验证数据（2026-10-30 本机实跑）**
+- `dailyFromLog` 中位 **1.04ms**（min 0.94 / max 2.16）。
+- build + 额度（剩余新 10 / 复习 50）中位 **0.15ms**，队列 60 题。
+- heapUsed 增量 2.57MB；门禁 19 项全过。
+
+**TODO/风险**
+- 日志接近 FIFO 上限 2 万条时首条记录可能被截断，日额度会高估新卡；SRS.md 已记录边界。
+
+---
+
+## b7161b2 · feat(ux,srs,pwa): 未作答统计/交卷防误点 + 每日累计额度 + 材料题保护 + PNG 图标
+
+**核心改动**
+- 答题头 / 答题卡未答统计；`unansweredAtSubmit` 区分「未做」与「做错」；结果页分列。
+- 交卷/结束练习独立末栏（桌面分隔线、窄屏整行），练习中途结束二次确认。
+- `ReviewQueue.dailyFromLog`：revlog 首条记录推导今日新卡、同日 learning 不占复习额度；
+  每日限额改为跨会话累计；app 增加 revlog 视图缓存并在评分/交卷/切库后失效。
+- `QuestionEditor.canEditQuestion` 禁止材料题进入编辑器，管理器按钮禁用 + 兜底提示。
+- 零依赖 PNG 生成器产出 192/512 图标（2KB/6KB），manifest maskable、SW 预缓存、CACHE v5。
+
+**验证数据（2026-10-30 本机实跑）**
+- 全量 24 套件 **3329/3329** 通过（新增 35 项：ui +10、review-queue +8、pwa +14、editor +3）。
+- 未作答：2 题已答 1 → 头「○ 未答 1」、卡未答子区域=1、考试结果注明客观题计错。
+- 每日额度：revlog 今日引入 2 / 已复习 2；剩余 20-18 / 200-195 → 2/5 → 队列 7；用尽 0。
+- 每日额度性能：2 万 revlog 1.04ms、带额度 build 0.15ms（4444f2c 打点）。
+
+**公共抽象清单（新增/调整）**
+- 新增 `QB.ReviewQueue.dailyFromLog`、`QB.QuestionEditor.canEditQuestion`、`scripts/gen-icons.mjs`。
+- 调整 `renderQuizRegions` 的答题卡子区域（新增 `ac-unanswered`，帧同步更新，仍为格级增量）。
+- 调整 `app` 状态：新增 `reviewLog/reviewLogBankId` 视图缓存 + `invalidateReviewLog`。
+- 影响范围：答题/结果/统计视图；local/api 的 revlog 读取（api 每库一次 GET）；PWA 资源清单。
+
+**TODO/风险**
+- 每日额度为设备本地语义，多端不累计；revlog FIFO 截断会导致新卡判定偏高。
+- 图标为几何绘制（非品牌设计稿），后续可替换为正式视觉资产。
+- 材料题完整嵌套编辑器（M3）仍未实现，当前仅做安全禁用。
+
+---
+
 ## 134255e · test(bench): 性能门禁 --assert + CI 条件步骤
 
 **核心改动**
