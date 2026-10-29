@@ -284,6 +284,25 @@ row('今日复习队列 build（3000 题：约 1000 到期 + 2000 新，限额 2
 }, 100), '队列 ' + queueRes.counts.total + ' 题（到期 ' + queueRes.counts.duePicked +
   ' / 新 ' + queueRes.counts.newPicked + '，原始到期池 ' + queueRes.counts.due + '，新题池 ' + queueRes.counts.new + '）');
 
+/* ---------- 11b-3. 每日额度推导（P2 跨会话；2 万条 revlog FIFO 上限） ---------- */
+const fakeLog = [];
+for (let i = 0; i < 20000; i++) {
+  const q = bigAll[i % bigAll.length];
+  fakeLog.push({ b: bigBank.id, h: q.contentHash || QB.makeContentHash(q), r: 1 + (i % 4), t: qNow - (i % 30) * 24 * 60 * 60 * 1000 });
+}
+let dailyRes;
+row('今日复习队列 dailyFromLog（2 万 revlog / 3000 题）', await timed(() => {
+  dailyRes = QB.ReviewQueue.dailyFromLog(fakeLog, bigBank.id, qNow);
+}, 100), '今日新 ' + dailyRes.newIntroduced + ' / 已复习 ' + dailyRes.reviewsDone);
+let queueDaily;
+row('今日复习队列 build + 每日额度（3000 题 / 2 万 revlog）', await timed(() => {
+  queueDaily = QB.ReviewQueue.build(bigAll, qMap, {
+    settings: { newPerDay: 20, reviewPerDay: 200 }, now: qNow, seed: 1,
+    daily: { newIntroduced: 10, reviewsDone: 150 }
+  });
+}, 100), '剩余新 ' + queueDaily.counts.newRemaining + ' / 复习 ' + queueDaily.counts.reviewRemaining +
+  ' → 队列 ' + queueDaily.counts.total + ' 题');
+
 /* ---------- 11c. UI 渲染成本（HTML 字符串构建；不含浏览器 DOM 解析/布局） ---------- */
 const counts540 = { total: idx.items.length, byType: {}, dueReview: 0 };
 QB.CONFIG.TYPES.forEach((t) => { counts540.byType[t] = idx.items.filter((q) => q.type === t).length; });
@@ -486,6 +505,8 @@ if (process.argv.indexOf('--assert') >= 0) {
     ['勾选选项 区域对账', 5],
     ['错题本 移除一条 区域对账', 5],
     ['今日复习队列 build', 5],
+    ['今日复习队列 dailyFromLog', 10],
+    ['今日复习队列 build + 每日额度', 10],
     ['XLSX 导出构建', 60],
     ['DOCX 导出构建', 40],
     ['FSRS.review 单次调度', 2],
