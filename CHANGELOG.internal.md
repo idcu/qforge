@@ -29,7 +29,7 @@
 - 文本格式（MD/DOCX/CSV/XLSX）暂不携带小问分值，导入导出按默认 10 分；已在 README/user-guide 明示。
 
 **验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
-- `node scripts/test-all.mjs`：24 个运行项 **3445/3445** 通过，0 失败，**24.2s**。
+- `node scripts/test-all.mjs`：24 个运行项 **3445/3445** 通过，0 失败，**24.3s**（最终全量，含引擎乱序 2 项）。
   新增 34 项：smoke +22（乱序 hash 不变/同种子可复现/集合不变/原题不改/按新下标判分/引擎选项、
   score 归一/满分 20+30/显式覆盖/导入与 wire 保真）、editor +6（默认 10/25/上限 100/HTML/落库/insertMany）、
   exporter +2（JSON 往返/`_toPlain`）、ui +4（三处小问乱序开关/分值留空）。
