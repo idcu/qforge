@@ -14,6 +14,41 @@
 
 ---
 
+## 4c833a2 · feat(results): 交卷后结果页内联自评 + fix(history): 成绩回写与 SRS/错题闭环
+
+**核心改动**
+- `QuizEngine.selfAssessAt(index, isCorrect, childIndex)`：按下标自评（结果页用），`selfAssess` 委托当前题；
+  材料题仍以整题为单位，聚合仍为 null 时不记调度/不计分。
+- 结果页逐题回顾：待自评简答题与材料简答小问渲染「我答对了 / 我答错了」
+  （`data-action=result-self-*`、`data-qidx`、`data-child`）；已判定小问不渲染；材料小问显示得分/满分。
+- `app.recordGraded`：练习即时判分、答题中自评、结果页自评共用 SRS + 错题口径；
+  `finishQuiz` 保存本次 `historyId`，结果页自评后 `History.update` 回写成绩（分数/正确率/题型分布）。
+- 数据层：`progress.historyUpdate` 契约；local 保留 `id/createdAt`；api `PATCH /api/history/{id}`；
+  参考后端保留 `id/created_at`，未知 id 404；wire patch 复用 `Wire.attempt` 映射。
+- 文案：结果页由「请在练习模式自评」改为「可在下方逐题/逐小问完成自评」。
+- 文档同提交：README/ARCHITECTURE/API-CONTRACT/SRS/user-guide/SPEC-material/COMPETITORS/DEVELOPMENT。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3411/3411** 通过，0 失败，**24.8s**。
+  新增：smoke +5（`selfAssessAt` 材料小问改判/得分 40↔50/普通简答）、contract +4（historyUpdate 保留身份/缺失 null）、
+  api +6（PATCH 得分/保留 id/created_at/未知 404/api 回写）、ui +6（结果页按钮/材料 data-child/得分/文案）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——按需单页 0.38ms、单题 update 0.22ms、
+  队列 build 0.17ms、dailyFromLog 1.03ms、XLSX 6.00ms、heapUsed +2.69MB ≤ 40MB。
+- 测试总数校正：3390 → **3411**（本轮新增 21 项断言）。
+
+**公共抽象清单（新增/调整）**
+- 新增 `QuizEngine.selfAssessAt`、`app.recordGraded`、`UIRenderer.resultSelfButtons`、
+  `QB.History.update`、`progress.historyUpdate`（local/api/参考后端同一契约）。
+- 调整 `finishQuiz` 保存 `historyId`、结果页事件 `result-self-correct/result-self-wrong`。
+- 影响范围：结果页交互、历史统计口径、SRS/错题本写入；材料题 SRS 语义不变（全部小问判定后才记一次）。
+
+**TODO/风险**
+- 结果页自评为一次性（判定后按钮消失，无撤销）；如需改判需重新练习。
+- api 模式历史回写失败时仅 toast 提示，本地结果页成绩仍按内存结果展示，历史记录可能滞后。
+- 未做真实浏览器交互验收（Node 仅断言结果页 HTML 与引擎/历史语义）；下一轮需补结果页点击路径真机验证。
+
+---
+
 ## 3056fc6 · feat(editor): M3 材料题嵌套编辑器 + fix(data): 材料题落库保留 material/children（P0）
 
 **核心改动**
