@@ -14,6 +14,142 @@
 
 ---
 
+## d5be8e0 · perf(srs): 今日复习队列基准打点（3000 题 0.18ms）
+
+**核心改动**
+- `scripts/bench.mjs`：新增 `QB.ReviewQueue.build` 行（3000 题：约 1000 到期 + 2000 新，限额 200/20）。
+- README 同步该实测数据。
+
+**验证数据（2026-10-29 本机实跑）**
+- 队列 build 中位 **0.18ms**（min 0.17 / max 2.64），输出 **220 题**（到期 200 + 新 20，原始到期池 1000、新题池 2000）。
+- heapUsed 增量 **2.57MB**（3000 题末态 15.04MB），与 P2 前同量级。
+- `node --expose-gc scripts/bench.mjs` 全量通过。
+
+**TODO/风险**
+- 队列上限是「每轮」而非「每日累计」；跨会话每日配额仍待做（SYNC-PLUGIN-PLAN 之后另立）。
+
+---
+
+## 2abb587 · chore(repo): MIT 许可 + npm test/bench 脚本 + 同步/插件设计稿
+
+**核心改动**
+- 新增 `LICENSE`（MIT）、`package.json`（零依赖，scripts: test/bench/serve/serve:api）。
+- 新增 `scripts/test-all.mjs`：固定顺序串行跑 smoke + 23 个套件，失败退出码非 0。
+- 新增 `docs/SYNC-PLUGIN-PLAN.md`：增量同步数据模型/协议/冲突策略/离线幂等/设备令牌 + 插件注册表与信任模型；明确标注「设计稿，未实现」。
+
+**验证数据**
+- `node scripts/test-all.mjs`：**24 个运行项 / 失败 0 / 24.6s**。
+
+**TODO/风险**
+- 同步与插件均未实现；参考后端仍无鉴权/CORS 默认关闭。设计稿中的验收指标需实现阶段逐项实测。
+
+---
+
+## a63a133 · docs(arch): 全量审计报告（2026-10-29）
+
+**核心改动**
+- 新增 `docs/EVALUATION-2026-10-29.md`：逐文件审计（57 文件/10,862 行）、缺陷分级（P0–P3）、竞品矩阵、优缺点与阶段方案。
+
+**验证数据**
+- 审计当时全量 22 套件 **3151/3151**；bench/首屏体积/路径守卫复现均记录在报告 §10。
+
+**TODO/风险**
+- 报告为 10-29 快照；P0/P1/P2/P3 已在后续提交闭环，4.x 缺陷编号中的 P0/P1 项应以本 CHANGELOG 后续条目为准。
+
+---
+
+## c712f01 · feat(a11y): 选项语义/弹窗焦点/键盘激活 + 移动端断点与减少动效（P3）
+
+**核心改动**
+- `optionHtml`：`role=radio/checkbox`、`aria-checked`、`tabindex`（作答后 -1 + `aria-disabled`）。
+- app 视图 `keydown`：Enter/Space 激活选项并阻止冒泡（避免误触全局提交/下一题）。
+- `openModal/closeModal`：`role=dialog`/`aria-modal` + 首焦点 + Tab 循环 + 关闭归还焦点。
+- CSS：全局 `:focus-visible`、`prefers-reduced-motion`、`safe-area-inset`、≥1100px 断点、窄屏选项 44px。
+
+**验证数据（2026-10-29）**
+- 全量 24 套件 **3294/3294** 通过（Asia/Shanghai）。
+- `ui-renderer.test` 126/126（+6）：role/aria-checked/tabindex/aria-disabled、多选 checkbox。
+- `pwa.test` 56/56（+6）：focus-visible/reduced-motion/safe-area/1100px/44px/键盘激活。
+
+**TODO/风险**
+- 未做真实读屏软件（NVDA/VoiceOver）与 axe-core 自动扫描；弹窗焦点行为未在真实浏览器回归（Node 无 DOM）。
+- PWA 图标仍只有 SVG（192/512 位图未补），安装提示需真机验证。
+
+---
+
+## 070288e · feat(srs): 今日复习队列限额 + 按题库复习设置 + 每题历史/难卡（P2）
+
+**背景**
+- 旧「今日复习」直接取全部到期题（新题也算到期），3000 题新库首日一次灌 3000 题；无每日新卡/复习上限。
+
+**核心改动**
+- 新增 `QB.ReviewQueue`（纯函数）：learning（分钟级已到期）→ 到期复习（逾期在前，封顶 `reviewPerDay-learning`）→ 新题（封顶 `newPerDay`）；seed 可复现。
+- 新增 `QB.SchedSettings`：按题库把 `{newPerDay, reviewPerDay}` 存入 `bank.sched`，复用 banks 仓库；默认值唯一来源 `CONFIG.LIMITS`（20/200）。
+- wire.bank / api-adapter / 参考后端 / 备份转换支持 `sched`（`new_per_day/review_per_day`）。
+- 首页显示本轮队列构成；统计页「今日复习计划」卡 + 设置入口；答题反馈下方显示本题评分历史（次数/四档/最近），lapses≥8 标记「难卡」。
+- 开练时一次性载入 reviewMap+revlog 快照，每题渲染零存储读取。
+- 新增 `QB.Time`（dayStart/dayIndex/isSameDay/endOfDay），替换 srs-store/statistics 两处重复实现。
+
+**验证数据（2026-10-29）**
+- 全量 24 套件 **3282/3282**（提交时）；`review-queue.test` 41/41：240 到期 + 160 新 → 200/20 = 220；小限额 10/5 → 15；0/0 → 0；learning 优先且分钟级未到不入队。
+- api E2E：`bank.sched` 创建 5/10 → 保存 7/12 → 回读一致（172/172）。
+- `srs.test` 60/60、`smoke` 604/604 无回归。
+
+**公共抽象清单（新增/调整）**
+- 新增 `QB.ReviewQueue.build`、`QB.SchedSettings.{DEFAULTS,normalize,ofBank,save}`、`QB.Time.*`。
+- 调整 `UIRenderer.renderStats(records, forecast, fsrsInfo, reviewPlan)`（新增第 4 参数，向后兼容：缺省不渲染计划卡）。
+- 影响范围：app 首页/答题/统计；wire/两个适配器/参考后端（bank.sched）；备份跨布局（自动带 sched）。
+
+**TODO/风险**
+- 限额是「每轮」而非「每日累计」；跨会话配额需新增每日状态存储。
+- `bank.sched` 未在旧题库上迁移（读取时归一为默认，不写回）；无独立 schema 版本。
+- 每题历史快照在开练时读取一次 revlog（上限 2 万条）；api 模式为 1 次 GET，未做分页。
+
+---
+
+## f3ebfd6 · fix(api,ui): 契约形状/缓存污染/hash 重算 + CORS/路径守卫 + 三处 UI 语义（P1）
+
+**核心改动**
+- `api-adapter.questions.list` 仅在无筛选时更新 count 缓存；`update` 内容字段变更时先 GET 合并再重算 `content_hash`，组织属性变更不发 hash。
+- `historyAdd` 两端统一返回新增记录（id/createdAt）。
+- 参考后端：可配置 CORS（默认关闭；放行来源预检 204、未放行 403）、32MB 请求体上限（413）。
+- 静态服务守卫：任一段 `..` 拒绝 + `root + path.sep` 前缀校验（修复 `/../qforgeX` 兄弟目录穿越）。
+- UI：`confirmDialog` 支持结构化 `lines`（交卷确认不再显示 `<br>` 字面量）；`getScore` 拆分 `unanswered/pendingSelfAssess`，结果页分列；收藏列表走 `toPlain`；source 无响应文案修正。
+- app 题库列表/收藏键视图缓存；作答热路径 REST 由 3–4 次降为 0–1 次。
+
+**验证数据（2026-10-29）**
+- 全量 23 套件 **3226/3226**（提交时，新增 40 项）。
+- api E2E 168/168：CORS 默认 403/放行 204；筛选后 count 仍 3；改题干 hash 重算、只改解析不变。
+- 静态守卫 14/14：`../`、`%2e%2e`、`..\`、畸形编码、NUL 全部 null。
+
+**TODO/风险**
+- 参考后端仍无鉴权；CORS 放行仅限本机/受信环境。
+- 第三方客户端 PATCH 内容若不传 `content_hash`，服务端不会重算（已在 API-CONTRACT 明确责任，但未强制校验）。
+
+---
+
+## aa05baf · fix(data): 分片删除重编号修复 + v3→v4 启动自检（P0 数据可见性）
+
+**背景**
+- 删除导致中间分片清空时只移除分片键并收缩 `sizes`，未对后续分片重编号 → 清单索引与物理分片错位：`count` 有数、`list` 为空，余题不可读且导出丢失。
+
+**核心改动**
+- `QB.QuestionShards` 新增 `indexesOf/compact/invariant`：以物理分片键为唯一事实来源，按索引升序拼接后重新切片；`clear` 回收高位孤儿分片。
+- 单题删除/批删在任一分片清空时统一走 `compact`。
+- Migration v4：启动时逐库 `invariant` 自检，不通过则 `compact` 修复（可恢复孤儿题），幂等。
+
+**验证数据（2026-10-29）**
+- 复现：400 题删首片 200 → 修复前 count=200/list=0；修复后 count=list=export=200。
+- 600 题 3 片删中间 200：count=list=400，分片键重编号 0,1，invariant ok。
+- 孤儿分片 compact 后 203 题全可读；v3→v4 修复坏清单 200 题，二次运行逐字节不变。
+- `shard.test` 115/115（+33）、`migrate.test` 57/57（+2）。
+
+**TODO/风险**
+- `compact` 在清空中片时重写全库分片（O(n)）；题库极大且频繁删空分片时有写放大，但远低于旧「每次全量重写」路径的常规频率。
+- 备份 `readAllData` 直接导出物理键，坏清单下备份仍保留孤儿字节；恢复后需 v4 迁移修复。
+
+---
+
 ## 3d12f3b · fix(ui): 作答反馈/解析移至操作按钮与答题卡之上
 
 **背景**
