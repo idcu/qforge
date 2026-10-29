@@ -23,10 +23,11 @@
 | `docx` | Word 文档 | `.docx` | wordprocessingml.document | 原生 ZIP 打包，段落即 LineParser 排版行（**导出仅文本、不嵌图片**） | ✅ 可再导入（文本往返，见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §5；导入他人含图 DOCX 时图片可提取，见 §5.1） |
 | `markdown` | Markdown 题单 | `.md` | text/markdown | 含题型角标、选项、答案、解析、分类，便于阅读/打印 | ✅ 可再导入（行式解析，见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §6） |
 | `txt` | 纯文本试卷 | `.txt` | text/plain | 等宽排版，含答案 | ❌（阅读用） |
+| `html` | 只读分享页 | `.html` | text/html | 自包含单文件：题目 + 选项 + 答案 + 解析，图片以 data URL 内嵌；无脚本、无网络请求，可打印 | ❌（只读，不参与导入） |
 
-- xlsx/docx/qbk 为二进制格式（注册表项带 `binary: true`），`content` 是 `ArrayBuffer`；四种文本格式返回字符串。
-- **格式按对象白名单过滤**：KINDS 项可带 `formats` 数组（如 history 只注册 `['json','csv','xlsx','txt']`）；`chooseFormat` 据此过滤弹窗选项，绕过弹窗直接 `buildContent('md', historyPayload)` 会得到明确的「不支持」抛错。题集三类（bank/wrong/favorites）不设白名单，开放全部 7 格式。
-- qbk 为 `async: true`（需异步读 IndexedDB），统一入口是 `Exporters.buildAsync(id, payload)`；同步 `buildContent` 对 qbk 明确抛错。图片文件名 = 资产 id（`as<FNV1ahex>-<字节长度>`），缺图时 toast 报缺失数，占位标记仍随 bank.json 导出。
+- xlsx/docx/qbk 为二进制格式（注册表项带 `binary: true`），`content` 是 `ArrayBuffer`；文本格式返回字符串。
+- **格式按对象白名单过滤**：KINDS 项可带 `formats` 数组（如 history 只注册 `['json','csv','xlsx','txt']`）；`FORMATS` 项可带 `kinds` 数组（`html` 仅开放给 `bank/wrong/favorites`）；`chooseFormat` 同时按两者过滤弹窗选项，绕过弹窗直接构建会得到明确的「不支持」抛错。题集三类（bank/wrong/favorites）开放全部 8 格式。
+- qbk/html 为 `async: true`（qbk 需读 IndexedDB，html 需读图片资产），统一入口是 `Exporters.buildAsync(id, payload)`；同步 `buildContent` 对它们明确抛错。图片文件名 = 资产 id（`as<FNV1ahex>-<字节长度>`），缺图时 toast 报缺失数，占位标记仍随 bank.json 导出。
 - 打包经公共模块 `QB.ZipWriter`（`js/utils/zip-writer.js`，stored 不压缩 + CRC32）与 `QB.OfficeWriter`（`js/modules/office-writer.js`，OOXML 部件生成）；采用 stored 是为了让自家 `ZipReader` 在无 `DecompressionStream` 的环境也能闭环回读，代价是体积大于 deflate（538 题 XLSX 约 0.65 MB，对应该库 JSON 载荷约 0.27 MB，见 §6 实测）。
 
 ### 2.1 JSON 结构
@@ -109,6 +110,17 @@ CSV/XLSX 为同一张 11 列表（首行表头）：
 - 模式：`exam→考试`、`practice→练习`；半对为不定项少选题数（旧记录无该字段时为 0）。
 - 用时：`durationMs` 转分钟、保留 1 位小数（12 分 30 秒 = 12.5）；无用时留空。切出次数仅考试行输出，练习行为空。
 - TXT 为逐条可读清单（时间/模式/题库/对错半对/得分/正确率/用时/切出）。
+
+### 2.4 只读分享页（HTML）
+
+`id: html`，实现见 `js/modules/share-page.js`，接入 `FORMATS`（`kinds: ['bank','wrong','favorites']`）。
+
+- **自包含**：单个 `.html` 文件，内联样式（含 `.rt-frac`/`.rt-sqrt` 公式排版与打印样式），不引用任何外部资源、不包含脚本、不发起网络请求。
+- **内容**：题库名/描述/题量与导出日期；逐题「题型 · 分类」、材料题共享材料、题干、选项、答案（简答为参考答案）、解析；材料题子问题按 `（1）（2）…` 编号。
+- **图片**：导出时读取 IndexedDB 资产，以 `data:image/<mime>;base64,…` 内嵌；缺失图片降级为 `[说明]` 占位并在结果中返回 `missing` 数（UI 会 toast 提示）。
+- **安全**：所有字段先经 `QB.RichText.render`（先转义再展开公式/图片记号），标题/描述另经 `escapeHtml`；不接受任何用户 HTML。
+- **可访问/可打印**：正文语义标签（`header/article/footer`）、答案区高对比底色、`@media print` 分页保护。
+- **限制**：只读、不参与导入；历史记录（非题集）明确拒绝；图片过多时文件体积会显著增大（base64 约为原始字节的 1.33×）。
 
 ## 3. 文件命名
 

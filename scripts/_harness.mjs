@@ -57,6 +57,7 @@ const MODULES = [
   'js/modules/progress-saver.js',
   'js/modules/question-editor.js',
   'js/modules/office-writer.js',
+  'js/modules/share-page.js',
   'js/modules/exporter.js',
   'js/modules/backup.js',
   'js/modules/migrate.js',

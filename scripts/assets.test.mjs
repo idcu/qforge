@@ -162,7 +162,7 @@ section('导出器 qbk 格式');
     options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A'
   };
   const payload = { kind: 'bank', bank: { name: '导出图包' }, entries: [{ question: question, meta: {} }] };
-  eq(QB.Exporters.FORMATS.length, 7, '导出格式注册数 = 7（新增 qbk）');
+  eq(QB.Exporters.FORMATS.length, 8, '导出格式注册数 = 8（含 html 分享页）');
   const built = await QB.Exporters.buildAsync('qbk', payload);
   ok(built.content instanceof ArrayBuffer, 'qbk 异步构建返回 ArrayBuffer');
   eq(built.assetCount, 1, '含 1 张图片');

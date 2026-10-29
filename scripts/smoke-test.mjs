@@ -1066,6 +1066,20 @@ eq(QB.SearchFilter.filter(tagQs, { tag: '易错' }).length, 1, '搜索：单标�
 eq(QB.SearchFilter.filter(tagQs, { tags: ['易错', '基础'] }).length, 2, '搜索：标签数组命中任一 2 题');
 eq(QB.SearchFilter.filter(tagQs, { keyword: '高频' }).length, 1, '搜索：关键词可命中标签');
 eq(QB.SearchFilter.filter(tagQs, { type: 'single', tag: '基础' }).length, 1, '搜索：题型+标签组合筛选');
+
+// 搜索覆盖扩展（下一轮）：选项 / 填空答案 / 参考答案 / 材料正文 / 材料子问题
+const deepQs = [
+  { type: 'single', question: '循环结构', options: [{ letter: 'A', text: '循环队列' }, { letter: 'B', text: '数组' }], answer: 'A' },
+  { type: 'fill', question: '后进先出', blanks: [{ answer: '栈' }], answer: '栈' },
+  { type: 'essay', question: '调度算法', reference_answer: '进程调度' },
+  { type: 'material', material: '共享材料：缓存一致性协议', question: '总题干', children: [{ type: 'single', question: '子问', options: [{ letter: 'A', text: 'MESI' }], answer: 'A' }] }
+];
+eq(QB.SearchFilter.filter(deepQs, { keyword: '循环队列' }).length, 1, '搜索：命中选项文本');
+eq(QB.SearchFilter.filter(deepQs, { keyword: '栈' }).length, 1, '搜索：命中填空答案');
+eq(QB.SearchFilter.filter(deepQs, { keyword: '进程调度' }).length, 1, '搜索：命中简答参考答案');
+eq(QB.SearchFilter.filter(deepQs, { keyword: '缓存一致性' }).length, 1, '搜索：命中材料正文');
+eq(QB.SearchFilter.filter(deepQs, { keyword: 'MESI' }).length, 1, '搜索：命中材料子问题选项');
+ok(QB.SearchFilter.haystack(deepQs[3]).indexOf(QB.normalizeAnswer('MESI')) >= 0, 'haystack 递归包含子问题文本');
 // 公共分页窗口：UIRenderer 不进 harness，直接验证 20 条/页数学语义（与 LIST_PAGE_SIZE 对齐）
 const PAGE_SIZE = 20;
 eq(Math.ceil(tagQs.length / PAGE_SIZE), 1, '列表分页：3 条 1 页');
@@ -1291,7 +1305,7 @@ ok(xlsxBuilt.content instanceof ArrayBuffer && xlsxBuilt.content.byteLength > 0,
 ok(new Uint8Array(xlsxBuilt.content)[0] === 0x50 && new Uint8Array(xlsxBuilt.content)[1] === 0x4b, 'xlsx ZIP 头 PK');
 const docxBuilt = QB.Exporters.buildContent('docx', expBank);
 ok(docxBuilt.content instanceof ArrayBuffer && docxBuilt.content.byteLength > 0, 'docx 导出为二进制 ArrayBuffer');
-eq(QB.Exporters.FORMATS.length, 7, '已注册导出格式数 = 7（qbk/json/csv/xlsx/docx/markdown/txt）');
+eq(QB.Exporters.FORMATS.length, 8, '已注册导出格式数 = 8（qbk/json/csv/xlsx/docx/markdown/txt/html）');
 
 /* ================= 10. 按题型分值 / 考试时长 / 练习计时 ================= */
 section('按题型分值 / 考试时长 / 练习计时');

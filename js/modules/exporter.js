@@ -445,7 +445,18 @@
     { id: 'xlsx', label: 'Excel 工作簿（.xlsx，可再次导入）', ext: 'xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', build: buildXLSX, binary: true },
     { id: 'docx', label: 'Word 文档（.docx，可再次导入）', ext: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', build: buildDOCX, binary: true },
     { id: 'markdown', label: 'Markdown 题单（含答案解析，.md）', ext: 'md', mime: 'text/markdown;charset=utf-8', build: buildMarkdown },
-    { id: 'txt', label: '纯文本试卷（.txt）', ext: 'txt', mime: 'text/plain;charset=utf-8', build: buildTXT }
+    { id: 'txt', label: '纯文本试卷（.txt）', ext: 'txt', mime: 'text/plain;charset=utf-8', build: buildTXT },
+    {
+      id: 'html',
+      label: '只读分享页（自包含 HTML，含答案/解析/内嵌图片，可直接发送）',
+      ext: 'html', mime: 'text/html;charset=utf-8',
+      kinds: ['bank', 'wrong', 'favorites'],
+      async: true,
+      async build(payload) {
+        if (!QB.SharePage) throw new Error('分享页模块未加载');
+        return QB.SharePage.build(payload);
+      }
+    }
   ];
 
   /* ---------------- 纯函数入口（可测试） ---------------- */
@@ -492,9 +503,11 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function chooseFormat(count, kindLabel, allowedIds, unit) {
+  function chooseFormat(count, kindLabel, allowedIds, unit, kindId) {
     unit = unit || '题';
-    const formats = allowedIds ? FORMATS.filter((f) => allowedIds.indexOf(f.id) >= 0) : FORMATS;
+    const formats = FORMATS.filter((f) =>
+      (!allowedIds || allowedIds.indexOf(f.id) >= 0) &&
+      (!f.kinds || (kindId && f.kinds.indexOf(kindId) >= 0)));
     return new Promise((resolve) => {
       const radios = formats.map((f) =>
         '<div class="checkbox-row"><input type="radio" id="exp-fmt-' + f.id + '" name="exp-fmt" value="' + f.id + '"' + (f.id === 'json' ? ' checked' : '') + '>' +
@@ -535,7 +548,7 @@
     if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
 
     const unit = def.unit || '题';
-    const formatId = await chooseFormat(payload.entries.length, def.label, def.formats, unit);
+    const formatId = await chooseFormat(payload.entries.length, def.label, def.formats, unit, opts.kind);
     if (!formatId) return null;
 
     let built;

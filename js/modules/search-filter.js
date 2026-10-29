@@ -5,17 +5,29 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
+  /**
+   * 检索用文本（公共纯函数）：题干 + 选项 + 答案/填空/参考答案 + 解析 + 材料 + 分类 + 标签，
+   * 材料题递归子问题。判分与去重基于原始文本，这里只做归一后的拼接。
+   */
+  function haystack(q) {
+    if (!q) return '';
+    const parts = [
+      q.question, q.analysis, q.category, (q.tags || []).join(' '),
+      q.answer, q.reference_answer, q.material,
+      (q.options || []).map((o) => (o.letter || '') + ' ' + (o.text || '')).join(' '),
+      (q.blanks || []).map((b) => b.answer || b).join(' ')
+    ];
+    (q.children || []).forEach((c) => parts.push(haystack(c)));
+    return QB.normalizeAnswer(parts.filter(Boolean).join(' '));
+  }
+
   QB.SearchFilter = {
-    /** 关键词匹配（题目 + 解析） */
+    haystack,
+    /** 关键词匹配（题干/选项/答案/参考答案/解析/材料/分类/标签；材料题递归子问题） */
     search(questions, keyword) {
       const kw = QB.normalizeAnswer(keyword, { stripPunctuation: false });
       if (!kw) return (questions || []).slice();
-      return (questions || []).filter((q) => {
-        const hay = QB.normalizeAnswer(q.question) + ' ' + QB.normalizeAnswer(q.analysis || '') +
-          ' ' + QB.normalizeAnswer(q.category || '') + ' ' +
-          QB.normalizeAnswer((q.tags || []).join(' '));
-        return hay.indexOf(kw) >= 0;
-      });
+      return (questions || []).filter((q) => haystack(q).indexOf(kw) >= 0);
     },
 
     /** 组合筛选（criteria.tag：单标签；criteria.tags：标签数组，命中任一即可） */

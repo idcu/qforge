@@ -390,9 +390,74 @@ throws(() => QB.Exporters.buildContent('markdown', histPayload), '历史不支�
 throws(() => QB.Exporters.buildContent('docx', histPayload), '历史不支持 docx（明确抛错）');
 await throwsAsync(() => QB.Exporters.buildAsync('qbk', histPayload), '历史不支持 qbk（异步构建明确拒绝）');
 
+/* ================= 9.1 只读分享页（自包含 HTML） ================= */
+section('只读分享页：自包含 HTML + 图片内嵌 + 安全转义');
+{
+  const sharePayload = {
+    kind: 'bank', bank: { name: '分享题库', description: '用于只读分享' },
+    entries: [
+      { question: { type: 'single', question: '1+1=？', options: [{ letter: 'A', text: '2' }, { letter: 'B', text: '3' }], answer: 'A', analysis: '基础算术' }, meta: {} },
+      { question: { type: 'essay', question: '简述题意', reference_answer: '参考答案文本', analysis: '' }, meta: {} }
+    ]
+  };
+  const built = await QB.Exporters.buildAsync('html', sharePayload);
+  ok(String(built.content).indexOf('<!doctype html>') === 0, '输出为完整 HTML 文档');
+  ok(built.content.indexOf('<meta charset="utf-8" />') >= 0, '声明 UTF-8');
+  ok(built.content.indexOf('分享题库') >= 0 && built.content.indexOf('用于只读分享') >= 0, '标题与描述已渲染');
+  ok(built.content.indexOf('答案：</span><span class="value">A') >= 0, '单选答案渲染');
+  ok(built.content.indexOf('参考答案：') >= 0 && built.content.indexOf('参考答案文本') >= 0, '简答参考答案渲染');
+  ok(built.content.indexOf('基础算术') >= 0, '解析渲染');
+  eq(built.ext, 'html', '扩展名 html');
+  eq(built.mime, 'text/html;charset=utf-8', 'MIME 为 HTML UTF-8');
+  eq(built.assetCount, 0, '无图片资产');
+  eq(built.missing, 0, '无缺失图片');
+  ok(built.content.indexOf('<script>') < 0, '页面不含任何脚本');
+
+  // XSS：题干里的标签必须被转义
+  const xss = QB.SharePage.buildHTML({
+    kind: 'bank', bank: { name: 'XSS' },
+    entries: [{ question: { type: 'judge', question: '<script>alert(1)</script>', answer: '正确' } }]
+  }, new Map());
+  ok(xss.content.indexOf('&lt;script&gt;alert(1)&lt;/script&gt;') >= 0, '题干 HTML 被转义');
+  ok(xss.content.indexOf('<script>alert(1)</script>') < 0, '不产生可执行脚本');
+
+  // 缺图：降级为占位文本并计入 missing
+  const imgQ = { type: 'single', question: '看图 ![示意图](asset:as12345678-9)', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
+  const miss = QB.SharePage.buildHTML({ kind: 'bank', bank: { name: '缺图' }, entries: [{ question: imgQ }] }, new Map());
+  eq(miss.missing, 1, '缺失 1 张图片');
+  ok(miss.content.indexOf('rt-img-missing') >= 0 && miss.content.indexOf('[示意图]') >= 0, '缺图降级为占位文字');
+
+  // 有图：内嵌 data URL
+  const assetMap = new Map([['as12345678-9', { bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), mime: 'image/png' }]]);
+  const withImg = QB.SharePage.buildHTML({ kind: 'bank', bank: { name: '带图' }, entries: [{ question: imgQ }] }, assetMap);
+  eq(withImg.missing, 0, '有资产时不报缺失');
+  ok(withImg.content.indexOf('data:image/png;base64,') >= 0, '图片内嵌为 data URL');
+  ok(withImg.content.indexOf('data-asset') < 0, '输出中不再保留 data-asset 占位');
+  eq(withImg.assetCount, 1, 'assetCount=1');
+
+  // 材料题：共享材料 + 子问题答案
+  const mat = QB.SharePage.buildHTML({
+    kind: 'bank', bank: { name: '材料' },
+    entries: [{
+      question: {
+        type: 'material', material: '共享材料文本', question: '总题干',
+        children: [
+          { type: 'single', question: '小问1', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' },
+          { type: 'judge', question: '小问2', answer: '正确' }
+        ]
+      }
+    }]
+  }, new Map());
+  ok(mat.content.indexOf('共享材料文本') >= 0 && mat.content.indexOf('小问1') >= 0 && mat.content.indexOf('小问2') >= 0, '材料题父子结构渲染');
+  ok(mat.content.indexOf('>（1）<') >= 0 && mat.content.indexOf('>（2）<') >= 0, '子问题编号渲染');
+
+  await throwsAsync(() => QB.Exporters.buildAsync('html', histPayload), '历史记录不支持分享页（明确拒绝）');
+  eq(QB.Exporters.FORMATS.find((f) => f.id === 'html').kinds.join(','), 'bank,wrong,favorites', 'HTML 仅对题集类 kind 开放');
+}
+
 /* ================= 10. 注册表与异常输入 ================= */
 section('注册表与异常');
-eq(QB.Exporters.FORMATS.length, 7, '注册格式数 = 7（qbk/json/csv/xlsx/docx/markdown/txt）');
+eq(QB.Exporters.FORMATS.length, 8, '注册格式数 = 8（qbk/json/csv/xlsx/docx/markdown/txt/html）');
 eq(QB.Exporters.KINDS.bank.label, '题库', 'KINDS.bank 存在');
 eq(Object.keys(QB.Exporters.KINDS).length, 4, '已注册对象数 = 4（bank/wrong/favorites/history）');
 await throwsAsync(() => QB.Exporters.collect('cards', bank), '未注册 kind（cards）抛错');
