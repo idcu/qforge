@@ -14,6 +14,41 @@
 
 ---
 
+## 1988e55 · feat(material): M4 小问乱序 + 子问分值 1–100 端到端
+
+**核心改动**
+- `QB.shuffleChildren(q, seed)`：材料题小问重排（父题浅克隆、保留原 `contentHash`），
+  <2 小问/非材料题原样返回；`QuizEngine.loadQuestions({shuffleChildren, shuffleSeed})` 接入，
+  组卷/练习/考试弹窗新增「材料题小问乱序」开关（默认关）。
+- `QB.normalizeChildScore` / `QB.CHILD_SCORE_MAX=100`：整数 1–100，空/非法/≤0 → 未设置；
+  编辑器每个小问新增分值输入（默认 10，题型切换保留），local-adapter、JSON 导入导出、
+  `Wire.question`、api-adapter 全链路保留 `children[*].score`（contentHash 不含分值，编辑分值不改身份）。
+- 计分口径（`QB.childPoints` + `QuizEngine.judgeOpts`）：**本场显式题型分值 > 小问自带分 > 默认 10**；
+  `useTypePoints` 仅在 `pointsMap` 非空时为 true。开始弹窗「每题分值」改为留空=默认，
+  仅显式填写才生成本场覆盖（此前默认 10 会无条件压过小问分值）。
+- 文本格式（MD/DOCX/CSV/XLSX）暂不携带小问分值，导入导出按默认 10 分；已在 README/user-guide 明示。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3445/3445** 通过，0 失败，**24.2s**。
+  新增 34 项：smoke +22（乱序 hash 不变/同种子可复现/集合不变/原题不改/按新下标判分/引擎选项、
+  score 归一/满分 20+30/显式覆盖/导入与 wire 保真）、editor +6（默认 10/25/上限 100/HTML/落库/insertMany）、
+  exporter +2（JSON 往返/`_toPlain`）、ui +4（三处小问乱序开关/分值留空）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——按需单页 0.20ms、
+  单题 update 0.23ms、insertMany 5.70ms、队列 build 0.17ms、dailyFromLog 1.02ms、heapUsed +2.69MB ≤ 40MB。
+
+**公共抽象清单（新增/调整）**
+- 新增 `QB.shuffleChildren`、`QB.normalizeChildScore`、`QB.CHILD_SCORE_MAX`、`QuizEngine.judgeOpts`。
+- 调整 `QB.childPoints` 优先级（新增 `useTypePoints`）、`QuizEngine.loadQuestions/restore` 的
+  `shuffleChildren` 与空 `pointsMap` 归一、开始弹窗分值输入默认值（空=默认）。
+- 影响范围：材料题作答/判分/计分/导出/API/备份、组卷与练习·考试开始弹窗；普通题计分口径不变。
+
+**TODO/风险**
+- 文本格式（MD/DOCX/CSV/XLSX）尚未支持小问分值语法；跨这些格式迁移会回落默认 10 分。
+- 每卷材料题上限未新增独立控件（已由「每题型抽取数量」天然约束）；若未来改为总量组卷再补。
+- 真实浏览器交互未验收（Node 覆盖 HTML/引擎/存储/往返语义）；小问乱序 UI 点击路径待真机验证。
+
+---
+
 ## 4c833a2 · feat(results): 交卷后结果页内联自评 + fix(history): 成绩回写与 SRS/错题闭环
 
 **核心改动**
