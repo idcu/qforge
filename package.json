@@ -1,0 +1,15 @@
+{
+  "name": "qforge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "淬题 qforge —— 零依赖、本地优先的题库 / 刷题 / FSRS 间隔重复静态应用",
+  "scripts": {
+    "test": "node scripts/test-all.mjs",
+    "bench": "node --expose-gc scripts/bench.mjs",
+    "serve": "node scripts/serve.mjs",
+    "serve:api": "node scripts/serve-api.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -92,6 +92,8 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 
 ```powershell
 Get-ChildItem scripts\*.test.mjs, scripts\smoke-test.mjs | ForEach-Object { node $_.FullName }
+# 或（推荐，固定顺序 + 单进程汇总）
+node scripts/test-all.mjs
 ```
 
 ## 3. 性能打点

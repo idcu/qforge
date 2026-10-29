@@ -116,6 +116,7 @@ qb/
 | `node scripts/static-server.test.mjs` | 静态服务路径守卫测试（14 项断言：正常路径/根路径/目录补 index.html/百分号解码；`../`、`%2e%2e`、`..\`、深层越界、畸形编码、NUL 一律拒绝；含 `..` 即使归一后落在 root 内也拒绝） |
 | `node scripts/dom-patch.test.mjs` | DOM 增量更新区域对账测试（40 项断言：`DomPatch.plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`；首次全变化、内容一致全不重建、单区域变化、新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全；**子区域（格级）：帧未变→顶层不重建、snapshot 以 frame 为基准、groupSub 按容器归组去重**） |
 | `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出/DOM 增量/**富文本公式子集渲染**/**FSRS-6 调度与训练** 的耗时与内存） |
+| `node scripts/test-all.mjs` / `npm test` | 串行跑 smoke + 全部 23 个 `*.test.mjs`（24 个运行项），任一失败整体退出码非 0（开发/本地一键回归） |
 | `node scripts/task-timer.mjs` | 开发子任务计时埋点（`start/end/report/reset`，记录落 gitignored 的 `.qforge-timings.json`）：为「subtask 时间明细表」提供**实测**数据（`bench.mjs` 量代码热路径，本工具量开发墙钟） |
 | `node scripts/serve-webdav.mjs` | 本地 **WebDAV 验证端点**（固定对象 PUT/GET + Basic 认证 + CORS 预检，数据落 gitignored 的 `.qforge-webdav/`）：真实坚果云等默认不发 CORS 头，`QB.SyncDAV` 的**真机**验收须落在可开 CORS 的端点上（`sync-dav.test` 亦用它跑真实 HTTP 集成） |
 | `python scripts/gen_fixtures.py` | 重新生成 xlsx / docx 样例（需 openpyxl）；`--docx-image` 含图 docx、`--material-md` 材料 MD/DOCX、`--material-csv` 材料 CSV/XLSX |
@@ -150,6 +151,12 @@ xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖）�
 - [使用指南](docs/user-guide.md) —— 多题库 / 模式 / 快捷键 / 导入导出
 - [导入格式说明](docs/IMPORT-FORMAT.md) —— 各格式与表头规范
 - [导出格式说明](docs/EXPORT-FORMAT.md) —— 导出对象/格式/扩展方式
+- [同步后端与插件位方案](docs/SYNC-PLUGIN-PLAN.md) —— 增量同步/冲突策略/受信插件（**设计稿，未实现**）
+- [全量审计报告（2026-10-29）](docs/EVALUATION-2026-10-29.md) —— 逐文件审计、竞品矩阵、缺陷与演进方案
+
+## 许可
+
+MIT（见 [LICENSE](LICENSE)）。
 
 ## 设计原则
 
