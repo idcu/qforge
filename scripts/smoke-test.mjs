@@ -397,6 +397,20 @@ section('材料题模型 / 判分 / 引擎 / 哈希');
   eq(E.getScore().score, 50, '引擎得分 50');
   eq(E.getScore().correct, 1, '正确题数 1');
 
+  // 交卷后结果页：按题目下标自评（selfAssessAt），与当前题无关
+  E.selfAssessAt(0, false, 4);
+  eq(E.results[0].isCorrect, false, 'selfAssessAt：材料题小问自评错误 → 整题 false');
+  eq(E.getScore().score, 40, 'selfAssessAt：小问自评错误 → 得分 40');
+  E.selfAssessAt(0, true, 4);
+  eq(E.results[0].isCorrect, true, 'selfAssessAt：改判正确 → 整题 true');
+  eq(E.getScore().score, 50, 'selfAssessAt：改判正确 → 得分恢复 50');
+  // 普通简答题同样按下标自评
+  const EE = new QB.QuizEngine();
+  EE.loadQuestions([{ type: 'essay', question: '简答', reference_answer: 'x' }], 'mixed', { shuffleOptions: false });
+  EE.setEssayAnswer('作答');
+  EE.submitAnswer();
+  eq(EE.selfAssessAt(0, true).isCorrect, true, 'selfAssessAt：普通简答自评正确');
+
   // 选项乱序递归到子问题（contentHash 不变，答案重映射）
   const Sh = QB.shuffleOptions(MQ, 123);
   eq(QB.makeContentHash(Sh), h0, '乱序后材料题 contentHash 不变');

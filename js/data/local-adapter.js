@@ -605,6 +605,17 @@
       Storage.setSync(K.history, all.slice(0, (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.HISTORY_MAX) || 500)); // FIFO 上限见 config.LIMITS
       return item; // 与 api-adapter 同形：返回新增记录（契约见 contract.test）
     },
+    /** 局部更新一次作答记录（交卷后自评回写成绩）；id/createdAt 不可被 patch 覆盖 */
+    async historyUpdate(id, patch) {
+      const all = Storage.get(K.history, []);
+      const idx = all.findIndex((h) => h.id === id);
+      if (idx < 0) return null;
+      const prev = all[idx];
+      const item = Object.assign({}, prev, patch || {}, { id: prev.id, createdAt: prev.createdAt });
+      all[idx] = item;
+      Storage.set(K.history, all);
+      return item;
+    },
     async historyRemove(id) {
       const all = Storage.get(K.history, []).filter((h) => h.id !== id);
       Storage.set(K.history, all);

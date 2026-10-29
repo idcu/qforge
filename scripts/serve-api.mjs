@@ -284,6 +284,15 @@ export function createStore(dataDir) {
       writeJson(files.history, all.slice(0, max));
       return all[0];
     },
+    update(id, patch) {
+      const all = readJson(files.history, []);
+      const idx = all.findIndex((h) => h.id === id);
+      if (idx < 0) return null;
+      const prev = all[idx];
+      all[idx] = Object.assign({}, prev, patch || {}, { id: prev.id, created_at: prev.created_at });
+      writeJson(files.history, all);
+      return all[idx];
+    },
     remove(id) {
       const all = readJson(files.history, []).filter((h) => h.id !== id);
       writeJson(files.history, all);
@@ -572,9 +581,13 @@ export function createHandler(opts) {
       if (m === 'DELETE') { store.history.clear(q.get('bank_id') || q.get('bankId')); return (res.writeHead(204), res.end()); }
       return fail(res, 405, 'METHOD_NOT_ALLOWED', m);
     }
-    if (segs.length === 3 && segs[1] === 'history' && m === 'DELETE') {
-      store.history.remove(segs[2]);
-      return (res.writeHead(204), res.end());
+    if (segs.length === 3 && segs[1] === 'history') {
+      if (m === 'PATCH') {
+        const rec = store.history.update(segs[2], await readJsonBody(req));
+        return rec ? json(res, 200, rec) : fail(res, 404, 'NOT_FOUND', '历史记录不存在');
+      }
+      if (m === 'DELETE') { store.history.remove(segs[2]); return (res.writeHead(204), res.end()); }
+      return fail(res, 405, 'METHOD_NOT_ALLOWED', m);
     }
     // ---- session ----
     if (segs.length === 2 && segs[1] === 'session') {

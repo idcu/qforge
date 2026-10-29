@@ -305,6 +305,15 @@
       (last ? '　最近 ' + esc(QB.Helpers.formatDate(last)) : '') + '</div></div>';
   }
 
+  /** 结果页内联自评按钮（交卷后简答/材料小问）：按题目下标定位，与答题中的 self-* 区分 */
+  function resultSelfButtons(qidx, childIndex) {
+    const childAttr = childIndex === undefined || childIndex === null ? '' : ' data-child="' + childIndex + '"';
+    return '<div class="quiz-actions result-self">' +
+      '<button class="btn btn-sm" data-action="result-self-correct" data-qidx="' + qidx + '"' + childAttr + '>我答对了</button>' +
+      '<button class="btn btn-sm btn-danger" data-action="result-self-wrong" data-qidx="' + qidx + '"' + childAttr + '>我答错了</button>' +
+      '</div>';
+  }
+
   function renderFeedback(q, result, childIndex) {
     if (!result) return '';
     const selfAttr = childIndex === undefined || childIndex === null ? '' : ' data-child="' + childIndex + '"';
@@ -504,7 +513,7 @@
         ' 道题未作答' + (engine.mode === 'exam'
           ? '（客观题已计为错误，简答题不计分也不计错）' : '，未计入得分与正确率') + '。</div>' : '') +
       (pendingSelf > 0 ? '<div class="li-meta" style="margin-top:8px">○ ' + pendingSelf +
-        ' 道简答题（含材料题中的简答小问）待自评，未计入得分与正确率；需要评分请在练习模式作答后点「我答对了/答错了」。</div>' : '') +
+        ' 道简答题（含材料题中的简答小问）待自评，未计入得分与正确率；可在下方逐题/逐小问点「我答对了 / 我答错了」完成自评。</div>' : '') +
       '<div class="li-meta" style="margin-top:10px">题库：' + esc(bank ? bank.name : '') +
       (meta.durationMs ? ' · 用时 ' + esc(QB.Helpers.formatDuration(meta.durationMs)) : '') + '</div>' +
       (meta.isExam ? '<div class="li-meta exam-focus-' + ((meta.focusLeaves || 0) > 0 ? 'warn' : 'ok') +
@@ -542,9 +551,12 @@
         childDetail = r.children.map((cv, j) => {
           const cq = (q.children || [])[j] || {};
           const cm = cv.isCorrect === true ? '✔' : (cv.isCorrect === null || cv.isCorrect === undefined ? '○' : (cv.partial ? '◐' : '✘'));
+          const selfBtns = (cv.isCorrect === null || cv.isCorrect === undefined) && cq.type === 'essay'
+            ? resultSelfButtons(i, j) : '';
           return '<div class="li-meta">（' + (j + 1) + '）' + cm + ' ' + esc(QB.typeBadge(cq.type)) +
             ' ' + plain(cq.question).slice(0, 60) +
-            '　正确答案：' + plain(cv.correctAnswer) + '</div>';
+            '　正确答案：' + plain(cv.correctAnswer) +
+            (cv.score ? '　得分 ' + (cv.earned || 0) + '/' + cv.score : '') + '</div>' + selfBtns;
         }).join('');
       }
       html += '<div class="list-item"><div class="li-head">' +
@@ -556,6 +568,7 @@
         (q.type !== 'material' ? '<div class="li-meta">正确答案：' + plain(r ? r.correctAnswer : '') +
         '　你的答案：' + esc(r ? String(r.userAnswer || '（未作答）') : '（未作答）') + '</div>' : '') +
         (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '') +
+        (q.type === 'essay' && r && r.isCorrect === null ? resultSelfButtons(i) : '') +
         '</div>';
     });
 

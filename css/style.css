@@ -371,6 +371,8 @@ body {
    交卷与「下一题」物理隔开 + 分隔线，窄屏改为上下整行，避免误点 */
 .quiz-actions-main { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .quiz-actions-end { display: flex; gap: 10px; margin-left: auto; padding-left: 16px; border-left: 1px solid var(--border); }
+/* 结果页内联自评：按钮紧跟待自评小问/题目，不占满整行 */
+.result-self { margin-top: 6px; justify-content: flex-start; gap: 10px; }
 @media (max-width: 560px) {
   .quiz-actions { flex-direction: column; }
   .quiz-actions-main { width: 100%; }

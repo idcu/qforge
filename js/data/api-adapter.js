@@ -311,6 +311,10 @@
       const w = await req('POST', '/api/history', toWireAttempt(record));
       return fromWireAttempt(w);
     },
+    async historyUpdate(id, patch) {
+      const w = await req('PATCH', '/api/history/' + enc(id), toWireAttempt(patch));
+      return fromWireAttempt(w);
+    },
     async historyRemove(id) { await req('DELETE', '/api/history/' + enc(id)); },
     async historyClear(bankId) { await req('DELETE', '/api/history' + (bankId ? '?bank_id=' + enc(bankId) : '')); },
 

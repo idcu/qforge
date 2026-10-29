@@ -378,21 +378,28 @@
     }
   }
 
+  /**
+   * 记录一次「已判定」结果：SRS 调度 + 错题本（练习即时判分与自评共用）。
+   * 材料题聚合仍为 null（还有小问待自评）时 collectGraded 返回空，不会重复记调度。
+   */
+  async function recordGraded(q, r) {
+    const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
+    invalidateReviewLog(); // 今日额度已变化，首页下次渲染重新推导
+    if (!entry) return null;
+    if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
+    try {
+      await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
+    } catch (e) { /* Storage.onError 已提示；不阻断答题 UI */ }
+    return entry;
+  }
+
   /** 提交当前题（练习模式），答错则自动进错题本 */
   async function submitCurrent() {
     const engine = State.engine;
     if (!engine || engine.hasAnswered() || !engine.canSubmit()) return;
     const q = engine.getCurrentQuestion();
     const r = engine.submitAnswer();
-    // SRS：练习即时判分（全对 good / 少选 hard / 错 again；含简答的题待自评，不在此记录）
-    const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
-    invalidateReviewLog(); // 今日额度已变化，首页下次渲染重新推导
-    if (entry) {
-      if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
-      try {
-        await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
-      } catch (e) { /* Storage.onError 已提示；不阻断答题 UI */ }
-    }
+    await recordGraded(q, r);
     QB.ProgressSaver.saveDebounced(State.bankId, engine);
     render();
   }
@@ -417,7 +424,7 @@
     }
     const score = engine.getScore();
     const durationMs = Date.now() - (State.quizMeta.startTs || Date.now());
-    await QB.History.add({
+    const historyRecord = await QB.History.add({
       bankId: State.bankId,
       bankName: State.bank ? State.bank.name : '',
       mode: engine.mode,
@@ -437,10 +444,34 @@
       title: isExam ? '考试结果' : '练习结果',
       durationMs: durationMs,
       focusLeaves: isExam ? (State.quizMeta.focusLeaves || 0) : 0,
-      isExam: isExam
+      isExam: isExam,
+      historyId: historyRecord && historyRecord.id
     };
     State.view = 'result';
     render();
+  }
+
+  /**
+   * 结果页自评后把成绩回写到本次历史记录（历史是快照，但待自评计分不应永久缺失）。
+   * 只更新计数/得分/正确率/题型分布，不触碰 id、创建时间与题库名等身份字段。
+   */
+  async function syncResultHistory() {
+    const id = State.resultMeta && State.resultMeta.historyId;
+    if (!id || !State.engine) return;
+    const score = State.engine.getScore();
+    try {
+      await QB.History.update(id, {
+        correct: score.correct,
+        wrong: score.wrong,
+        partial: score.partial,
+        pending: score.pending,
+        score: score.score,
+        accuracy: score.accuracy,
+        byType: State.engine.byType()
+      });
+    } catch (e) {
+      UI.toast('自评已记录，但历史成绩同步失败', 'err');
+    }
   }
 
   /** 错题重练：在错题池上可选题型/分类/题量后再练（池=当前错题本） */
@@ -644,6 +675,20 @@
         return render();
       case 'retry-wrong':
         return startResultWrongQuiz();
+      /* 交卷后结果页内联自评（简答/材料小问）：与答题中 self-* 共用判分与记录口径 */
+      case 'result-self-correct':
+      case 'result-self-wrong': {
+        if (!State.engine) return;
+        const isOk = action === 'result-self-correct';
+        const qidx = parseInt(el.getAttribute('data-qidx'), 10);
+        const childAttr = el.getAttribute('data-child');
+        const q = State.engine.questions[qidx];
+        const r = State.engine.selfAssessAt(qidx, isOk, childAttr === null ? undefined : parseInt(childAttr, 10));
+        if (!r) return;
+        await recordGraded(q, r);
+        await syncResultHistory();
+        return render();
+      }
 
       /* —— 答题 —— */
       case 'pick': {
@@ -678,17 +723,9 @@
         const isOk = action === 'self-correct';
         const q = State.engine.getCurrentQuestion();
         const childAttr = el.getAttribute('data-child');
-        const r = (q && q.type === 'material')
-          ? State.engine.selfAssess(isOk, parseInt(childAttr, 10))
-          : State.engine.selfAssess(isOk);
         // 材料题：只有聚合从 null（待自评）变为已判定时才记一次调度/错题
-        const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
-        invalidateReviewLog();
-        if (entry) {
-          try { await QB.SRSStore.grade(State.bankId, entry.question, entry.rating); }
-          catch (e) { /* Storage.onError 已提示 */ }
-          if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
-        }
+        const r = State.engine.selfAssess(isOk, childAttr === null ? undefined : parseInt(childAttr, 10));
+        await recordGraded(q, r);
         QB.ProgressSaver.saveDebounced(State.bankId, State.engine);
         return render();
       }

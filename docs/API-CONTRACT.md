@@ -93,6 +93,7 @@
 | DELETE | `/api/banks/{id}/favorites` | 清空收藏 |
 | GET | `/api/history?bank_id=` | 历史记录列表（上限 500） |
 | POST | `/api/history` | 新增一条记录 → `201` + 新增的 `AttemptRecord`（与 `progress.historyAdd` 返回同形：带 `id`/`created_at`） |
+| PATCH | `/api/history/{id}` | 局部更新一次成绩（交卷后自评回写 `score/correct/wrong/pending/accuracy/by_type`）→ 更新后的记录；`id`/`created_at` 不可被 patch 覆盖；不存在 → `404` |
 | DELETE | `/api/history/{id}` | 删除一条记录 |
 | DELETE | `/api/history?bank_id=` | 清空（或按库） |
 | GET | `/api/session` | 读取答题进度会话 |
@@ -177,7 +178,7 @@
 | `questions.removeMany` | `POST /api/banks/{id}/questions/batch`（`op=delete`） |
 | `progress.wrongList/wrongAdd/wrongRemove/wrongClear` | Progress 的 wrong 端点 |
 | `progress.favoriteList/favoriteToggle/favoriteClear` | Progress 的 favorites 端点 |
-| `progress.historyList/historyAdd/historyRemove/historyClear` | history 端点 |
+| `progress.historyList/historyAdd/historyUpdate/historyRemove/historyClear` | history 端点（`historyUpdate` → `PATCH /api/history/{id}`） |
 | `progress.sessionSave/sessionLoad/sessionClear` | session 端点 |
 | `reviews.list(bankId)` / `reviews.save(bankId, map)` / `reviews.remove(bankId)` | `GET`/`PUT`/`DELETE` `§6 /api/banks/{id}/reviews` |
 | `revlog.list()` / `revlog.append(entries)` | `GET`/`POST` `§6 /api/revlog` |

@@ -153,7 +153,13 @@ section('后端：学习数据（错题/收藏/历史/会话）');
   const hist = await req('GET', '/api/history?bank_id=' + bankA.id);
   eq(hist.body.total, 1, 'history 按库列表');
   eq(hist.body.items[0].correct, 4, 'history 记录字段保留');
-  await req('DELETE', '/api/history/' + hist.body.items[0].id);
+  const hid = hist.body.items[0].id;
+  const patchedHist = await req('PATCH', '/api/history/' + hid, { score: 40, accuracy: 80, pending: 1, id: 'evil', created_at: 0 });
+  eq(patchedHist.body.score, 40, 'history PATCH 更新得分');
+  eq(patchedHist.body.id, hid, 'history PATCH 保留 id');
+  eq(patchedHist.body.created_at, hist.body.items[0].created_at, 'history PATCH 保留 created_at');
+  eq((await req('PATCH', '/api/history/missing', { score: 1 })).status, 404, 'history PATCH 不存在 404');
+  await req('DELETE', '/api/history/' + hid);
   eq((await req('GET', '/api/history')).body.total, 0, 'history 单条删除');
 
   eq((await req('GET', '/api/session')).status, 404, '无会话 404');
@@ -335,6 +341,9 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   const hist = await QB.DB.progress.historyList(bank.id);
   eq(hist[0].byType.single.correct, 1, 'api：history 回读 byType');
   eq(hist[0].durationMs, 500, 'api：history 回读 durationMs');
+  const histUpd = await QB.DB.progress.historyUpdate(added.id, { score: 42, correct: 0 });
+  eq(histUpd.score, 42, 'api：historyUpdate 回写得分');
+  eq(histUpd.id, added.id, 'api：historyUpdate 保留 id');
 
   // 筛选查询不得污染 count 缓存（否则考勤/状态栏显示筛选后总数）
   {

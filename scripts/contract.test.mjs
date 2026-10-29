@@ -133,6 +133,12 @@ section('删库级联（唯一入口 cascadeDelete）');
   QB.DB.weights.write({ global: null, banks: { [A.id]: { w: QB.FSRS.DEFAULT_W, trainedAt: 1 } } });
   const added = await QB.DB.progress.historyAdd({ bankId: A.id, bankName: '级联A', total: 1, correct: 1 });
   ok(added && typeof added.id === 'string' && typeof added.createdAt === 'number', 'historyAdd 返回新增记录（id/createdAt，与 api 适配器同形）');
+  // 交卷后自评回写：只能改成绩字段，id/createdAt 不可被覆盖
+  const updated = await QB.DB.progress.historyUpdate(added.id, { score: 30, accuracy: 75, id: 'evil', createdAt: 0 });
+  ok(updated && updated.id === added.id && updated.createdAt === added.createdAt, 'historyUpdate 保留 id/createdAt（patch 不能篡改身份）');
+  eq(updated.score, 30, 'historyUpdate 更新得分');
+  eq((await QB.DB.progress.historyList(A.id)).find((h) => h.id === added.id).score, 30, 'historyUpdate 已落库');
+  eq(await QB.DB.progress.historyUpdate('missing-history', { score: 1 }), null, 'historyUpdate 不存在的 id 返回 null');
   await QB.DB.progress.historyAdd({ bankId: B.id, bankName: '级联B', total: 1, correct: 1 });
   await QB.DB.setCurrentBankId(A.id);
 

@@ -298,6 +298,31 @@ section('结果页：未作答与待自评分开计数（回归）');
   const allSelf = UI.renderResult(mk({ score: 0, correct: 0, wrong: 0, partial: 0, pending: 1, unanswered: 0, pendingSelfAssess: 1, accuracy: 0 }), { name: 'B' }, {});
   ok(allSelf.indexOf('未作答</div>') < 0, '无未作答时不渲染未作答卡');
   ok(allSelf.indexOf('1 道简答题') >= 0, '仅待自评时文案正确');
+  ok(allSelf.indexOf('data-action="result-self-correct" data-qidx="1"') >= 0, '待自评简答含结果页自评按钮（按题号定位）');
+  ok(allSelf.indexOf('data-action="result-self-wrong" data-qidx="1"') >= 0, '结果页自评含「我答错了」');
+  ok(allSelf.indexOf('逐题/逐小问点') >= 0, '文案指引结果页内联自评');
+
+  // 材料题：仅待自评的简答小问渲染按钮，已判定小问不渲染
+  const mq = {
+    type: 'material', material: '共享材料', question: '材料题',
+    children: [{ type: 'single', question: '小问1', options: ['甲', '乙'], answer: 'A' }, { type: 'essay', question: '小问2', reference_answer: '参考' }]
+  };
+  const mresult = {
+    isCorrect: null, points: { max: 20, earned: 10 },
+    children: [
+      { isCorrect: true, correctAnswer: '甲', userAnswer: '甲', score: 10, earned: 10 },
+      { isCorrect: null, correctAnswer: '参考', userAnswer: '作答', score: 10, earned: 0 }
+    ]
+  };
+  const mhtml = UI.renderResult({
+    questions: [mq],
+    results: [mresult],
+    getScore: () => ({ score: 10, correct: 0, wrong: 0, partial: 0, pending: 1, unanswered: 0, pendingSelfAssess: 1, accuracy: 0 }),
+    breakdown: () => ({ byType: {}, byCategory: [], byDifficulty: [] })
+  }, { name: 'B' }, {});
+  ok(mhtml.indexOf('data-action="result-self-correct" data-qidx="0" data-child="1"') >= 0, '材料待自评小问按钮带 data-child');
+  ok(mhtml.indexOf('data-child="0"') < 0, '已判定小问不渲染自评按钮');
+  ok(mhtml.indexOf('得分 10/10') >= 0, '材料小问显示得分/满分');
 }
 
 section('复习计划卡 / 难卡标记 / 本题历史（P2）');

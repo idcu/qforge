@@ -261,14 +261,16 @@
   }
 
   /**
-   * 简答题自评
+   * 简答题自评（按题目下标；交卷后的结果页复用同一语义）
+   * @param {number} index 题号下标
    * @param {boolean} isCorrect 用户自评结论
    * @param {number} [childIndex] 材料题：自评的小问下标
    * @returns 重算后的 result（材料题聚合可能仍为 null=还有小问待自评）
    */
-  QuizEngine.prototype.selfAssess = function (isCorrect, childIndex) {
-    const q = this.getCurrentQuestion();
-    const r = this.results[this.currentIndex];
+  QuizEngine.prototype.selfAssessAt = function (index, isCorrect, childIndex) {
+    const i = index === undefined || index === null ? this.currentIndex : index;
+    const q = this.questions[i];
+    const r = this.results[i];
     if (!r) return null;
     if (q && q.type === 'material') {
       const cq = (q.children || [])[childIndex];
@@ -281,6 +283,11 @@
     if (r.type !== 'essay') return null;
     r.isCorrect = !!isCorrect;
     return r;
+  };
+
+  /** 简答题自评（当前题；答题过程中使用） */
+  QuizEngine.prototype.selfAssess = function (isCorrect, childIndex) {
+    return this.selfAssessAt(this.currentIndex, isCorrect, childIndex);
   };
 
   /**

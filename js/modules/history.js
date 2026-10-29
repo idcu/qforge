@@ -14,6 +14,11 @@
       return QB.DB.progress.historyAdd(record);
     },
 
+    /** 局部更新一次记录（交卷后自评回写成绩）；返回更新后的记录或 null */
+    async update(id, patch) {
+      return QB.DB.progress.historyUpdate(id, patch);
+    },
+
     async remove(id) {
       return QB.DB.progress.historyRemove(id);
     },

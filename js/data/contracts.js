@@ -36,7 +36,7 @@
     questions: ['list', 'count', 'revision', 'get', 'create', 'update', 'remove', 'insertMany', 'removeMany'],
     progress: ['wrongList', 'wrongAdd', 'wrongRemove', 'wrongClear',
       'favoriteList', 'favoriteToggle', 'favoriteClear',
-      'historyList', 'historyAdd', 'historyRemove', 'historyClear',
+      'historyList', 'historyAdd', 'historyUpdate', 'historyRemove', 'historyClear',
       'sessionSave', 'sessionLoad', 'sessionClear'],
     // 阶段 C（开生态）：SRS / 评分日志 / 个性化权重 / 备份 —— 只暴露「存储原语」，
     // 算法（FSRS 调度、留出门控、到期桶计算）留在领域模块（见 docs/SRS.md §8/§12）。
