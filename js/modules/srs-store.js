@@ -106,13 +106,9 @@
     return (await dueToday(bankId, questions, now)).length;
   }
 
-  const DAY_MS = 24 * 60 * 60 * 1000;
-
-  /** 本地自然日序号（按运行环境时区，0 点为界） */
+  /** 本地自然日序号（按运行环境时区，0 点为界；唯一实现见 QB.Time） */
   function dayIndex(ts) {
-    const d = new Date(ts);
-    d.setHours(0, 0, 0, 0);
-    return Math.floor(d.getTime() / DAY_MS);
+    return QB.Time.dayIndex(ts);
   }
 
   /** 概览：已跟踪题数、已学题数（有 stability 的） */

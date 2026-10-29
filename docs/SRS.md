@@ -143,6 +143,18 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 - `isDueToday(state, now)`：`due <= 今日 23:59:59.999`（含逾期），按运行环境本地自然日判定，不依赖时区偏移量（srs.test 含时区无关断言）。
 - `dueQuestions(questions, stateMap, now)`：筛今日到期题；顺序打乱由调用方负责。
 
+### 6.1 今日复习队列与限额（`QB.ReviewQueue` + `QB.SchedSettings`）
+
+v1 的「今日复习」直接取全部到期题（新题也算到期），3000 题新库首日会一次灌 3000 题。现在改为三层排队：
+
+1. **learning**：处于 1m/10m 学习/重学步骤且 `due <= now` 的卡，优先（分钟级未到的不入本轮）。
+2. **review**：已毕业卡且 `due <= 今日 23:59:59.999`（逾期在前，按 due 升序）；上限 `reviewPerDay - learning.length`。
+3. **new**：无调度状态的题；上限 `newPerDay`。
+
+顺序固定为 learning → review → new（review/new 组内按种子洗牌，可复现）。限额按题库存于 `bank.sched = {newPerDay, reviewPerDay}`（wire：`sched.new_per_day / review_per_day`），复用 banks 仓库，故 local / api / 备份三端一致；默认值唯一来源 `CONFIG.LIMITS.NEW_PER_DAY=20 / REVIEW_PER_DAY=200`，0 表示该组不排。统计页提供「调整复习设置」，首页「今日复习」显示本轮实际排入的题量与构成（不再显示原始到期总数）。
+
+> 这是**每轮队列上限**（每次点「今日复习」重新按限额生成），不是跨会话的每日累计计数；跨会话累计需新增每日配额存储，列入后续项。到期判定语义仍由 `srs.js::isDueToday` 单点定义，队列只做分组与裁剪。
+
 ## 7. SM-2 → FSRS 迁移
 
 旧版本按 SM-2 存的状态只有 `interval/ease`，无 `algo/stability` 字段。策略（`srs-store.js`）：

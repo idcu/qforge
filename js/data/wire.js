@@ -15,14 +15,26 @@
     from(w) {
       return {
         id: w.id, name: w.name, description: w.description || '', category: w.category || '',
+        // 复习调度设置（可选）：wire snake_case ↔ 本地 camelCase；缺失时为 null（使用默认限额）
+        sched: w.sched ? {
+          newPerDay: w.sched.new_per_day,
+          reviewPerDay: w.sched.review_per_day
+        } : null,
         createdAt: w.created_at, updatedAt: w.updated_at
       };
     },
     to(b) {
-      return {
+      const out = {
         id: b.id, name: b.name, description: b.description || '', category: b.category || '',
         created_at: b.createdAt, updated_at: b.updatedAt
       };
+      if (b.sched) {
+        out.sched = {
+          new_per_day: b.sched.newPerDay,
+          review_per_day: b.sched.reviewPerDay
+        };
+      }
+      return out;
     }
   };
 

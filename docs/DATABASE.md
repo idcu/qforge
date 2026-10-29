@@ -29,11 +29,13 @@ CREATE TABLE banks (
   source_uri     TEXT,                               -- 文件名 / '剪贴板' / 远端 URL
   source_checksum CHAR(8),                           -- 上次拉取内容 FNV-1a，仅 url
   source_fetched_at BIGINT,                          -- 上次拉取时间，仅 url
+  sched       JSON,                                  -- 复习设置 {new_per_day, review_per_day}，可空=默认
   created_at  BIGINT       NOT NULL,
   updated_at  BIGINT       NOT NULL
 );
 ```
 > 前端 bank.source 为嵌套对象 `{kind, uri, fetchedAt, checksum, refreshable}`；无该字段的旧题库按 `local` 兜底（读取时归一，不写迁移）。注意区分：来源（题目从哪进入本地）与存储后端（`DATA_BACKEND` local/api）是两个维度。
+> `bank.sched` 为复习限额 `{new_per_day, review_per_day}`（前端 camelCase `newPerDay/reviewPerDay`），缺省用 `CONFIG.LIMITS` 默认值；随题库记录一起备份与同步。
 
 ### 2.2 questions（题目）
 ```sql

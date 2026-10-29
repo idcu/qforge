@@ -44,7 +44,10 @@
     DEFAULT_EXAM_MINUTES: 30,
     HISTORY_MAX: 500,             // 本地历史记录 FIFO 上限
     REVLOG_MAX: 20000,            // FSRS 评分日志 FIFO 上限（约 0.8MB）
-    QUESTIONS_SHARD_SIZE: 200     // 单库题目分片大小（尾分片可不满；单题增删改只重写所在分片）
+    QUESTIONS_SHARD_SIZE: 200,    // 单库题目分片大小（尾分片可不满；单题增删改只重写所在分片）
+    // 复习队列默认限额（按题库可在 bank.sched 覆盖；0=该组不排）
+    NEW_PER_DAY: 20,              // 每日新题上限
+    REVIEW_PER_DAY: 200          // 每日到期复习上限
   };
 
   // 题目图片资产（IndexedDB；改库名等于换存储实例，不会迁移旧图）

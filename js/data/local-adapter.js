@@ -289,6 +289,7 @@
         createdAt: t,
         updatedAt: t
       };
+      if (data && data.sched) bank.sched = data.sched;
       list.push(bank);
       Storage.set(K.banks, list);
       return bank;

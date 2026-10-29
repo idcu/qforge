@@ -300,6 +300,47 @@ section('结果页：未作答与待自评分开计数（回归）');
   ok(allSelf.indexOf('1 道简答题') >= 0, '仅待自评时文案正确');
 }
 
+section('复习计划卡 / 难卡标记 / 本题历史（P2）');
+{
+  const plan = UI.renderReviewPlan({
+    bank: { id: 'b' }, settings: { newPerDay: 20, reviewPerDay: 200 },
+    counts: { total: 5, newPicked: 2, duePicked: 3, learning: 0 }
+  });
+  ok(plan.indexOf('今日复习计划') >= 0, '统计页含复习计划卡');
+  ok(plan.indexOf('每日新题上限 <b>20</b>') >= 0, '展示新题上限');
+  ok(plan.indexOf('当前队列 5 题') >= 0, '展示当前队列构成');
+  ok(plan.indexOf('data-action="review-settings"') >= 0, '含复习设置入口');
+  eq(UI.renderReviewPlan(null), '', '无计划对象时不渲染卡片');
+
+  const q = { type: 'judge', question: '历史题', answer: '正确' };
+  const engine = {
+    mode: 'practice', questions: [q], currentIndex: 0,
+    results: [{ isCorrect: true, correctAnswer: '正确', userAnswer: '正确', analysis: '' }],
+    answers: [true],
+    getCurrentQuestion: () => q,
+    getProgress: () => ({ current: 1, total: 1, percentage: 100 }),
+    getScore: () => ({ score: 10, correct: 1, wrong: 0 }),
+    hasAnswered: () => true, canSubmit: () => true, isLastQuestion: () => true,
+    statusAt: () => 'correct', answeredCount: () => 1
+  };
+  const regions = UI.renderQuizRegions(engine, {
+    favorited: false,
+    reviewState: { lapses: 9, stability: 2 },
+    reviewHistory: [{ r: 1, t: 1000 }, { r: 3, t: 2000 }, { r: 3, t: 3000 }]
+  });
+  const keys = regions.map((r) => r.key);
+  ok(keys.indexOf('quiz-history') >= 0, '已答且有历史：含 quiz-history 区域');
+  const head = regions.find((r) => r.key === 'quiz-head').html;
+  ok(head.indexOf('leech-badge') >= 0, 'lapses≥8 显示难卡标记');
+  ok(head.indexOf('累计遗忘 9 次') >= 0, '难卡 title 含遗忘次数');
+  const hist = regions.find((r) => r.key === 'quiz-history').html;
+  ok(hist.indexOf('评分 3 次') >= 0 && hist.indexOf('又忘 1') >= 0 && hist.indexOf('良好 2') >= 0, '历史含次数与四档分布');
+  ok(hist.indexOf('最近') >= 0, '历史含最近一次时间');
+
+  const noHist = UI.renderQuizRegions(engine, { favorited: false });
+  eq(noHist.map((r) => r.key).indexOf('quiz-history'), -1, '无历史快照时不渲染历史区');
+}
+
 section('错题本/收藏夹：简答题解析展示（回归）');
 {
   const essay = { type: 'essay', question: '简答解析题', reference_answer: '参考答案XYZ', analysis: '解析ABC' };

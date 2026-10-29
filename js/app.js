@@ -165,7 +165,17 @@
     QB.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
     items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
     State.allQuestions = items;
-    State.counts = { total: items.length, byType: byType, dueReview: await QB.SRSStore.countDue(State.bankId, items) };
+    // 今日队列（按题库限额）：到期数一律走队列口径，避免首页显示「3000 题到期」的洪水
+    const reviewMap = await QB.SRSStore.readMap(State.bankId);
+    const queue = QB.ReviewQueue.build(items, reviewMap, {
+      settings: QB.SchedSettings.ofBank(State.bank),
+      now: Date.now()
+    });
+    State.counts = {
+      total: items.length, byType: byType,
+      dueReview: queue.counts.total,
+      queue: queue.counts
+    };
   }
 
   /** 题库列表/当前库元数据变更后使缓存失效（本地可精确失效，api 模式避免多余 GET） */
@@ -200,7 +210,11 @@
         const cq = State.engine.getCurrentQuestion();
         let favorited = false;
         if (cq) favorited = State.favoriteKeys.has(QB.makeQuestionKey(cq));
-        regions = UI.renderQuizRegions(State.engine, { favorited: favorited });
+        regions = UI.renderQuizRegions(State.engine, {
+          favorited: favorited,
+          reviewState: quizReviewState(cq),
+          reviewHistory: quizReviewHistory(cq)
+        });
         if (!regions) html = UI.renderQuiz(State.engine, { favorited: favorited }); // 无当前题时回退整块
         break;
       }
@@ -233,7 +247,11 @@
           scopes: scopes,
           scopeLabel: scopeBank ? scopeBank.name : '全局'
         };
-        html = UI.renderStats(await QB.History.list(State.bankId), fc, fsrsInfo);
+        html = UI.renderStats(await QB.History.list(State.bankId), fc, fsrsInfo, {
+          bank: State.bank,
+          settings: QB.SchedSettings.ofBank(State.bank),
+          counts: State.counts.queue
+        });
         break;
       }
       case 'search': {
@@ -289,6 +307,7 @@
     State.view = 'quiz';
     startQuizTimer(engine);
     QB.ProgressSaver.save(State.bankId, engine);
+    hydrateQuizReviewContext(State.bankId, engine);
     render();
   }
 
@@ -428,11 +447,50 @@
     beginQuiz(QB.shuffle(list.map((x) => x.question)).slice(0, QB.CONFIG.QUESTIONS_PER_QUIZ), 'practice', '收藏练习');
   }
 
-  /** 今日复习：抽取 SRS 到期题（含未学新题），打乱成练习 */
+  /** 当前题 FSRS 状态（本场开练时快照；无快照返回 null） */
+  function quizReviewState(q) {
+    if (!q || !State.quizMeta.reviewMap) return null;
+    return State.quizMeta.reviewMap[QB.makeQuestionKey(q)] || null;
+  }
+
+  /** 当前题评分历史（本场开练时快照；无快照返回 null） */
+  function quizReviewHistory(q) {
+    if (!q || !State.quizMeta.revlogByHash) return null;
+    return State.quizMeta.revlogByHash[QB.makeQuestionKey(q)] || null;
+  }
+
+  /** 开练时一次性载入本题库的调度状态与 revlog（每题渲染只查内存，api 模式不逐题 GET） */
+  function hydrateQuizReviewContext(bankId, engine) {
+    if (!bankId) return;
+    Promise.all([QB.SRSStore.readMap(bankId), QB.DB.revlog.list()])
+      .then(([map, log]) => {
+        if (State.engine !== engine) return; // 已切场，丢弃旧快照
+        const byHash = {};
+        (log || []).forEach((e) => {
+          if (!e || e.b !== bankId || !e.h) return;
+          (byHash[e.h] = byHash[e.h] || []).push(e);
+        });
+        State.quizMeta.reviewMap = map || {};
+        State.quizMeta.revlogByHash = byHash;
+        render();
+      })
+      .catch(() => { /* 历史面板是增强信息，载入失败不影响答题 */ });
+  }
+
+  /** 今日复习：按题库限额排 learning → 到期 → 新题（不再一次性灌全库） */
   async function startReview() {
-    const due = await QB.SRSStore.dueToday(State.bankId, State.allQuestions);
-    if (!due.length) { UI.toast('今日没有到期需要复习的题目 🎉', 'ok'); return; }
-    beginQuiz(QB.shuffle(due), 'practice', '今日复习（' + due.length + ' 题）');
+    const reviewMap = await QB.SRSStore.readMap(State.bankId);
+    const queue = QB.ReviewQueue.build(State.allQuestions, reviewMap, {
+      settings: QB.SchedSettings.ofBank(State.bank),
+      now: Date.now()
+    });
+    if (!queue.questions.length) {
+      UI.toast('今日没有需要复习的题目（限额内已排完）🎉', 'ok');
+      return;
+    }
+    const c = queue.counts;
+    beginQuiz(queue.questions, 'practice',
+      '今日复习（' + c.total + ' 题：到期 ' + c.duePicked + ' / 新 ' + c.newPicked + ' / 学习中 ' + c.learning + '）');
   }
 
   /* ---------------- 事件处理 ---------------- */
@@ -730,6 +788,10 @@
         return render();
       }
 
+      /* —— 复习设置 —— */
+      case 'review-settings':
+        return openSchedDialog();
+
       /* —— 搜索 —— */
       case 'search-practice': {
         const results = QB.SearchFilter.filter(State.allQuestions, {
@@ -874,6 +936,46 @@
         beginQuiz(questions, mode, quizTitle, quizOpts);
       };
     });
+  }
+
+  /** 复习设置弹窗（按题库保存到 bank.sched，随备份/API 同步） */
+  function openSchedDialog() {
+    if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+    const s = QB.SchedSettings.ofBank(State.bank);
+    UI.openModal(
+      '<h3>复习设置 · ' + esc(State.bank.name) + '</h3>' +
+      '<p class="li-meta">控制「今日复习」每轮最多排入的题量，顺序为：学习中（分钟级）→ 到期复习 → 新题。' +
+      '设为 0 表示该组本轮不排。</p>' +
+      '<div class="qe-grid">' +
+      '<div><label class="qe-label">每日新题上限</label>' +
+      '<input type="number" min="0" max="9999" id="sched-new" value="' + s.newPerDay + '" /></div>' +
+      '<div><label class="qe-label">每日复习上限</label>' +
+      '<input type="number" min="0" max="9999" id="sched-rev" value="' + s.reviewPerDay + '" /></div>' +
+      '</div>' +
+      '<p class="li-meta">默认新题 ' + QB.SchedSettings.DEFAULTS.newPerDay + ' / 复习 ' +
+      QB.SchedSettings.DEFAULTS.reviewPerDay + '；设置存于题库记录，local / api / 备份三端一致。</p>' +
+      '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
+      '<button class="btn" data-action="modal-ok">保存</button></div>',
+      (modal) => {
+        modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
+        modal.querySelector('[data-action="modal-ok"]').onclick = async () => {
+          try {
+            const res = await QB.SchedSettings.save(State.bank, {
+              newPerDay: parseInt(modal.querySelector('#sched-new').value, 10),
+              reviewPerDay: parseInt(modal.querySelector('#sched-rev').value, 10)
+            });
+            State.bank = res.bank;
+            const i = State.banks.findIndex((b) => b.id === res.bank.id);
+            if (i >= 0) State.banks[i] = res.bank;
+            UI.closeModal();
+            UI.toast('复习设置已保存（新 ' + res.settings.newPerDay + ' / 复习 ' + res.settings.reviewPerDay + '）', 'ok');
+            render();
+          } catch (e) {
+            UI.toast('保存失败：' + e.message, 'err');
+          }
+        };
+      }
+    );
   }
 
   /* ---------------- 事件委托绑定 ---------------- */
@@ -1117,6 +1219,7 @@
     State.quizMeta = { startTs: Date.now(), title: '继续上次' };
     State.view = 'quiz';
     startQuizTimer(engine);
+    hydrateQuizReviewContext(State.bankId, engine);
     render();
   }
 

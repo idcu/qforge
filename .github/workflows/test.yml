@@ -62,6 +62,8 @@ jobs:
         run: node scripts/contract.test.mjs
       - name: 参考后端 + api 适配器端到端测试
         run: node scripts/api-backend.test.mjs
+      - name: 今日复习队列 / 复习设置测试
+        run: node scripts/review-queue.test.mjs
       - name: 静态服务路径守卫测试
         run: node scripts/static-server.test.mjs
       - name: WebDAV 云备份测试

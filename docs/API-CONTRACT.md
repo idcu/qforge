@@ -36,6 +36,7 @@
   "source_uri": "文件名 / 剪贴板 / 远端 URL",
   "source_checksum": "a2cd0a87",
   "source_fetched_at": 0,
+  "sched": { "new_per_day": 20, "review_per_day": 200 },
   "created_at": 0, "updated_at": 0 }
 ```
 > `cascade=true` 时连带删除该题库下所有题目与用户数据（错题/收藏/历史/会话）。

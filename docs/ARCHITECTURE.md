@@ -53,6 +53,7 @@
 | 文件 | 导出 | 职责 |
 | --- | --- | --- |
 | `utils/helpers.js` | `QB.Helpers` | `debounce`（返回函数带 **`.cancel()`**，可丢弃挂起调用）/`throttle/cloneDeep/uid/escapeHtml/formatDate/formatDuration/calculateAccuracy` |
+| `utils/time.js` | `QB.Time` | 自然日公共抽象：`dayStart/dayIndex/isSameDay/endOfDay`（唯一实现；SRS 到期、复习队列、学习热力图共用，禁止各自 `setHours(0,0,0,0)`） |
 | `utils/rich-text.js` | `QB.RichText` | 模型内容上屏统一入口：`render()`（转义 + `^{}`/`_{}` 上下标 + **轻量公式子集 `\frac{}{}`/`\sqrt{}`/`\sqrt[n]{}`（CSS 排版，参数组可嵌套、内部递归渲染）**）、`toPlain()`（去记号，不转义）、`questionAssetIds()`（收集题内图片 id，含材料正文 `material` 与递归小问 `children`，供 qbk 打包/备份孤儿清理的引用集） |
 | `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存；visibility/beforeunload 落盘；`usageBytes()` |
 | `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions` | mulberry32 种子化洗牌/抽样；选项乱序并同步重映射答案 |
@@ -108,6 +109,8 @@
 | `modules/fsrs-train-client.js` | 训练执行选择器：`supported(env)` 判定（http(s)+Worker）、`run(revlog,opts)` 消息往返（30s 超时）并透传训练参数（含热启动 `startWeights`）、构造/运行失败自动回退主线程；env/createWorker/compute 可注入测试 |
 | `workers/fsrs-worker.js` | 训练 Worker（不经 index.html）：importScripts fsrs.js + train-core，收 `train`（`initWeights` 基线 / `startWeights?` 热启动）回 `done/error`；SW 预缓存，离线可用 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
+| `modules/sched-settings.js` | `QB.SchedSettings`：按题库复习限额（`bank.sched`）归一/读取/保存；默认值唯一来源 `CONFIG.LIMITS.NEW_PER_DAY/REVIEW_PER_DAY`，复用 banks 仓库（local/api/备份同语义） |
+| `modules/review-queue.js` | `QB.ReviewQueue`：今日复习队列纯函数——learning（分钟级已到期）→ 到期复习（逾期在前，封顶 `reviewPerDay-learning`）→ 新题（封顶 `newPerDay`）；返回 `{questions, counts, settings}`，不碰存储/DOM |
 | `modules/srs-store.js` | SRS 状态按题库存取（`user:review:<bank>`，contentHash 键）**经 `QB.DB.reviews`（异步）**：`grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear` 均 `async`；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（同步纯函数，一次作答一条 revlog 契约） |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire,countUp})`：倒计时（考试，到期 `onExpire` 自动交卷）与正计时（练习 `countUp=true`，从 0 累加不结束）共用同一实现，`onTick` 统一回调「剩余/已用毫秒」 |
 | `modules/source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入测试） |

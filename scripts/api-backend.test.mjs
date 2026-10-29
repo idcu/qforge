@@ -299,8 +299,14 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   eq(QB.DB.backend, 'api', 'DATA_BACKEND=api 时门面选中 api 适配器');
 
   // 与 UI 相同的仓库调用面
-  const bank = await QB.DB.banks.create({ name: 'parity 库', category: 'parity' });
+  const bank = await QB.DB.banks.create({ name: 'parity 库', category: 'parity', sched: { newPerDay: 5, reviewPerDay: 10 } });
   ok(!!bank.id, 'api：banks.create 返回 id');
+  eq(bank.sched.newPerDay, 5, 'api：创建时 sched.newPerDay 回读（new_per_day → newPerDay）');
+  const savedSched = await QB.SchedSettings.save(bank, { newPerDay: 7, reviewPerDay: 12 });
+  eq(savedSched.settings.newPerDay, 7, 'api：SchedSettings.save 返回归一设置');
+  const rereadBank = await QB.DB.banks.get(bank.id);
+  eq(rereadBank.sched.newPerDay, 7, 'api：sched 经 PATCH 落库并回读 newPerDay');
+  eq(rereadBank.sched.reviewPerDay, 12, 'api：sched 回读 reviewPerDay');
   await QB.DB.questions.insertMany(bank.id, [
     { type: 'single', question: 'parity 题1', options: [{ letter: 'A', text: '对' }], answer: 'A' },
     { type: 'judge', question: 'parity 题2', answer: '正确' }

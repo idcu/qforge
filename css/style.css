@@ -275,6 +275,15 @@ body {
   font-size: 12px;
   font-weight: 600;
 }
+/* 难卡标记（累计遗忘 ≥8 次）：与题型角标同形，用危险色区分 */
+.type-badge.leech-badge {
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+/* 本题评分历史卡（答题反馈下方） */
+.review-history { border-left: 3px solid var(--primary); }
+/* 确认弹窗的结构化多行（交卷未答/半对明细） */
+.confirm-lines { line-height: 1.8; }
 .progress-bar {
   height: 6px;
   border-radius: 999px;

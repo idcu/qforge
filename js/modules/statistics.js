@@ -54,11 +54,9 @@
         .filter((x) => x.total > 0);
     },
 
-    /** 自然日 0 点（运行环境本地时区） */
+    /** 自然日 0 点（运行环境本地时区；唯一实现见 QB.Time） */
     _dayStart(ts) {
-      const d = new Date(ts);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime();
+      return QB.Time.dayStart(ts);
     },
 
     /** 该自然日所在周的周一 0 点 */

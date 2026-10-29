@@ -124,8 +124,12 @@
     }
 
     const due = counts.dueReview || 0;
+    const queue = counts.queue;
+    const reviewSub = queue
+      ? (queue.total + ' 题（新 ' + queue.newPicked + ' / 到期 ' + queue.duePicked + (queue.learning ? ' / 学习中 ' + queue.learning : '') + '）')
+      : (due + ' 题到期（间隔重复）');
     const menu = [
-      { action: 'start-review', ico: '🧠', label: '今日复习', sub: due + ' 题到期（间隔重复）', hot: due > 0 },
+      { action: 'start-review', ico: '🧠', label: '今日复习', sub: reviewSub, hot: (queue ? queue.total : due) > 0 },
       { action: 'start-practice', ico: '✍️', label: '练习模式', sub: '边答边看解析' },
       { action: 'start-exam', ico: '⏱️', label: '考试模式', sub: '限时 / 交卷' },
       { action: 'start-mixed', ico: '🎲', label: '组卷', sub: '题型/分类/难度' },
@@ -278,6 +282,22 @@
     return html;
   }
 
+  /**
+   * 本题评分历史（revlog 快照）：次数 + 四档分布 + 最近时间。
+   * 数据由 app.js 在开练时一次性载入（避免每题渲染读整份 revlog）。
+   */
+  function renderReviewHistory(history) {
+    const counts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    let last = 0;
+    history.forEach((e) => {
+      if (counts[e.r] !== undefined) counts[e.r]++;
+      if (e.t > last) last = e.t;
+    });
+    return '<div class="card review-history" data-region="quiz-history"><div class="li-meta">本题历史：评分 ' +
+      history.length + ' 次（又忘 ' + counts[1] + ' / 困难 ' + counts[2] + ' / 良好 ' + counts[3] + ' / 简单 ' + counts[4] + '）' +
+      (last ? '　最近 ' + esc(QB.Helpers.formatDate(last)) : '') + '</div></div>';
+  }
+
   function renderFeedback(q, result, childIndex) {
     if (!result) return '';
     const selfAttr = childIndex === undefined || childIndex === null ? '' : ' data-child="' + childIndex + '"';
@@ -328,6 +348,9 @@
 
     regions.push({ key: 'quiz-head', html: '<div class="quiz-head" data-region="quiz-head">' +
       '<div><span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span> ' +
+      (opts.reviewState && opts.reviewState.lapses >= 8
+        ? '<span class="type-badge leech-badge" title="累计遗忘 ' + opts.reviewState.lapses + ' 次，建议拆分或重学">难卡</span> '
+        : '') +
       '<span class="q-progress">第 ' + prog.current + ' / ' + prog.total + ' 题</span>' +
       (q.category ? ' <span class="q-progress">· ' + esc(q.category) + '</span>' : '') + '</div>' +
       '<div class="q-score">得分 ' + score.score + ' · ✔ ' + score.correct + ' · ✘ ' + score.wrong +
@@ -351,6 +374,10 @@
     // 解析是作答后最需要阅读的内容，不应被压到页面最底部（答题卡之后）。
     if (!isExam && answered) {
       regions.push({ key: 'quiz-feedback', html: q.type === 'material' ? renderMaterialOverall(result) : renderFeedback(q, result) });
+      // 本题历史（评分序列/最近一次）是增强信息：仅在已答且有 revlog 时出现
+      if (Array.isArray(opts.reviewHistory) && opts.reviewHistory.length) {
+        regions.push({ key: 'quiz-history', html: renderReviewHistory(opts.reviewHistory) });
+      }
     }
 
     // 操作按钮
@@ -671,8 +698,25 @@
       '</div></div>';
   }
 
-  function renderStats(records, forecastData, fsrsInfo) {
-    let prefix = renderFsrsCard(fsrsInfo);
+  /**
+   * 今日复习计划卡（统计页）：展示当前限额与本次队列构成，入口「调整复习设置」。
+   * @param {{bank:Object, settings:Object, counts?:Object}} plan
+   */
+  function renderReviewPlan(plan) {
+    if (!plan || !plan.settings) return '';
+    const s = plan.settings;
+    const c = plan.counts;
+    const now = c
+      ? '当前队列 ' + c.total + ' 题（新 ' + c.newPicked + ' / 到期 ' + c.duePicked + ' / 学习中 ' + c.learning + '）'
+      : '按限额生成今日队列';
+    return '<div class="card"><h3 class="card-title">今日复习计划</h3>' +
+      '<div class="li-meta">每日新题上限 <b>' + s.newPerDay + '</b> · 每日复习上限 <b>' + s.reviewPerDay + '</b>' +
+      '　' + esc(now) + '</div>' +
+      '<div class="toolbar"><button class="btn btn-ghost" data-action="review-settings">调整复习设置</button></div></div>';
+  }
+
+  function renderStats(records, forecastData, fsrsInfo, reviewPlan) {
+    let prefix = renderReviewPlan(reviewPlan) + renderFsrsCard(fsrsInfo);
     if (forecastData) {
       const max = Math.max(1, ...forecastData.days.map((d) => d.count));
       const shortLabel = (s) => s === '今天' ? '今' : s.replace('天后', '');
@@ -931,6 +975,7 @@
     renderHistoryListRegions, renderSearchRegions,
     renderAnswerText, emptyState, progressBar,
     renderMixDialog, renderStartDialog,
+    renderReviewHistory, renderReviewPlan,
     toast, openModal, closeModal, confirmDialog
   };
   QB.UIRenderer.LIST_PAGE_SIZE = LIST_PAGE_SIZE;

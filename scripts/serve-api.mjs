@@ -92,6 +92,7 @@ export function createStore(dataDir) {
         created_at: t,
         updated_at: t
       };
+      if (data && data.sched) bank.sched = data.sched;
       const list = banks.list();
       list.push(bank);
       writeJson(files.banks, list);
