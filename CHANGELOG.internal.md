@@ -14,6 +14,21 @@
 
 ---
 
+## 134255e · test(bench): 性能门禁 --assert + CI 条件步骤
+
+**核心改动**
+- `scripts/bench.mjs --assert`：17 项量级阈值 + heapUsed 增量 ≤40MB，超限退出码 1。
+- CI 在 Node 24 / Asia-Shanghai 矩阵格额外跑该门禁；README/DEVELOPMENT 同步口径。
+
+**验证数据（2026-10-29 本机实跑）**
+- 门禁全通过：队列 0.17ms、单页 0.24ms、全量读 3.42ms、单题写 0.23ms、缓存命中 0.00ms、XLSX 6.08ms、DOCX 2.38ms、FSRS 训练 3809ms、heapUsed +2.57MB。
+- `test-all` 24 个运行项 / 0 失败 / 24.7s。
+
+**TODO/风险**
+- 阈值按本机基线 3–10 倍设定，CI 机器更慢时可能误报；首次跑 CI 后需按实际结果校准（优先调阈值而非删断言）。
+
+---
+
 ## d5be8e0 · perf(srs): 今日复习队列基准打点（3000 题 0.18ms）
 
 **核心改动**
