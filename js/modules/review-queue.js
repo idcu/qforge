@@ -16,7 +16,42 @@
   const QB = (global.QB = global.QB || {});
 
   function keyOf(q) {
-    return (q && (q.contentHash || QB.makeContentHash(q))) || '';
+    return (q && (q.contentHash || QB.makeContentHash(q)) || '') || '';
+  }
+
+  /**
+   * 从评分日志推导「今日已引入新卡 / 今日已复习次数」，用于跨会话每日配额。
+   * 口径：
+   *   - 某 hash 的**首条日志**（全量日志内最早 t）落在今日 → 今日引入的新卡；
+   *   - 今日剩余日志（非今日新卡）逐条计入已复习次数（learning 步骤也计入）；
+   *   - 日志 FIFO 截断（REVLOG_MAX）后，极旧的卡可能丢失首条记录而被误判为新卡，
+   *     属已知边界；< 2 万条日志的正常使用不受影响。
+   * @param {Array} log revlog 全量（{b,h,r,t}）
+   * @param {string} bankId
+   * @param {number} now
+   * @returns {{newIntroduced:number, reviewsDone:number, dayStart:number}}
+   */
+  function dailyFromLog(log, bankId, now) {
+    const dayStart = QB.Time.dayStart(now);
+    const firstSeen = {};
+    const newHashes = {};
+    let reviewsDone = 0;
+    (log || []).forEach((e) => {
+      if (!e || e.b !== bankId || !e.h) return;
+      const t = Number(e.t) || 0;
+      if (firstSeen[e.h] === undefined || t < firstSeen[e.h]) firstSeen[e.h] = t;
+    });
+    Object.keys(firstSeen).forEach((h) => {
+      if (firstSeen[h] >= dayStart) newHashes[h] = true;
+    });
+    (log || []).forEach((e) => {
+      if (!e || e.b !== bankId || !e.h) return;
+      const t = Number(e.t) || 0;
+      if (t < dayStart) return;
+      if (newHashes[e.h]) return; // 新卡当天的多条 learning 步骤不计入复习额度
+      reviewsDone++;
+    });
+    return { newIntroduced: Object.keys(newHashes).length, reviewsDone: reviewsDone, dayStart: dayStart };
   }
 
   /**
@@ -50,9 +85,13 @@
     due.sort((a, b) => a.dueAt - b.dueAt);
 
     const learningQs = learning.map((x) => x.q);
-    const dueCap = Math.max(0, settings.reviewPerDay - learningQs.length);
-    const pickedDue = due.slice(0, dueCap).map((x) => x.q);
-    const pickedNew = fresh.slice(0, settings.newPerDay);
+    const daily = opts.daily || {};
+    const introducedToday = Math.max(0, Number(daily.newIntroduced) || 0);
+    const reviewedToday = Math.max(0, Number(daily.reviewsDone) || 0);
+    const newCap = Math.max(0, settings.newPerDay - introducedToday);
+    const reviewCap = Math.max(0, settings.reviewPerDay - reviewedToday - learningQs.length);
+    const pickedDue = due.slice(0, reviewCap).map((x) => x.q);
+    const pickedNew = fresh.slice(0, newCap);
 
     const orderedDue = opts.shuffleDue === false ? pickedDue : QB.shuffle(pickedDue, opts.seed);
     const orderedNew = QB.shuffle(pickedNew, opts.seed === undefined ? undefined : opts.seed + 1);
@@ -66,11 +105,16 @@
         duePicked: pickedDue.length,
         new: fresh.length,
         newPicked: pickedNew.length,
-        total: out.length
+        total: out.length,
+        // 每日额度视角（跨会话）：已用/剩余
+        newIntroducedToday: introducedToday,
+        reviewsDoneToday: reviewedToday,
+        newRemaining: newCap,
+        reviewRemaining: reviewCap
       },
       settings: settings
     };
   }
 
-  QB.ReviewQueue = { build, keyOf };
+  QB.ReviewQueue = { build, keyOf, dailyFromLog };
 })(typeof window !== 'undefined' ? window : globalThis);

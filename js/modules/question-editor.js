@@ -78,6 +78,15 @@
 
   const DIFF_OPTS = [0, 1, 2, 3, 4, 5];
 
+  /**
+   * 是否允许在编辑器中打开编辑。
+   * 材料题（含子问题）暂不支持嵌套编辑：旧实现会退回 essay 表单并部分改写父题，
+   * 因此显式禁止，避免“看起来能编辑、保存后半损坏”。
+   */
+  function canEditQuestion(q) {
+    return !!q && q.type !== 'material';
+  }
+
   function typeOptions(cur) {
     // M1：材料题（material）仅支持 JSON 导入/做题，嵌套编辑器在 M3 开放
     return QB.CONFIG.TYPES.filter((t) => t !== 'material').map((t) =>
@@ -399,7 +408,9 @@
         (q.tags || []).map((t) => '<span class="tag-chip tag-soft">' + esc(t) + '</span>').join('') +
         ' <span>答案：' + esc(answerPreview(q)) + '</span></div>' +
         '<div class="li-actions">' +
-        '<button class="btn btn-sm btn-ghost" data-qm="edit">编辑</button>' +
+        '<button class="btn btn-sm btn-ghost" data-qm="edit"' +
+        (canEditQuestion(q) ? '' : ' disabled title="材料题暂不支持在编辑器中编辑；如需修改请删除后重新导入"') +
+        '>编辑</button>' +
         '<button class="btn btn-sm btn-ghost btn-danger-text" data-qm="del">删除</button>' +
         '</div></div>').join('');
 
@@ -481,6 +492,10 @@
           if (edit) {
             const id = edit.closest('.qe-row').getAttribute('data-id');
             const q = (await QB.DB.questions.get(id));
+            if (!canEditQuestion(q)) {
+              UI.toast('材料题暂不支持在编辑器中编辑；如需修改请删除后重新导入', 'err');
+              return;
+            }
             return openEditor(bank, q, show);
           }
           if (del) {
@@ -510,7 +525,7 @@
 
   QB.QuestionEditor = {
     create, update, remove, insertMany, removeMany,
-    buildQuestion, insertAtCursor,
+    buildQuestion, insertAtCursor, canEditQuestion,
     openManager, openEditor, openReservedDialog
   };
 })(window);

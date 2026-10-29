@@ -30,6 +30,9 @@
     // 当前题库收藏键集合：答题渲染只查内存，避免每次作答读整份收藏（api 模式下即一次 REST）
     favoriteKeys: new Set(),
     favoriteBankId: null,
+    // 当前题库 revlog 缓存（今日配额推导用；评分/交卷后失效）
+    reviewLog: null,
+    reviewLogBankId: null,
     fsrsScope: null       // FSRS 权重作用域：null=全局，或 bankId
   };
 
@@ -165,11 +168,14 @@
     QB.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
     items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
     State.allQuestions = items;
-    // 今日队列（按题库限额）：到期数一律走队列口径，避免首页显示「3000 题到期」的洪水
+    // 今日队列（按题库限额 + 今日已用额度）：到期数走队列口径，避免首页显示「3000 题到期」的洪水
     const reviewMap = await QB.SRSStore.readMap(State.bankId);
+    const log = await reviewLogFor(State.bankId);
+    const daily = QB.ReviewQueue.dailyFromLog(log, State.bankId, Date.now());
     const queue = QB.ReviewQueue.build(items, reviewMap, {
       settings: QB.SchedSettings.ofBank(State.bank),
-      now: Date.now()
+      now: Date.now(),
+      daily: daily
     });
     State.counts = {
       total: items.length, byType: byType,
@@ -178,10 +184,25 @@
     };
   }
 
+  /** 当前库 revlog（同库复用；评分/交卷后由 invalidateReviewLog 失效） */
+  async function reviewLogFor(bankId) {
+    if (State.reviewLogBankId === bankId && State.reviewLog) return State.reviewLog;
+    const log = await QB.DB.revlog.list();
+    State.reviewLog = log || [];
+    State.reviewLogBankId = bankId;
+    return State.reviewLog;
+  }
+
+  function invalidateReviewLog() {
+    State.reviewLog = null;
+    State.reviewLogBankId = null;
+  }
+
   /** 题库列表/当前库元数据变更后使缓存失效（本地可精确失效，api 模式避免多余 GET） */
   function invalidateBanks() {
     State.banksLoaded = false;
     State.favoriteBankId = null;
+    invalidateReviewLog();
   }
 
   /* ---------------- 渲染分发 ---------------- */
@@ -365,6 +386,7 @@
     const r = engine.submitAnswer();
     // SRS：练习即时判分（全对 good / 少选 hard / 错 again；含简答的题待自评，不在此记录）
     const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
+    invalidateReviewLog(); // 今日额度已变化，首页下次渲染重新推导
     if (entry) {
       if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
       try {
@@ -388,6 +410,7 @@
     const srsEntries = QB.SRSStore.collectGraded(
       engine.questions.map((question, i) => ({ question: question, result: engine.results[i] }))
     );
+    invalidateReviewLog();
     if (srsEntries.length) {
       try { await QB.SRSStore.gradeMany(State.bankId, srsEntries); }
       catch (e) { /* Storage.onError 已提示；成绩与历史不受影响 */ }
@@ -480,12 +503,15 @@
   /** 今日复习：按题库限额排 learning → 到期 → 新题（不再一次性灌全库） */
   async function startReview() {
     const reviewMap = await QB.SRSStore.readMap(State.bankId);
+    const log = await reviewLogFor(State.bankId);
+    const daily = QB.ReviewQueue.dailyFromLog(log, State.bankId, Date.now());
     const queue = QB.ReviewQueue.build(State.allQuestions, reviewMap, {
       settings: QB.SchedSettings.ofBank(State.bank),
-      now: Date.now()
+      now: Date.now(),
+      daily: daily
     });
     if (!queue.questions.length) {
-      UI.toast('今日没有需要复习的题目（限额内已排完）🎉', 'ok');
+      UI.toast('今日额度已用完或没有到期题（可在统计页调整复习设置）', 'ok');
       return;
     }
     const c = queue.counts;
@@ -509,6 +535,7 @@
           await QB.DB.setCurrentBankId(bank.id);
           State.view = 'home';
           invalidateBanks();
+          invalidateReviewLog();
         }
         return render();
       }
@@ -533,6 +560,7 @@
             State.bankId = await QB.DB.getCurrentBankId();
             State.view = 'banks';
             invalidateBanks();
+            invalidateReviewLog();
           }
         }
         return render();
@@ -579,6 +607,7 @@
         await QB.DB.setCurrentBankId(bank.id);
         State.view = 'home';
         invalidateBanks();
+        invalidateReviewLog();
         return render();
       }
       case 'bank-import-sample': {
@@ -654,6 +683,7 @@
           : State.engine.selfAssess(isOk);
         // 材料题：只有聚合从 null（待自评）变为已判定时才记一次调度/错题
         const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
+        invalidateReviewLog();
         if (entry) {
           try { await QB.SRSStore.grade(State.bankId, entry.question, entry.rating); }
           catch (e) { /* Storage.onError 已提示 */ }
@@ -696,6 +726,18 @@
             lines.push('· 简答题交卷后为「待自评」，不计入本次得分；需要评分请在练习模式作答后自评。');
             lines.push('确定交卷吗？取消可返回答题卡检查。');
             const ok = await UI.confirmDialog('', '确认交卷', { lines: lines });
+            if (!ok) return;
+          }
+        } else if (State.engine && State.engine.mode === 'practice') {
+          // 练习中途结束：避免与「下一题」相邻误点后直接丢场次，给出一次确认
+          const done = State.engine.answeredCount();
+          const total = State.engine.questions.length;
+          if (done > 0 && done < total) {
+            const ok = await UI.confirmDialog('', '结束练习', { lines: [
+              '· 已作答 ' + done + ' / ' + total + ' 题，未作答 ' + (total - done) + ' 题。',
+              '· 结束后立即生成本次结果，未作答的题不计入正确率。',
+              '确定结束练习吗？取消可继续作答。'
+            ] });
             if (!ok) return;
           }
         }
@@ -967,6 +1009,7 @@
             State.bank = res.bank;
             const i = State.banks.findIndex((b) => b.id === res.bank.id);
             if (i >= 0) State.banks[i] = res.bank;
+            invalidateReviewLog();
             UI.closeModal();
             UI.toast('复习设置已保存（新 ' + res.settings.newPerDay + ' / 复习 ' + res.settings.reviewPerDay + '）', 'ok');
             render();
@@ -1133,6 +1176,7 @@
         const prefix = (QB.CONFIG && QB.CONFIG.STORAGE_PREFIX) || 'qb';
         if (e.key === prefix + ':banks') invalidateBanks();
         if (e.key.indexOf(prefix + ':user:fav:') === 0) State.favoriteBankId = null;
+        if (e.key.indexOf(prefix + ':user:revlog') === 0) invalidateReviewLog();
       });
     }
 

@@ -99,6 +99,23 @@ ok(/env\(safe-area-inset-(top|bottom)\)/.test(css), 'CSS 处理刘海屏安全�
 ok(/@media\s*\(min-width:\s*1100px\)/.test(css), 'CSS 提供 ≥1100px 加宽断点');
 ok(/@media\s*\(max-width:\s*560px\)[\s\S]*\.option\s*\{[^}]*min-height:\s*44px/.test(css), '窄屏选项可点高度 ≥44px');
 ok(app.indexOf("closest('.option[data-action]')") >= 0, 'app.js 为选项提供 Enter/Space 键盘激活');
+ok(/\.quiz-actions-end[^}]*border-left:\s*1px solid/.test(css), '交卷/结束练习独立末栏（桌面分隔线）');
+ok(/@media\s*\(max-width:\s*560px\)[\s\S]*\.quiz-actions-end[^}]*width:\s*100%/.test(css), '窄屏交卷整行独占（不再与下一题相邻）');
+
+section('PWA 图标：192/512 位图（安装条件）');
+{
+  const pngs = ['icons/icon-192.png', 'icons/icon-512.png'];
+  pngs.forEach((f) => {
+    ok(fs.existsSync(path.join(ROOT, f)), f + ' 存在');
+    const sig = fs.readFileSync(path.join(ROOT, f)).slice(0, 8).toString('hex');
+    eq(sig, '89504e470d0a1a0a', f + ' 为合法 PNG（签名校验）');
+  });
+  ok(manifest.icons.some((i) => i.sizes === '192x192' && i.type === 'image/png'), 'manifest 声明 192 PNG');
+  ok(manifest.icons.some((i) => i.sizes === '512x512' && i.type === 'image/png'), 'manifest 声明 512 PNG');
+  ok(manifest.icons.some((i) => String(i.purpose || '').indexOf('maskable') >= 0), 'manifest 含 maskable 图标');
+  ok(indexHtml.indexOf('rel="apple-touch-icon" href="icons/icon-192.png"') >= 0, 'apple-touch-icon 指向 192 PNG');
+  ok(sw.indexOf('./icons/icon-192.png') >= 0 && sw.indexOf('./icons/icon-512.png') >= 0, 'SW CORE 预缓存两种 PNG 图标');
+}
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

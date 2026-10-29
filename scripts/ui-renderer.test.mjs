@@ -367,6 +367,46 @@ section('可访问性：选项 radio/checkbox 语义 + 作答后禁用（P3）')
   ok(UI.renderQuiz(mk(mq, false), {}).indexOf('role="checkbox"') >= 0, '多选选项 role=checkbox');
 }
 
+section('未作答统计 + 交卷/下一题分离（防误点回归）');
+{
+  const qs = [
+    { type: 'single', question: '题1', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' },
+    { type: 'judge', question: '题2', answer: '正确' }
+  ];
+  const engine = {
+    mode: 'exam', questions: qs, currentIndex: 0,
+    results: [{ isCorrect: true, correctAnswer: 'A', userAnswer: 'A', analysis: '' }, null],
+    answers: ['A', undefined],
+    getCurrentQuestion: () => qs[0],
+    getProgress: () => ({ current: 1, total: 2, percentage: 0 }),
+    getScore: () => ({ score: 10, correct: 1, wrong: 0 }),
+    hasAnswered: () => true, canSubmit: () => true, isLastQuestion: () => false,
+    statusAt: (i) => (i === 0 ? 'answered' : 'empty'), answeredCount: () => 1
+  };
+  const regions = UI.renderQuizRegions(engine, { favorited: false });
+  const head = regions.find((r) => r.key === 'quiz-head').html;
+  ok(head.indexOf('○ 未答 1') >= 0, '答题头显示未作答数（2 题已答 1）');
+
+  const actions = regions.find((r) => r.key === 'quiz-actions').html;
+  ok(actions.indexOf('class="quiz-actions-main"') >= 0, '主操作独立容器');
+  ok(actions.indexOf('class="quiz-actions-end"') >= 0, '交卷/结束练习独立容器');
+  ok(actions.indexOf('quiz-actions-main') < actions.indexOf('下一题'), '「下一题」在主动作区');
+  ok(actions.indexOf('下一题') < actions.indexOf('quiz-actions-end'), '「下一题」与交卷区分隔');
+  ok(actions.indexOf('quiz-actions-end') < actions.indexOf('交卷'), '「交卷」位于独立末栏');
+
+  const card = regions.find((r) => r.key === 'quiz-card');
+  ok(card.frame.indexOf('data-sub="ac-unanswered"') >= 0, '答题卡帧含未答计数子区域');
+  eq(card.sub.find((s) => s.key === 'ac-unanswered').html, '1', '答题卡未答子区域计数为 1');
+  ok(card.frame.indexOf('未答 <span data-sub="ac-unanswered">') >= 0, '答题卡摘要含未答文案');
+
+  const examResult = UI.renderResult({
+    mode: 'exam', questions: qs, results: engine.results,
+    getScore: () => ({ score: 10, correct: 1, wrong: 0, partial: 0, pending: 1, unanswered: 1, pendingSelfAssess: 0, accuracy: 100 }),
+    breakdown: () => ({ byType: {}, byCategory: [], byDifficulty: [] })
+  }, { name: 'B' }, {});
+  ok(examResult.indexOf('1 道题未作答（客观题已计为错误') >= 0, '考试结果页未作答注明已计为错误');
+}
+
 section('错题本/收藏夹：简答题解析展示（回归）');
 {
   const essay = { type: 'essay', question: '简答解析题', reference_answer: '参考答案XYZ', analysis: '解析ABC' };
@@ -428,8 +468,8 @@ section('答题卡格级增量：帧稳定 + 子区域仅变化一格 + 计数�
   ok(!!c1 && !!c1.frame && !!c1.sub, '答题卡区域含 frame + sub（格级增量）');
   ok(c1.frame.indexOf('ac-cell') < 0, '帧不含格子状态（结构稳定，跨作答不变）');
   ok(c1.frame.indexOf('data-sub="ac-grid"') >= 0 && c1.frame.indexOf('data-sub="ac-count"') >= 0, '帧含子区域容器 ac-grid / ac-count');
-  eq(c1.sub.map((s) => s.key).join(','), 'ac-count,ac-cell-0,ac-cell-1,ac-cell-2', '子区域键序：计数 + 逐格');
-  eq(c1.sub.map((s) => s.into).join(','), 'ac-count,ac-grid,ac-grid,ac-grid', '子区域容器归属正确');
+  eq(c1.sub.map((s) => s.key).join(','), 'ac-count,ac-unanswered,ac-cell-0,ac-cell-1,ac-cell-2', '子区域键序：已答/未答计数 + 逐格');
+  eq(c1.sub.map((s) => s.into).join(','), 'ac-count,ac-unanswered,ac-grid,ac-grid,ac-grid', '子区域容器归属正确');
   ok(c1.html.indexOf('ac-cell ac-correct cur') >= 0, '整块 html 仍带状态类（向后兼容拼接）');
   eq(UI.renderQuizRegions(mk(0, 0), {}).map((r) => r.html).join(''), UI.renderQuiz(mk(0, 0), {}), '卡区域 html 拼接 = renderQuiz 整块');
 
@@ -440,7 +480,7 @@ section('答题卡格级增量：帧稳定 + 子区域仅变化一格 + 计数�
   eq(c2.frame, c1.frame, '帧跨作答/跳题逐字节不变（顶层对账稳定命中 quiz-card）');
   const base = {}; c1.sub.forEach((s) => { base[s.key] = s.html; });
   const changedSub = c2.sub.filter((s) => base[s.key] !== s.html).map((s) => s.key).sort();
-  deepEq(changedSub, ['ac-cell-0', 'ac-cell-1', 'ac-count'], '子区域仅「计数 + 受影响两格」变化，其余格不重建');
+  deepEq(changedSub, ['ac-cell-0', 'ac-cell-1', 'ac-count', 'ac-unanswered'], '子区域仅「已答/未答计数 + 受影响两格」变化，其余格不重建');
   ok(DP.plan(snap1, r2).unchanged.indexOf('quiz-card') >= 0, 'plan：答题卡在 unchanged（整卡不重建）');
 }
 

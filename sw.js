@@ -12,9 +12,10 @@
  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
  */
-const CACHE = 'qforge-v4';
+const CACHE = 'qforge-v5';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
+  './icons/icon-192.png', './icons/icon-512.png',
   // FSRS 训练 Worker 链（Worker 不经 <script> 加载，需显式预缓存以支持离线训练）
   './js/workers/fsrs-worker.js',
   './js/modules/fsrs.js',

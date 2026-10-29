@@ -135,6 +135,48 @@ section('队列：种子确定性 + 材料题 hash 键');
   eq(r.questions[0].type, 'material', '材料题整题入队（原子单位）');
 }
 
+section('每日额度：从 revlog 推导今日已引入/已复习（跨会话）');
+{
+  const now = new Date(2026, 9, 30, 15, 0, 0).getTime();
+  const yesterday = now - DAY;
+  const log = [
+    { b: 'B1', h: 'old', r: 3, t: yesterday - 2 * DAY },
+    { b: 'B1', h: 'old', r: 3, t: now - 6 * 3600 * 1000 }, // 今日 09:00 复习
+    { b: 'B1', h: 'old', r: 4, t: now - 3 * 3600 * 1000 }, // 今日 12:00 复习
+    { b: 'B1', h: 'new1', r: 1, t: now - 8 * 3600 * 1000 }, // 今日引入（首条）
+    { b: 'B1', h: 'new1', r: 3, t: now - 7.5 * 3600 * 1000 }, // 同日 learning 步骤
+    { b: 'B1', h: 'new2', r: 1, t: now - 2 * 3600 * 1000 },
+    { b: 'B2', h: 'other', r: 3, t: now - 3600 * 1000 } // 他库忽略
+  ];
+  const d = QB.ReviewQueue.dailyFromLog(log, 'B1', now);
+  eq(d.newIntroduced, 2, '今日引入新卡 2 张（new1/new2）');
+  eq(d.reviewsDone, 2, '今日已复习 2 次（old 的两条，同日 learning 不计）');
+
+  // build：剩余额度 = 20-18 新 / 200-195 复习
+  const qs = [];
+  const map = {};
+  for (let i = 0; i < 100; i++) {
+    qs.push(Q(i));
+    map[key(qs[i])] = { algo: 'fsrs', stability: 5, difficulty: 5, due: now - DAY };
+  }
+  for (let i = 100; i < 200; i++) qs.push(Q(i));
+  const r = QB.ReviewQueue.build(qs, map, {
+    settings: { newPerDay: 20, reviewPerDay: 200 }, now: now, seed: 5,
+    daily: { newIntroduced: 18, reviewsDone: 195 }
+  });
+  eq(r.counts.newPicked, 2, '新题剩余额度 2（20-18）');
+  eq(r.counts.duePicked, 5, '复习剩余额度 5（200-195）');
+  eq(r.counts.newRemaining, 2, 'counts.newRemaining=2');
+  eq(r.counts.reviewRemaining, 5, 'counts.reviewRemaining=5');
+  eq(r.counts.total, 7, '本轮队列 7 题');
+
+  const exhausted = QB.ReviewQueue.build(qs, map, {
+    settings: { newPerDay: 20, reviewPerDay: 200 }, now: now,
+    daily: { newIntroduced: 20, reviewsDone: 200 }
+  });
+  eq(exhausted.counts.total, 0, '额度用尽 → 空队列');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

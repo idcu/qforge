@@ -366,7 +366,20 @@ body {
 
 .essay-area { width: 100%; min-height: 120px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; font-size: 15px; resize: vertical; }
 
-.quiz-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.quiz-actions { display: flex; gap: 14px; margin-top: 16px; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; }
+/* 主操作（提交/下一题/上一题/收藏）与破坏性操作（交卷/结束练习）分栏：
+   交卷与「下一题」物理隔开 + 分隔线，窄屏改为上下整行，避免误点 */
+.quiz-actions-main { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.quiz-actions-end { display: flex; gap: 10px; margin-left: auto; padding-left: 16px; border-left: 1px solid var(--border); }
+@media (max-width: 560px) {
+  .quiz-actions { flex-direction: column; }
+  .quiz-actions-main { width: 100%; }
+  .quiz-actions-end {
+    width: 100%; margin-left: 0; padding-left: 0;
+    border-left: 0; border-top: 1px solid var(--border); padding-top: 12px;
+  }
+  .quiz-actions-end .btn { width: 100%; justify-content: center; }
+}
 
 .feedback {
   margin-top: 16px;

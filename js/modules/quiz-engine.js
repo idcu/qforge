@@ -102,8 +102,8 @@
       partial: partial,
       wrong: wrong,
       pending: total - decided,
-      // pending 拆成两类，供结果页给出准确文案（未作答 ≠ 待自评）
-      unanswered: unanswered,
+      // 未作答：考试交卷后客观题已有结果（判为错），需用交卷时快照区分「未做」与「做错」
+      unanswered: this.unansweredAtSubmit != null ? this.unansweredAtSubmit : unanswered,
       pendingSelfAssess: pendingSelfAssess,
       accuracy: QB.Helpers.calculateAccuracy(correct + partial, decided)
     };
@@ -289,6 +289,9 @@
    * 保留 isCorrect=null（待自评）：不给分、不计错、不写 SRS/错题，得分仅统计已判定部分。
    */
   QuizEngine.prototype.gradeAll = function () {
+    // 交卷前统计「完全未作答」的题数：判分后客观题会有结果，届时无法再区分未答/错答
+    this.unansweredAtSubmit = 0;
+    for (let i = 0; i < this.questions.length; i++) if (!this.results[i]) this.unansweredAtSubmit++;
     for (let i = 0; i < this.questions.length; i++) {
       if (this.results[i]) continue;
       const q = this.questions[i];

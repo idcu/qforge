@@ -7,7 +7,8 @@
     "test": "node scripts/test-all.mjs",
     "bench": "node --expose-gc scripts/bench.mjs",
     "serve": "node scripts/serve.mjs",
-    "serve:api": "node scripts/serve-api.mjs"
+    "serve:api": "node scripts/serve-api.mjs",
+    "icons": "node scripts/gen-icons.mjs"
   },
   "engines": {
     "node": ">=20"

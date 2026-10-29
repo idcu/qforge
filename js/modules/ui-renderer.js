@@ -353,6 +353,7 @@
     const isExam = engine.mode === 'exam';
     const regions = [];
 
+    const unansweredNow = Math.max(0, prog.total - answeredCountOf(engine));
     regions.push({ key: 'quiz-head', html: '<div class="quiz-head" data-region="quiz-head">' +
       '<div><span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span> ' +
       (opts.reviewState && opts.reviewState.lapses >= 8
@@ -361,6 +362,7 @@
       '<span class="q-progress">第 ' + prog.current + ' / ' + prog.total + ' 题</span>' +
       (q.category ? ' <span class="q-progress">· ' + esc(q.category) + '</span>' : '') + '</div>' +
       '<div class="q-score">得分 ' + score.score + ' · ✔ ' + score.correct + ' · ✘ ' + score.wrong +
+      (unansweredNow > 0 ? ' · ○ 未答 ' + unansweredNow : '') +
       (opts.timerText ? ' · ⏱ ' + esc(opts.timerText) : '') + '</div>' +
       '</div>' });
     regions.push({ key: 'quiz-progress', html: progressBar(prog.percentage, 'quiz-progress') });
@@ -387,31 +389,40 @@
       }
     }
 
-    // 操作按钮
-    let actions = '<div class="quiz-actions" data-region="quiz-actions">';
+    // 操作按钮：主操作与「交卷/结束练习」分栏（交卷是破坏性操作，与「下一题」拉开距离防误点）
+    const left = [];
+    let end = '';
     if (!isExam && !answered) {
-      actions += '<button class="btn" data-action="submit"' + (engine.canSubmit() ? '' : ' disabled') + '>提交答案</button>';
+      left.push('<button class="btn" data-action="submit"' + (engine.canSubmit() ? '' : ' disabled') + '>提交答案</button>');
     }
     if (isExam) {
-      actions += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
-      actions += '<button class="btn btn-ghost" data-action="next"' + (engine.isLastQuestion() ? ' disabled' : '') + '>下一题</button>';
-      actions += '<button class="btn btn-danger" data-action="finish-exam">交卷</button>';
+      left.push('<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>');
+      left.push('<button class="btn btn-ghost" data-action="next"' + (engine.isLastQuestion() ? ' disabled' : '') + '>下一题</button>');
+      end = '<button class="btn btn-danger" data-action="finish-exam">交卷</button>';
     } else if (answered) {
-      actions += '<button class="btn" data-action="next">' + (engine.isLastQuestion() ? '查看结果' : '下一题') + '</button>';
-      actions += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
-      actions += '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
+      left.push('<button class="btn" data-action="next">' + (engine.isLastQuestion() ? '查看结果' : '下一题') + '</button>');
+      left.push('<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>');
+      end = '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
     } else {
-      actions += '<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>';
-      actions += '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
+      left.push('<button class="btn btn-ghost" data-action="prev"' + (engine.currentIndex === 0 ? ' disabled' : '') + '>上一题</button>');
+      end = '<button class="btn btn-ghost" data-action="finish-exam">结束练习</button>';
     }
-    actions += '<button class="btn btn-ghost' + (opts.favorited ? ' fav-on' : '') + '" data-action="fav-toggle" title="收藏本题">' +
-      (opts.favorited ? '★ 已收藏' : '☆ 收藏') + '</button>';
-    actions += '</div>';
+    left.push('<button class="btn btn-ghost' + (opts.favorited ? ' fav-on' : '') + '" data-action="fav-toggle" title="收藏本题">' +
+      (opts.favorited ? '★ 已收藏' : '☆ 收藏') + '</button>');
+    const actions = '<div class="quiz-actions" data-region="quiz-actions">' +
+      '<div class="quiz-actions-main">' + left.join('') + '</div>' +
+      (end ? '<div class="quiz-actions-end">' + end + '</div>' : '') +
+      '</div>';
     regions.push({ key: 'quiz-actions', html: actions });
 
     // 答题卡（题目较多时才显示，支持点击跳转）保持在最下方：格级增量 —— 帧稳定 + 子区域（计数/逐格）
     if (engine.questions.length > 1) regions.push(answerCardRegion(engine));
     return regions;
+  }
+
+  /** 已答题数（引擎方法缺失时按 0 兜底，保持渲染层对轻量测试桩兼容） */
+  function answeredCountOf(engine) {
+    return typeof engine.answeredCount === 'function' ? engine.answeredCount() : 0;
   }
 
   /** 整块字符串（向后兼容；由区域数组拼接，内容完全一致） */
@@ -445,11 +456,15 @@
    */
   function answerCardRegion(engine) {
     const n = engine.questions.length;
-    const sub = [{ key: 'ac-count', into: 'ac-count', html: String(engine.answeredCount()) }];
+    const done = answeredCountOf(engine);
+    const sub = [
+      { key: 'ac-count', into: 'ac-count', html: String(done) },
+      { key: 'ac-unanswered', into: 'ac-unanswered', html: String(n - done) }
+    ];
     engine.questions.forEach((_, i) => {
       sub.push({ key: 'ac-cell-' + i, into: 'ac-grid', html: answerCellHtml(engine, i) });
     });
-    const frame = '<details class="answer-card" data-region="quiz-card" open><summary>答题卡（已答 <span data-sub="ac-count"></span> / ' + n + '）</summary>' +
+    const frame = '<details class="answer-card" data-region="quiz-card" open><summary>答题卡（已答 <span data-sub="ac-count"></span> / ' + n + ' · 未答 <span data-sub="ac-unanswered"></span>）</summary>' +
       '<div class="ac-grid" data-sub="ac-grid"></div>' + answerCardLegend() + '</details>';
     return { key: 'quiz-card', html: renderAnswerCard(engine), frame: frame, sub: sub };
   }
@@ -459,8 +474,8 @@
     const n = engine.questions.length;
     let cells = '';
     for (let i = 0; i < n; i++) cells += answerCellHtml(engine, i);
-    const done = engine.answeredCount();
-    return '<details class="answer-card" data-region="quiz-card" open><summary>答题卡（已答 <span data-sub="ac-count">' + done + '</span> / ' + n + '）</summary>' +
+    const done = answeredCountOf(engine);
+    return '<details class="answer-card" data-region="quiz-card" open><summary>答题卡（已答 <span data-sub="ac-count">' + done + '</span> / ' + n + ' · 未答 <span data-sub="ac-unanswered">' + (n - done) + '</span>）</summary>' +
       '<div class="ac-grid" data-sub="ac-grid">' + cells + '</div>' + answerCardLegend() + '</details>';
   }
 
@@ -486,7 +501,8 @@
       '<div class="stat-box"><div class="st-num">' + score.accuracy + '%</div><div class="st-label">正确率' + (score.pending > 0 ? '（不含未判定）' : '') + '</div></div>' +
       '</div>' +
       (unanswered > 0 ? '<div class="li-meta" style="margin-top:8px">○ ' + unanswered +
-        ' 道题未作答，未计入得分与正确率。</div>' : '') +
+        ' 道题未作答' + (engine.mode === 'exam'
+          ? '（客观题已计为错误，简答题不计分也不计错）' : '，未计入得分与正确率') + '。</div>' : '') +
       (pendingSelf > 0 ? '<div class="li-meta" style="margin-top:8px">○ ' + pendingSelf +
         ' 道简答题（含材料题中的简答小问）待自评，未计入得分与正确率；需要评分请在练习模式作答后点「我答对了/答错了」。</div>' : '') +
       '<div class="li-meta" style="margin-top:10px">题库：' + esc(bank ? bank.name : '') +
@@ -716,9 +732,14 @@
     const now = c
       ? '当前队列 ' + c.total + ' 题（新 ' + c.newPicked + ' / 到期 ' + c.duePicked + ' / 学习中 ' + c.learning + '）'
       : '按限额生成今日队列';
+    const used = c && c.newRemaining !== undefined
+      ? '<div class="li-meta">今日已引入新题 <b>' + c.newIntroducedToday + '</b> / ' + s.newPerDay +
+        ' · 已复习 <b>' + c.reviewsDoneToday + '</b> / ' + s.reviewPerDay +
+        '　剩余新 ' + c.newRemaining + ' / 复习 ' + c.reviewRemaining + '</div>'
+      : '';
     return '<div class="card"><h3 class="card-title">今日复习计划</h3>' +
       '<div class="li-meta">每日新题上限 <b>' + s.newPerDay + '</b> · 每日复习上限 <b>' + s.reviewPerDay + '</b>' +
-      '　' + esc(now) + '</div>' +
+      '　' + esc(now) + '</div>' + used +
       '<div class="toolbar"><button class="btn btn-ghost" data-action="review-settings">调整复习设置</button></div></div>';
   }
 

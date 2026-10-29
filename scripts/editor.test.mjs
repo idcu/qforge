@@ -110,6 +110,11 @@ eq((await QB.DB.questions.list(bank.id, {})).total, 1, '删除后剩 1 题');
 await QB.QuestionEditor.removeMany([created1.id]);
 eq((await QB.DB.questions.list(bank.id, {})).total, 0, '批量删除后为 0');
 
+section('材料题编辑保护：编辑器显式禁用（回归）');
+eq(QB.QuestionEditor.canEditQuestion({ type: 'material', children: [] }), false, '材料题不可在编辑器打开');
+eq(QB.QuestionEditor.canEditQuestion({ type: 'single' }), true, '普通题可编辑');
+eq(QB.QuestionEditor.canEditQuestion(null), false, '空对象安全返回 false');
+
 /* ---------------- 汇总 ---------------- */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
