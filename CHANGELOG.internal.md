@@ -14,6 +14,33 @@
 
 ---
 
+## f026812 · feat(export,search): 只读分享页 HTML + 搜索覆盖选项/答案/材料子问题（下一轮）
+
+**核心改动**
+- 新增 `QB.SharePage`：自包含只读 HTML（题目/选项/答案/解析/材料父子/图片 data URL 内嵌），
+  无脚本、无网络请求、可打印；注册为 `FORMATS.html`（仅 bank/wrong/favorites）。
+- `Exporters.chooseFormat` 支持 `kinds` 格式白名单；历史记录明确拒绝 html。
+- `SearchFilter.haystack`：题干+选项+答案/填空/参考答案+解析+材料+分类+标签，材料题递归；
+  搜索与组合筛选统一走该纯函数。
+
+**验证数据（2026-10-30 本机实跑）**
+- 全量 24 套件 **3358/3358** 通过（新增 29 项：exporter +23、smoke +6；office/assets 同步 8 格式断言）。
+- 分享页：完整文档/UTF-8/答案与解析/无脚本/`<script>` 转义/缺图占位/data URL/材料父子/历史拒绝。
+- 搜索：选项、填空答案、简答参考答案、材料正文、子问题选项全部命中（6 项）。
+
+**公共抽象清单（新增/调整）**
+- 新增 `QB.SharePage.{buildHTML,build,embedAssets,collectIds}`、`QB.SearchFilter.haystack`。
+- 调整 `QB.Exporters.FORMATS`（8 格式 + `kinds` 白名单）与 `chooseFormat` 签名（新增 kindId）。
+- 影响范围：导出弹窗（新增 html 选项）；搜索页结果口径（覆盖更广，分页/高亮不变）。
+
+**TODO/风险**
+- 分享页图片以 base64 内嵌，体积约为原始字节 1.33×；大图题库导出文件会明显变大。
+- 浏览器 UI 抽检未完成：一次子代理执行在“练习模式→开始”处受阻且步数耗尽（可能是合成事件/持久化示例库所致），
+  本轮**未声称**真实浏览器通过；Node 逻辑层与 HTML 输出断言全绿，真机验收仍待做。
+- 材料题嵌套编辑器（M3）仍未实现。
+
+---
+
 ## 4444f2c · perf(srs): 每日额度推导基准 + 门禁两项
 
 **核心改动**
