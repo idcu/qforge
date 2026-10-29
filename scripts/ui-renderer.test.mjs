@@ -266,6 +266,40 @@ section('DOM 增量对账：作答区/列表仅重建变化区域（QB.DomPatch.
   eq(sr.map((r) => r.html).join(''), UI.renderSearch({ name: 'B' }, 2, [s1], { keyword: 'x', categories: ['c'], tags: [] }, 0), '搜索：区域拼接 = 整块字符串');
 }
 
+section('收藏夹：富文本记号不原样泄漏（回归：曾用 escapeHtml 而非 toPlain）');
+{
+  const q = {
+    type: 'single', question: '函数 x^{2} 与图片 ![示意图](asset:as12345678-9)',
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  };
+  const html = UI.renderFavoritesList([{ questionKey: 'k-rich', question: q, addedAt: 0 }], 0);
+  ok(html.indexOf('函数 x2 与图片') >= 0, '上标记号去标记后以纯文本 x2 呈现（列表紧凑态）');
+  ok(html.indexOf('x^{2}') < 0, '不出现原始记号 x^{2}');
+  ok(html.indexOf('[示意图]') >= 0, '图片占位转为纯文本 [示意图]');
+  ok(html.indexOf('asset:') < 0, '不泄漏 asset: 内部标记');
+}
+
+section('结果页：未作答与待自评分开计数（回归）');
+{
+  const qs = [{ type: 'single', question: 'a', options: ['1', '2'], answer: 'A' }, { type: 'essay', question: 'b', reference_answer: 'x' }];
+  const mk = (score) => ({
+    questions: qs,
+    results: [null, { isCorrect: null, correctAnswer: 'x', userAnswer: 'y' }],
+    getScore: () => score,
+    breakdown: () => ({ byType: {}, byCategory: [], byDifficulty: [] })
+  });
+  const html = UI.renderResult(mk({ score: 0, correct: 0, wrong: 0, partial: 0, pending: 2, unanswered: 1, pendingSelfAssess: 1, accuracy: 0 }), { name: 'B' }, {});
+  ok(html.indexOf('<div class="st-num">1</div><div class="st-label">未作答</div>') >= 0, '统计卡含「未作答 1」');
+  ok(html.indexOf('<div class="st-num">1</div><div class="st-label">待自评</div>') >= 0, '统计卡含「待自评 1」');
+  ok(html.indexOf('1 道题未作答') >= 0, '提示文案单列未作答');
+  ok(html.indexOf('1 道简答题') >= 0, '提示文案单列待自评');
+  ok(html.indexOf('2 道简答题') < 0, '不再把未作答混算成待自评');
+
+  const allSelf = UI.renderResult(mk({ score: 0, correct: 0, wrong: 0, partial: 0, pending: 1, unanswered: 0, pendingSelfAssess: 1, accuracy: 0 }), { name: 'B' }, {});
+  ok(allSelf.indexOf('未作答</div>') < 0, '无未作答时不渲染未作答卡');
+  ok(allSelf.indexOf('1 道简答题') >= 0, '仅待自评时文案正确');
+}
+
 section('错题本/收藏夹：简答题解析展示（回归）');
 {
   const essay = { type: 'essay', question: '简答解析题', reference_answer: '参考答案XYZ', analysis: '解析ABC' };

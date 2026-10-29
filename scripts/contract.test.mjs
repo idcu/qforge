@@ -131,7 +131,8 @@ section('删库级联（唯一入口 cascadeDelete）');
   QB.DB.reviews.save(A.id, { 'hA': { algo: 'fsrs', stability: 1 } });
   QB.DB.revlog.append([{ t: 1, h: 'hA', r: 3, b: A.id }, { t: 2, h: 'hB', r: 3, b: B.id }, { t: 3, h: 'legacy', r: 3 }]);
   QB.DB.weights.write({ global: null, banks: { [A.id]: { w: QB.FSRS.DEFAULT_W, trainedAt: 1 } } });
-  await QB.DB.progress.historyAdd({ bankId: A.id, bankName: '级联A', total: 1, correct: 1 });
+  const added = await QB.DB.progress.historyAdd({ bankId: A.id, bankName: '级联A', total: 1, correct: 1 });
+  ok(added && typeof added.id === 'string' && typeof added.createdAt === 'number', 'historyAdd 返回新增记录（id/createdAt，与 api 适配器同形）');
   await QB.DB.progress.historyAdd({ bankId: B.id, bankName: '级联B', total: 1, correct: 1 });
   await QB.DB.setCurrentBankId(A.id);
 

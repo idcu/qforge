@@ -89,7 +89,7 @@
     } finally {
       if (timer) clearTimeout(timer);
     }
-    if (!res || !res.ok) throw new Error('远端返回错误：HTTP ' + (res && res.status) || '无响应');
+    if (!res || !res.ok) throw new Error('远端返回错误：HTTP ' + (res && res.status ? res.status : '无响应'));
 
     // 优先用 Content-Length 预检；读取后再兜底校验
     const declared = Number(res.headers && res.headers.get && res.headers.get('content-length')) || 0;

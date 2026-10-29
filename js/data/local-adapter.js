@@ -581,9 +581,10 @@
     },
     async historyAdd(record) {
       const all = Storage.get(K.history, []).slice();
-      all.unshift(Object.assign({ id: QB.uid('h'), createdAt: now() }, record));
+      const item = Object.assign({ id: QB.uid('h'), createdAt: now() }, record);
+      all.unshift(item);
       Storage.setSync(K.history, all.slice(0, (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.HISTORY_MAX) || 500)); // FIFO 上限见 config.LIMITS
-      return all;
+      return item; // 与 api-adapter 同形：返回新增记录（契约见 contract.test）
     },
     async historyRemove(id) {
       const all = Storage.get(K.history, []).filter((h) => h.id !== id);

@@ -435,18 +435,25 @@
   function renderResult(engine, bank, meta) {
     const score = engine.getScore();
     meta = meta || {};
-    const pendingBox = score.pending > 0
-      ? '<div class="stat-box"><div class="st-num">' + score.pending + '</div><div class="st-label">待自评</div></div>'
+    const unanswered = score.unanswered || 0;
+    const pendingSelf = score.pendingSelfAssess || 0;
+    const pendingBox = unanswered > 0
+      ? '<div class="stat-box"><div class="st-num">' + unanswered + '</div><div class="st-label">未作答</div></div>'
+      : '';
+    const selfBox = pendingSelf > 0
+      ? '<div class="stat-box"><div class="st-num">' + pendingSelf + '</div><div class="st-label">待自评</div></div>'
       : '';
     let html = '<div class="card"><h3 class="card-title">' + (meta.title || '本次结果') + '</h3>' +
       '<div class="stat-grid">' +
-      '<div class="stat-box"><div class="st-num">' + score.score + '</div><div class="st-label">得分' + (score.pending > 0 ? '（不含待自评）' : '') + '</div></div>' +
+      '<div class="stat-box"><div class="st-num">' + score.score + '</div><div class="st-label">得分' + (score.pending > 0 ? '（不含未判定）' : '') + '</div></div>' +
       '<div class="stat-box"><div class="st-num">' + score.correct + '</div><div class="st-label">正确</div></div>' +
       '<div class="stat-box"><div class="st-num">' + score.wrong + '</div><div class="st-label">错误</div></div>' +
-      pendingBox +
-      '<div class="stat-box"><div class="st-num">' + score.accuracy + '%</div><div class="st-label">正确率' + (score.pending > 0 ? '（不含待自评）' : '') + '</div></div>' +
+      pendingBox + selfBox +
+      '<div class="stat-box"><div class="st-num">' + score.accuracy + '%</div><div class="st-label">正确率' + (score.pending > 0 ? '（不含未判定）' : '') + '</div></div>' +
       '</div>' +
-      (score.pending > 0 ? '<div class="li-meta" style="margin-top:8px">○ ' + score.pending +
+      (unanswered > 0 ? '<div class="li-meta" style="margin-top:8px">○ ' + unanswered +
+        ' 道题未作答，未计入得分与正确率。</div>' : '') +
+      (pendingSelf > 0 ? '<div class="li-meta" style="margin-top:8px">○ ' + pendingSelf +
         ' 道简答题（含材料题中的简答小问）待自评，未计入得分与正确率；需要评分请在练习模式作答后点「我答对了/答错了」。</div>' : '') +
       '<div class="li-meta" style="margin-top:10px">题库：' + esc(bank ? bank.name : '') +
       (meta.durationMs ? ' · 用时 ' + esc(QB.Helpers.formatDuration(meta.durationMs)) : '') + '</div>' +
@@ -577,7 +584,7 @@
       const q = it.question;
       regions.push({ key: 'fav-item-' + it.questionKey, html: '<div class="list-item" data-region="fav-item-' + esc(it.questionKey) + '"><div class="li-head">' +
         '<span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span>' +
-        '<span class="li-title">' + esc(q.question) + '</span></div>' +
+        '<span class="li-title">' + plain(q.question) + '</span></div>' +
         renderAnswerText(q) +
         '<div class="li-actions">' +
         '<button class="btn btn-sm btn-ghost" data-action="fav-remove" data-key="' + esc(it.questionKey) + '">取消收藏</button>' +
@@ -891,10 +898,21 @@
     root.innerHTML = '';
   }
 
-  function confirmDialog(message, confirmText) {
+  /**
+   * 确认弹窗。多行内容用结构化 `lines`（逐行 <div>，仍逐行转义），
+   * 不要传 HTML 字符串——本函数对 message 统一转义，传 HTML 会原样显示标签。
+   * @param {string} message 单段文本（与 lines 二选一）
+   * @param {string} confirmText
+   * @param {{lines?:string[]}} [opts]
+   */
+  function confirmDialog(message, confirmText, opts) {
     return new Promise((resolve) => {
+      const lines = opts && Array.isArray(opts.lines) ? opts.lines : null;
+      const body = lines
+        ? '<div class="confirm-lines">' + lines.map((l) => '<div>' + esc(l) + '</div>').join('') + '</div>'
+        : '<p>' + esc(message) + '</p>';
       openModal(
-        '<h3>请确认</h3><p>' + esc(message) + '</p>' +
+        '<h3>请确认</h3>' + body +
         '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
         '<button class="btn btn-danger" data-action="modal-ok">' + esc(confirmText || '确定') + '</button></div>',
         (modal) => {

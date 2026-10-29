@@ -15,6 +15,8 @@
  *   - 资产上传走**原始字节**（POST /api/assets，body=bytes），**不支持 multipart**；
  *     POST /api/banks/{id}/import 仅实现 `{ questions, mode }` JSON 分支。
  *   - 无鉴权/多用户；`reviews` 为整表 last-write-wins（多端冲突消解属后续项）。
+ *   - CORS 默认关闭（同源部署零配置）；跨源验收需显式 `CORS_ORIGIN`（逗号分隔来源或 `*`），
+ *     仅用于本机/受信环境，切勿在无鉴权前提下对公网放行。
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -27,6 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const DEFAULT_DATA_DIR = path.join(ROOT, '.qforge-data');
 const DEFAULT_PORT = 8788;
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES) || 32 * 1024 * 1024; // 请求体上限（默认 32MB）
 
 /* ================= FNV-1a 内容寻址（与 js/utils/assets.js::idFor 逐字节一致） ================= */
 function assetId(bytes) {
@@ -421,10 +424,37 @@ function fail(res, status, code, message) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        const err = new Error('请求体超过上限（' + Math.round(MAX_BODY_BYTES / 1024 / 1024) + 'MB）');
+        err.status = 413;
+        reject(err);
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+/** 依 allow 配置生成 CORS 响应头；allow 为空/来源不匹配时返回 null（不添加任何头） */
+export function corsHeaders(origin, allow) {
+  if (!allow) return null;
+  const allowed = String(allow).split(',').map((s) => s.trim()).filter(Boolean);
+  if (!allowed.length) return null;
+  const wildcard = allowed.indexOf('*') >= 0;
+  if (!wildcard && (!origin || allowed.indexOf(origin) < 0)) return null;
+  return {
+    'Access-Control-Allow-Origin': wildcard ? '*' : origin,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin'
+  };
 }
 
 export function createHandler(opts) {
@@ -626,6 +656,14 @@ export function createHandler(opts) {
   return async function handler(req, res) {
     const url = new URL(req.url || '/', 'http://localhost');
     const segs = url.pathname.split('/').filter(Boolean);
+    const cors = corsHeaders(req.headers.origin, opts.corsOrigin);
+    if (cors) Object.keys(cors).forEach((k) => res.setHeader(k, cors[k]));
+    if (req.method === 'OPTIONS') {
+      if (!cors) { res.writeHead(403); res.end('Forbidden（CORS 未放行该来源）'); return; }
+      res.writeHead(204);
+      res.end();
+      return;
+    }
     try {
       if (segs[0] === 'api') return await api(req, res, url, segs);
       if (url.pathname === '/health') return json(res, 200, { ok: true, backend: 'qforge-reference', dataDir: store.root });
@@ -633,7 +671,9 @@ export function createHandler(opts) {
       if (!filePath) { res.writeHead(403); res.end('Forbidden'); return; }
       return sendFile(res, filePath, req.url);
     } catch (e) {
-      return fail(res, e && e.status === 400 ? 400 : 500, e && e.status === 400 ? 'BAD_REQUEST' : 'INTERNAL', (e && e.message) || '服务端错误');
+      const status = e && Number(e.status) ? Number(e.status) : 500;
+      const code = status === 400 ? 'BAD_REQUEST' : status === 413 ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL';
+      return fail(res, status, code, (e && e.message) || '服务端错误');
     }
   };
 }
@@ -642,7 +682,11 @@ export function createHandler(opts) {
 export function createServer(options) {
   options = options || {};
   const store = createStore(options.dataDir);
-  const handler = createHandler({ store: store, root: options.root || ROOT });
+  const handler = createHandler({
+    store: store,
+    root: options.root || ROOT,
+    corsOrigin: options.corsOrigin == null ? (process.env.CORS_ORIGIN || '') : options.corsOrigin
+  });
   const server = http.createServer(handler);
   // Node 默认 keepAliveTimeout=5s 明显短于浏览器复用空闲 socket 的预期：空闲 >5s 后浏览器
   // 复用被回收的 socket 会得到 RST，DevTools 记 `net::ERR_ABORTED`（请求重发后才成功）。
@@ -674,6 +718,7 @@ export function run() {
     const shown = host === '0.0.0.0' ? 'localhost（局域网可达）' : host;
     console.log('参考后端已启动: http://' + shown + ':' + s.port + '/  (监听 ' + host + '，静态根 ' + ROOT + '，数据目录 ' + s.dataDir + ')');
     console.log('前端切换：CONFIG.DATA_BACKEND="api" + API_BASE_URL=""（同源）或指向本服务');
+    if (process.env.CORS_ORIGIN) console.log('CORS 放行来源：' + process.env.CORS_ORIGIN);
     return s;
   });
 }

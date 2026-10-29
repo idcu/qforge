@@ -23,16 +23,29 @@ export const MIME = {
 
 /**
  * URL 路径 → root 下的绝对文件路径（含越界守卫与目录补 index.html）。
- * @returns {string|null} 越界返回 null（调用方应答 403）
+ * 安全约束（2026-10-29 修复）：
+ *   - 先 decodeURIComponent；畸形编码（抛错）直接判为非法；
+ *   - 任一路径段为 '..' 判为非法（含 %2e%2e 与 ..\ 变体）；
+ *   - 归一后必须严格位于 root 之下（用 root + path.sep 前缀，避免 /../qforgeX 这类
+ *     "同前缀兄弟目录"被误判为合法）。
+ * @returns {string|null} 越界/非法返回 null（调用方应答 403）
  */
 export function resolveSafePath(root, urlPath) {
-  const urlNoQuery = decodeURIComponent((urlPath || '/').split('?')[0]);
-  let filePath = path.join(root, urlNoQuery === '/' ? 'index.html' : urlNoQuery);
-  if (!filePath.startsWith(root)) return null;
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
-    filePath = path.join(filePath, 'index.html');
+  const raw = String(urlPath || '/').split('?')[0];
+  let urlNoQuery;
+  try {
+    urlNoQuery = decodeURIComponent(raw);
+  } catch (e) {
+    return null; // 畸形 percent-encoding
   }
-  return filePath;
+  if (urlNoQuery.indexOf('\0') >= 0) return null;
+  if (urlNoQuery.split(/[\\/]+/).some((seg) => seg === '..')) return null;
+  const base = path.resolve(root);
+  const filePath = path.normalize(path.join(base, urlNoQuery === '/' ? 'index.html' : urlNoQuery));
+  if (filePath !== base && !filePath.startsWith(base + path.sep)) return null;
+  let out = filePath;
+  if (fs.existsSync(out) && fs.statSync(out).isDirectory()) out = path.join(out, 'index.html');
+  return out;
 }
 
 /** 发送文件；读取失败应答 404（附原始路径便于排查） */

@@ -99,7 +99,7 @@ qb/
 | `node scripts/rich-text.test.mjs` | 富文本渲染器测试（66 项断言：转义防注入、上标/下标、**公式子集 `\frac`/`\sqrt`（含指数根号、嵌套参数组、内部递归上下标、未闭合原样保留、内部转义）**、`toPlain` 公式去记号、图片占位、collectAssets、材料题资产递归（材料正文+小问）、hydrate 假 DOM、光标插入） |
 | `node scripts/assets.test.mjs` | 图片资产/题库包测试（62 项断言：IDB 内存驱动、内容寻址去重、qbk/qfbk ZIP 往返、缺图警告、孤儿清理、qbk→落库全链路去重、材料题 qbk 往返） |
 | `node scripts/blueprint.test.mjs` | 组卷蓝图筛选/抽题/缺口测试（18 项断言） |
-| `node scripts/source.test.mjs` | 来源溯源/URL 校验/checksum/快照拉取（29 项断言） |
+| `node scripts/source.test.mjs` | 来源溯源/URL 校验/checksum/快照拉取（30 项断言，含无响应文案回归） |
 | `node scripts/fsrs.test.mjs` | FSRS-6 调度器测试（135 项断言：py-fsrs 6.3.2 黄金对照 S10/D5/R0.9/good→32.026729、R=1 不增长、D₀/D′(5)/S′_f/同日 S′_s；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps 1m/10m、relearning、迁移、钳制、opt-in fuzz 区间/分布/确定性） |
 | `node scripts/fsrs-opt.test.mjs` | FSRS 参数优化器测试（114 项断言：revlog/FIFO/按库隔离、四门控、留出集门控与历史最佳权重、确定性复训、preset 端到端；**增量重训：训练点记录 / `shouldRetrain` 阈值 / 热启动与 Worker 透传**；Worker 化 supported 判定/假 Worker 协议/自动回退/trainAsync 写盘） |
 | `node scripts/srs.test.mjs` | 到期判定、存储与 7 日预报测试（60 项断言，含时区无关、SM-2→FSRS 迁移、一次作答一条 revlog 契约、删库级联清理） |
@@ -107,11 +107,12 @@ qb/
 | `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（**90** 项断言：含失败快照回滚、WebDAV 密码脱敏、**备份载荷两种布局的识别与双向转换（本地 ⇄ 后端）**） |
 | `node scripts/migrate.test.mjs` | schema 迁移测试（57 项断言：contentHash v1→v2 与全部用户数据键重映射、幂等、v2→v3 分片迁移幂等、v3→v4 分片一致修复空跑与字段） |
 | `node scripts/shard.test.mjs` | 题目库分片存储测试（115 项断言：切分与清单、按需单页只解析覆盖分片、单题增删改只重写所在分片、空分片与高位回收、旧单 blob 兼容与写时迁移、删库级联清分片；**删除一致性：单删清空中间分片/批删整片后重编号且余题可读、孤儿分片 invariant 检出与 compact 修复、v3→v4 启动自检修复坏清单并幂等**；UI 级按需装载：count 直读清单零分片解析、loadQuestions 缓存命中同数组、buildIndex 复用缓存、写操作令修订号 +1 并使缓存失效重读） |
-| `node scripts/contract.test.mjs` | 数据契约层测试（52 项断言：`QB.CONTRACTS` 7 组方法清单、`QB.ASSET_DRIVER_CONTRACT`、`assertAdapter`/`assertDriver` 精确报缺；local-adapter 的 reviews/revlog/weights/backup 四组仓库读写语义与领域模块同源；**删库级联唯一入口 `cascadeDelete`** 全键清理 + 非级联路径） |
-| `node scripts/api-backend.test.mjs` | **参考后端 + api 适配器端到端测试**（**155** 项断言：真实 Node HTTP 服务上跑 banks/questions(含 batch·import)/progress/reviews·revlog·weights/backup/assets 的路由·状态码·错误体·级联·原子落盘·重启持久化；并把 `DATA_BACKEND='api'` + 适配器指向该服务，用与 UI 相同的仓库调用面断言 wire 映射、`count`/`reviews` **按库缓存命中与写·级联·backup.import 后失效**、`revision()` 写修订号失效、资产 FNV id 与服务端一致、级联删库同语义、后端不可达走**真实网络失败**路径诚实抛错；**跨布局整链：本地备份 → 真实 `POST /api/backup` → 读回核对后端口径 → 再恢复到本地，逐项等价**） |
+| `node scripts/contract.test.mjs` | 数据契约层测试（53 项断言：`QB.CONTRACTS` 7 组方法清单、`QB.ASSET_DRIVER_CONTRACT`、`assertAdapter`/`assertDriver` 精确报缺；local-adapter 的 reviews/revlog/weights/backup 四组仓库读写语义与领域模块同源；**`historyAdd` 返回新增记录（与 api 同形）**；**删库级联唯一入口 `cascadeDelete`** 全键清理 + 非级联路径） |
+| `node scripts/api-backend.test.mjs` | **参考后端 + api 适配器端到端测试**（**168** 项断言：真实 Node HTTP 服务上跑 banks/questions(含 batch·import)/progress/reviews·revlog·weights/backup/assets 的路由·状态码·错误体·级联·原子落盘·重启持久化；**CORS 默认关闭/显式放行来源预检 204/未放行不带 ACAO**；**content_hash 按合并后完整题目重算、仅改解析不变**；**筛选查询不污染 count 缓存**；**historyAdd 返回形状与 local 一致**；并把 `DATA_BACKEND='api'` + 适配器指向该服务，用与 UI 相同的仓库调用面断言 wire 映射、`count`/`reviews` **按库缓存命中与写·级联·backup.import 后失效**、`revision()` 写修订号失效、资产 FNV id 与服务端一致、级联删库同语义、后端不可达走**真实网络失败**路径诚实抛错；**跨布局整链：本地备份 → 真实 `POST /api/backup` → 读回核对后端口径 → 再恢复到本地，逐项等价**） |
 | `node scripts/sync-dav.test.mjs` | WebDAV 云备份测试（**44** 项断言：配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/404；**真实 HTTP 集成（本地 CORS WebDAV 验证端点）：CORS 预检 / 真实 PUT 落盘 / 错误密码 401 / 含图 ZIP / 真实 GET 解析 / 无对象 404**） |
 | `node scripts/pwa.test.mjs` | PWA 清单/SW/离线资源 + FSRS Worker 资源校验 + 悬浮滚动按钮 + 细节样式修复回归（**50** 项断言；含 **SW 不拦截同源 `/api` 前缀 + 缓存名换代（`qforge-v4`，≥v4 断言）+ activate 删除非当前版本缓存**） |
-| `node scripts/ui-renderer.test.mjs` | UI 渲染器弹窗/答题界面构建（98 项断言：**解析反馈位于操作按钮/答题卡之前**、**简答题解析在错题本/收藏夹展示回归**、`data-bp-min/max/cat` 属性可查询回归、**组卷抽题行不含分值列 / 练习·考试开始弹窗每题型「数量+分值」行、考试时长默认 30、练习计时开关**、分类转义、**自定义标题**、**题干渲染回归：非材料题曾只显示选项**、**答题卡状态类与图例**、**收藏已收藏态**、**搜索单行 sticky**、**历史统计 sticky**；**区域数组与 DOM 对账（阶段 A）：`*Regions` 键序稳定、拼接逐字节等于旧整块字符串、顶层带 `data-region`、`DomPatch.plan` 仅重建变化区域；答题卡格级增量：帧跨作答逐字节不变、仅「计数 + 受影响格」变化**） |
+| `node scripts/ui-renderer.test.mjs` | UI 渲染器弹窗/答题界面构建（109 项断言：**解析反馈位于操作按钮/答题卡之前**、**简答题解析在错题本/收藏夹展示回归**、**收藏夹富文本去记号（不再泄漏 `x^{2}`/`asset:`）**、**结果页未作答与待自评分开计数**、`data-bp-min/max/cat` 属性可查询回归、**组卷抽题行不含分值列 / 练习·考试开始弹窗每题型「数量+分值」行、考试时长默认 30、练习计时开关**、分类转义、**自定义标题**、**题干渲染回归：非材料题曾只显示选项**、**答题卡状态类与图例**、**收藏已收藏态**、**搜索单行 sticky**、**历史统计 sticky**；**区域数组与 DOM 对账（阶段 A）：`*Regions` 键序稳定、拼接逐字节等于旧整块字符串、顶层带 `data-region`、`DomPatch.plan` 仅重建变化区域；答题卡格级增量：帧跨作答逐字节不变、仅「计数 + 受影响格」变化**） |
+| `node scripts/static-server.test.mjs` | 静态服务路径守卫测试（14 项断言：正常路径/根路径/目录补 index.html/百分号解码；`../`、`%2e%2e`、`..\`、深层越界、畸形编码、NUL 一律拒绝；含 `..` 即使归一后落在 root 内也拒绝） |
 | `node scripts/dom-patch.test.mjs` | DOM 增量更新区域对账测试（40 项断言：`DomPatch.plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`；首次全变化、内容一致全不重建、单区域变化、新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全；**子区域（格级）：帧未变→顶层不重建、snapshot 以 frame 为基准、groupSub 按容器归组去重**） |
 | `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出/DOM 增量/**富文本公式子集渲染**/**FSRS-6 调度与训练** 的耗时与内存） |
 | `node scripts/task-timer.mjs` | 开发子任务计时埋点（`start/end/report/reset`，记录落 gitignored 的 `.qforge-timings.json`）：为「subtask 时间明细表」提供**实测**数据（`bench.mjs` 量代码热路径，本工具量开发墙钟） |
@@ -120,8 +121,8 @@ qb/
 
 xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖），Node 直接跑全部断言，无需安装任何包。
 
-**实测数据（Node v24.14.0；性能条目为 2026-10-19 基线，测试矩阵于 2026-10-27 复跑，详见 `CHANGELOG.internal.md`）**：
-- 22 个逻辑层测试套件 **3186 / 3186 通过**（2026-10-29 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖）：冒烟 **604**、XML 解析器 **39**、导出 161、Office 导出 1148、编辑器 29、**富文本 66**、**图片资产 62**、组卷 18、**UI 渲染器 98**、**DOM 增量 40**、来源/网络导入 29、FSRS **135**、**FSRS 优化器 114**、SRS **60**、存储可靠性 **20**、备份 **90**、schema 迁移 **57**、**题目分片 115**、**数据契约 52**、**参考后端 E2E 155**、**WebDAV 44**、PWA **50**。
+**实测数据（Node v24.14.0；性能条目为 2026-10-19 基线，测试矩阵于 2026-10-29 复跑，详见 `CHANGELOG.internal.md`）**：
+- **23 个逻辑层测试套件 3226 / 3226 通过**（2026-10-29 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖）：冒烟 **604**、XML 解析器 **39**、导出 161、Office 导出 1148、编辑器 29、**富文本 66**、**图片资产 62**、组卷 18、**UI 渲染器 109**、**DOM 增量 40**、来源/网络导入 **30**、**静态服务 14**、FSRS **135**、**FSRS 优化器 114**、SRS **60**、存储可靠性 **20**、备份 **90**、schema 迁移 **57**、**题目分片 115**、**数据契约 53**、**参考后端 E2E 168**、**WebDAV 44**、PWA **50**。
 - 冒烟覆盖：六题型判分（含不定项少选半分）、难度/标签元数据、**按题型分值（自定义分值、材料题按小问题型分值累加、时长与计时开关随进度恢复）**、**考试倒计时 / 练习正计时实测**、**材料题 M1 判分聚合 + M2 五格式（MD/DOCX/CSV/XLSX/TXT）往返黄金断言**、xlsx/docx 原生解析、选项乱序重映射、JSON/CSV/Markdown 三格式 540 题全量往返、**contentHash v2 不误并同题干异答案题**、**考试简答待自评（不伪造错误）**、题库隔离与级联删除、答题卡跳转。
 - FSRS 优化器：800 卡 × 5 评的确定性合成日志（3200 相邻样本，切出 640 留出样本）验证——真权重刻意显著偏离默认（初始稳定度×1.5、w6×0.5、召回增长×1.3、hard 惩罚×0.6）时，留出集 logloss 改善 **2.84%**（超 0.2% 门控）才采纳；门控基于独立留出集（不再训练集自证），返回历史最佳权重；改善不足（含默认权重自生成的日志）诚实拒绝。注：旧夹具 ±40% 随机扰动在 FSRS-6 下改善仅 0.04%，已改用可解释的偏离真权重（详见 SRS.md §8.6）。
 - Office 导出：540 题 xlsx/docx 导出 → 自家导入器回读，题量/题型分布/contentHash 集合与逐题判分全部一致；另经 Python zipfile/openpyxl 独立校验。
@@ -134,7 +135,7 @@ xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖）�
 - UI 级按需加载（阶段 A）：`app.js::loadBankData` 改为视图感知——仅 home/search/stats 解析整库，答题/结果/错题/收藏/历史视图不再触库（总数走 `count` 直读清单）；整库读取统一收敛到 `QB.DB.loadQuestions` 缓存（按 `bankId`+写修订号失效，`buildIndex`/question-editor 复用）。3000 题实测：改造前每次 render 全量冷读 **3.70ms** → 装载缓存命中 **0.00ms**、答题交互视图装载 **0.00ms**，仅题库/题目变动后首次付 3.42ms；首屏/答题 HTML 构建 0.02/0.02ms 且与库规模无关。
 - DOM 增量更新（阶段 A）：`#view` 不再整块 `innerHTML` 重绘。渲染器新增 5 个区域数组变体（`renderQuizRegions`/`renderWrongListRegions`/`renderFavoritesListRegions`/`renderHistoryListRegions`/`renderSearchRegions`，每区域顶层带 `data-region="KEY"`），`QB.DomPatch.plan/patch` 对账：内容未变的区域**保留原 DOM 节点**（保住焦点/`<details>` 展开态/滚动），仅重建变化区域。**答题卡格级增量**：`quiz-card` 区域带 `frame`（仅结构，跨作答逐字节不变）+ `sub`（计数 + 逐格），帧未变时仅按 key 就地替换变化的子节点。实测对账 **0.00ms**：答题区勾选选项顶层仅重建 2/5 区域（占字节 10.2%），**整张答题卡 `<details>` 不重建**、仅替换 2/51 子节点（占整卡字节 2.0%，答题热路径重建量由细化前 95.6% 降至 10.2%）；错题本移除一条仅重建 1/22 区域（占字节 0.9%，20 个区域保持原节点）。浏览器实机验证：折叠答题卡后作答仍保持折叠、计数/格状态同步更新、控制台无报错。
 - 关键耗时中位数（`scripts/bench.mjs`，`--expose-gc`，采样 10 次）：JSON 解析 1.76ms、落库 4.87ms、按需单页冷读 0.27ms、全量冷读 0.77ms、检索 0.77ms、50 题整卷判分 0.10ms、540 题乱序 0.54ms、文本四格式导出 2.46ms、**XLSX 构建 7.31ms（667 KB）**、**DOCX 构建 2.54ms（259 KB）**、Markdown 540 题再解析 3.25ms；**3000 题 UI 装载缓存命中 0.00ms / 写后首次 3.42ms（对照改造前每次 render 全量冷读 3.70ms）**；**DOM 区域对账 0.00ms（答题区顶层重建 2/5 区域、答题卡仅替换 2/51 子节点、错题本重建 1/22 区域）**；heapUsed 增量 **+2.54MB**（3000 题规模库末态 14.77MB、DOM 增量末态 14.95MB）。
-- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 **22 个运行项（冒烟 + 21 套件）**，防止自然日/时间断言的时区回归。
+- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 **23 个运行项（冒烟 + 22 套件）**，防止自然日/时间断言的时区回归。
 
 ## 远端仓库
 

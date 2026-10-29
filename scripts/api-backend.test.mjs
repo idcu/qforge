@@ -50,6 +50,26 @@ section('后端：健康检查与静态文件');
   eq(trav.status, 403, '路径穿越被拒绝（403）');
 }
 
+section('后端：CORS 显式放行（默认关闭）');
+{
+  const bare = await fetch(base + '/api/banks', { method: 'OPTIONS', headers: { Origin: 'http://localhost:8777' } });
+  eq(bare.status, 403, '默认不放行跨源预检（403）');
+  eq(bare.headers.get('access-control-allow-origin'), null, '默认响应不含 ACAO');
+
+  const corsSrv = await createServer({ port: 0, dataDir: tmpDir(), corsOrigin: 'http://localhost:8777' });
+  const corsBase = 'http://127.0.0.1:' + corsSrv.port;
+  const pre = await fetch(corsBase + '/api/banks', { method: 'OPTIONS', headers: { Origin: 'http://localhost:8777' } });
+  eq(pre.status, 204, '放行来源预检 204');
+  eq(pre.headers.get('access-control-allow-origin'), 'http://localhost:8777', 'ACAO 回显放行来源');
+  ok(String(pre.headers.get('access-control-allow-methods')).indexOf('PATCH') >= 0, '预检声明 PATCH 等方法');
+  const get = await fetch(corsBase + '/api/banks', { headers: { Origin: 'http://localhost:8777' } });
+  eq(get.status, 200, '放行来源正常 GET');
+  eq(get.headers.get('access-control-allow-origin'), 'http://localhost:8777', '普通响应带 ACAO');
+  const denied = await fetch(corsBase + '/api/banks', { headers: { Origin: 'http://evil.example' } });
+  eq(denied.headers.get('access-control-allow-origin'), null, '未放行来源不带 ACAO');
+  await corsSrv.close();
+}
+
 section('后端：题库 CRUD 与错误体');
 let bankA = null;
 let bankB = null;
@@ -304,10 +324,28 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   eq((await QB.DB.progress.wrongList(bank.id))[0].wrongCount, 1, 'api：wrongAdd 经 wire 映射回读 wrongCount');
   await QB.DB.progress.favoriteToggle(bank.id, qa);
   eq((await QB.DB.progress.favoriteList(bank.id))[0].questionKey, QB.makeQuestionKey(qa), 'api：favorites 回读 questionKey');
-  await QB.DB.progress.historyAdd({ bankId: bank.id, bankName: 'parity 库', total: 1, correct: 1, byType: { single: { correct: 1, total: 1 } }, durationMs: 500 });
+  const added = await QB.DB.progress.historyAdd({ bankId: bank.id, bankName: 'parity 库', total: 1, correct: 1, byType: { single: { correct: 1, total: 1 } }, durationMs: 500 });
+  ok(added && typeof added.id === 'string' && added.createdAt > 0, 'api：historyAdd 返回新增记录（id/createdAt），与 local 同形');
   const hist = await QB.DB.progress.historyList(bank.id);
   eq(hist[0].byType.single.correct, 1, 'api：history 回读 byType');
   eq(hist[0].durationMs, 500, 'api：history 回读 durationMs');
+
+  // 筛选查询不得污染 count 缓存（否则考勤/状态栏显示筛选后总数）
+  {
+    await QB.DB.questions.count(bank.id); // 预热真值 3
+    const filtered = await QB.DB.questions.list(bank.id, { type: 'judge' });
+    eq(filtered.total, 2, 'api：筛选题型 total=2');
+    eq(await QB.DB.questions.count(bank.id), 3, 'api：筛选后 count 仍为题库总数 3（缓存未被筛选 total 覆盖）');
+  }
+
+  // content_hash：内容变更由「合并后的完整题目」重算；组织属性变更不发 hash
+  {
+    const beforeQ = await QB.DB.questions.get(qa.id);
+    const changed = await QB.DB.questions.update(qa.id, { question: 'parity 题1（改）' });
+    eq(changed.contentHash, QB.makeContentHash(Object.assign({}, beforeQ, { question: 'parity 题1（改）' })), 'api：改题干后 contentHash 按合并结果重算');
+    const analysisOnly = await QB.DB.questions.update(qa.id, { analysis: '只改解析' });
+    eq(analysisOnly.contentHash, changed.contentHash, 'api：只改解析不改 contentHash');
+  }
 
   eq(Object.keys(await QB.DB.reviews.list(bank.id)).length, 0, 'api：reviews 初始空');
   await QB.DB.reviews.save(bank.id, { h1: { algo: 'fsrs', stability: 4.5 } });

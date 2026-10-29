@@ -14,6 +14,7 @@
   /* ---------------- 应用状态 ---------------- */
   const State = {
     banks: [],
+    banksLoaded: false,
     bankId: null,
     bank: null,
     allQuestions: [],
@@ -26,6 +27,9 @@
     resultMeta: {},
     search: { keyword: '', type: '', category: '', tag: '' },
     listPage: { wrong: 0, favorites: 0, search: 0 },
+    // 当前题库收藏键集合：答题渲染只查内存，避免每次作答读整份收藏（api 模式下即一次 REST）
+    favoriteKeys: new Set(),
+    favoriteBankId: null,
     fsrsScope: null       // FSRS 权重作用域：null=全局，或 bankId
   };
 
@@ -122,17 +126,29 @@
     return State.view === 'quiz' && !State.engine; // 无引擎时 quiz 视图回退渲染首页
   }
 
-  async function loadBankData() {
-    State.banks = await QB.DB.banks.list();
+  async function loadBankData(opts) {
+    opts = opts || {};
+    if (!State.banksLoaded || opts.refreshBanks) {
+      State.banks = await QB.DB.banks.list();
+      State.banksLoaded = true;
+    }
     if (State.bankId) {
-      State.bank = await QB.DB.banks.get(State.bankId);
+      State.bank = State.banks.find((b) => b.id === State.bankId) || await QB.DB.banks.get(State.bankId);
       if (!State.bank) State.bankId = null;
     }
     if (!State.bankId) {
       State.bank = null;
       State.allQuestions = [];
+      State.favoriteKeys = new Set();
+      State.favoriteBankId = null;
       State.counts = { total: 0, byType: {}, dueReview: 0 };
       return;
+    }
+    // 收藏键按库缓存：作答渲染走内存集合（api 模式下省掉每次作答的 GET favorites）
+    if (State.favoriteBankId !== State.bankId) {
+      const favs = await QB.DB.progress.favoriteList(State.bankId);
+      State.favoriteKeys = new Set(favs.map((f) => f.questionKey));
+      State.favoriteBankId = State.bankId;
     }
     // 总数直读分片清单（O(1)），供状态栏显示，与是否装载整库无关
     const total = await QB.DB.questions.count(State.bankId);
@@ -150,6 +166,12 @@
     items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
     State.allQuestions = items;
     State.counts = { total: items.length, byType: byType, dueReview: await QB.SRSStore.countDue(State.bankId, items) };
+  }
+
+  /** 题库列表/当前库元数据变更后使缓存失效（本地可精确失效，api 模式避免多余 GET） */
+  function invalidateBanks() {
+    State.banksLoaded = false;
+    State.favoriteBankId = null;
   }
 
   /* ---------------- 渲染分发 ---------------- */
@@ -177,7 +199,7 @@
         if (!State.engine) { html = UI.renderHome(State.bank, State.counts); break; }
         const cq = State.engine.getCurrentQuestion();
         let favorited = false;
-        if (cq) { try { favorited = await QB.Favorites.has(State.bankId, cq); } catch (e) { favorited = false; } }
+        if (cq) favorited = State.favoriteKeys.has(QB.makeQuestionKey(cq));
         regions = UI.renderQuizRegions(State.engine, { favorited: favorited });
         if (!regions) html = UI.renderQuiz(State.engine, { favorited: favorited }); // 无当前题时回退整块
         break;
@@ -424,7 +446,12 @@
       /* —— 题库 —— */
       case 'bank-create': {
         const bank = await QB.BankManager.create();
-        if (bank) { State.bankId = bank.id; await QB.DB.setCurrentBankId(bank.id); State.view = 'home'; }
+        if (bank) {
+          State.bankId = bank.id;
+          await QB.DB.setCurrentBankId(bank.id);
+          State.view = 'home';
+          invalidateBanks();
+        }
         return render();
       }
       case 'bank-select':
@@ -437,6 +464,7 @@
       case 'bank-rename': {
         const bank = State.banks.find((b) => b.id === id) || await QB.DB.banks.get(id);
         if (bank) await QB.BankManager.rename(bank);
+        invalidateBanks();
         return render();
       }
       case 'bank-delete': {
@@ -446,6 +474,7 @@
           if (done) {
             State.bankId = await QB.DB.getCurrentBankId();
             State.view = 'banks';
+            invalidateBanks();
           }
         }
         return render();
@@ -491,6 +520,7 @@
         State.bankId = bank.id;
         await QB.DB.setCurrentBankId(bank.id);
         State.view = 'home';
+        invalidateBanks();
         return render();
       }
       case 'bank-import-sample': {
@@ -607,7 +637,7 @@
             if (partialAns > 0) lines.push('· ' + partialAns + ' 道材料题未答全或含待自评小问（未自评部分不计分）');
             lines.push('· 简答题交卷后为「待自评」，不计入本次得分；需要评分请在练习模式作答后自评。');
             lines.push('确定交卷吗？取消可返回答题卡检查。');
-            const ok = await UI.confirmDialog(lines.join('<br>'), '确认交卷');
+            const ok = await UI.confirmDialog('', '确认交卷', { lines: lines });
             if (!ok) return;
           }
         }
@@ -617,6 +647,8 @@
         const q = State.engine.getCurrentQuestion();
         if (!q) return;
         const res = await QB.Favorites.toggle(State.bankId, q);
+        const k = QB.makeQuestionKey(q);
+        if (res.added) State.favoriteKeys.add(k); else State.favoriteKeys.delete(k);
         UI.toast(res.added ? '已加入收藏' : '已取消收藏', 'ok');
         return render();
       }
@@ -635,11 +667,13 @@
         const { map } = await QB.DB.buildIndex(State.bankId);
         const q = map.get(key);
         if (q) await QB.Favorites.toggle(State.bankId, q);
+        State.favoriteKeys.delete(key);
         return render();
       }
       case 'fav-clear': {
         if (await UI.confirmDialog('确定清空当前题库的收藏夹吗？', '清空')) {
           await QB.DB.progress.favoriteClear(State.bankId);
+          State.favoriteKeys.clear();
         }
         return render();
       }
@@ -981,6 +1015,16 @@
       render();
     });
 
+    // 多标签/多窗口：题库列表或收藏变化时使内存缓存失效（本地 storage 事件；api 模式无此事件）
+    if (window.addEventListener) {
+      window.addEventListener('storage', (e) => {
+        if (!e || !e.key) return;
+        const prefix = (QB.CONFIG && QB.CONFIG.STORAGE_PREFIX) || 'qb';
+        if (e.key === prefix + ':banks') invalidateBanks();
+        if (e.key.indexOf(prefix + ':user:fav:') === 0) State.favoriteBankId = null;
+      });
+    }
+
     // 考试防作弊信号：统计切出页面次数（仅记录与结果提示，不做拦截）
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) return;
@@ -1092,6 +1136,7 @@
     bindView();
 
     State.banks = await QB.DB.banks.list();
+    State.banksLoaded = true;
     State.bankId = await QB.DB.getCurrentBankId();
     State.view = State.bankId ? 'home' : 'banks';
     await render();

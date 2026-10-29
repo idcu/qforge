@@ -89,12 +89,22 @@
     });
     const total = this.questions.length;
     const decided = correct + wrong + partial;
+    let unanswered = 0;
+    let pendingSelfAssess = 0;
+    this.questions.forEach((q, i) => {
+      const r = this.results[i];
+      if (!r) { unanswered++; return; }
+      if (r.isCorrect === null || r.isCorrect === undefined) pendingSelfAssess++;
+    });
     return {
       score: score,
       correct: correct,
       partial: partial,
       wrong: wrong,
       pending: total - decided,
+      // pending 拆成两类，供结果页给出准确文案（未作答 ≠ 待自评）
+      unanswered: unanswered,
+      pendingSelfAssess: pendingSelfAssess,
       accuracy: QB.Helpers.calculateAccuracy(correct + partial, decided)
     };
   };

@@ -13,8 +13,10 @@
 | 时间 | 毫秒时间戳（数值），字段名 `created_at` / `updated_at` |
 | 错误体 | `{ "error": { "code": "NOT_FOUND", "message": "题库不存在" } }` |
 | 幂等 | `PUT` / `DELETE` 幂等；`POST` 非幂等 |
+| CORS | 默认**不放行跨源**（同源部署零配置）；跨源验收需参考后端显式 `CORS_ORIGIN`（逗号分隔来源或 `*`）。放行来源的预检 `OPTIONS` 返回 `204` + `Access-Control-Allow-Origin/Methods/Headers`；未放行来源预检返回 `403`，普通响应不带 ACAO |
+| 请求体上限 | 参考后端默认 32MB（`MAX_BODY_BYTES` 可调），超限返回 `413 PAYLOAD_TOO_LARGE` |
 
-**HTTP 状态码**：200 成功、201 创建、204 删除成功无返回、400 参数错误、404 资源不存在、409 冲突（重复）、422 校验失败、500 服务端错误。
+**HTTP 状态码**：200 成功、201 创建、204 删除成功无返回、400 参数错误、404 资源不存在、409 冲突（重复）、413 请求体过大、422 校验失败、500 服务端错误。**静态文件路径含 `..` / 畸形编码 / NUL 一律 `403`**（参考后端与 `scripts/lib/static-server.mjs` 同一守卫）。
 
 ## 2. 资源：题库（Banks）
 
@@ -68,6 +70,8 @@
 }
 ```
 > `indefinite`（不定项）结构同 `multi`；判分语义为全对满分、少选半分（响应/历史中以 `partial: true` 标记）、错选 0 分，见 [ARCHITECTURE.md](ARCHITECTURE.md) §6。图片以 Markdown 占位 `![alt](asset:<id>)` 内嵌在文本字段，字节走 §8 资产接口。
+>
+> **content_hash 归属（2026-10-29 明确）**：`content_hash` 由「题型 + 规范化题干 + 选项文本集合 + 答案语义」计算（见 `js/utils/question-id.js`）。`PATCH` 若修改任一内容字段（type/question/options/answer/blanks/reference_answer/material/children），**必须携带由合并后完整题目重算的 `content_hash`**；仅改组织属性（analysis/category/source/difficulty/tags）时不得改写 hash。参考实现中 `api-adapter.update` 会先 GET 当前题、合并 patch 后重算；服务端应信任并按此存储（参考后端不做二次重算，若第三方客户端漏传，去重键会漂移）。
 
 **批量返回字段**
 - `op=add`：`{ inserted, duplicates, skipped, total }`（`mode=overwrite` 表示先清空该库再写入）
@@ -87,7 +91,7 @@
 | POST | `/api/banks/{id}/favorites/toggle` | 切换收藏（`{ question_id }`）→ `{ added, list }` |
 | DELETE | `/api/banks/{id}/favorites` | 清空收藏 |
 | GET | `/api/history?bank_id=` | 历史记录列表（上限 500） |
-| POST | `/api/history` | 新增一条记录 |
+| POST | `/api/history` | 新增一条记录 → `201` + 新增的 `AttemptRecord`（与 `progress.historyAdd` 返回同形：带 `id`/`created_at`） |
 | DELETE | `/api/history/{id}` | 删除一条记录 |
 | DELETE | `/api/history?bank_id=` | 清空（或按库） |
 | GET | `/api/session` | 读取答题进度会话 |
@@ -187,7 +191,7 @@
 >
 > **本阶段验证**：21 套件 + smoke 共 **22** 项 / **2885** 断言在 UTC 与 Asia/Shanghai 双时区全绿；浏览器 E2E 分别验证了**本地模式**（练习答题→交卷→结果页、统计页到期预报 + FSRS 诊断、今日复习、备份下载）与 **`?backend=api` 真实后端**（建库→导入样例 18 题→答题→交卷→统计→备份下载；服务端 `.qforge-data/` 实际落盘 `banks.json`/`questions/*.json`/`progress/*.json`/`revlog.json`/`history.json`；拒绝「继续上次」触发 `DELETE /api/session`，服务端 `session.json` 随之消失），**控制台 0 error / 0 warning**。
 >
-> **api 模式按库缓存**：`reviews.list` 按库缓存（同一库两次 render 之间只打一次 `GET .../reviews`），`save`/`remove`/`banks.remove`/`backup.import` 一律失效；`questions.count` 同思路（`backup.import` 后整表清空）。api 模式下渲染热路径因此不再逐次打 REST。
+> **api 模式按库缓存**：`reviews.list` 按库缓存（同一库两次 render 之间只打一次 `GET .../reviews`），`save`/`remove`/`banks.remove`/`backup.import` 一律失效；`questions.count` 同思路（**仅无 `type/category/q` 筛选的 list 才更新总数缓存**，否则筛选后的 total 会污染题库总数；`backup.import` 后整表清空）。api 模式下渲染热路径因此不再逐次打 REST。
 >
 > **已知噪声修复（2026-10-19，实测闭环）**：`req()` 原先对 204 直接 `return null` 而**不消费响应体**，浏览器会为「其实已成功」的请求记 `net::ERR_ABORTED`（已由「`DELETE /api/session` 后服务端 `session.json` 消失」证实请求成功；`keepAliveTimeout` 并非成因——其调整后错误仍在）。现改为**始终消费响应体**（二进制走 `arrayBuffer`、其余走 `text`，204 读空体），在建新标签（空控制台）实测该条目消失。
 >

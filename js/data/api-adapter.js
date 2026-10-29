@@ -202,7 +202,9 @@
       const suffix = p.toString() ? ('?' + p.toString()) : '';
       const r = await req('GET', ROUTES.bankQuestions(enc(bankId)) + suffix);
       const items = (r.items || []).map(fromWireQuestion);
-      countCache.set(bankId, r.total);
+      // 仅无筛选时更新总数缓存：带 type/category/keyword 的查询返回的是筛选后 total，
+      // 写入缓存会让后续 count() 误报「题库总数」（见 api-backend.test）。
+      if (!query.type && !query.category && !query.keyword) countCache.set(bankId, r.total);
       return { items: items, total: r.total, page: r.page || 1, size: r.size || items.length };
     },
     async count(bankId) {
@@ -220,7 +222,21 @@
       return fromWireQuestion(w);
     },
     async update(id, patch) {
-      const w = await reqMaybe('PATCH', ROUTES.question(enc(id)), toWireQuestion(patch));
+      patch = patch || {};
+      const body = toWireQuestion(patch);
+      // content_hash 必须由「合并后的完整题目」计算：残缺 patch（只带 type 等少数字段）
+      // 直接算 hash 会写入与真实内容不符的去重键。组织属性（解析/分类/难度/标签/来源）
+      // 不进 hash，此时不发送 content_hash，服务端保留原值。
+      const CONTENT_KEYS = ['type', 'question', 'options', 'answer', 'blanks', 'reference_answer', 'material', 'children'];
+      const touchesContent = CONTENT_KEYS.some((k) => patch[k] !== undefined);
+      if (touchesContent) {
+        const cur = await questions.get(id);
+        if (!cur) throw new Error('题目不存在: ' + id);
+        body.content_hash = QB.makeContentHash(Object.assign({}, cur, patch));
+      } else {
+        delete body.content_hash;
+      }
+      const w = await reqMaybe('PATCH', ROUTES.question(enc(id)), body);
       if (!w) throw new Error('题目不存在: ' + id);
       bumpRev();
       return fromWireQuestion(w);

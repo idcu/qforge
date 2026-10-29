@@ -90,6 +90,12 @@ section('HTTP 错误与超时');
   try { await S.fetchSnapshot('https://example.com/missing.json', { loader: errLoader }); } catch (e) { threw = /404/.test(e.message); }
   ok(threw, 'HTTP 404 抛错');
 
+  // loader 返回 null（无响应）：不得出现 "HTTP undefined"
+  const nullLoader = async () => null;
+  let nullMsg = '';
+  try { await S.fetchSnapshot('https://example.com/none.json', { loader: nullLoader }); } catch (e) { nullMsg = e.message; }
+  ok(/无响应/.test(nullMsg) && !/undefined/.test(nullMsg), '无响应时文案为「HTTP 无响应」（回归：运算符优先级导致 undefined）');
+
   // 超时：loader 收到 abort signal 后按 AbortError 拒绝
   const slowLoader = (url, init) => new Promise((resolve, reject) => {
     init.signal.addEventListener('abort', () => {
