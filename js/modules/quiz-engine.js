@@ -28,6 +28,8 @@
    * @param {string} [type] 题型/来源标记
    * @param {Object} [opts]
    * @param {boolean} [opts.shuffleOptions] 是否乱序选项（单选/多选），默认取 CONFIG.SHUFFLE_OPTIONS
+   * @param {boolean} [opts.shuffleChildren] 是否乱序材料题小问（仅 material，整题 contentHash 不变）
+   * @param {number} [opts.shuffleSeed] 乱序种子（测试可复现；缺省随机）
    *   说明：乱序只产出派生克隆，不改库里的原题；恢复会话走 restore()，不会二次乱序。
    */
   QuizEngine.prototype.loadQuestions = function (questions, type, opts) {
@@ -37,12 +39,21 @@
       ? !!opts.shuffleOptions
       : !QB.CONFIG || QB.CONFIG.SHUFFLE_OPTIONS !== false;
     if (doShuffle) list = list.map((q) => QB.shuffleOptions(q));
+    if (opts.shuffleChildren) {
+      const seed = opts.shuffleSeed;
+      list = list.map((q, i) => QB.shuffleChildren(q, seed === undefined || seed === null ? undefined : seed + i));
+    }
     this.questions = list;
     this.currentType = type || 'mixed';
-    this.pointsMap = opts.pointsMap || null;
+    this.pointsMap = opts.pointsMap && Object.keys(opts.pointsMap).length ? opts.pointsMap : null;
     this.durationMs = Number(opts.durationMs) > 0 ? Number(opts.durationMs) : 0;
     this.showTimer = !!opts.showTimer;
     this.reset();
+  };
+
+  /** 本场判分参数（唯一入口）：按题型分值仅在显式设置时覆盖小问自带分 */
+  QuizEngine.prototype.judgeOpts = function () {
+    return { pointOf: (t) => this.pointOf(t), useTypePoints: !!this.pointsMap };
   };
 
   /** 本场某题型每题分值（公共口径）：有覆盖用覆盖，否则回落 CONFIG.POINTS_PER_CORRECT */
@@ -232,7 +243,7 @@
     const q = this.getCurrentQuestion();
     if (!q || this.hasAnswered()) return null;
     const userAnswer = this.answers[this.currentIndex];
-    const verdict = QB.judgeAnswer(q, userAnswer, { pointOf: (t) => this.pointOf(t) });
+    const verdict = QB.judgeAnswer(q, userAnswer, this.judgeOpts());
     const result = {
       questionId: q.id,
       contentHash: q.contentHash || QB.makeContentHash(q),
@@ -302,7 +313,7 @@
     for (let i = 0; i < this.questions.length; i++) {
       if (this.results[i]) continue;
       const q = this.questions[i];
-      const verdict = QB.judgeAnswer(q, this.answers[i], { pointOf: (t) => this.pointOf(t) });
+      const verdict = QB.judgeAnswer(q, this.answers[i], this.judgeOpts());
       let isCorrect = verdict.isCorrect;
       let points = verdict.points;
       let children = verdict.children;
@@ -444,7 +455,7 @@
     this.answers = state.answers || [];
     this.results = state.results || [];
     this.currentIndex = state.currentIndex || 0;
-    this.pointsMap = state.pointsMap || null;
+    this.pointsMap = state.pointsMap && Object.keys(state.pointsMap).length ? state.pointsMap : null;
     this.durationMs = Number(state.durationMs) > 0 ? Number(state.durationMs) : 0;
     this.showTimer = !!state.showTimer;
     return this.questions.length > 0;

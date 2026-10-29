@@ -40,6 +40,23 @@
   };
 
   /**
+   * 材料题小问乱序（公共抽象，仅 material；小问数 <2 原样返回）。
+   * 返回父题浅克隆：children 顺序重排、共享材料/父题字段不变，并保留原 contentHash
+   * （去重/错题/收藏/SRS 键以整题原序语义为准，不因本场展示顺序改变）。
+   * 作答数组与结果 children[] 均按重排后的下标对齐；不修改题库原题。
+   * @param {Object} q 题目
+   * @param {number} [seed] 不传则用 Math.random（可复现测试传 seed）
+   */
+  QB.shuffleChildren = function shuffleChildren(q, seed) {
+    if (!q || q.type !== 'material') return q;
+    const kids = Array.isArray(q.children) ? q.children : [];
+    if (kids.length < 2) return q;
+    const hash = q.contentHash || QB.makeContentHash(q);
+    const shuffled = QB.shuffle(kids, seed).map((c) => Object.assign({}, c));
+    return Object.assign({}, q, { children: shuffled, contentHash: hash });
+  };
+
+  /**
    * 选项乱序（公共抽象，仅 single/multi）
    * 返回题目的浅克隆：选项重排并重新分配字母 A..，答案字母同步重映射。
    * - 不修改原题（落库数据保持 A/B/C/D 原序）；

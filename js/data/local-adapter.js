@@ -38,7 +38,7 @@
       item.material = q.material || '';
       item.children = (q.children || []).map((c) => {
         c = c || {};
-        return {
+        const child = {
           type: c.type,
           question: c.question || '',
           options: Array.isArray(c.options) ? c.options : [],
@@ -47,6 +47,10 @@
           reference_answer: c.reference_answer || '',
           analysis: c.analysis || ''
         };
+        // 子问题分值（M4）：可选字段，缺失时引擎按本场题型分值/默认 10 分
+        const score = QB.normalizeChildScore(c.score);
+        if (score > 0) child.score = score;
+        return child;
       });
     }
     // v2 hash（题型+题干+选项+答案+材料与子问题）才沿用；旧版裸 hash（v1）或缺失一律重算

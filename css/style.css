@@ -586,9 +586,13 @@ body {
 }
 .me-child-head b { flex: 1; }
 .me-child-head select { max-width: 170px; }
+.me-score-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.me-score { width: 70px; }
 @media (max-width: 560px) {
   .me-child-head { flex-wrap: wrap; }
   .me-child-head select { max-width: none; width: 100%; }
+  .me-score-label { width: 100%; }
+  .me-score { flex: 1; }
 }
 .qe-row .li-head { gap: 8px; }
 .btn-danger-text { color: var(--danger); }

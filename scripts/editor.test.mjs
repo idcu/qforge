@@ -121,6 +121,9 @@ const mkChild = (type, extra) => QB.QuestionEditor.buildChildQuestion(type, Obje
   const single = mkChild('single');
   eq(single.type, 'single', '子问题保留题型');
   eq(single.answer, 'A', '子问题单选答案 A');
+  eq(single.score, 10, '子问题默认分值 10');
+  eq(mkChild('single', { score: '25' }).score, 25, '子问题分值可设为 25');
+  eq(mkChild('single', { score: 999 }).score, 100, '子问题分值上限 100（公共归一）');
   ok(!('category' in single) && !('difficulty' in single) && !('tags' in single), '子问题不携带分类/难度/标签（继承父题）');
 
   const two = [mkChild('single'), mkChild('judge')];
@@ -160,6 +163,7 @@ const mkChild = (type, extra) => QB.QuestionEditor.buildChildQuestion(type, Obje
   ok(body.indexOf('data-me="material"') >= 0 && body.indexOf('data-me="children"') >= 0, '编辑器含材料与子问题容器');
   eq((body.match(/data-cc-card=/g) || []).length, 2, '渲染 2 张小问卡片');
   ok(body.indexOf('data-cc="type"') >= 0 && body.indexOf('data-cc="answer"') >= 0, '卡片含题型与作答区');
+  ok(body.indexOf('data-cc="score"') >= 0 && body.indexOf('class="me-score"') >= 0, '卡片含小问分值输入（data-cc=score）');
   ok(body.indexOf('data-cc="opt-add"') >= 0 || body.indexOf('data-cc="blank-add"') >= 0, '作答区控件使用 cc 前缀（与普通题作用域隔离）');
   ok(body.indexOf('材&lt;b&gt;料') >= 0, '材料正文转义');
 
@@ -174,13 +178,14 @@ section('M3 材料题：Repository 新增/编辑往返');
   const mBank = await QB.DB.banks.create({ name: '材料题编辑库' });
   const first = QB.QuestionEditor.buildMaterialQuestion({
     material: '材料正文', question: '引导语', category: '综合', difficulty: 2, tags: '材料',
-    children: [mkChild('single'), mkChild('judge')]
+    children: [mkChild('single', { score: 25 }), mkChild('judge')]
   });
   const created = await QB.QuestionEditor.create(mBank.id, first.question);
   eq(created.type, 'material', '材料题可新增');
   eq(created.children.length, 2, '新增后小问 2 个');
   const reread = await QB.DB.questions.get(created.id);
   eq(reread.children[0].question, '小问题干', '子问题题干落库');
+  eq(reread.children[0].score, 25, '子问题分值落库/回读');
   ok(!('category' in reread.children[0]), '子问题无分类字段');
 
   const edited = QB.QuestionEditor.buildMaterialQuestion({
@@ -199,6 +204,7 @@ section('M3 材料题：Repository 新增/编辑往返');
   const list = (await QB.DB.questions.list(importBank.id, {})).items;
   eq(list[0].material, '材料正文', 'insertMany 后材料正文保留');
   eq(list[0].children.length, 2, 'insertMany 后子问题保留');
+  eq(list[0].children[0].score, 25, 'insertMany 后子问题分值保留');
 }
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

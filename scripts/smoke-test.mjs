@@ -94,6 +94,10 @@ eq(QB.parseBoolean('错'), false, 'parseBoolean 错');
 eq(QB.parseBoolean('√'), true, 'parseBoolean √');
 eq(QB.parseBoolean('B') === null, true, 'parseBoolean 无法识别字母 B → null');
 eq(QB.normalizeLetters('ba'), 'AB', 'normalizeLetters 去重排序大写');
+eq(QB.normalizeChildScore('12'), 12, '小问分值：数字字符串归一');
+eq(QB.normalizeChildScore(999), 100, '小问分值：上限 100');
+eq(QB.normalizeChildScore('0'), 0, '小问分值：0 → 未设置');
+eq(QB.normalizeChildScore('  '), 0, '小问分值：空 → 未设置');
 
 eq(QB.judgeAnswer({ type: 'judge', answer: '正确' }, true).isCorrect, true, '判断：正确');
 eq(QB.judgeAnswer({ type: 'judge', answer: '错误' }, true).isCorrect, false, '判断：错答');
@@ -416,6 +420,59 @@ section('材料题模型 / 判分 / 引擎 / 哈希');
   eq(QB.makeContentHash(Sh), h0, '乱序后材料题 contentHash 不变');
   eq(Sh.children[0].type, 'single', '子问题保留');
   ok(JSON.stringify(Sh.children[0].options.map((o) => o.letter).sort()) === JSON.stringify(['A', 'B', 'C', 'D']), '子问题选项仍为 A..D');
+
+  // M4：材料题小问乱序（QB.shuffleChildren）
+  const MC = {
+    type: 'material', material: '共享材料', question: '引导语',
+    children: [
+      { type: 'judge', question: '小问甲', options: [], answer: '正确' },
+      { type: 'judge', question: '小问乙', options: [], answer: '错误' },
+      { type: 'judge', question: '小问丙', options: [], answer: '正确' }
+    ]
+  };
+  const hMC = QB.makeContentHash(MC);
+  const SC = QB.shuffleChildren(MC, 7);
+  const SC2 = QB.shuffleChildren(MC, 7);
+  eq(SC.contentHash, hMC, '小问乱序：整题 contentHash 不变');
+  eq(JSON.stringify(SC.children.map((c) => c.question)), JSON.stringify(SC2.children.map((c) => c.question)), '小问乱序：同种子可复现');
+  eq(JSON.stringify(SC.children.map((c) => c.question).sort()), JSON.stringify(['小问丙', '小问乙', '小问甲'].sort()), '小问乱序：小问集合不变');
+  ok(JSON.stringify(SC.children.map((c) => c.question)) !== JSON.stringify(MC.children.map((c) => c.question)), '小问乱序：顺序确实改变');
+  eq(JSON.stringify(MC.children.map((c) => c.question)), JSON.stringify(['小问甲', '小问乙', '小问丙']), '小问乱序：不修改原题');
+  eq(QB.judgeAnswer(SC, SC.children.map((c) => QB.resolveJudgeValue(c.answer))).isCorrect, true, '小问乱序：按新下标作答仍判对');
+  ok(QB.shuffleChildren({ type: 'single', question: 'x' }, 1).type === 'single', '小问乱序：非材料题原样返回');
+  const ESh = new QB.QuizEngine();
+  ESh.loadQuestions([MC], 'mixed', { shuffleOptions: false, shuffleChildren: true, shuffleSeed: 7 });
+  eq(ESh.questions[0].contentHash, hMC, '引擎 shuffleChildren：整题 contentHash 不变');
+  eq(JSON.stringify(ESh.questions[0].children.map((c) => c.question)), JSON.stringify(SC.children.map((c) => c.question)), '引擎 shuffleChildren：种子结果与 QB.shuffleChildren 一致');
+
+  // M4：子问题分值（children[*].score）与「按题型分值」优先级
+  const MS = {
+    type: 'material', material: '分值材料',
+    children: [
+      { type: 'judge', question: '分值甲', options: [], answer: '正确', score: 20 },
+      { type: 'judge', question: '分值乙', options: [], answer: '正确', score: 30 }
+    ]
+  };
+  const vScore = QB.judgeAnswer(MS, [true, true]);
+  eq(vScore.points.max, 50, '小问分值：满分 = 20+30');
+  eq(vScore.points.earned, 50, '小问分值：全对得 50');
+  eq(QB.childPoints(MS.children[0]), 20, 'childPoints：小问自带分优先');
+  eq(QB.childPoints(MS.children[0], { pointOf: () => 15, useTypePoints: true }), 15, 'childPoints：本场显式题型分值覆盖小问分');
+  const ES = new QB.QuizEngine();
+  ES.loadQuestions([MS], 'mixed', { shuffleOptions: false });
+  ES.selectAnswer(true, 0); ES.selectAnswer(true, 1);
+  ES.submitAnswer();
+  eq(ES.getScore().score, 50, '引擎：无本场题型覆盖时按小问分值计 50');
+  const ES2 = new QB.QuizEngine();
+  ES2.loadQuestions([MS], 'mixed', { shuffleOptions: false, pointsMap: { judge: 15 } });
+  ES2.selectAnswer(true, 0); ES2.selectAnswer(true, 1);
+  ES2.submitAnswer();
+  eq(ES2.getScore().score, 30, '引擎：显式题型分值覆盖后按 15×2 计 30');
+  const stdScore = QB.Adapters.toStandard(Object.assign({}, MS, { material: '分值材料' }));
+  eq(stdScore.question.children[0].score, 20, '导入：材料小问分值保留');
+  const wireScore = QB.Wire.question.to({ id: 'q1', bankId: 'b1', type: 'material', material: 'm', question: 'g', children: MS.children });
+  eq(wireScore.children[0].score, 20, 'wire：小问分值导出');
+  eq(QB.Wire.question.from(wireScore).children[0].score, 20, 'wire：小问分值回读');
 
   // 蓝图：material 作为一个抽题单位
   const pool = [MQ, QB.Adapters.toStandard({ type: 'judge', question: '普通判断', answer: '正确' }).question];

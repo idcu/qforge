@@ -40,7 +40,7 @@
 
   const question = {
     from(w) {
-      return {
+      const out = {
         id: w.id, bankId: w.bank_id, type: w.type,
         material: w.material, children: (w.children || []).map(question.from),
         question: w.question, options: w.options || [], answer: w.answer,
@@ -49,6 +49,8 @@
         difficulty: w.difficulty || 0, tags: w.tags || [],
         contentHash: w.content_hash, createdAt: w.created_at, updatedAt: w.updated_at
       };
+      if (w.score !== undefined) out.score = w.score;
+      return out;
     },
     to(q) {
       const out = { id: q.id, bank_id: q.bankId, type: q.type };
@@ -64,6 +66,7 @@
       out.source = q.source || '';
       out.difficulty = q.difficulty || 0;
       out.tags = q.tags || [];
+      if (q.score !== undefined) out.score = q.score;
       const hash = q.contentHash || (q.type ? QB.makeContentHash(q) : undefined);
       if (hash) out.content_hash = hash;
       out.created_at = q.createdAt;

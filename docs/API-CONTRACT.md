@@ -60,6 +60,7 @@
   "type": "judge | single | multi | indefinite | fill | essay | material",
   "material": "材料题共享材料（仅 type=material）",
   "children": [ { "type": "single|multi|…（不可再 material）", "question": "（n）小问题干", "options": [], "answer": "…", "score": 10 } ],
+  // children[*].score 可选，整数 1..100；缺省=按本场题型分值/默认 10（M4，见 SPEC-material）
   "question": "题干",
   "options": [{ "letter": "A", "text": "选项内容" }],
   "answer": "B",

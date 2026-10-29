@@ -341,6 +341,9 @@
       child.category = '';
       child.difficulty = 0;
       child.tags = [];
+      // 子问题分值（M4，可选）：1..100；缺省不写，引擎按题型/默认 10 分
+      const score = QB.normalizeChildScore(firstOf(childRaw.score, childRaw.分值, ''));
+      if (score > 0) child.score = score;
       item.children.push(child);
     });
 

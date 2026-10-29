@@ -84,6 +84,9 @@
     delete item.category;
     delete item.difficulty;
     delete item.tags;
+    // 子问题分值（M4，可选）：JSON/.qbk 无损往返；文本格式不携带（按默认分）
+    const score = QB.normalizeChildScore(c.score);
+    if (score > 0) item.score = score;
     return item;
   }
 

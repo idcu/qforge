@@ -325,6 +325,9 @@
     delete q.category;
     delete q.difficulty;
     delete q.tags;
+    // 小问分值 1..100（公共归一）；空/非法回落默认 10，口径见 QB.normalizeChildScore
+    const score = QB.normalizeChildScore(fv.score);
+    q.score = score > 0 ? score : 10;
     return { question: q, errors: r.errors };
   }
 
@@ -387,9 +390,11 @@
 
   /** 子问题卡片（data-cc 前缀，作用域内独立） */
   function childCardBody(c, i) {
+    const score = QB.normalizeChildScore(c.score) || 10;
     return '<div class="me-child" data-cc-card="' + i + '">' +
       '<div class="me-child-head"><b>小问 ' + (i + 1) + '</b>' +
       '<select data-cc="type">' + childTypeOptions(c.type) + '</select>' +
+      '<label class="me-score-label">分值<input type="number" class="me-score" data-cc="score" min="1" max="100" value="' + score + '" /></label>' +
       '<button type="button" class="btn btn-sm btn-ghost btn-danger-text" data-cc="del-child">删除小问</button></div>' +
       '<label class="qe-label">小问题干</label><textarea data-cc="question" rows="2" placeholder="小问题干（填空用 ____ 表示空位）">' + esc(c.question || '') + '</textarea>' +
       '<div data-cc="answer">' + answerSection(c, 'cc') + '</div>' +
@@ -443,7 +448,8 @@
         const t = type || (card.querySelector('[data-cc="type"]') || {}).value || 'single';
         return buildChildQuestion(t, Object.assign({
           question: card.querySelector('[data-cc="question"]').value,
-          analysis: card.querySelector('[data-cc="analysis"]').value
+          analysis: card.querySelector('[data-cc="analysis"]').value,
+          score: card.querySelector('[data-cc="score"]').value
         }, collectAnswer(card, t, 'cc'))).question;
       };
       const collectAll = () => {
@@ -461,7 +467,8 @@
         collectAll();
         const common = {
           question: card.querySelector('[data-cc="question"]').value,
-          analysis: card.querySelector('[data-cc="analysis"]').value
+          analysis: card.querySelector('[data-cc="analysis"]').value,
+          score: QB.normalizeChildScore(card.querySelector('[data-cc="score"]').value) || 10
         };
         children[idx] = Object.assign(blankChild(sel.value), common);
         renderChildren();

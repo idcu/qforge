@@ -111,21 +111,39 @@
     }
   };
 
+  /** 小问分值上限（编辑器/导入/存储的统一校验边界，见 M4） */
+  const CHILD_SCORE_MAX = 100;
+
   /**
-   * 小问/单题每题分值（公共抽象）：本场「按题型分值」优先，其次题目自带分，最后回落全局默认。
-   * 材料题整题满分 = 各小问按「小问题型分值」累加（复用此函数，语义唯一）。
+   * 小问自带分值归一（公共抽象）：整数 1..100；空/非法/≤0 → 0（表示未设置）。
+   * 编辑器、导入适配器、存储与导出共用，禁止各自 Math.round/clamp。
+   */
+  function normalizeChildScore(value) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(CHILD_SCORE_MAX, n);
+  }
+  QB.normalizeChildScore = normalizeChildScore;
+
+  /**
+   * 小问/单题每题分值（公共抽象）：本场「按题型分值」**仅在显式设置时**优先，
+   * 其次题目自带分（children[*].score），最后回落全局默认。
+   * 材料题整题满分 = 各小问按此口径累加（复用此函数，语义唯一）。
    * @param {Object} q 题目（材料题子问题或普通题）
-   * @param {Object} [opts] { pointOf(type) => number } 本场按题型分值解析器
+   * @param {Object} [opts] { pointOf(type) => number, useTypePoints?: boolean }
+   *   useTypePoints=true 表示本场对题型分值做了显式覆盖（空/未传=按题目分值）
    */
   function childPoints(q, opts) {
-    if (q && opts && typeof opts.pointOf === 'function') {
+    if (q && opts && opts.useTypePoints && typeof opts.pointOf === 'function') {
       const p = Number(opts.pointOf(q.type));
       if (p > 0) return p;
     }
-    if (q && Number(q.score) > 0) return Number(q.score);
+    const own = normalizeChildScore(q && q.score);
+    if (own > 0) return own;
     return (QB.CONFIG && QB.CONFIG.POINTS_PER_CORRECT) || 10;
   }
   QB.childPoints = childPoints;
+  QB.CHILD_SCORE_MAX = CHILD_SCORE_MAX;
 
   /**
    * 材料题（综合题）：逐小问判分并聚合

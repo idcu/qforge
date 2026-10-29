@@ -955,6 +955,7 @@
         const maxDifficulty = parseInt(modal.querySelector('[data-bp-max]').value, 10) || 0;
         const asExam = modal.querySelector('#bp-exam').checked;
         const shuffleOpts = modal.querySelector('#bp-shuffle').checked;
+        const shuffleChildren = modal.querySelector('#bp-shuffle-child').checked;
         const orderShuffled = modal.querySelector('#bp-ordshuf').checked;
         UI.closeModal();
         const spec = { items: items, category: category || undefined, keepOrder: !orderShuffled };
@@ -965,7 +966,10 @@
         if (shortages.length) {
           UI.toast('部分题型题量不足，实际组卷 ' + questions.length + ' 题', 'err');
         }
-        beginQuiz(questions, asExam ? 'exam' : 'practice', asExam ? '组卷考试' : '组卷练习', { shuffleOptions: shuffleOpts });
+        beginQuiz(questions, asExam ? 'exam' : 'practice', asExam ? '组卷考试' : '组卷练习', {
+          shuffleOptions: shuffleOpts,
+          shuffleChildren: shuffleChildren
+        });
       };
     });
   }
@@ -992,6 +996,7 @@
           .filter((it) => it.count > 0);
         const category = modal.querySelector('[data-st-cat]').value;
         const shuffleOpts = modal.querySelector('#st-shuffle-opt').checked;
+        const shuffleChildren = modal.querySelector('#st-shuffle-child').checked;
         let durationMin = 0;
         let showTimer = false;
         if (mode === 'exam') {
@@ -1006,11 +1011,13 @@
         if (shortages.length) {
           UI.toast('部分题型数量不足，实际组卷 ' + questions.length + ' 题', 'err');
         }
+        // 仅显式填写的每题分值才作为本场覆盖；留空=按题目自带分值/默认（M4）
         const pointsMap = {};
         items.forEach((it) => {
-          pointsMap[it.type] = points[it.type] > 0 ? points[it.type] : (QB.CONFIG.POINTS_PER_CORRECT || 10);
+          if (points[it.type] > 0) pointsMap[it.type] = points[it.type];
         });
-        const quizOpts = { shuffleOptions: shuffleOpts, pointsMap: pointsMap, showTimer: showTimer };
+        const quizOpts = { shuffleOptions: shuffleOpts, shuffleChildren: shuffleChildren, showTimer: showTimer };
+        if (Object.keys(pointsMap).length) quizOpts.pointsMap = pointsMap;
         if (mode === 'exam' && durationMin > 0) quizOpts.durationMs = durationMin * 60 * 1000;
         beginQuiz(questions, mode, quizTitle, quizOpts);
       };

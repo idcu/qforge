@@ -138,6 +138,7 @@
     if (q.source !== undefined) out.source = q.source;
     if (q.difficulty !== undefined) out.difficulty = q.difficulty;
     if (q.tags !== undefined) out.tags = q.tags;
+    if (q.score !== undefined) out.score = q.score;
     const hash = q.contentHash || (q.type ? QB.makeContentHash(q) : undefined);
     if (hash) out.content_hash = hash;
     return out;

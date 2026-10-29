@@ -905,12 +905,13 @@
     const countClass = opts.countClass || 'bp-n';
     const countValue = opts.countValue === undefined ? 0 : opts.countValue;
     const showPoints = !!opts.points;
-    const pDef = opts.pointsDefault || (QB.CONFIG.POINTS_PER_CORRECT || 10);
+    // 分值留空=按题目自带分值/全局默认；仅显式填写才作为本场覆盖（M4）
+    const pDef = opts.pointsDefault === undefined ? '' : opts.pointsDefault;
     return QB.CONFIG.TYPES.map((t) =>
       '<div class="bp-row"><label class="bp-name">' + esc(QB.typeLabel(t)) +
       ' <span class="li-meta">（可选 ' + ((avail && avail[t]) || 0) + '）</span></label>' +
       '<input type="number" min="0" class="' + esc(countClass) + '" data-bp-type="' + esc(t) + '" value="' + countValue + '" />' +
-      (showPoints ? '<span class="bp-pts-label">每题</span><input type="number" min="0" class="bp-pts" data-bp-pts="' +
+      (showPoints ? '<span class="bp-pts-label">每题</span><input type="number" min="0" class="bp-pts" placeholder="默认" data-bp-pts="' +
         esc(t) + '" value="' + pDef + '" />' : '') +
       '</div>').join('');
   }
@@ -930,6 +931,7 @@
       '<div><label class="qe-label">难度上限</label><select data-bp-max>' + difficultyOptions(true) + '</select></div></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-ordshuf" checked /><label for="bp-ordshuf">题目顺序乱序（取消则按题型分组的原始顺序）</label></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-shuffle"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="bp-shuffle">选项乱序（单选/多选/不定项，答案自动重映射，仅影响本场）</label></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="bp-shuffle-child" /><label for="bp-shuffle-child">材料题小问乱序（仅影响本场，整题去重键不变）</label></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-exam" /><label for="bp-exam">以考试模式开始（计时、交卷整卷判分）</label></div>' +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
       '<button class="btn" data-action="modal-ok">开始</button></div>';
@@ -954,7 +956,7 @@
     const timerRow = isExam ? '' :
       '<div class="checkbox-row"><input type="checkbox" id="st-timer" /><label for="st-timer">显示计时（正计时，仅本场；默认关闭）</label></div>';
     return '<h3>' + esc(opts.title || (isExam ? '考试模式' : '练习模式')) + '</h3>' +
-      '<p class="li-meta">按题型设置抽取数量（0=不选该题型）与每题分值；某题型数量不足时按实际数量组卷并提示。</p>' +
+      '<p class="li-meta">按题型设置抽取数量（0=不选该题型）与每题分值（留空=按题目自带分值/默认 10 分）；某题型数量不足时按实际数量组卷并提示。</p>' +
       typeCountRows(avail, {
         countClass: 'st-count',
         countValue: opts.countValue === undefined ? 0 : opts.countValue,
@@ -965,6 +967,7 @@
       durField +
       '</div>' +
       '<div class="checkbox-row"><input type="checkbox" id="st-shuffle-opt"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="st-shuffle-opt">选项乱序（单选/多选/不定项，仅影响本场）</label></div>' +
+      '<div class="checkbox-row"><input type="checkbox" id="st-shuffle-child" /><label for="st-shuffle-child">材料题小问乱序（仅影响本场，整题去重键不变）</label></div>' +
       timerRow +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
       '<button class="btn" data-action="modal-ok">开始</button></div>';

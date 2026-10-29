@@ -284,7 +284,7 @@ const matQ = QB.Adapters.toStandard({
   type: 'material', material: '共享材料正文', question: '材料引导语',
   category: '会计基础', difficulty: 3, tags: ['综合题'],
   children: [
-    { type: 'single', question: '小问一', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'B' },
+    { type: 'single', question: '小问一', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'B', score: 25 },
     { type: 'judge', question: '小问二', answer: '正确' }
   ]
 }).question;
@@ -327,7 +327,9 @@ eq(matJsonRt.questions.length, 1, '材料 JSON 往返：1 题');
 eq(matJsonRt.questions[0].type, 'material', '材料 JSON 往返：仍为材料题');
 eq(matJsonRt.questions[0].children.length, 2, '材料 JSON 往返：2 个小问');
 eq(matJsonRt.questions[0].material, '共享材料正文', '材料 JSON 往返：共享材料保留');
+eq(matJsonRt.questions[0].children[0].score, 25, '材料 JSON 往返：小问分值保留（M4）');
 eq(QB.makeContentHash(matJsonRt.questions[0]), QB.makeContentHash(matQ), '材料 JSON 往返：hash 相等');
+eq(QB.Exporters._toPlain(matQ, null).children[0].score, 25, '材料导出 toPlain：小问分值输出');
 
 /* ================= 9.5 历史记录导出（非题集） ================= */
 section('历史记录导出');

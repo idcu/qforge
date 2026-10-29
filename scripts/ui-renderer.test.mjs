@@ -48,6 +48,7 @@ section('组卷弹窗：属性可查询（回归 data-bp-min/max 多引号）');
   eq(n, NTYPES, '每题型一行（data-bp-type 个数 = 题型数）');
   ok(html.indexOf('data-bp-pts') < 0, '组卷弹窗不含每题分值列（保持现状）');
   ok(html.indexOf('id="bp-exam"') >= 0, '含考试模式开关');
+  ok(html.indexOf('id="bp-shuffle-child"') >= 0, '组卷含材料题小问乱序开关（M4）');
   ok(html.indexOf('data-action="modal-ok">开始') >= 0, '含「开始」按钮');
 }
 
@@ -61,6 +62,8 @@ section('练习/考试开始弹窗：每题型数量+分值、考试时长、练
   const np = (p.match(/data-bp-pts=/g) || []).length;
   eq(np, NTYPES, '每题型一个分值输入（data-bp-pts 个数 = 题型数）');
   ok(p.indexOf('class="bp-pts"') >= 0, '分值列使用 .bp-pts');
+  ok(p.indexOf('placeholder="默认"') >= 0, '每题分值留空=默认（M4 显式覆盖语义）');
+  ok(p.indexOf('id="st-shuffle-child"') >= 0, '练习弹窗含材料题小问乱序开关（M4）');
   ok(p.indexOf('<select data-st-cat>') >= 0, '分类下拉为 data-st-cat');
   ok(p.indexOf('id="st-duration"') < 0, '练习弹窗不含考试时长');
   ok(p.indexOf('id="st-timer"') >= 0, '练习弹窗含「显示计时」开关');
@@ -71,6 +74,7 @@ section('练习/考试开始弹窗：每题型数量+分值、考试时长、练
   ok(e.indexOf('考试模式') >= 0, '考试模式标题');
   ok(e.indexOf('id="st-duration"') >= 0, '考试弹窗含考试时长输入');
   ok(e.indexOf('value="30"') >= 0, '考试时长默认 30 分钟');
+  ok(e.indexOf('id="st-shuffle-child"') >= 0, '考试弹窗也含材料题小问乱序开关');
   ok(e.indexOf('id="st-timer"') < 0, '考试弹窗不含练习计时开关');
   ok(e.indexOf('data-bp-pts=') >= 0, '考试弹窗也含每题分值列');
 }

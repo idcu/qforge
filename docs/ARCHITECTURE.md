@@ -56,9 +56,9 @@
 | `utils/time.js` | `QB.Time` | 自然日公共抽象：`dayStart/dayIndex/isSameDay/endOfDay`（唯一实现；SRS 到期、复习队列、学习热力图共用，禁止各自 `setHours(0,0,0,0)`） |
 | `utils/rich-text.js` | `QB.RichText` | 模型内容上屏统一入口：`render()`（转义 + `^{}`/`_{}` 上下标 + **轻量公式子集 `\frac{}{}`/`\sqrt{}`/`\sqrt[n]{}`（CSS 排版，参数组可嵌套、内部递归渲染）**）、`toPlain()`（去记号，不转义）、`questionAssetIds()`（收集题内图片 id，含材料正文 `material` 与递归小问 `children`，供 qbk 打包/备份孤儿清理的引用集） |
 | `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存；visibility/beforeunload 落盘；`usageBytes()` |
-| `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions` | mulberry32 种子化洗牌/抽样；选项乱序并同步重映射答案 |
+| `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions`/`QB.shuffleChildren` | mulberry32 种子化洗牌/抽样；选项乱序并同步重映射答案；材料题小问乱序保留原 contentHash（整题身份不随展示顺序变化） |
 | `utils/answer-normalize.js` | `QB.normalizeAnswer`/`QB.parseBoolean`/`QB.normalizeLetters` | 全角转半角、去空白、去标点、大小写归一；布尔归一 |
-| `utils/judge-answer.js` | `QB.judgeAnswer` / `QB.childPoints` | 按 `type` 策略表判分；`judgeAnswer(q, ans, opts?)` 的 `opts.pointOf(type)` 提供本场「按题型分值」，材料题小问按小问题型分值累加（`childPoints` 口径唯一：本场分值 > 题目自带分 > `CONFIG.POINTS_PER_CORRECT`） |
+| `utils/judge-answer.js` | `QB.judgeAnswer` / `QB.childPoints` / `QB.normalizeChildScore` | 按 `type` 策略表判分；`judgeAnswer(q, ans, opts?)` 的 `opts.pointOf(type)` 提供本场「按题型分值」，`opts.useTypePoints` 为 true（本场显式设置分值）时才覆盖小问自带分；口径唯一：**本场显式题型分值 > `children[*].score`（1–100） > `CONFIG.POINTS_PER_CORRECT`**；小问分值归一由 `normalizeChildScore` 统一（编辑器/导入/存储/导出共用） |
 | `utils/question-id.js` | `QB.makeContentHash`/`QB.makeQuestionKey`/`QB.isCurrentHash` | v2 去重键（题型+题干+选项+答案，前缀 `2:`）；普通题与材料题子问题共用模块内语义归一件 |
 | `utils/zip-reader.js` | `QB.ZipReader`/`QB.decodeUtf8` | 原生 ZIP 读取（EOCD→中央目录→本地头）+ `DecompressionStream('deflate-raw')`；支持 method 0/8 |
 | `utils/zip-writer.js` | `QB.ZipWriter` | 原生 ZIP 打包（stored method=0 + CRC32），与 ZipReader 对称；xlsx/docx/qbk/qfbk 写出共用 |
