@@ -31,7 +31,25 @@
       createdAt: q.createdAt || t,
       updatedAt: t
     };
-    // v2 hash（题型+题干+选项+答案）才沿用；旧版裸 hash（v1）或缺失一律重算
+    // 材料题：必须保留 material 与 children（判分/做题/导出/备份的事实来源）。
+    // 旧实现遗漏这两个字段，导致材料题经 create/insertMany 后只剩父题干（子问题与材料丢失）；
+    // 子问题只保留判分所需字段（分类/难度/标签由父题继承，不落库）。
+    if (q.type === 'material') {
+      item.material = q.material || '';
+      item.children = (q.children || []).map((c) => {
+        c = c || {};
+        return {
+          type: c.type,
+          question: c.question || '',
+          options: Array.isArray(c.options) ? c.options : [],
+          answer: c.answer !== undefined ? c.answer : '',
+          blanks: Array.isArray(c.blanks) ? c.blanks : [],
+          reference_answer: c.reference_answer || '',
+          analysis: c.analysis || ''
+        };
+      });
+    }
+    // v2 hash（题型+题干+选项+答案+材料与子问题）才沿用；旧版裸 hash（v1）或缺失一律重算
     item.contentHash = QB.isCurrentHash(q.contentHash) ? q.contentHash : QB.makeContentHash(item);
     return item;
   }

@@ -12,7 +12,7 @@
  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
  */
-const CACHE = 'qforge-v5';
+const CACHE = 'qforge-v6';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
   './icons/icon-192.png', './icons/icon-512.png',

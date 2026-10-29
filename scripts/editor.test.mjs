@@ -110,12 +110,96 @@ eq((await QB.DB.questions.list(bank.id, {})).total, 1, '删除后剩 1 题');
 await QB.QuestionEditor.removeMany([created1.id]);
 eq((await QB.DB.questions.list(bank.id, {})).total, 0, '批量删除后为 0');
 
-section('材料题编辑保护：编辑器显式禁用（回归）');
-eq(QB.QuestionEditor.canEditQuestion({ type: 'material', children: [] }), false, '材料题不可在编辑器打开');
-eq(QB.QuestionEditor.canEditQuestion({ type: 'single' }), true, '普通题可编辑');
-eq(QB.QuestionEditor.canEditQuestion(null), false, '空对象安全返回 false');
+section('M3 材料题：子问题构建 / 父题构建 / 编辑器 HTML');
+const mkChild = (type, extra) => QB.QuestionEditor.buildChildQuestion(type, Object.assign({
+  question: '小问题干', analysis: '小问解析',
+  optionRows: [{ text: '甲', checked: true }, { text: '乙', checked: false }],
+  blankRows: [{ answer: '空1', accept: [] }],
+  judgeAnswer: '正确', essayRef: '参考答案'
+}, extra || {})).question;
+{
+  const single = mkChild('single');
+  eq(single.type, 'single', '子问题保留题型');
+  eq(single.answer, 'A', '子问题单选答案 A');
+  ok(!('category' in single) && !('difficulty' in single) && !('tags' in single), '子问题不携带分类/难度/标签（继承父题）');
 
-/* ---------------- 汇总 ---------------- */
+  const two = [mkChild('single'), mkChild('judge')];
+  const built = QB.QuestionEditor.buildMaterialQuestion({
+    material: '共享材料', question: '总题干', analysis: '整题解析',
+    category: '物业', difficulty: 3, tags: '法规,高频', children: two
+  });
+  eq(built.errors.length, 0, '完整材料题校验通过');
+  eq(built.question.type, 'material', '父题类型 material');
+  eq(built.question.material, '共享材料', '材料正文保留');
+  eq(built.question.question, '总题干', '总题干保留');
+  eq(built.question.children.length, 2, '两个小问');
+  eq(built.question.difficulty, 3, '父题难度归一');
+  eq(built.question.tags.join('|'), '法规|高频', '父题标签归一');
+  ok(built.question.options.length === 0 && built.question.answer === '', '父题不携带选项/答案');
+
+  const one = QB.QuestionEditor.buildMaterialQuestion({ material: 'm', children: [mkChild('single')] });
+  ok(one.errors.join('；').indexOf('至少需要 2 个小问') >= 0, '少于 2 个小问报错');
+  const empty = QB.QuestionEditor.buildMaterialQuestion({ children: two });
+  ok(empty.errors.join('；').indexOf('材料正文与总题干至少填写一项') >= 0, '材料与总题干全空报错');
+  const badChild = QB.QuestionEditor.buildMaterialQuestion({
+    material: 'm', children: [QB.QuestionEditor.buildChildQuestion('single', { question: '未选答案' }).question, mkChild('judge')]
+  });
+  ok(badChild.errors.join('；').indexOf('小问 1：') >= 0, '子问题校验错误带小问序号');
+  const nested = QB.QuestionEditor.buildMaterialQuestion({
+    material: 'm', children: [{ type: 'material', question: '嵌套' }, mkChild('judge')]
+  });
+  ok(nested.errors.join('；').indexOf('不允许再嵌套材料题') >= 0, '禁止材料题嵌套');
+  const tooMany = QB.QuestionEditor.buildMaterialQuestion({
+    material: 'm', children: Array.from({ length: 11 }, () => mkChild('judge'))
+  });
+  ok(tooMany.errors.join('；').indexOf('最多 10 个小问') >= 0, '超过 10 个小问报错（与导入规格一致）');
+
+  const body = QB.QuestionEditor.materialEditorBody({
+    type: 'material', material: '材<b>料', category: 'C', children: [mkChild('single'), mkChild('fill')]
+  });
+  ok(body.indexOf('data-me="material"') >= 0 && body.indexOf('data-me="children"') >= 0, '编辑器含材料与子问题容器');
+  eq((body.match(/data-cc-card=/g) || []).length, 2, '渲染 2 张小问卡片');
+  ok(body.indexOf('data-cc="type"') >= 0 && body.indexOf('data-cc="answer"') >= 0, '卡片含题型与作答区');
+  ok(body.indexOf('data-cc="opt-add"') >= 0 || body.indexOf('data-cc="blank-add"') >= 0, '作答区控件使用 cc 前缀（与普通题作用域隔离）');
+  ok(body.indexOf('材&lt;b&gt;料') >= 0, '材料正文转义');
+
+  eq(QB.QuestionEditor.isMaterialQuestion({ type: 'material' }), true, 'isMaterialQuestion 识别材料题');
+  eq(QB.QuestionEditor.isMaterialQuestion({ type: 'single' }), false, '普通题不是材料题');
+  eq(QB.QuestionEditor.canEditQuestion({ type: 'material', children: [] }), true, 'M3 后材料题可进入专用编辑器');
+  eq(QB.QuestionEditor.canEditQuestion(null), false, '空对象安全返回 false');
+}
+
+section('M3 材料题：Repository 新增/编辑往返');
+{
+  const mBank = await QB.DB.banks.create({ name: '材料题编辑库' });
+  const first = QB.QuestionEditor.buildMaterialQuestion({
+    material: '材料正文', question: '引导语', category: '综合', difficulty: 2, tags: '材料',
+    children: [mkChild('single'), mkChild('judge')]
+  });
+  const created = await QB.QuestionEditor.create(mBank.id, first.question);
+  eq(created.type, 'material', '材料题可新增');
+  eq(created.children.length, 2, '新增后小问 2 个');
+  const reread = await QB.DB.questions.get(created.id);
+  eq(reread.children[0].question, '小问题干', '子问题题干落库');
+  ok(!('category' in reread.children[0]), '子问题无分类字段');
+
+  const edited = QB.QuestionEditor.buildMaterialQuestion({
+    material: '材料正文（改）', analysis: '整题解析',
+    children: [mkChild('single'), mkChild('judge'), mkChild('fill')]
+  });
+  const updated = await QB.QuestionEditor.update(created.id, edited.question);
+  eq(updated.children.length, 3, '编辑后小问 3 个');
+  eq((await QB.DB.questions.get(created.id)).material, '材料正文（改）', '材料正文更新');
+  ok(QB.makeContentHash(updated) !== QB.makeContentHash(created), '内容变更后 contentHash 改变');
+
+  // 导入落库路径（insertMany）同样必须保留 material/children（P0 回归）
+  const importBank = await QB.DB.banks.create({ name: '材料题导入库' });
+  const imported = await QB.QuestionEditor.insertMany(importBank.id, [first.question], { dedupe: false });
+  eq(imported.inserted, 1, '材料题可批量导入');
+  const list = (await QB.DB.questions.list(importBank.id, {})).items;
+  eq(list[0].material, '材料正文', 'insertMany 后材料正文保留');
+  eq(list[0].children.length, 2, 'insertMany 后子问题保留');
+}
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

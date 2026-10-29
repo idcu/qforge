@@ -568,6 +568,26 @@ body {
 .qe-optrow input[type='text'] { flex: 1; }
 .qe-letter { min-width: 22px; font-weight: 600; color: var(--text-muted); }
 .qe-err { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 6px; }
+/* 材料题嵌套编辑器：每个小问一张卡片，内部沿用 qe 控件样式 */
+.me-child {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin: 10px 0;
+  background: var(--surface);
+}
+.me-child-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.me-child-head b { flex: 1; }
+.me-child-head select { max-width: 170px; }
+@media (max-width: 560px) {
+  .me-child-head { flex-wrap: wrap; }
+  .me-child-head select { max-width: none; width: 100%; }
+}
 .qe-row .li-head { gap: 8px; }
 .btn-danger-text { color: var(--danger); }
 .tag-chip {

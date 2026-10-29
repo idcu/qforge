@@ -66,7 +66,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
 | `scripts/exporter.test.mjs` | **184** | 七格式注册（含 html 分享页）、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、**合并解析文本 CSV 往返**、**材料题五格式分流/18 列多行块/三格式 hash 往返/JSON 嵌套 material+children 往返**、错题 wrongCount、乱序隔离、历史记录四格式；**只读分享页（23 项）：完整文档/UTF-8/标题描述/答案与解析/无脚本/XSS 转义/缺图占位/data URL 内嵌/材料父子编号/历史拒绝/kind 白名单** |
 | `scripts/office-export.test.mjs` | **1148** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
-| `scripts/editor.test.mjs` | **32** | `buildQuestion` 纯函数、增删改、编辑元数据不改变 contentHash；**材料题编辑保护 `canEditQuestion`（material=false / 普通=true / null 安全）** |
+| `scripts/editor.test.mjs` | **64** | `buildQuestion` 纯函数、增删改、编辑元数据不改变 contentHash；**M3 材料题（31 项）：子问题构建与字段清理、父题校验（≥2 小问/材料或题干/禁嵌套）、编辑器 HTML（data-cc 作用域/转义）、Repository 新增/编辑往返、insertMany 保留 material+children（P0 回归）** |
 | `scripts/rich-text.test.mjs` | **66** | 转义防注入、上标/下标、**公式子集 `\frac`/`\sqrt`（指数根号、嵌套参数组、内部递归上下标/公式、未闭合原样保留、公式内部转义、alt 剥离公式标签）**、`toPlain` 公式去记号、图片占位、collectAssets、材料题资产递归（材料正文+小问）、hydrate 假 DOM、光标插入 |
 | `scripts/assets.test.mjs` | **62** | IDB 内存驱动、内容寻址去重、qbk/qfbk ZIP 往返、缺图警告、孤儿清理、qbk 落库去重、材料题 qbk 往返（材料正文+小问图片） |
 | `scripts/blueprint.test.mjs` | **18** | 题型×分类×难度筛选/抽题/缺口、种子可复现 |
@@ -86,7 +86,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 | `scripts/dom-patch.test.mjs` | **40** | `QB.DomPatch` 区域对账（`plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`，DOM-free）：首次全变化、内容一致全不重建、单区域变化、区域新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全、列表移除场景；**子区域（格级）：`contentOf` 取 frame、帧未变→顶层不重建、`snapshot` 以 frame 为基准、`normalize` 保留 `frame`/`sub`、`groupSub` 按容器归组去重剔除非法项** |
 | `scripts/contract.test.mjs` | **53** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源（**local-adapter 直读写 Storage，领域模块经 `QB.DB.*` 委托本适配器，禁双向委托以免自递归**）；**`historyAdd` 返回新增记录（与 api 适配器同形）**；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径 |
 | `scripts/api-backend.test.mjs` | **172** | **参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；**CORS 默认关闭、显式放行来源预检 204、未放行不带 ACAO**；**content_hash 按合并后完整题目重算、仅改解析不变**；**筛选查询不污染 count 缓存**；**historyAdd 返回形状与 local 一致**；**bank.sched 创建/保存/回读**；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、**`count`/`reviews` 按库缓存命中与写·级联·`backup.import` 后失效（5 项）**、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错（注入 fetch 走**真实网络失败**路径）；**跨布局整链 E2E（33 项）：本地模式造数 → 本地布局备份 → api 模式 `applyBackup` 经 `localToServer` + 真实 `POST /api/backup?mode=replace` → 直读 `GET /api/backup` 核对接管后端口径（snake_case、按库归集、id 保留）→ 再恢复到另一 local 上下文，题库/题目/错题/历史/revlog/权重逐项等价（闭环）** |
-| **合计** | **3358 / 3358 通过 · 24 个套件**（2026-10-30 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+| **合计** | **3390 / 3390 通过 · 24 个套件**（2026-10-30 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
 
 一键全跑（PowerShell）：
 
