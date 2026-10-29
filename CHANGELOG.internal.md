@@ -14,6 +14,46 @@
 
 ---
 
+## 3056fc6 · feat(editor): M3 材料题嵌套编辑器 + fix(data): 材料题落库保留 material/children（P0）
+
+**核心改动**
+- `QB.QuestionEditor`：新增 `buildChildQuestion/buildMaterialQuestion/materialEditorBody/openMaterialEditor/isMaterialQuestion`；
+  管理器「＋ 新建材料题」、材料题行编辑路由到嵌套编辑器；小问增删、题型切换（重置答案区）、图片插入、
+  `data-cc` 作用域隔离（一套控件复用，不复制表单标记）。
+- 校验：≥2 小问、≤`MATERIAL_MAX_CHILDREN`(10)、禁嵌套材料题、材料正文或总题干至少一项、逐小问 `validate`；
+  子问清理 category/difficulty/tags（由父题统一持有）。
+- `canEditQuestion` 语义调整：所有有 type 的题均可编辑（此前材料题被禁用），材料题改走专用编辑器。
+- **P0 修复（M3 测试暴露）**：`local-adapter.stampQuestion` 此前丢弃 `material/children`，材料题经
+  `create/insertMany` 后只剩父题干（判分/导出/备份全部丢子问）。现保留这两个字段（子问仅落判分所需字段），
+  并按完整内容重算 contentHash；`insertMany` 同路径受益。
+- CSS `.me-child` 小问卡片（560px 以下头部换行）；SW `CACHE` 升 `qforge-v6`。
+- 文档同提交：README、ARCHITECTURE、DEVELOPMENT、user-guide、SPEC-material、COMPETITORS；
+  测试总数由 3389 校正为 **3390**（editor 63→64）。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/editor.test.mjs`：**64/64** 通过（新增 32 项：子问构建/父题校验/HTML 作用域与转义/
+  Repository 新增与编辑往返/`insertMany` 保留 material+children/P0 回归/最多 10 小问）。
+- `node scripts/test-all.mjs`：24 个运行项 **3390/3390** 通过，0 失败，**24.7s**。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——按需单页 0.21ms、单题 update 0.21ms、
+  insertMany 5.53ms、队列 build 0.17ms、dailyFromLog 1.01ms、heapUsed +2.69MB ≤ 40MB。
+- P0 复现路径：修复前 `create(material)` 返回对象 `children` 为 undefined；修复后子问数与 contentType 序列一致，
+  `insertMany` 后材料正文/子问均保留（4 项回归断言）。
+
+**公共抽象清单（新增/调整）**
+- 新增 `QB.QuestionEditor.{buildChildQuestion,buildMaterialQuestion,materialEditorBody,openMaterialEditor,isMaterialQuestion}`。
+- 抽取 `answerSectionCore/answerSection`（可指定 data 属性前缀）、`collectAnswer(scope,type,prefix)`、
+  `mutateAnswerList(box,draft,type,prefix,target)`：普通题与材料小问共用，消除复制粘贴表单逻辑。
+- 调整 `canEditQuestion` 语义（材料题从“禁止”改为“允许，走专用编辑器”）；影响范围：题目管理器按钮状态与编辑路由。
+- 调整 `stampQuestion`（材料题落库字段）；影响范围：本地适配器 create/insertMany/update，备份导出与判分读取。
+
+**TODO/风险**
+- 历史版本中已经丢失 `material/children` 的材料题无法从 LocalStorage/备份恢复，只能从源文件重导；
+  v4 迁移只修复分片，不补材料题字段。
+- M3 编辑器仅完成 Node 逻辑层与 HTML 构建断言；**未做真实浏览器 UI 验收**（此前答题页抽检受阻，本轮不声称通过）。
+- 材料题整题作为一个复习单位，小问级错题/自评（M4）仍未实现。
+
+---
+
 ## f026812 · feat(export,search): 只读分享页 HTML + 搜索覆盖选项/答案/材料子问题（下一轮）
 
 **核心改动**
