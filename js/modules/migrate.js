@@ -11,12 +11,17 @@
  *   旧单 blob questions:<bankId>（数组）切成 questions:<bankId>:<i> 分片并写下清单
  *   questions:<bankId>:meta，随后删除旧 blob 键；分片读写统一走 QB.QuestionShards。
  *   已存在清单的库直接跳过 → 幂等；空/缺失数组仅清理残留键。
+ * v3 → v4（分片删除重编号修复）：
+ *   旧实现删除导致中间分片清空时只移除分片键并收缩 sizes，未对后续分片重编号，
+ *   造成清单索引与物理分片错位（表现为「count 有数、list 为空」，余题成为不可达孤儿）。
+ *   本迁移逐库做不变量自检，不通过则用 QB.QuestionShards.compact 按物理索引升序重建，
+ *   可恢复已产生的孤儿题目；已满足不变量的库跳过 → 幂等。
  */
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const SCHEMA_VERSION = 3;
+  const SCHEMA_VERSION = 4;
 
   function currentVersion() {
     return Number(QB.Storage.get(QB.KEYS.metaSchema, 0)) || 0;
@@ -153,8 +158,31 @@
   }
 
   /**
+   * v3 → v4：分片不变量自检与重建。
+   * 以物理分片键为准（QB.QuestionShards.indexesOf/compact），因此既能修「中间分片被清空」
+   * 造成的错位，也能回收历史遗留的高位孤儿分片。
+   * @returns {Promise<{checked:number, repaired:number, questions:number, banks:string[]}>}
+   */
+  async function migrateV3ToV4() {
+    const banks = await QB.DB.banks.list();
+    const repairedBanks = [];
+    let checked = 0;
+    let questions = 0;
+    for (const bank of banks) {
+      const inv = QB.QuestionShards.invariant(bank.id);
+      if (!inv.meta) continue; // 旧单 blob / 空库：v2→v3 已处理，无需修复
+      checked++;
+      if (inv.ok) continue;
+      const r = QB.QuestionShards.compact(bank.id);
+      repairedBanks.push(bank.id);
+      questions += r.count;
+    }
+    return { checked: checked, repaired: repairedBanks.length, questions: questions, banks: repairedBanks };
+  }
+
+  /**
    * 执行迁移（幂等）。已是最新版本时为空操作。
-   * @returns {Promise<{fromVersion:number, version:number, migrated?:{questions:number,states:number}, sharded?:{banks:number,questions:number}}>}
+   * @returns {Promise<{fromVersion:number, version:number, migrated?:{questions:number,states:number}, sharded?:{banks:number,questions:number}, repaired?:{checked:number,repaired:number,questions:number,banks:string[]}}>}
    */
   async function run() {
     const fromVersion = currentVersion();
@@ -162,9 +190,10 @@
     const result = { fromVersion: fromVersion, version: SCHEMA_VERSION };
     if (fromVersion < 2) result.migrated = await migrateV1ToV2();
     if (fromVersion < 3) result.sharded = await migrateV2ToV3();
+    if (fromVersion < 4) result.repaired = await migrateV3ToV4();
     QB.Storage.set(QB.KEYS.metaSchema, SCHEMA_VERSION);
     return result;
   }
 
-  QB.Migration = { SCHEMA_VERSION, run, currentVersion };
+  QB.Migration = { SCHEMA_VERSION, run, currentVersion, migrateV3ToV4 };
 })(typeof window !== 'undefined' ? window : globalThis);

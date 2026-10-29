@@ -35,10 +35,11 @@ section('全新环境：空迁移并写版本号');
   eq(QB.Migration.currentVersion(), 0, '无版本标记视为 0');
   const r = await QB.Migration.run();
   eq(r.fromVersion, 0, 'fromVersion=0');
-  eq(r.version, 3, '迁到 3');
+  eq(r.version, 4, '迁到 4');
   eq(r.migrated.questions, 0, '无存量题目');
   eq(r.sharded.banks, 0, '无存量库可分片');
-  eq(QB.Migration.currentVersion(), 3, '版本号已写入');
+  eq(r.repaired.repaired, 0, '无存量坏分片');
+  eq(QB.Migration.currentVersion(), 4, '版本号已写入');
 }
 
 section('v1→v2：题目与全部用户数据键跟随重映射');
@@ -132,9 +133,10 @@ section('幂等：再跑一次为空操作，数据不二次变化');
 {
   const before = JSON.stringify(QB.Storage.keys().sort().map((k) => [k, QB.Storage.get(k)]));
   const r2 = await QB.Migration.run();
-  eq(r2.fromVersion, 3, '第二次 fromVersion=3');
+  eq(r2.fromVersion, 4, '第二次 fromVersion=4');
   ok(r2.migrated === undefined, '已是最新，无 migrated 字段');
   ok(r2.sharded === undefined, '已是最新，无 sharded 字段');
+  ok(r2.repaired === undefined, '已是最新，无 repaired 字段');
   const after = JSON.stringify(QB.Storage.keys().sort().map((k) => [k, QB.Storage.get(k)]));
   ok(before === after, '存储内容逐字节不变');
 }
@@ -179,7 +181,7 @@ section('v2→v3：旧单 blob 独立迁移为分片（幂等）');
 
   const r = await QB.Migration.run();
   eq(r.fromVersion, 2, 'fromVersion=2');
-  eq(r.version, 3, '迁到 3');
+  eq(r.version, 4, '迁到 4');
   ok(r.migrated === undefined, 'v1→v2 不重复执行');
   eq(r.sharded.banks, 1, '分片迁移 1 个库');
   eq(r.sharded.questions, 450, '分片迁移 450 题');

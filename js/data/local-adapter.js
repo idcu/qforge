@@ -78,6 +78,21 @@
     setShard(bankId, i, arr) { Storage.set(K.questionShard(bankId, i), arr); },
     removeShard(bankId, i) { Storage.remove(K.questionShard(bankId, i)); },
 
+    /**
+     * 实际存在的分片索引（升序，含清单之外的高位/孤儿分片）。
+     * 分片键是唯一物理事实来源：清单 sizes 只描述"应有几个、各多少"，
+     * 删除后重编号与损坏修复都必须以本方法为准。
+     */
+    indexesOf(bankId) {
+      const prefix = 'questions:' + bankId + ':';
+      return Storage.keys()
+        .filter((k) => k.indexOf(prefix) === 0 && k.slice(prefix.length) !== 'meta')
+        .map((k) => k.slice(prefix.length))
+        .filter((s) => /^\d+$/.test(s))
+        .map(Number)
+        .sort((a, b) => a - b);
+    },
+
     /** 旧单 blob（分片迁移前）读取，非数组返回 [] */
     legacyOf(bankId) {
       const legacy = Storage.get(K.questions(bankId), []);
@@ -147,7 +162,7 @@
       return { meta: meta, shards: shards };
     },
 
-    /** 全量重写：清旧分片后按 SHARD_SIZE 切片写；顺带清除旧单 blob */
+    /** 全量重写：清旧分片后按 SHARD_SIZE 切片写；顺带清除旧单 blob 与高位孤儿分片 */
     writeAll(bankId, list) {
       QuestionShards.clear(bankId);
       if (!list || !list.length) return;
@@ -192,12 +207,66 @@
       return null;
     },
 
-    /** 清除某库全部分片与清单（含旧单 blob），删库级联用 */
+    /** 清除某库全部分片与清单（含旧单 blob 与高位孤儿分片），删库级联/重写用 */
     clear(bankId) {
+      const idxs = new Set(QuestionShards.indexesOf(bankId));
       const meta = QuestionShards.metaOf(bankId);
-      if (meta) for (let i = 0; i < meta.sizes.length; i++) Storage.remove(K.questionShard(bankId, i));
+      if (meta) meta.sizes.forEach((_, i) => idxs.add(i));
+      idxs.forEach((i) => Storage.remove(K.questionShard(bankId, i)));
       Storage.remove(K.questionsMeta(bankId));
       Storage.remove(K.questions(bankId));
+    },
+
+    /**
+     * 分片压缩/重编号（唯一实现）：按物理索引升序拼接→重新按 SHARD_SIZE 切片，
+     * 使清单 sizes 与分片键 0..n-1 严格一一对应。
+     * 触发场景：删除导致中间分片清空、数据修复（migrate v4）、外部损坏恢复。
+     * 返回 {rewrote, count}；无清单（旧单 blob）时不做任何事。
+     */
+    compact(bankId) {
+      const meta = QuestionShards.metaOf(bankId);
+      if (!meta) return { rewrote: false, count: QuestionShards.legacyOf(bankId).length };
+      const idxs = QuestionShards.indexesOf(bankId);
+      let all = [];
+      idxs.forEach((i) => {
+        const shard = QuestionShards.shardOf(bankId, i);
+        if (shard.length) all = all.concat(shard);
+      });
+      idxs.forEach((i) => QuestionShards.removeShard(bankId, i));
+      if (!all.length) {
+        Storage.remove(K.questionsMeta(bankId));
+        return { rewrote: true, count: 0 };
+      }
+      const p = QuestionShards.plan(all);
+      p.shards.forEach((part, i) => QuestionShards.setShard(bankId, i, part));
+      QuestionShards.setMeta(bankId, p.meta);
+      return { rewrote: true, count: all.length };
+    },
+
+    /**
+     * 分片不变量自检（只读，不改数据）：清单 sizes 之和 = count = 实际可读题数，
+     * 分片键连续 0..n-1 且无高位孤儿。供 migrate v4 与测试使用。
+     * @returns {{ok:boolean, meta:Object|null, indexes:number[], sizeSum:number, actual:number,
+     *            missing:number[], extra:number[], countMismatch:boolean}}
+     */
+    invariant(bankId) {
+      const meta = QuestionShards.metaOf(bankId);
+      if (!meta) return { ok: true, meta: null, indexes: [], sizeSum: 0, actual: 0, missing: [], extra: [], countMismatch: false };
+      const indexes = QuestionShards.indexesOf(bankId);
+      const sizeSum = (meta.sizes || []).reduce((n, x) => n + (Number(x) || 0), 0);
+      let actual = 0;
+      indexes.forEach((i) => { actual += QuestionShards.shardOf(bankId, i).length; });
+      const missing = [];
+      for (let i = 0; i < meta.sizes.length; i++) {
+        if (meta.sizes[i] > 0 && QuestionShards.shardOf(bankId, i).length === 0) missing.push(i);
+      }
+      const extra = indexes.filter((i) => i >= meta.sizes.length);
+      const countMismatch = sizeSum !== meta.count || actual !== meta.count;
+      return {
+        ok: !countMismatch && !missing.length && !extra.length && indexes.length === meta.sizes.length,
+        meta: meta, indexes: indexes, sizeSum: sizeSum, actual: actual,
+        missing: missing, extra: extra, countMismatch: countMismatch
+      };
     }
   };
 
@@ -353,14 +422,15 @@
         const shard = QuestionShards.shardOf(b.id, loc.idx);
         const [removed] = shard.splice(loc.pos, 1);
         if (!shard.length) {
-          QuestionShards.removeShard(b.id, loc.idx); // 分片清空即回收，避免空壳
-          meta.sizes.splice(loc.idx, 1);
+          // 中间分片被清空：必须重编号，否则后续分片索引错位、余题不可读（见 shard.test 中间片用例）
+          QuestionShards.removeShard(b.id, loc.idx);
+          QuestionShards.compact(b.id);
         } else {
           QuestionShards.setShard(b.id, loc.idx, shard);
           meta.sizes[loc.idx] = shard.length;
+          meta.count -= 1;
+          QuestionShards.setMeta(b.id, meta);
         }
-        meta.count -= 1;
-        QuestionShards.setMeta(b.id, meta);
         bumpRev();
         return removed;
       }
@@ -427,6 +497,7 @@
         }
         const sizes = [];
         let count = 0;
+        let emptied = false;
         for (let i = 0; i < meta.sizes.length; i++) {
           const shard = QuestionShards.shardOf(b.id, i);
           const kept = shard.filter((q) => {
@@ -434,14 +505,19 @@
             return true;
           });
           if (kept.length === shard.length) { sizes.push(shard.length); count += shard.length; continue; }
-          if (!kept.length) { QuestionShards.removeShard(b.id, i); continue; }
+          if (!kept.length) { QuestionShards.removeShard(b.id, i); emptied = true; continue; }
           QuestionShards.setShard(b.id, i, kept);
           sizes.push(kept.length);
           count += kept.length;
         }
-        meta.sizes = sizes;
-        meta.count = count;
-        QuestionShards.setMeta(b.id, meta);
+        if (emptied) {
+          // 有分片被清空 → 统一重编号（唯一实现在 compact），避免余下分片索引错位
+          QuestionShards.compact(b.id);
+        } else {
+          meta.sizes = sizes;
+          meta.count = count;
+          QuestionShards.setMeta(b.id, meta);
+        }
       });
       if (removed) bumpRev();
       return { removed };

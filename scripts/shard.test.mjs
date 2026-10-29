@@ -286,6 +286,96 @@ section('UI 级按需加载：count 直读清单、revision 失效、loadQuestio
   eq((await QB.DB.loadQuestions(null)).total, 0, 'bankId 为空返回空列表');
 }
 
+section('单题删除清空中间分片：重编号，余题仍可读');
+{
+  QB.Storage.clearAll();
+  const midBank = await QB.DB.banks.create({ name: '中间片' });
+  const qs = [];
+  for (let i = 0; i < SHARD * 3; i++) qs.push(mkQ(i));
+  await QB.DB.questions.insertMany(midBank.id, qs, { dedupe: false });
+  eq(QB.Storage.get(K.questionsMeta(midBank.id)).sizes.length, 3, '初始 3 片');
+
+  // 逐题删掉中间整片（200..399）
+  for (let i = SHARD; i < SHARD * 2; i++) await QB.DB.questions.remove('q-' + i);
+  const meta = QB.Storage.get(K.questionsMeta(midBank.id));
+  eq(meta.count, SHARD * 2, '中间片清空后 count=' + (SHARD * 2));
+  eq(meta.sizes.length, 2, '剩 2 片');
+  eq(meta.sizes.reduce((a, b) => a + b, 0), SHARD * 2, 'sizes 之和 = count');
+  const all = (await QB.DB.questions.list(midBank.id, {})).items;
+  eq(all.length, SHARD * 2, 'list 返回 ' + (SHARD * 2) + ' 题（修复前为 0）');
+  eq(all[0].id, 'q-0', '首题仍为 q-0');
+  eq(all[all.length - 1].id, 'q-' + (SHARD * 3 - 1), '末题仍为 q-' + (SHARD * 3 - 1));
+  ok(await QB.DB.questions.get('q-' + (SHARD * 2 + 5)), '后续分片中的题可按 id 读取');
+  eq(QB.QuestionShards.indexesOf(midBank.id).join(','), '0,1', '分片键重编号为连续 0,1');
+  ok(QB.QuestionShards.invariant(midBank.id).ok, '不变量成立');
+  eq(await QB.DB.questions.count(midBank.id), SHARD * 2, 'count 与 list 一致');
+}
+
+section('removeMany 整片删除：重编号，余题仍可读');
+{
+  QB.Storage.clearAll();
+  const batchBank = await QB.DB.banks.create({ name: '批删整片' });
+  const qs = [];
+  for (let i = 0; i < SHARD * 2; i++) qs.push(mkQ(i));
+  await QB.DB.questions.insertMany(batchBank.id, qs, { dedupe: false });
+  const ids = qs.slice(0, SHARD).map((q) => q.id); // 整片 0
+  const res = await QB.DB.questions.removeMany(ids);
+  eq(res.removed, SHARD, '删除整片 ' + SHARD + ' 题');
+  const meta = QB.Storage.get(K.questionsMeta(batchBank.id));
+  eq(meta.count, SHARD, 'count=' + SHARD);
+  eq(meta.sizes.length, 1, '只剩 1 片');
+  const all = (await QB.DB.questions.list(batchBank.id, {})).items;
+  eq(all.length, SHARD, 'list 返回 ' + SHARD + ' 题（修复前为 0）');
+  eq(all[0].id, 'q-' + SHARD, '首题为原第 2 片首题');
+  eq(QB.QuestionShards.indexesOf(batchBank.id).join(','), '0', '高位片已回收并重编号');
+  ok(QB.QuestionShards.invariant(batchBank.id).ok, '不变量成立');
+}
+
+section('孤儿分片修复：compact 按物理索引升序重建并可读');
+{
+  QB.Storage.clearAll();
+  const orphanBank = await QB.DB.banks.create({ name: '孤儿片' });
+  const qs = [];
+  for (let i = 0; i < SHARD; i++) qs.push(mkQ(i));
+  await QB.DB.questions.insertMany(orphanBank.id, qs, { dedupe: false });
+  const extra = [mkQ(9001), mkQ(9002), mkQ(9003)];
+  QB.Storage.set(K.questionShard(orphanBank.id, 5), extra); // 模拟清空中间片后遗留的高位孤儿
+  const inv = QB.QuestionShards.invariant(orphanBank.id);
+  ok(!inv.ok, '不变量检出高位孤儿');
+  eq(inv.extra.join(','), '5', 'extra 指明分片 5');
+  const r = QB.QuestionShards.compact(orphanBank.id);
+  eq(r.count, SHARD + 3, 'compact 合并孤儿后共 ' + (SHARD + 3) + ' 题');
+  eq(QB.QuestionShards.indexesOf(orphanBank.id).join(','), '0,1', '重建为连续 0,1');
+  const all = (await QB.DB.questions.list(orphanBank.id, {})).items;
+  eq(all.length, SHARD + 3, 'list 返回全部 ' + (SHARD + 3) + ' 题');
+  eq(all[all.length - 1].id, 'q-9003', '孤儿题目按原顺序接在尾部');
+  ok(QB.QuestionShards.invariant(orphanBank.id).ok, '修复后不变量成立');
+}
+
+section('迁移 v3 → v4：启动自检修复坏清单');
+{
+  QB.Storage.clearAll();
+  const badBank = await QB.DB.banks.create({ name: '坏清单' });
+  const qs = [];
+  for (let i = 0; i < SHARD * 2; i++) qs.push(mkQ(i));
+  await QB.DB.questions.insertMany(badBank.id, qs, { dedupe: false });
+  // 模拟旧缺陷终态：分片 0 被删、清单收缩为 [200]，分片 1 成为孤儿
+  QB.Storage.remove(K.questionShard(badBank.id, 0));
+  QB.Storage.set(K.questionsMeta(badBank.id), { v: 3, shardSize: SHARD, count: SHARD, sizes: [SHARD] });
+  QB.Storage.set(K.metaSchema, 3);
+  const res = await QB.Migration.run();
+  eq(res.version, 4, 'schema 升到 4');
+  eq(res.repaired.repaired, 1, '修复 1 个题库');
+  eq(res.repaired.questions, SHARD, '恢复 ' + SHARD + ' 题');
+  const meta = QB.Storage.get(K.questionsMeta(badBank.id));
+  eq(meta.v, 3, '清单版本保持 3（v4 是修复而非结构变更）');
+  eq(meta.count, SHARD, '清单 count 正确');
+  eq((await QB.DB.questions.list(badBank.id, {})).items.length, SHARD, '修复后可读');
+  ok(QB.QuestionShards.invariant(badBank.id).ok, '修复后不变量成立');
+  const again = await QB.Migration.run();
+  eq(again.version, 4, '再次运行为空操作（幂等）');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
