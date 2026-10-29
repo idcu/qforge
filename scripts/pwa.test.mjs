@@ -92,6 +92,14 @@ ok(/\.toast-wrap[^}]*left:\s*50%/.test(css) && /\.toast-wrap[^}]*translateX\(-50
 ok(/\.qe-grid\s*\{[^}]*flex-wrap:\s*wrap/.test(css), '.qe-grid 支持换行（窄屏筛选控件不再被挤压）');
 ok(/@media\s*\(max-width:\s*560px\)[\s\S]*\.toast-wrap[^}]*right:\s*72px/.test(css), '窄屏（≤560px）提示条改左对齐并让出右下悬浮按钮区（x 方向不再交叠）');
 
+section('可访问性与移动端基础（P3）');
+ok(/focus-visible/.test(css), 'CSS 提供 :focus-visible 焦点可见样式');
+ok(/prefers-reduced-motion:\s*reduce/.test(css), 'CSS 尊重系统「减少动态效果」');
+ok(/env\(safe-area-inset-(top|bottom)\)/.test(css), 'CSS 处理刘海屏安全区');
+ok(/@media\s*\(min-width:\s*1100px\)/.test(css), 'CSS 提供 ≥1100px 加宽断点');
+ok(/@media\s*\(max-width:\s*560px\)[\s\S]*\.option\s*\{[^}]*min-height:\s*44px/.test(css), '窄屏选项可点高度 ≥44px');
+ok(app.indexOf("closest('.option[data-action]')") >= 0, 'app.js 为选项提供 Enter/Space 键盘激活');
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

@@ -607,7 +607,44 @@ body {
   /* 窄屏下提示条收进左侧，让出右下角悬浮滚动按钮区（回到顶部/直达底部），避免 x 方向交叠 */
   .toast-wrap { left: 10px; right: 72px; transform: none; }
   .toast { max-width: min(360px, 100%); }
+  /* 触屏可点区域 ≥44px（选项是自定义 div，必须显式给高度） */
+  .option { min-height: 44px; }
+  .btn { min-height: 40px; }
+  .tabs .tab { min-height: 40px; }
 }
+
+/* 平板/桌面加宽：900px 在 1440p 屏幕上偏窄，内容区随断点放宽 */
+@media (min-width: 1100px) {
+  .view { max-width: 1080px; }
+  .menu-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* 刘海屏安全区（PWA standalone 下顶栏/底栏不被遮挡） */
+@supports (padding: env(safe-area-inset-top)) {
+  .topbar { padding-top: max(10px, env(safe-area-inset-top)); }
+  .statusbar { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+  .btn-bottom { bottom: calc(20px + env(safe-area-inset-bottom)); }
+  .btn-top { bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
+
+/* 键盘焦点可见（原有仅 .blank-row input:focus 一条，键盘用户无法定位） */
+:where(button, a, select, input, textarea, [tabindex]):focus-visible,
+.option:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.option:focus-visible { border-color: var(--primary); }
+
+/* 尊重系统「减少动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ===== 列表分页与标签 ===== */
 .pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 14px 0 4px; }
 .pager-meta { text-align: center; margin: 10px 0 2px; }

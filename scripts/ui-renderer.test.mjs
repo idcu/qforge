@@ -341,6 +341,32 @@ section('复习计划卡 / 难卡标记 / 本题历史（P2）');
   eq(noHist.map((r) => r.key).indexOf('quiz-history'), -1, '无历史快照时不渲染历史区');
 }
 
+section('可访问性：选项 radio/checkbox 语义 + 作答后禁用（P3）');
+{
+  const sq = { type: 'single', question: '单选语义', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
+  const mk = (q, answered) => ({
+    mode: 'practice', questions: [q], currentIndex: 0,
+    results: [answered ? { isCorrect: true, correctAnswer: 'A', userAnswer: 'A', analysis: '' } : null],
+    answers: [answered ? 'A' : undefined],
+    getCurrentQuestion: () => q,
+    getProgress: () => ({ current: 1, total: 1, percentage: 0 }),
+    getScore: () => ({ score: 0, correct: 0, wrong: 0 }),
+    hasAnswered: () => answered, canSubmit: () => false, isLastQuestion: () => true,
+    statusAt: () => (answered ? 'correct' : 'empty'), answeredCount: () => (answered ? 1 : 0)
+  });
+  const fresh = UI.renderQuiz(mk(sq, false), {});
+  ok(fresh.indexOf('role="radio"') >= 0, '单选选项 role=radio');
+  ok(fresh.indexOf('tabindex="0"') >= 0, '未作答选项可键盘聚焦（tabindex=0）');
+  ok(fresh.indexOf('aria-checked="false"') >= 0, '未选中 aria-checked=false');
+
+  const done = UI.renderQuiz(mk(sq, true), {});
+  ok(done.indexOf('aria-checked="true"') >= 0, '已选 aria-checked=true');
+  ok(done.indexOf('tabindex="-1"') >= 0 && done.indexOf('aria-disabled="true"') >= 0, '作答后选项移出 Tab 序列并标记禁用');
+
+  const mq = { type: 'multi', question: '多选语义', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'AB' };
+  ok(UI.renderQuiz(mk(mq, false), {}).indexOf('role="checkbox"') >= 0, '多选选项 role=checkbox');
+}
+
 section('错题本/收藏夹：简答题解析展示（回归）');
 {
   const essay = { type: 'essay', question: '简答解析题', reference_answer: '参考答案XYZ', analysis: '解析ABC' };

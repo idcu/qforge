@@ -24,13 +24,18 @@
     return '<div class="empty">' + esc(text) + (actionHtml ? '<div style="margin-top:14px">' + actionHtml + '</div>' : '') + '</div>';
   }
 
-  /** 选项渲染 */
+  /** 选项渲染（可访问性：radio/checkbox 语义 + 键盘可达；作答后禁用） */
   function optionHtml(letter, text, state) {
     const cls = ['option'];
     if (state.selected) cls.push('selected');
     if (state.correct) cls.push('correct');
     if (state.wrong) cls.push('wrong');
-    return '<div class="' + cls.join(' ') + '" data-action="' + (state.multi ? 'toggle' : 'pick') +
+    const role = state.multi ? 'checkbox' : 'radio';
+    return '<div class="' + cls.join(' ') + '" role="' + role + '"' +
+      ' tabindex="' + (state.disabled ? '-1' : '0') + '"' +
+      ' aria-checked="' + (state.selected ? 'true' : 'false') + '"' +
+      (state.disabled ? ' aria-disabled="true"' : '') +
+      ' data-action="' + (state.multi ? 'toggle' : 'pick') +
       '" data-value="' + esc(state.value !== undefined ? state.value : letter) + '"' + (state.childAttr || '') + '>' +
       '<span class="opt-letter">' + esc(letter) + '</span>' +
       '<span class="opt-text">' + rich(text) + '</span></div>';
@@ -228,6 +233,7 @@
           value: o.value,
           selected: selected,
           childAttr: childAttr(childIndex),
+          disabled: answeredLocked,
           correct: answered && correctBool !== null && o.value === correctBool,
           wrong: answered && selected && correctBool !== null && o.value !== correctBool
         });
@@ -248,6 +254,7 @@
           multi: q.type === 'multi' || q.type === 'indefinite',
           selected: isSel,
           childAttr: childAttr(childIndex),
+          disabled: answeredLocked,
           correct: isCorrect,
           wrong: answered && isSel && !isCorrect
         });
@@ -929,17 +936,53 @@
       '<button class="btn" data-action="modal-ok">开始</button></div>';
   }
 
+  /** 弹窗打开前的焦点（关闭时归还，避免键盘用户焦点丢到 body） */
+  let lastFocus = null;
+
+  function focusablesIn(modal) {
+    return Array.prototype.slice.call(modal.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter((el) => el.offsetParent !== null);
+  }
+
   function openModal(html, onMount) {
     const root = document.getElementById('modal-root');
+    lastFocus = document.activeElement || null;
     root.innerHTML = '<div class="modal">' + html + '</div>';
     root.hidden = false;
-    if (onMount) onMount(root.querySelector('.modal'));
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-modal', 'true');
+    root.setAttribute('aria-label', '对话框');
+    const modal = root.querySelector('.modal');
+    if (onMount) onMount(modal);
+    // 焦点进入弹窗首个可操作元素（无则聚焦弹窗本体）
+    const list = focusablesIn(modal);
+    if (list.length) { try { list[0].focus(); } catch (e) { /* 不可聚焦时忽略 */ } }
+    else if (modal.setAttribute) { modal.setAttribute('tabindex', '-1'); try { modal.focus(); } catch (e) { /* ignore */ } }
+    // Tab 焦点循环（Esc 由 app.js 全局处理）
+    root.onkeydown = (e) => {
+      if (e.key !== 'Tab') return;
+      const items = focusablesIn(modal);
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
   }
 
   function closeModal() {
     const root = document.getElementById('modal-root');
     root.hidden = true;
     root.innerHTML = '';
+    root.onkeydown = null;
+    root.removeAttribute('role');
+    root.removeAttribute('aria-modal');
+    root.removeAttribute('aria-label');
+    if (lastFocus && typeof lastFocus.focus === 'function' && document.body.contains(lastFocus)) {
+      try { lastFocus.focus(); } catch (e) { /* 元素已移除时忽略 */ }
+    }
+    lastFocus = null;
   }
 
   /**

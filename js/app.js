@@ -995,6 +995,15 @@
       handleAction(el);
     });
 
+    v.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      const el = e.target.closest('.option[data-action]');
+      if (!el || !v.contains(el)) return;
+      e.preventDefault();
+      e.stopPropagation(); // 避免 Enter 再触发全局「提交/下一题」
+      el.click();
+    });
+
     v.addEventListener('input', (e) => {
       const t = e.target;
       if (t.matches('[data-action="search-input"]')) {
