@@ -115,7 +115,7 @@ qb/
 | `node scripts/review-queue.test.mjs` | 今日复习队列/复习设置测试（41 项断言：**限额裁剪（240 到期 + 160 新 → 200/20）**、learning 优先、分钟级未到过滤、逾期排序、0 限额空队列、种子确定性、材料题按整题 hash 入队；**QB.Time 自然日抽象**；SchedSettings 归一/落库到 `bank.sched`；Wire `sched` 双向映射） |
 | `node scripts/static-server.test.mjs` | 静态服务路径守卫测试（14 项断言：正常路径/根路径/目录补 index.html/百分号解码；`../`、`%2e%2e`、`..\`、深层越界、畸形编码、NUL 一律拒绝；含 `..` 即使归一后落在 root 内也拒绝） |
 | `node scripts/dom-patch.test.mjs` | DOM 增量更新区域对账测试（40 项断言：`DomPatch.plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`；首次全变化、内容一致全不重建、单区域变化、新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全；**子区域（格级）：帧未变→顶层不重建、snapshot 以 frame 为基准、groupSub 按容器归组去重**） |
-| `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出/DOM 增量/**富文本公式子集渲染**/**FSRS-6 调度与训练** 的耗时与内存） |
+| `node scripts/bench.mjs` | 性能打点（解析/落库/检索/结算/乱序/导出/DOM 增量/**富文本公式子集渲染**/**FSRS-6 调度与训练** 的耗时与内存）；`--assert` 开性能门禁（17 项阈值 + heapUsed ≤40MB，超限退出码 1） |
 | `node scripts/test-all.mjs` / `npm test` | 串行跑 smoke + 全部 23 个 `*.test.mjs`（24 个运行项），任一失败整体退出码非 0（开发/本地一键回归） |
 | `node scripts/task-timer.mjs` | 开发子任务计时埋点（`start/end/report/reset`，记录落 gitignored 的 `.qforge-timings.json`）：为「subtask 时间明细表」提供**实测**数据（`bench.mjs` 量代码热路径，本工具量开发墙钟） |
 | `node scripts/serve-webdav.mjs` | 本地 **WebDAV 验证端点**（固定对象 PUT/GET + Basic 认证 + CORS 预检，数据落 gitignored 的 `.qforge-webdav/`）：真实坚果云等默认不发 CORS 头，`QB.SyncDAV` 的**真机**验收须落在可开 CORS 的端点上（`sync-dav.test` 亦用它跑真实 HTTP 集成） |
@@ -138,7 +138,7 @@ xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖）�
 - DOM 增量更新（阶段 A）：`#view` 不再整块 `innerHTML` 重绘。渲染器新增 5 个区域数组变体（`renderQuizRegions`/`renderWrongListRegions`/`renderFavoritesListRegions`/`renderHistoryListRegions`/`renderSearchRegions`，每区域顶层带 `data-region="KEY"`），`QB.DomPatch.plan/patch` 对账：内容未变的区域**保留原 DOM 节点**（保住焦点/`<details>` 展开态/滚动），仅重建变化区域。**答题卡格级增量**：`quiz-card` 区域带 `frame`（仅结构，跨作答逐字节不变）+ `sub`（计数 + 逐格），帧未变时仅按 key 就地替换变化的子节点。实测对账 **0.00ms**：答题区勾选选项顶层仅重建 2/5 区域（占字节 10.2%），**整张答题卡 `<details>` 不重建**、仅替换 2/51 子节点（占整卡字节 2.0%，答题热路径重建量由细化前 95.6% 降至 10.2%）；错题本移除一条仅重建 1/22 区域（占字节 0.9%，20 个区域保持原节点）。浏览器实机验证：折叠答题卡后作答仍保持折叠、计数/格状态同步更新、控制台无报错。
 - 关键耗时中位数（`scripts/bench.mjs`，`--expose-gc`，采样 10 次）：JSON 解析 1.76ms、落库 4.87ms、按需单页冷读 0.27ms、全量冷读 0.77ms、检索 0.77ms、50 题整卷判分 0.10ms、540 题乱序 0.54ms、文本四格式导出 2.46ms、**XLSX 构建 7.31ms（667 KB）**、**DOCX 构建 2.54ms（259 KB）**、Markdown 540 题再解析 3.25ms；**3000 题 UI 装载缓存命中 0.00ms / 写后首次 3.42ms（对照改造前每次 render 全量冷读 3.70ms）**；**DOM 区域对账 0.00ms（答题区顶层重建 2/5 区域、答题卡仅替换 2/51 子节点、错题本重建 1/22 区域）**；heapUsed 增量 **+2.54MB**（3000 题规模库末态 14.77MB、DOM 增量末态 14.95MB）。
 - 今日复习队列（P2）：3000 题（约 1000 到期 + 2000 新）`QB.ReviewQueue.build` 中位 **0.18ms**，按限额裁剪为 **200 到期 + 20 新 = 220 题**（修复前一次灌 3000 题）；实现见 `js/modules/review-queue.js`。
-- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 **24 个运行项（冒烟 + 23 套件）**，防止自然日/时间断言的时区回归。
+- CI：`.github/workflows/test.yml`，push/PR 到 main 时在 Node 20/24 × 时区（UTC / Asia/Shanghai）矩阵零依赖直跑全部 **24 个运行项（冒烟 + 23 套件）**，防止自然日/时间断言的时区回归；**另在 Node 24 / Asia-Shanghai 跑 `bench.mjs --assert` 性能门禁**（17 项量级阈值 + heapUsed ≤40MB，超限 CI 失败）。
 
 ## 远端仓库
 

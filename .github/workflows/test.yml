@@ -74,3 +74,6 @@ jobs:
         run: node scripts/ui-renderer.test.mjs
       - name: DOM 增量更新区域对账测试
         run: node scripts/dom-patch.test.mjs
+      - name: 性能门禁（Node 24 / Asia-Shanghai）
+        if: matrix.node-version == '24' && matrix.tz == 'Asia/Shanghai'
+        run: node --expose-gc scripts/bench.mjs --assert

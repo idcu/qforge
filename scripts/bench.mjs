@@ -467,3 +467,47 @@ console.log('DOM 增量更新（区域对账，非整块 innerHTML）：勾选�
   + ms(rowBy('错题本 移除一条 区域对账').median) + '，' + planWrong.unchanged.length + ' 个区域保持原 DOM 节点');
 console.log('DOM 增量更新内存末态 heapUsed ' + mb(uiPatchHeap) + '（含 3000 题库 + 全部区域快照对象）');
 console.log('============================================\n');
+
+/* ---------- 性能门禁（可选 --assert） ----------
+ * 阈值取本次基线 × 约 3–10 倍，用于拦截「量级回归」而非机器差异；
+ * 绝对值不追求严格，CI 与本地都不会因小波动误报。 */
+if (process.argv.indexOf('--assert') >= 0) {
+  const BUDGETS = [
+    ['JSON.parse', 20],
+    ['insertMany 落库', 30],
+    ['规模库 按需单页', 5],
+    ['规模库 全量读取', 30],
+    ['规模库 单题 update', 5],
+    ['规模库 insertMany overwrite', 80],
+    ['规模库 装载·缓存命中', 2],
+    ['规模库 答题交互·视图装载', 2],
+    ['首页渲染 HTML 构建（3000', 5],
+    ['答题区渲染 HTML 构建', 5],
+    ['勾选选项 区域对账', 5],
+    ['错题本 移除一条 区域对账', 5],
+    ['今日复习队列 build', 5],
+    ['XLSX 导出构建', 60],
+    ['DOCX 导出构建', 40],
+    ['FSRS.review 单次调度', 2],
+    ['FSRS 优化器 computeTrain（4000', 20000]
+  ];
+  const fails = [];
+  console.log('================ 性能门禁 ================');
+  BUDGETS.forEach(([needle, max]) => {
+    const r = report.find((x) => x.name.indexOf(needle) === 0);
+    if (!r) { fails.push(needle + ' 缺失'); return; }
+    const ok = r.median <= max;
+    console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：' + ms(r.median) + ' ≤ ' + ms(max));
+    if (!ok) fails.push(needle + ' ' + ms(r.median) + ' > ' + ms(max));
+  });
+  const heapDeltaMb = (heapAfter - heapBefore) / 1024 / 1024;
+  const heapOk = heapDeltaMb <= 40;
+  console.log((heapOk ? '  ✓ ' : '  ✗ ') + 'heapUsed 增量：' + heapDeltaMb.toFixed(2) + 'MB ≤ 40.00MB');
+  if (!heapOk) fails.push('heapUsed 增量 ' + heapDeltaMb.toFixed(2) + 'MB > 40MB');
+  console.log('-------------------------------------------');
+  if (fails.length) {
+    fails.forEach((f) => console.log('  - ' + f));
+    process.exit(1);
+  }
+  console.log('性能门禁全部通过 ✅\n');
+}
