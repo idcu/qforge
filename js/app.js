@@ -95,6 +95,9 @@
         (State.counts && State.counts.total ? ' · 共 ' + State.counts.total + ' 题' : '');
     }
     if (ex) ex.textContent = State.timerText || '';
+    // 答题头内的倒计时（renderQuizRegions 输出 #quiz-timer）：每秒就地更新，不整块重建
+    const qt = document.getElementById('quiz-timer');
+    if (qt) qt.textContent = State.timerText ? ' · ⏱ ' + State.timerText : '';
   }
 
   /** 把「顶栏 + 菜单栏」实测高度写入 CSS 变量，供下方 sticky 区块（历史统计/搜索栏）定位 */
@@ -233,6 +236,7 @@
         if (cq) favorited = State.favoriteKeys.has(QB.makeQuestionKey(cq));
         regions = UI.renderQuizRegions(State.engine, {
           favorited: favorited,
+          timerText: State.timerText,
           reviewState: quizReviewState(cq),
           reviewHistory: quizReviewHistory(cq)
         });
@@ -348,8 +352,8 @@
     const eng = State.engine;
     const total = (eng && eng.durationMs) || 0;
     if (total <= 0) return; // 0=不限时，不启动倒计时
-    // 优先按持久化截止时间计算剩余；旧会话无 deadlineAt 时回退整段时长
-    const rem = eng && eng.deadlineAt ? Math.max(0, eng.deadlineAt - Date.now()) : total;
+    // 剩余时间统一由引擎计算：deadlineAt > startedAt+durationMs > 旧会话整段回退
+    const rem = eng.remainingMs ? eng.remainingMs() : total;
     State.timerText = QB.Helpers.formatDuration(rem);
     updateStatus();
     State.timer = QB.createExamTimer({
@@ -1327,13 +1331,16 @@
     State.view = 'quiz';
     hydrateQuizReviewContext(State.bankId, engine);
     if (isExam && engine.durationMs > 0) {
-      const rem = engine.deadlineAt ? engine.deadlineAt - Date.now() : engine.durationMs;
+      const legacyNoTime = !engine.deadlineAt && !engine.startedAt;
+      const rem = engine.remainingMs();
       if (rem <= 0) {
         UI.toast('考试时间已到，已自动交卷', 'err');
         await finishQuiz();
         return;
       }
-      UI.toast('已恢复考试，剩余 ' + QB.Helpers.formatDuration(rem), 'ok');
+      UI.toast(legacyNoTime
+        ? '旧考试记录缺少截止时间，已按整段时长重新计时'
+        : '已恢复考试，剩余 ' + QB.Helpers.formatDuration(rem), legacyNoTime ? 'err' : 'ok');
     }
     startQuizTimer(engine);
     render();

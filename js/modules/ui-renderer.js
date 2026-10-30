@@ -372,7 +372,7 @@
       (q.category ? ' <span class="q-progress">· ' + esc(q.category) + '</span>' : '') + '</div>' +
       '<div class="q-score">得分 ' + score.score + ' · ✔ ' + score.correct + ' · ✘ ' + score.wrong +
       (unansweredNow > 0 ? ' · ○ 未答 ' + unansweredNow : '') +
-      (opts.timerText ? ' · ⏱ ' + esc(opts.timerText) : '') + '</div>' +
+      '<span id="quiz-timer">' + (opts.timerText ? ' · ⏱ ' + esc(opts.timerText) : '') + '</span></div>' +
       '</div>' });
     regions.push({ key: 'quiz-progress', html: progressBar(prog.percentage, 'quiz-progress') });
 

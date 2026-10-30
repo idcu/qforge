@@ -464,7 +464,25 @@
     this.showTimer = !!state.showTimer;
     this.startedAt = Number(state.startedAt) > 0 ? Number(state.startedAt) : 0;
     this.deadlineAt = Number(state.deadlineAt) > 0 ? Number(state.deadlineAt) : 0;
+    // 旧版会话只有 startedAt、没有 deadlineAt：用 startedAt + durationMs 推导截止时间，避免恢复后重新计时
+    if (this.durationMs > 0 && !this.deadlineAt && this.startedAt > 0) {
+      this.deadlineAt = this.startedAt + this.durationMs;
+    }
     return this.questions.length > 0;
+  };
+
+  /**
+   * 考试剩余毫秒（唯一口径）：deadlineAt > startedAt+durationMs > 整段 durationMs（无任何时间戳的旧会话）。
+   * durationMs<=0（不限时）返回 0；已超时返回 0。
+   * @param {number} [now] 测试可注入
+   */
+  QuizEngine.prototype.remainingMs = function (now) {
+    const total = Number(this.durationMs) > 0 ? Number(this.durationMs) : 0;
+    if (total <= 0) return 0;
+    const at = Number(now) || Date.now();
+    if (Number(this.deadlineAt) > 0) return Math.max(0, Number(this.deadlineAt) - at);
+    if (Number(this.startedAt) > 0) return Math.max(0, Number(this.startedAt) + total - at);
+    return total;
   };
 
   QB.QuizEngine = QuizEngine;

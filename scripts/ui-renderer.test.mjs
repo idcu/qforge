@@ -209,6 +209,12 @@ section('区域数组：键序稳定、拼接等于整块字符串、顶层带 d
   const s1 = { type: 'single', question: '题一', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
   const s2 = { type: 'judge', question: '题二', answer: 'A' };
 
+  // 考试倒计时：答题头内 #quiz-timer（每秒就地更新，不整块重建）
+  const tq = UI.renderQuizRegions(mkQ('practice', [s1], 0, false), { timerText: '01:59' });
+  const tqHtml = tq.map((r) => r.html).join('');
+  ok(tqHtml.indexOf('id="quiz-timer"') >= 0 && tqHtml.indexOf('⏱ 01:59') >= 0, '答题头显示倒计时（#quiz-timer）');
+  ok(UI.renderQuizRegions(mkQ('practice', [s1], 0, false), {}).map((r) => r.html).join('').indexOf('⏱') < 0, '无 timerText 不渲染倒计时');
+
   const qr = UI.renderQuizRegions(mkQ('practice', [s1], 0, false), {});
   eq(qr.map((r) => r.key).join(','), 'quiz-head,quiz-progress,quiz-question,quiz-actions', '单选单题：区域键序');
   eq(qr.map((r) => r.html).join(''), UI.renderQuiz(mkQ('practice', [s1], 0, false), {}), '区域拼接 = renderQuiz 整块字符串');

@@ -1037,6 +1037,18 @@ const restoredExam = new QB.QuizEngine();
 ok(restoredExam.restore(savedSession), '考试会话可恢复');
 eq(restoredExam.deadlineAt, 1700000060000, 'restore 保留截止时间');
 eq(restoredExam.startedAt, 1700000000000, 'restore 保留开始时间');
+eq(restoredExam.remainingMs(1700000030000), 30000, 'remainingMs：按 deadlineAt 计算剩余');
+// 旧版会话只有 startedAt、没有 deadlineAt：restore 推导截止时间，不重新计时
+const legacyExam = new QB.QuizEngine();
+ok(legacyExam.restore({ mode: 'exam', durationMs: 60000, startedAt: 1700000000000, deadlineAt: 0, questions: [{}] }), '旧版考试会话可恢复');
+eq(legacyExam.deadlineAt, 1700000060000, '旧版会话：startedAt + durationMs 推导 deadlineAt');
+eq(legacyExam.remainingMs(1700000030000), 30000, '旧版会话：剩余时间按推导截止时间');
+// 连 startedAt 都没有的极旧会话：只能回退整段
+const veryOldExam = new QB.QuizEngine();
+veryOldExam.restore({ mode: 'exam', durationMs: 60000, questions: [{}] });
+eq(veryOldExam.deadlineAt, 0, '极旧会话：无开始时间不推导截止');
+eq(veryOldExam.remainingMs(), 60000, '极旧会话：回退整段时长');
+eq(new QB.QuizEngine().remainingMs(), 0, '不限时：剩余 0（不启动倒计时）');
 
 /* ================= 7. 答题引擎 ================= */
 section('答题引擎（练习 + 考试）');
