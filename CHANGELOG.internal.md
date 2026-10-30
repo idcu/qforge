@@ -14,6 +14,47 @@
 
 ---
 
+## 889060b · feat(security): 静态站 CSP 与安全响应头基线
+
+**核心改动**
+- `index.html` 新增 `<meta http-equiv="Content-Security-Policy">`（位于样式表/脚本之前）；页面无内联 `<script>`，全部脚本为同源相对路径。
+- 新增 `scripts/lib/security-headers.mjs` 作为**唯一策略源**：`CSP` 常量 + `securityHeaders(filePath)`；
+  `scripts/lib/static-server.mjs::sendFile` 对 `serve.mjs`/`serve-api.mjs` 统一附加：
+  - HTML：`Content-Security-Policy`（共享策略 + `frame-ancestors 'none'`）+ `X-Frame-Options: DENY`；
+  - 所有静态响应（含 404）：`X-Content-Type-Options: nosniff` + `Referrer-Policy: same-origin`；
+  - 非 HTML 不加 CSP。
+- 策略：`script-src 'self' file:`（无内联/无 eval）、`style-src 'unsafe-inline'`（渲染层 `style="..."`）、
+  `img-src data: blob:`（IndexedDB 资产）、`connect-src http: https:`（自建后端/WebDAV/URL 导入）、
+  `object-src 'none'`、`base-uri`/`form-action` 收紧；各指令额外放行 `file:` 仅用于双击 `index.html` 直开。
+- 测试：`pwa.test` +15（meta 位置/逐字符一致/script-src/无内联脚本等）；`static-server.test` +8（安全头函数）；
+  `api-backend.test` +6（真实 HTTP 下 HTML/JS 响应头）。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3549/3549** 通过，0 失败，**24.5s**
+  （pwa 70→85、static-server 14→22、api-backend 202→208）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.63ms、按需单页 0.21ms、
+  单题 update 0.21ms、heapUsed **+2.70MB** ≤ 40MB。
+- 真实浏览器（`serve.mjs` 127.0.0.1:8777）：首页渲染正常、控制台全程无 CSP 违规；选择示例题库 →
+  练习模式（单选 3 题）→「单选 第 1 / 3 题」→ 错误选项提交 →「❌ 回答错误」+ 正确答案 + 解析，**PASS**。
+- `file://` 直开：Edge headless `--dump-dom --virtual-time-budget=5000` 确认 `data-theme`/导航/空库首页均由脚本渲染，
+  控制台无 CSP 阻断（此前误判为脚本被拦截，实为空库无菜单项，已如实更正）。
+- 首屏体积复测（67 个文件，逐文件 gzip -9）：**223.7 KB gzip / 618.5 KB raw**；README 旧值 185.9/522.8 KB 系旧版 61 文件，已校正。
+
+**公共抽象/影响**
+- 新增公共抽象 `CSP` / `securityHeaders(filePath)`（仅 scripts 使用，不随应用发布）；影响 `sendFile` 两个调用方
+  （`serve.mjs`、`serve-api.mjs`），API 路由与静态路径守卫不变。
+- `index.html` meta 与 `security-headers.mjs` 必须逐字符一致，`pwa.test` 已加守护；改策略须同时改两处与测试。
+- README 顺带校正多处过期套件计数（smoke 610→658、exporter 184→199、editor 63→70、assets 62→64、
+  source 30→35、storage 20→23、contract 53→57、ui-renderer 136→153），均为当前实测值。
+
+**TODO/风险**
+- `style-src 'unsafe-inline'` 为渲染层字符串模板内联样式所必需，尚未迁移到 class/CSSOM；这是 CSP 的剩余放宽面。
+- `connect-src` 必须保留任意 http(s) 以支持可配置后端/WebDAV/URL 导入，不能收窄到具体域名。
+- 未做跨浏览器（Firefox/Safari）CSP 兼容矩阵；`file:` scheme 放行仅由 Edge headless 验证。
+- 未验证 `file://` 下导入/IndexedDB 全流程（仅验证首页脚本执行）。
+
+---
+
 ## 04a8852 · feat(sync): 参考后端可选 Bearer 令牌鉴权
 
 **核心改动**
