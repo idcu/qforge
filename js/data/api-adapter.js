@@ -176,6 +176,13 @@
    */
   const reviewCache = new Map();
 
+  /* ---------------- 权重仓缓存（作答热路径） ----------------
+   * 每次评分都要读活动权重（题库 preset → 全局 → 默认）；无缓存时每个答案打一次 GET。
+   * 单用户参考后端下按客户端写失效：write 后缓存提交值、remove 后丢缓存、级联删库与
+   * backup.import 后丢缓存（多端写入读到旧值属已知限制，与 count/reviews 缓存同口径）。
+   */
+  let weightsCache = null;
+
   /* ---------------- BankRepository ---------------- */
   const banks = {
     async list() { const r = await req('GET', ROUTES.banks); return (r.items || []).map(fromWireBank); },
@@ -187,6 +194,7 @@
       await req('DELETE', ROUTES.bank(enc(id)) + '?cascade=' + (cascade ? 'true' : 'false'));
       countCache.delete(id);
       reviewCache.delete(id); // 级联已删该库 reviews，缓存须一并丢弃
+      weightsCache = null; // 级联可能删除该库 preset，权重缓存一并丢弃
     }
   };
 
@@ -357,6 +365,23 @@
       } finally {
         reviewCache.delete(bankId);
       }
+    },
+    /**
+     * 作答热路径：一次 PUT 同时提交调度状态与评分日志（服务端在同一请求内落盘）。
+     * 成功后缓存刚提交的 map（下次作答 0 GET）；失败丢弃缓存，避免读到半写入结果。
+     */
+    async record(bankId, map, entries) {
+      try {
+        const r = await req('PUT', ROUTES.reviews(enc(bankId)), { items: map || {}, revlog: entries || [] });
+        reviewCache.set(bankId, map || {});
+        return {
+          saved: r && typeof r.saved === 'number' ? r.saved : Object.keys(map || {}).length,
+          logged: r && typeof r.logged === 'number' ? r.logged : (Array.isArray(entries) ? entries.length : 0)
+        };
+      } catch (e) {
+        reviewCache.delete(bankId);
+        throw e;
+      }
     }
   };
 
@@ -370,11 +395,20 @@
 
   const weights = {
     async read() {
+      if (weightsCache) return weightsCache;
       const r = await req('GET', ROUTES.weights);
-      return QB.Weights.normalizeStore(r);
+      weightsCache = QB.Weights.normalizeStore(r);
+      return weightsCache;
     },
-    async write(store) { await req('PUT', ROUTES.weights, store || { global: null, banks: {} }); },
-    async remove(scope) { await req('DELETE', ROUTES.weightsScope(scope)); }
+    async write(store) {
+      const normalized = QB.Weights.normalizeStore(store);
+      await req('PUT', ROUTES.weights, normalized);
+      weightsCache = normalized; // 服务端按请求体落盘，写后可直接命中
+    },
+    async remove(scope) {
+      await req('DELETE', ROUTES.weightsScope(scope));
+      weightsCache = null;
+    }
   };
 
   const backup = {
@@ -388,6 +422,7 @@
         // bulk 变更可能重写任意库的题目/进度：两份缓存整表清空（失败也清，防读到半写入结果）
         countCache.clear();
         reviewCache.clear();
+        weightsCache = null;
       }
     }
   };

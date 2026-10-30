@@ -40,7 +40,7 @@
       'sessionSave', 'sessionLoad', 'sessionClear'],
     // 阶段 C（开生态）：SRS / 评分日志 / 个性化权重 / 备份 —— 只暴露「存储原语」，
     // 算法（FSRS 调度、留出门控、到期桶计算）留在领域模块（见 docs/SRS.md §8/§12）。
-    reviews: ['list', 'save', 'remove'],       // 按库调度状态 map（contentHash → state）
+    reviews: ['list', 'save', 'remove', 'record'], // 按库调度状态 map（contentHash → state）；record = 状态+评分日志一次提交（作答热路径）
     revlog: ['list', 'append'],                // 评分日志（追加 + FIFO 保留策略在存储层）
     weights: ['read', 'write', 'remove'],      // 全局 + 按题库 preset 权重
     backup: ['export', 'import']               // 全量数据载荷（含图 ZIP 组装仍在客户端）

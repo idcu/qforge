@@ -610,8 +610,16 @@ export function createHandler(opts) {
       if (m === 'PUT') {
         const body = await readJsonBody(req);
         const map = (body && body.items) ? body.items : (body || {});
+        if (body && body.revlog !== undefined && !Array.isArray(body.revlog)) {
+          return fail(res, 400, 'BAD_REQUEST', 'revlog 必须为数组');
+        }
         store.progress.reviewSave(bankId, map);
-        return json(res, 200, { saved: Object.keys(map).length });
+        let logged = 0;
+        if (body && Array.isArray(body.revlog) && body.revlog.length) {
+          store.revlog.append(body.revlog);
+          logged = body.revlog.length;
+        }
+        return json(res, 200, { saved: Object.keys(map).length, logged: logged });
       }
       if (m === 'DELETE') { store.progress.reviewRemove(bankId); return (res.writeHead(204), res.end()); }
       return fail(res, 405, 'METHOD_NOT_ALLOWED', m);

@@ -653,7 +653,16 @@
     list(bankId) { return Storage.get(K.review(bankId)) || {}; },
     /** 整表落盘（一次评分/整卷结算后提交），失败即抛 */
     save(bankId, map) { Storage.setSync(K.review(bankId), map || {}); },
-    remove(bankId) { Storage.remove(K.review(bankId)); }
+    remove(bankId) { Storage.remove(K.review(bankId)); },
+    /**
+     * 作答热路径：调度状态 + 评分日志一次提交（等价 save + revlog.append）。
+     * api 适配器对应 PUT /reviews（body 可携 revlog），把两次网络请求收敛为一次。
+     */
+    record(bankId, map, entries) {
+      reviews.save(bankId, map);
+      revlog.append(entries || []);
+      return { saved: Object.keys(map || {}).length, logged: Array.isArray(entries) ? entries.length : 0 };
+    }
   };
 
   const REVLOG_MAX = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000; // revlog FIFO 上限

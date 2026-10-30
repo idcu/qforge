@@ -479,6 +479,66 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   eq(Object.keys((await QB.DB.weights.read()).banks).length, 0, 'api：级联删库（权重 preset）');
 }
 
+section('作答热路径请求收敛（api）：reviews.record + 权重缓存');
+{
+  const ctx = await createHarness(path.resolve(__dirname, '..'));
+  const { QB } = ctx;
+  const origFetch = globalThis.fetch;
+  let calls = [];
+  QB.ApiAdapter.useFetch((url, opts) => {
+    calls.push({ method: (opts && opts.method) || 'GET', url: String(url).replace(base, '') });
+    return origFetch(url, opts);
+  });
+  QB.CONFIG.DATA_BACKEND = 'api';
+  QB.CONFIG.API_BASE_URL = base;
+  QB.DB.init();
+  const bank = await QB.DB.banks.create({ name: '热路径库' });
+  const q = { type: 'single', question: '热路径题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' };
+  q.contentHash = QB.makeContentHash(q);
+
+  calls = [];
+  await QB.SRSStore.grade(bank.id, q, 2, 1000);
+  eq(calls.length, 3, '首次作答 3 请求（GET reviews + GET weights + PUT record）');
+  eq(calls.filter((c) => c.method === 'GET' && c.url.indexOf('/fsrs-weights') >= 0).length, 1, '首次作答读一次权重');
+  ok(calls.some((c) => c.method === 'PUT' && c.url.indexOf('/reviews') >= 0), '状态与日志经 PUT reviews 一次提交');
+  const savedMap = (await req('GET', '/api/banks/' + bank.id + '/reviews')).body.items;
+  ok(savedMap[q.contentHash] && savedMap[q.contentHash].algo === 'fsrs', '服务端已落调度状态');
+  const log1 = (await req('GET', '/api/revlog')).body.items.filter((e) => e.b === bank.id);
+  eq(log1.length, 1, '同一 PUT 请求写入 1 条评分日志');
+
+  calls = [];
+  await QB.SRSStore.grade(bank.id, q, 2, 2000);
+  eq(calls.length, 1, '热态作答仅 1 请求（reviews/weights 缓存命中，GET 归零）');
+  eq(calls[0].method, 'PUT', '热态请求为 PUT reviews');
+  const log2 = (await req('GET', '/api/revlog')).body.items.filter((e) => e.b === bank.id);
+  eq(log2.length, 2, '第二次作答再写 1 条日志');
+
+  calls = [];
+  await QB.SRSStore.gradeMany(bank.id, [{ question: q, rating: 2 }, { question: q, rating: 3 }], 3000);
+  eq(calls.length, 1, '交卷批量 gradeMany 仍仅 1 请求（日志随记录一起提交）');
+  const log3 = (await req('GET', '/api/revlog')).body.items.filter((e) => e.b === bank.id);
+  eq(log3.length, 4, '批量提交写入 2 条日志');
+
+  calls = [];
+  await QB.DB.progress.wrongAdd(bank.id, q);
+  eq(calls.length, 1, '错题额外 1 请求（错误题热路径合计 2）');
+
+  // 权重缓存：write 后命中、remove 后重新 GET
+  await QB.DB.weights.write({ global: { w: QB.FSRS.DEFAULT_W, trainedAt: 11 }, banks: {} });
+  calls = [];
+  await QB.DB.weights.read();
+  eq(calls.length, 0, 'weights.write 后缓存命中，无 GET');
+  await QB.DB.weights.remove();
+  calls = [];
+  await QB.DB.weights.read();
+  eq(calls.length, 1, 'weights.remove 后缓存丢弃，重新 GET');
+
+  // 服务端拒绝非数组 revlog（不静默半写）
+  const bad = await req('PUT', '/api/banks/' + bank.id + '/reviews', { items: {}, revlog: 'x' });
+  eq(bad.status, 400, 'revlog 非数组 → 400');
+  eq(bad.body.error.code, 'BAD_REQUEST', 'revlog 非数组错误码 BAD_REQUEST');
+}
+
 section('跨布局整链 E2E：本地备份 → 真实后端（POST /api/backup）→ 读回 → 再恢复到本地');
 {
   // 1) local 模式造数据 → 本地布局备份载荷（questions:<id>:meta 分片 + user:*/meta:*）

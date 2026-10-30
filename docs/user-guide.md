@@ -20,7 +20,7 @@ node scripts/serve-api.mjs
 ```
 
 - 后端实现见 [API-CONTRACT.md](API-CONTRACT.md)（数据落工程根 `.qforge-data/` 的 JSON，已 gitignore；原子写入）。
-- **切换后端不改动任何前端代码/界面**——SRS 复习计划、备份、图片资产等都已纳入数据层契约（见 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3 与 [SRS.md](SRS.md) §9）。
+- **切换后端不改动任何前端代码/界面**——SRS 复习计划、备份、图片资产等都已纳入数据层契约（见 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3 与 [SRS.md](SRS.md) §9）。作答热路径已收敛：调度状态与评分日志合并为一次 `PUT /api/banks/{id}/reviews`，权重与复习表按库缓存，连续作答通常只剩 1 个写请求；多端同时写入时缓存可能读到旧值（单用户参考实现口径，冲突消解属后续项）。
 - 页面默认启用 **CSP**（`script-src 'self'`，禁止内联脚本/eval；本地服务另加 `X-Frame-Options: DENY`、`nosniff`、`Referrer-Policy`）。二次开发若新增内联 `<script>` 或 `eval` 会被浏览器拦截，请放外部 `.js` 文件；`connect-src` 已放行 http(s) 以支持自建后端、WebDAV 与 URL 导入；同时放行 `file:` 仅用于双击 `index.html` 直开（http(s) 页面不能借它读取本地文件）。
 - 说明与已知限制：参考后端**单用户**；`/api/*` 默认无鉴权，设置 `API_TOKEN` 后服务端要求 `Authorization: Bearer <token>`（前端在 `config.js` 的 `NETWORK.API_TOKEN` 填同一值即自动附带；静态文件与 `/health` 不受保护），**共享密钥不是账号体系**，对公网暴露前必须启用令牌；**题目编辑已启用 `updated_at` 乐观并发**（两台设备同时改同一题时，后提交者收到 409「题目已在其他设备修改」，不会静默覆盖）；复习计划的并发写仍为「整表 last-write-wins」；后端不可用时界面会如实报网络错误（不静默返回假数据）。
 

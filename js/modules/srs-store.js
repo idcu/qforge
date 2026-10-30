@@ -74,8 +74,8 @@
     const fr = fsrsRating(rating);
     const next = QB.FSRS.review(map[k], fr, ts, await QB.FSRSOpt.getActiveWeights(bankId));
     map[k] = next;
-    await writeMap(bankId, map);
-    await QB.FSRSOpt.appendLog([{ t: ts, h: k, r: fr, b: bankId }]);
+    // 热路径：状态 + 评分日志一次提交（api 模式 1 个请求；local 模式两次本地写）
+    await QB.DB.reviews.record(bankId, map, [{ t: ts, h: k, r: fr, b: bankId }]);
     return next;
   }
 
@@ -92,8 +92,7 @@
       map[k] = QB.FSRS.review(map[k], fr, ts, w);
       logs.push({ t: ts, h: k, r: fr, b: bankId });
     });
-    await writeMap(bankId, map);
-    await QB.FSRSOpt.appendLog(logs);
+    await QB.DB.reviews.record(bankId, map, logs);
   }
 
   /** 今日到期题目（未学过的题也算到期） */

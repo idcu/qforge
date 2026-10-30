@@ -174,7 +174,7 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 
 ### 8.1 数据采集
 
-- 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳, b:bankId}` 到 `qb:user:revlog`（**经契约层 `QB.DB.revlog.append`，异步**；补 id/时间戳与 FIFO 裁剪在 `local-adapter` 侧完成）。
+- 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳, b:bankId}` 到 `qb:user:revlog`：**经契约层 `QB.DB.reviews.record(bankId, map, [entry])` 一次提交**（本地等价 `save + revlog.append`；api 模式同一 `PUT /reviews` 落盘，补 id/时间戳与 FIFO 裁剪在实现侧完成）。
 - **FIFO 上限 20,000 条**（约 0.8MB），超限丢最旧；常量唯一来源为 `QB.LocalAdapter.REVLOG_MAX`，`FSRSOpt.LOG_LIMIT` 再导出同值（不重复定义）。
 - **作用域隔离（评估报告中优先级#4 修复）**：按题库训练只读取 `b === 当前库` 的日志；全局训练读取全部。2026-10 前的旧日志无 `b`，只参与全局训练（不静默归入任何题库）；v1→v2 迁移时，题目仍唯一归属某库的旧日志会自动回填 `b`（见 [DATABASE.md](DATABASE.md) §4）。
 
@@ -252,15 +252,15 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 
 | Repository | 方法（`QB.CONTRACTS`） | 领域模块入口 |
 | --- | --- | --- |
-| `QB.DB.reviews` | `list(bankId)` / `save(bankId,map)` / `remove(bankId)` | `SRSStore.readMap/writeMap/clear/getState/grade/gradeMany/dueToday/countDue/stats/forecast` |
+| `QB.DB.reviews` | `list(bankId)` / `save(bankId,map)` / `remove(bankId)` / `record(bankId,map,entries)` | `SRSStore.readMap/writeMap/clear/getState/grade/gradeMany/dueToday/countDue/stats/forecast` |
 | `QB.DB.revlog` | `list()` / `append(entries)` | `FSRSOpt.readLog/readLogForScope/appendLog/shouldRetrain` |
 | `QB.DB.weights` | `read()` / `write(store)` / `remove(scope)` | `FSRSOpt.readStore/writeStore/getActiveWeights/getWeightsMeta/saveWeights/resetWeights/train/trainAsync` |
 
 - **只暴露存储原语**（读/写某键）：FSRS 调度、留出门控、到期桶计算、SM-2 迁移等算法**仍在**本子系统，不进契约层。
 - **读写均为异步**：`local-adapter` 返回值是普通值（`await` 零额外开销，local 行为逐字节等价），`api-adapter` 返回 Promise；调用点一律 `await`，故「切到后端后 UI 零改动」。
-- **禁止双向委托**：`local-adapter.reviews/revlog/weights` 必须直读写 LocalStorage，**不得**反向调用 `SRSStore`/`FSRSOpt`（否则与「领域模块 → `QB.DB.*`」互为委托成自递归）。`FSRSOpt.normalizeStore`（纯函数）是 `{global,banks}` 归一结构的唯一实现，被 `local-adapter.weights` 复用。
+- **禁止双向委托**：`local-adapter.reviews/revlog/weights` 必须直读写 LocalStorage，**不得**反向调用 `SRSStore`/`FSRSOpt`（否则与「领域模块 → `QB.DB.*`」互为委托成自递归）。`QB.Weights.normalizeStore`（纯函数，utils/weights.js）是 `{global,banks}` 归一结构的唯一实现，被 `local-adapter.weights`/`api-adapter.weights` 复用（`FSRSOpt.normalizeStore` 为兼容导出）。
 - 纯函数（`ratingForResult`/`collectGraded`/`keyFor`/`fsrsRating`/`dayIndex`/桶计算）保持同步。
-- **api 模式按库缓存（已实现）**：`api-adapter.reviews.list` 按库缓存，`save`/`remove`/`banks.remove`/`backup.import` 一律失效——同一库在两次写之间只打一次 `GET /api/banks/{id}/reviews`，避免高频 render 逐次打 REST。
+- **api 模式缓存与热路径（已实现）**：`api-adapter.reviews.list` 按库缓存，`save`/`remove`/`banks.remove`/`backup.import` 一律失效；`reviews.record` 成功后缓存刚提交的 map。权重仓同样缓存（`write` 后命中、`remove`/`banks.remove`/`backup.import` 失效）。实测作答写路径由「GET reviews + GET weights + PUT reviews + POST revlog」收敛为首次 3 请求、热态/批量 1 请求（错误题额外 1 条错题记录）。多端写入可能读到旧缓存，属单用户参考实现已知限制。
 
 ## 10. API 与测试
 

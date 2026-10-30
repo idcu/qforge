@@ -28,7 +28,7 @@ section('契约表结构');
 {
   const groups = Object.keys(QB.CONTRACTS);
   eq(groups.join(','), 'banks,questions,progress,reviews,revlog,weights,backup', '契约含 7 组能力');
-  eq(QB.CONTRACTS.reviews.join(','), 'list,save,remove', 'reviews = 存储原语三方法');
+  eq(QB.CONTRACTS.reviews.join(','), 'list,save,remove,record', 'reviews = 存储原语 + 作答热路径 record');
   eq(QB.CONTRACTS.revlog.join(','), 'list,append', 'revlog = list/append');
   eq(QB.CONTRACTS.weights.join(','), 'read,write,remove', 'weights = read/write/remove');
   eq(QB.CONTRACTS.backup.join(','), 'export,import', 'backup = export/import');
@@ -65,6 +65,20 @@ section('reviews 仓库（本地）');
   eq((await QB.SRSStore.getState(b, { contentHash: 'hash1' })).stability, 2.3065, '仓库与领域模块同源（readMap 经 DB.reviews.list）');
   QB.DB.reviews.remove(b);
   eq(JSON.stringify(QB.DB.reviews.list(b)), '{}', 'remove 后回到空 map');
+
+  // record：一次调用同时落调度状态与评分日志（作答热路径）
+  const rb = 'ct-bank-record';
+  QB.Storage.remove(QB.KEYS.review(rb));
+  QB.Storage.remove(QB.KEYS.revlog);
+  const map2 = { hash2: { algo: 'fsrs', stability: 3.1 } };
+  const rec = QB.DB.reviews.record(rb, map2, [{ t: 200, h: 'hash2', r: 3, b: rb }]);
+  eq(QB.DB.reviews.list(rb).hash2.stability, 3.1, 'record 落调度状态（与 save 同源）');
+  eq(QB.DB.revlog.list().length, 1, 'record 同时追加评分日志');
+  eq(QB.DB.revlog.list()[0].b, rb, 'record 保留日志题库归属');
+  eq(rec.logged, 1, 'record 返回 logged 条数');
+  eq(rec.saved, 1, 'record 返回 saved 状态数');
+  QB.DB.reviews.remove(rb);
+  QB.Storage.remove(QB.KEYS.revlog);
 }
 
 section('revlog 仓库（本地，委托 fsrs-opt）');
