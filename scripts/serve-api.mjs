@@ -493,13 +493,74 @@ function bearerToken(req) {
   return m ? m[1] : '';
 }
 
+/**
+ * 限流配置归一：默认 1200 次/分钟/IP（单用户正常使用远低于该值；公开部署防暴力探测/滥用），
+ * `RATE_LIMIT_MAX=0` 可关闭。`trustProxy` 仅在可信反向代理后开启，否则可伪造 X-Forwarded-For。
+ */
+function normalizeRateLimit(input) {
+  if (input === false) return { max: 0, windowMs: 60000, trustProxy: false };
+  const o = input && typeof input === 'object' ? input : {};
+  const rawMax = o.max == null
+    ? (process.env.RATE_LIMIT_MAX == null ? 1200 : process.env.RATE_LIMIT_MAX)
+    : o.max;
+  const rawWindow = o.windowMs == null
+    ? (process.env.RATE_LIMIT_WINDOW_MS == null ? 60000 : process.env.RATE_LIMIT_WINDOW_MS)
+    : o.windowMs;
+  return {
+    max: Math.max(0, Math.floor(Number(rawMax) || 0)),
+    windowMs: Math.max(1000, Math.floor(Number(rawWindow) || 60000)),
+    trustProxy: o.trustProxy == null ? process.env.TRUST_PROXY === '1' : !!o.trustProxy
+  };
+}
+
+function clientKey(req, trustProxy) {
+  if (trustProxy && req.headers && req.headers['x-forwarded-for']) {
+    return String(req.headers['x-forwarded-for']).split(',')[0].trim() || 'unknown';
+  }
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
 export function createHandler(opts) {
   const store = opts.store;
   const root = opts.root || ROOT;
   // 可选共享令牌：空 = 不启用鉴权（默认，旧部署零影响）；启用后仅保护 /api/*，静态文件仍公开
   const apiToken = opts.token == null ? (process.env.API_TOKEN || '') : opts.token;
+  const rateCfg = normalizeRateLimit(opts.rateLimit);
+  const rateBuckets = new Map();
+  const nowMs = typeof opts.now === 'function' ? opts.now : Date.now;
+
+  /** 固定窗口按 IP 限流；返回 false 表示已应答 429。仅作用于 /api/*，静态与 /health 不受影响。 */
+  function applyRateLimit(req, res) {
+    if (rateCfg.max <= 0) return true;
+    const rawNow = Number(nowMs());
+    const t = Number.isFinite(rawNow) ? rawNow : Date.now();
+    const key = clientKey(req, rateCfg.trustProxy);
+    let b = rateBuckets.get(key);
+    if (!b || t >= b.resetAt) {
+      b = { count: 0, resetAt: t + rateCfg.windowMs };
+      rateBuckets.set(key, b);
+    }
+    b.count += 1;
+    if (rateBuckets.size > 10000) {
+      for (const [k, v] of rateBuckets) if (t >= v.resetAt) rateBuckets.delete(k);
+    }
+    const remaining = Math.max(0, rateCfg.max - b.count);
+    res.setHeader('X-RateLimit-Limit', String(rateCfg.max));
+    res.setHeader('X-RateLimit-Remaining', String(remaining));
+    res.setHeader('X-RateLimit-Reset', String(Math.ceil(b.resetAt / 1000)));
+    if (b.count > rateCfg.max) {
+      const retry = Math.max(1, Math.ceil((b.resetAt - t) / 1000));
+      res.setHeader('Retry-After', String(retry));
+      json(res, 429, {
+        error: { code: 'RATE_LIMITED', message: '请求过于频繁，请在 ' + retry + ' 秒后重试' }
+      });
+      return false;
+    }
+    return true;
+  }
 
   async function api(req, res, url, segs) {
+    if (!applyRateLimit(req, res)) return;
     if (apiToken && !tokenMatches(bearerToken(req), apiToken)) {
       res.setHeader('WWW-Authenticate', 'Bearer');
       return json(res, 401, { error: { code: 'UNAUTHORIZED', message: '需要有效的 API 令牌（Authorization: Bearer <token>）' } });
@@ -750,7 +811,9 @@ export function createServer(options) {
     store: store,
     root: options.root || ROOT,
     corsOrigin: options.corsOrigin == null ? (process.env.CORS_ORIGIN || '') : options.corsOrigin,
-    token: options.token == null ? (process.env.API_TOKEN || '') : options.token
+    token: options.token == null ? (process.env.API_TOKEN || '') : options.token,
+    rateLimit: options.rateLimit,
+    now: options.now
   });
   const server = http.createServer(handler);
   // Node 默认 keepAliveTimeout=5s 明显短于浏览器复用空闲 socket 的预期：空闲 >5s 后浏览器

@@ -78,6 +78,60 @@ section('后端：CORS 显式放行（默认关闭）');
   await corsSrv.close();
 }
 
+section('后端：按 IP 限流（默认开启，可配/可关）');
+{
+  const clock = { t: 0 };
+  const rlSrv = await createServer({
+    port: 0, dataDir: tmpDir(),
+    rateLimit: { max: 2, windowMs: 1000 },
+    now: () => clock.t
+  });
+  const rlBase = 'http://127.0.0.1:' + rlSrv.port;
+  const r1 = await fetch(rlBase + '/api/banks');
+  eq(r1.status, 200, '限流窗口内第 1 次请求 200');
+  eq(r1.headers.get('x-ratelimit-limit'), '2', '响应带 X-RateLimit-Limit');
+  eq(r1.headers.get('x-ratelimit-remaining'), '1', '第 1 次后剩余 1');
+  const r2 = await fetch(rlBase + '/api/banks');
+  eq(r2.status, 200, '第 2 次请求 200');
+  eq(r2.headers.get('x-ratelimit-remaining'), '0', '第 2 次后剩余 0');
+  const r3 = await fetch(rlBase + '/api/banks');
+  eq(r3.status, 429, '超过上限 → 429');
+  eq(r3.headers.get('retry-after'), '1', '429 带 Retry-After');
+  eq(r3.headers.get('x-ratelimit-remaining'), '0', '429 剩余为 0');
+  const r3Body = await r3.json();
+  eq(r3Body.error.code, 'RATE_LIMITED', '429 错误码 RATE_LIMITED');
+  eq((await fetch(rlBase + '/index.html')).status, 200, '静态文件不受限流影响');
+  eq((await fetch(rlBase + '/health')).status, 200, '/health 不受限流影响');
+  clock.t = 1100;
+  const r4 = await fetch(rlBase + '/api/banks');
+  eq(r4.status, 200, '窗口重置后恢复 200');
+  eq(r4.headers.get('x-ratelimit-remaining'), '1', '新窗口剩余恢复');
+  await rlSrv.close();
+
+  // 可信代理模式：按 X-Forwarded-For 首段分桶；未开启 trustProxy 时不信任该头
+  const proxySrv = await createServer({
+    port: 0, dataDir: tmpDir(),
+    rateLimit: { max: 1, windowMs: 60000, trustProxy: true }
+  });
+  const proxyBase = 'http://127.0.0.1:' + proxySrv.port;
+  const ipA1 = await fetch(proxyBase + '/api/banks', { headers: { 'X-Forwarded-For': '1.1.1.1' } });
+  eq(ipA1.status, 200, '代理模式：IP A 第 1 次 200');
+  const ipA2 = await fetch(proxyBase + '/api/banks', { headers: { 'X-Forwarded-For': '1.1.1.1' } });
+  eq(ipA2.status, 429, '代理模式：IP A 超限 429');
+  const ipB = await fetch(proxyBase + '/api/banks', { headers: { 'X-Forwarded-For': '2.2.2.2' } });
+  eq(ipB.status, 200, '代理模式：IP B 独立分桶 200');
+  await proxySrv.close();
+
+  // rateLimit:false 关闭限流（默认配置仍可显式关闭）
+  const offSrv = await createServer({ port: 0, dataDir: tmpDir(), rateLimit: false });
+  const offBase = 'http://127.0.0.1:' + offSrv.port;
+  for (let i = 0; i < 3; i++) {
+    eq((await fetch(offBase + '/api/banks')).status, 200, '关闭限流后第 ' + (i + 1) + ' 次仍 200');
+  }
+  eq((await fetch(offBase + '/api/banks')).headers.get('x-ratelimit-limit'), null, '关闭限流后不返回限流头');
+  await offSrv.close();
+}
+
 section('后端：可选 Bearer 令牌鉴权');
 {
   const authSrv = await createServer({ port: 0, dataDir: tmpDir(), token: 's3cr3t' });
@@ -651,6 +705,25 @@ section('api 适配器：Bearer 令牌自动附带与 401 诚实抛出');
   eq(err && err.code, 'UNAUTHORIZED', '错误令牌：错误码 UNAUTHORIZED');
   ok(err && String(err.message).indexOf('API 令牌') >= 0, '错误令牌：消息可读');
   await authSrv.close();
+}
+
+section('api 适配器：429 限流诚实抛出');
+{
+  const ctx = await createHarness(path.resolve(__dirname, '..'));
+  const { QB } = ctx;
+  const rlSrv = await createServer({ port: 0, dataDir: tmpDir(), rateLimit: { max: 1, windowMs: 60000 } });
+  const rlBase = 'http://127.0.0.1:' + rlSrv.port;
+  QB.CONFIG.DATA_BACKEND = 'api';
+  QB.CONFIG.API_BASE_URL = rlBase;
+  QB.ApiAdapter.useFetch((url, opts) => fetch(url, opts));
+  QB.DB.init();
+  eq((await QB.DB.banks.list()).length, 0, '限流窗口内首次请求成功');
+  let err = null;
+  try { await QB.DB.banks.list(); } catch (e) { err = e; }
+  eq(err && err.status, 429, '超限后适配器抛 429');
+  eq(err && err.code, 'RATE_LIMITED', '超限错误码 RATE_LIMITED');
+  ok(err && String(err.message).indexOf('过于频繁') >= 0, '超限消息可读');
+  await rlSrv.close();
 }
 
 console.log('\n================ 汇总 ================');

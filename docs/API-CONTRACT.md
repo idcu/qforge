@@ -15,8 +15,9 @@
 | 幂等 | `PUT` / `DELETE` 幂等；`POST` 非幂等 |
 | CORS | 默认**不放行跨源**（同源部署零配置）；跨源验收需参考后端显式 `CORS_ORIGIN`（逗号分隔来源或 `*`）。放行来源的预检 `OPTIONS` 返回 `204` + `Access-Control-Allow-Origin/Methods/Headers`；未放行来源预检返回 `403`，普通响应不带 ACAO |
 | 请求体上限 | 参考后端默认 32MB（`MAX_BODY_BYTES` 可调），超限返回 `413 PAYLOAD_TOO_LARGE` |
+| 限流 | 参考后端默认 **1200 次/分钟/IP**（`RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` 可调，`RATE_LIMIT_MAX=0` 关闭；`TRUST_PROXY=1` 时按 `X-Forwarded-For` 首段分桶）。仅 `/api/*` 受限，静态文件与 `/health` 不受影响；超限返回 `429 RATE_LIMITED` + `Retry-After` + `X-RateLimit-Limit/Remaining/Reset` |
 
-**HTTP 状态码**：200 成功、201 创建、204 删除成功无返回、400 参数错误、401 未授权（令牌缺失/错误，启用 `API_TOKEN` 时）、404 资源不存在、409 冲突（重复/版本过期）、413 请求体过大、422 校验失败、500 服务端错误。**静态文件路径含 `..` / 畸形编码 / NUL 一律 `403`**（参考后端与 `scripts/lib/static-server.mjs` 同一守卫）。参考后端与开发静态服务对静态资源统一附加安全头：HTML 带 `Content-Security-Policy`（策略源 `scripts/lib/security-headers.mjs`，含 `frame-ancestors 'none'`）与 `X-Frame-Options: DENY`；所有静态响应带 `X-Content-Type-Options: nosniff` 与 `Referrer-Policy: same-origin`；非 HTML 不加 CSP。
+**HTTP 状态码**：200 成功、201 创建、204 删除成功无返回、400 参数错误、401 未授权（令牌缺失/错误，启用 `API_TOKEN` 时）、404 资源不存在、409 冲突（重复/版本过期）、413 请求体过大、422 校验失败、429 请求过于频繁（超出限流）、500 服务端错误。**静态文件路径含 `..` / 畸形编码 / NUL 一律 `403`**（参考后端与 `scripts/lib/static-server.mjs` 同一守卫）。参考后端与开发静态服务对静态资源统一附加安全头：HTML 带 `Content-Security-Policy`（策略源 `scripts/lib/security-headers.mjs`，含 `frame-ancestors 'none'`）与 `X-Frame-Options: DENY`；所有静态响应带 `X-Content-Type-Options: nosniff` 与 `Referrer-Policy: same-origin`；非 HTML 不加 CSP。
 
 ## 2. 资源：题库（Banks）
 
