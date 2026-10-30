@@ -8,6 +8,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolveSafePath } from './lib/static-server.mjs';
+import { CSP, securityHeaders } from './lib/security-headers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -15,6 +16,7 @@ const ROOT = path.resolve(__dirname, '..');
 let pass = 0;
 const failures = [];
 function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); } }
+function eq2(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
 function section(t) { console.log('\n== ' + t + ' =='); }
 
 section('正常路径');
@@ -46,6 +48,21 @@ section('含 .. 的路径一律拒绝（与目标是否存在无关）');
   const tricky = '/../../' + path.basename(ROOT) + '/index.html';
   ok(fs.existsSync(path.join(ROOT, 'index.html')), '前提：index.html 真实存在');
   ok(resolveSafePath(ROOT, tricky) === null, '含 .. 的路径即使归一后落在 root 内也拒绝（' + tricky + '）');
+}
+
+section('安全响应头（与 index.html meta CSP 同源）');
+{
+  const html = securityHeaders('index.html');
+  eq2(html['Content-Security-Policy'], CSP + "; frame-ancestors 'none'", 'HTML 响应 CSP = 共享策略 + frame-ancestors');
+  eq2(html['X-Frame-Options'], 'DENY', 'HTML 禁止被嵌套（X-Frame-Options）');
+  eq2(html['X-Content-Type-Options'], 'nosniff', '所有响应带 nosniff');
+  eq2(html['Referrer-Policy'], 'same-origin', '所有响应带 Referrer-Policy');
+  const js = securityHeaders('js/app.js');
+  ok(!('Content-Security-Policy' in js), '非 HTML 响应不带 CSP（避免误伤二进制/静态资源）');
+  eq2(js['X-Content-Type-Options'], 'nosniff', '非 HTML 仍有 nosniff');
+  const notFound = securityHeaders('');
+  ok(!('Content-Security-Policy' in notFound), '404（空路径）不带 CSP');
+  ok(!('X-Frame-Options' in notFound), '404（空路径）不带 X-Frame-Options');
 }
 
 console.log('\n================ 汇总 ================');

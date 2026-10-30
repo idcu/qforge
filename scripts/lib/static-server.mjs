@@ -5,6 +5,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { securityHeaders } from './security-headers.mjs';
 
 /** 扩展名 → Content-Type（静态资源） */
 export const MIME = {
@@ -52,14 +53,14 @@ export function resolveSafePath(root, urlPath) {
 export function sendFile(res, filePath, urlPath) {
   fs.readFile(filePath, (err, data) => {
     if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.writeHead(404, Object.assign({ 'Content-Type': 'text/plain; charset=utf-8' }, securityHeaders('')));
       res.end('404 Not Found: ' + (urlPath || filePath));
       return;
     }
-    res.writeHead(200, {
+    res.writeHead(200, Object.assign({
       'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
       'Cache-Control': 'no-store'
-    });
+    }, securityHeaders(filePath)));
     res.end(data);
   });
 }

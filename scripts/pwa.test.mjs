@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CSP } from './lib/security-headers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -115,6 +116,34 @@ section('PWA 图标：192/512 位图（安装条件）');
   ok(manifest.icons.some((i) => String(i.purpose || '').indexOf('maskable') >= 0), 'manifest 含 maskable 图标');
   ok(indexHtml.indexOf('rel="apple-touch-icon" href="icons/icon-192.png"') >= 0, 'apple-touch-icon 指向 192 PNG');
   ok(sw.indexOf('./icons/icon-192.png') >= 0 && sw.indexOf('./icons/icon-512.png') >= 0, 'SW CORE 预缓存两种 PNG 图标');
+}
+
+section('内容安全策略（CSP，静态站基线）');
+{
+  const metaRe = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"\s*\/?>/i;
+  const m = metaRe.exec(index);
+  ok(!!m, 'index.html 含 CSP meta');
+  eq(m ? m[1] : '', CSP, 'meta CSP 与 scripts/lib/security-headers.mjs 逐字符一致');
+  const metaAt = m ? m.index : -1;
+  const cssAt = index.indexOf('<link rel="stylesheet"');
+  const scriptAt = index.search(/<script\b/);
+  ok(metaAt > 0 && cssAt > metaAt, 'CSP meta 在样式表之前（先于资源加载生效）');
+  ok(metaAt > 0 && scriptAt > metaAt, 'CSP meta 在首个 <script> 之前');
+  const policy = m ? m[1] : '';
+  ok(/script-src 'self' file:/.test(policy), "script-src 仅 'self' + file:（双击直开兼容）");
+  ok(!/script-src[^;]*'unsafe-inline'/.test(policy), 'script-src 不含 unsafe-inline');
+  ok(!/'unsafe-eval'/.test(policy), '不含 unsafe-eval');
+  ok(/style-src 'self' 'unsafe-inline' file:/.test(policy), "style-src 允许内联样式（渲染层 style=\"...\"）");
+  ok(/img-src 'self' data: blob: file:/.test(policy), 'img-src 放行 data:/blob:/file:（IndexedDB 资产与双击直开）');
+  ok(/connect-src 'self' http: https: file:/.test(policy), 'connect-src 放行 http(s)/file:（可配置后端/WebDAV/URL 导入）');
+  ok(/default-src 'self' file:/.test(policy) && /worker-src 'self' file:/.test(policy), 'default-src/worker-src 含 file:（file:// 脚本/Worker 可加载）');
+  ok(/object-src 'none'/.test(policy) && /base-uri 'self'/.test(policy) && /form-action 'self'/.test(policy),
+    'object-src/base-uri/form-action 收紧');
+  ok(!/frame-ancestors/.test(policy), 'meta 不写 frame-ancestors（浏览器忽略，改由 HTTP 头提供）');
+  const inlineScriptRe = /<script\b(?![^>]*\bsrc=)[^>]*>/i;
+  ok(!inlineScriptRe.test(index), 'index.html 无内联 <script>（script-src self 不会误伤）');
+  const badSrcRe = /<script\s+src="(?:https?:)?\/\//i;
+  ok(!badSrcRe.test(index), '所有脚本为同源相对路径（无跨源 script）');
 }
 
 console.log('\n================ 汇总 ================');

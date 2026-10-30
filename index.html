@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- CSP：与 scripts/lib/security-headers.mjs 的 CSP 逐字符一致（pwa.test 比对）；本页无内联脚本 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' 'unsafe-inline' file:; img-src 'self' data: blob: file:; font-src 'self' data: file:; connect-src 'self' http: https: file:; worker-src 'self' file:; media-src 'self' blob: file:; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <title>淬题 qforge</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <meta name="theme-color" content="#0fae6a" />

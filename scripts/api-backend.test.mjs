@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
 import { createServer } from './serve-api.mjs';
+import { CSP } from './lib/security-headers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,7 +36,7 @@ const req = async (method, p, body, headers) => {
   });
   const type = res.headers.get('content-type') || '';
   const payload = type.indexOf('application/json') === 0 ? await res.json() : await res.arrayBuffer();
-  return { status: res.status, body: payload, type: type };
+  return { status: res.status, body: payload, type: type, headers: res.headers };
 };
 
 section('后端：健康检查与静态文件');
@@ -46,6 +47,13 @@ section('后端：健康检查与静态文件');
   const idx = await req('GET', '/index.html');
   eq(idx.status, 200, '静态文件仍可服务（index.html 200）');
   ok(String(idx.type).indexOf('text/html') === 0, '静态响应 Content-Type 为 html');
+  eq(idx.headers.get('content-security-policy'), CSP + "; frame-ancestors 'none'", 'HTML 响应带 CSP（含 frame-ancestors）');
+  eq(idx.headers.get('x-frame-options'), 'DENY', 'HTML 响应禁止被嵌套');
+  eq(idx.headers.get('x-content-type-options'), 'nosniff', 'HTML 响应带 nosniff');
+  eq(idx.headers.get('referrer-policy'), 'same-origin', 'HTML 响应带 Referrer-Policy');
+  const jsFile = await req('GET', '/js/app.js');
+  eq(jsFile.headers.get('content-security-policy'), null, 'JS 静态响应不带 CSP');
+  eq(jsFile.headers.get('x-content-type-options'), 'nosniff', 'JS 静态响应仍带 nosniff');
   const trav = await req('GET', '/..%2f..%2f..%2fetc%2fpasswd');
   eq(trav.status, 403, '路径穿越被拒绝（403）');
 }
