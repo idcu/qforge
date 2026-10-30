@@ -14,6 +14,40 @@
 
 ---
 
+## 419d65b · fix(exam): 答题头显示倒计时 + 旧会话 remainingMs 回退
+
+**问题（用户反馈）**
+- 考试倒计时仍未显示。根因：`renderQuizRegions` 早已支持 `opts.timerText`，但 `app.render` 调用时
+  **从未传入 `State.timerText`**；倒计时只更新顶栏 `status-extra`，答题头 `q-score` 始终没有时间。
+- 旧版考试会话可能只有 `startedAt`、没有 `deadlineAt`；此前回退用整段 `durationMs` 重新计时。
+
+**核心改动**
+- 显示：`app.render` → `renderQuizRegions({timerText: State.timerText})`；`q-score` 内新增
+  `<span id="quiz-timer">`；`updateStatus` 每秒同步更新 `#quiz-timer` 与顶栏（不整块重建）。
+- 旧会话：新增 `QuizEngine.remainingMs(now)` 唯一口径——`deadlineAt` > `startedAt+durationMs` >
+  极旧会话整段回退；`restore` 在只有 `startedAt`、无 `deadlineAt` 时推导截止时间；
+  `maybeResume` 对无任何时间戳的极旧会话给出「按整段重新计时」提示；`startExamTimer` 改用 `remainingMs()`。
+- 文档同提交：README/ARCHITECTURE/user-guide/DEVELOPMENT。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3504/3504** 通过，0 失败，**23.8s**。
+  smoke 651→**658**（remainingMs 截止计算/旧会话推导/极旧整段回退 7 项）；
+  ui 151→**153**（`#quiz-timer` 有 timerText 显示/无则不渲染 2 项）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.66ms、
+  按需单页 0.21ms、单题 update 0.21ms、heapUsed +2.70MB ≤ 40MB。
+- 未做真实浏览器验收：本轮只有逻辑/HTML/计时口径断言，答题头倒计时真机显示仍需补验（不声称通过）。
+
+**公共抽象清单（新增/调整）**
+- 新增 `QuizEngine.remainingMs(now)`（考试剩余时间唯一口径）。
+- `UIRenderer` 答题头新增 `#quiz-timer`；`app.updateStatus` 同时更新答题头与顶栏。
+- 影响范围：考试计时/恢复、练习正计时显示；会话结构与交卷语义不变。
+
+**TODO/风险**
+- 极旧会话既无 `startedAt` 也无 `deadlineAt` 时只能按整段重新计时（已明确提示，无法还原真实剩余）。
+- 真机刷新/倒计时显示尚未验收；api 模式 pagehide 写入仍为尽力而为。
+
+---
+
 ## 4e64da8 · fix(exam): 刷新/切后台恢复考试，倒计时按持久化截止时间继续
 
 **问题（用户反馈）**
