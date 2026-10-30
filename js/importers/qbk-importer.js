@@ -26,7 +26,9 @@
       questions: jsonRes.questions,
       warnings: warnings,
       format: 'qbk',
-      assetCount: ids.length
+      assetCount: ids.length,
+      // 透传内容校验和（JSON 导入器已复核）；预览展示「一致/不一致」
+      meta: jsonRes.meta || null
     };
   }
 

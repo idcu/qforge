@@ -329,6 +329,17 @@ section('结果页：未作答与待自评分开计数（回归）');
   ok(mhtml.indexOf('得分 10/10') >= 0, '材料小问显示得分/满分');
 }
 
+section('导入预览：内容校验和行（P4）');
+{
+  eq(UI.renderImportChecksum(null), '', '无校验和 meta 不渲染');
+  const okHtml = UI.renderImportChecksum({ checksum: 'abcd1234', checksumOk: true });
+  ok(okHtml.indexOf('data-import-checksum="ok"') >= 0, '校验和一致渲染 ok 状态');
+  ok(okHtml.indexOf('abcd1234') >= 0 && okHtml.indexOf('一致') >= 0, '展示校验和与「一致」');
+  const bad = UI.renderImportChecksum({ checksum: 'deadbeef', checksumOk: false });
+  ok(bad.indexOf('data-import-checksum="mismatch"') >= 0, '校验和不一致渲染 mismatch');
+  ok(bad.indexOf('可能被修改或传输损坏') >= 0, '不一致给出风险说明');
+}
+
 section('复习计划卡 / 难卡标记 / 本题历史（P2）');
 {
   const plan = UI.renderReviewPlan({

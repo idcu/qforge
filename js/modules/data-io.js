@@ -45,6 +45,7 @@
       UI.openModal(
         '<h3>导入预览</h3>' +
         '<div class="li-meta">目标题库：' + QB.escapeHtml(bank.name) + '　格式：' + QB.escapeHtml(result.format) + '</div>' +
+        UI.renderImportChecksum(result.meta) +
         '<table class="preview-table"><thead><tr><th>题型</th><th>数量</th></tr></thead>' +
         '<tbody>' + rows +
         '<tr><td><b>合计</b></td><td><b>' + (stats.total || 0) + '</b></td></tr>' +

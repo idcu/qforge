@@ -171,6 +171,9 @@ section('导出器 qbk 格式');
   const back = JSON.parse(parsed.text);
   eq(back.questions[0].question, question.question, '占位标记随 JSON 往返保留');
   eq(parsed.assets[0].id, imgId, '导出包资产 id 一致');
+  ok(typeof back.checksum === 'string' && back.checksum.length === 8, 'qbk bank.json 含内容校验和（P4）');
+  const qres = await QB.QbkImporter.parse({ arrayBuffer: built.content, fileName: 'c.qbk' });
+  eq(qres.meta.checksumOk, true, 'qbk 导入：校验和一致（P4）');
 
   let threw = false;
   try { QB.Exporters.buildContent('qbk', payload); } catch (e) { threw = true; }

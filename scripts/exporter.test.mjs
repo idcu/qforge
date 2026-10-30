@@ -339,6 +339,13 @@ eq(matJsonRt.questions[0].material, '共享材料正文', '材料 JSON 往返：
 eq(matJsonRt.questions[0].children[0].score, 25, '材料 JSON 往返：小问分值保留（M4）');
 eq(QB.makeContentHash(matJsonRt.questions[0]), QB.makeContentHash(matQ), '材料 JSON 往返：hash 相等');
 eq(QB.Exporters._toPlain(matQ, null).children[0].score, 25, '材料导出 toPlain：小问分值输出');
+// 内容校验和（P4）：导出带 checksum，未修改导入通过；篡改后警告
+ok(matJson.indexOf('"checksum"') >= 0, 'JSON 导出：含内容校验和');
+eq(matJsonRt.meta.checksumOk, true, 'JSON 导入：校验和一致');
+const tamperedText = matJson.replace('"小问一"', '"小问一改"');
+const tampered = await QB.JsonImporter.parse({ text: tamperedText, fileName: 'tampered.json' });
+eq(tampered.meta.checksumOk, false, 'JSON 导入：篡改后校验和不一致');
+ok(tampered.warnings.some((w) => w.indexOf('校验和不一致') >= 0), 'JSON 导入：篡改后给出警告');
 
 /* ================= 9.5 历史记录导出（非题集） ================= */
 section('历史记录导出');

@@ -17,7 +17,18 @@
       throw new Error('JSON 解析失败：' + e.message);
     }
     const res = QB.Adapters.sniffAndAdapt(json);
-    return { questions: res.questions, warnings: res.warnings || [], format: 'json/' + res.format };
+    const outWarnings = (res.warnings || []).slice();
+    // 本系统导出的 JSON/qbk 带 checksum：复核 questions 规范化 JSON，失败只警告不阻断（诚实提示）
+    const meta = { checksum: '', checksumOk: null };
+    if (json && typeof json.checksum === 'string' && Array.isArray(json.questions) && QB.Source && QB.Source.checksumText) {
+      const actual = QB.Source.checksumText(JSON.stringify(json.questions));
+      meta.checksum = json.checksum;
+      meta.checksumOk = actual === json.checksum;
+      if (!meta.checksumOk) {
+        outWarnings.push('内容校验和不一致：文件可能被修改或传输损坏（导出 ' + json.checksum + '，实际 ' + actual + '）');
+      }
+    }
+    return { questions: res.questions, warnings: outWarnings, format: 'json/' + res.format, meta: meta };
   }
 
   QB.JsonImporter = { parse: parse, exts: ['json'] };

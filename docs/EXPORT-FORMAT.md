@@ -38,6 +38,7 @@
   "exportedAt": "2026-10-13T10:00:00.000Z",
   "kind": "bank | wrong | favorites",
   "bank": { "name": "…", "description": "", "category": "" },
+  "checksum": "ab12cd34",
   "questions": [
     { "type": "single", "question": "…", "options": [{"letter":"A","text":"…"}],
       "answer": "B", "blanks": [], "reference_answer": "",
@@ -52,6 +53,7 @@
   ]
 }
 ```
+> **内容校验和（P4）**：`checksum` 对 `questions` 的规范化 JSON 计算 FNV-1a 32 位（8 位十六进制）；导出→导入时核对，不一致给警告并在预览展示。仅用于检测传输损坏/手工误改，**不是密码学签名**，不防恶意重算。
 > 错题导出时题目附带 `wrongCount`（再导入时被适配器忽略，不影响题面）。
 > 材料题（`type=material`）以 `material` + `children` **嵌套**导出（M1 起），JSON/.qbk 全字段无损；小问题目复用各题型字段，但不携带 `category/difficulty/tags`（继承父题，见 [SPEC-material.md](SPEC-material.md) §2.1）。
 
@@ -172,7 +174,7 @@ QB.Exporters.openFlow({ kind, bank })
 
 ## 7. 测试
 
-- `scripts/exporter.test.mjs`：导出功能单元测试（**195** 项断言），覆盖六题型、CSV 转义、BOM、JSON/CSV/MD 往返、错题 wrongCount、收藏、乱序隔离、**材料题五格式分流与 18/19 列多行块往返（M2/M4，23 项）**、**材料题 JSON 嵌套 material+children 往返（6 项）**、**历史记录四格式（11 列/半对/切出/用时小数/格式白名单拒绝）**、注册表异常。
+- `scripts/exporter.test.mjs`：导出功能单元测试（**199** 项断言），覆盖六题型、CSV 转义、BOM、JSON/CSV/MD 往返、错题 wrongCount、收藏、乱序隔离、**材料题五格式分流与 18/19 列多行块往返（M2/M4，23 项）**、**材料题 JSON 嵌套 material+children 往返（6 项）**、**JSON 内容校验和（导出/一致/篡改警告，4 项）**、**历史记录四格式（11 列/半对/切出/用时小数/格式白名单拒绝）**、注册表异常。
 - `scripts/office-export.test.mjs`：xlsx/docx 二进制导出专项（**1148** 项断言）：CRC32 标准向量、ZIP 部件、表格/文档行往返、538 题两种格式全量判分自洽、错题 17 列、可复现打包、openpyxl 已独立验证可打开（539 行 × 16 列）。
-- `scripts/smoke-test.mjs`：含 538 题真实数据的 JSON/CSV/Markdown 全量往返断言与 xlsx/docx 二进制结构断言；§2.9/§2.10 为材料题 MD/DOCX/TXT 与 CSV/XLSX 往返黄金断言；M4 新增小问乱序/子问分值 22 项（**637** 项）。
+- `scripts/smoke-test.mjs`：含 538 题真实数据的 JSON/CSV/Markdown 全量往返断言与 xlsx/docx 二进制结构断言；§2.9/§2.10 为材料题 MD/DOCX/TXT 与 CSV/XLSX 往返黄金断言；M4 新增小问乱序/子问分值 22 项、填空空位/答案数不一致 9 项（**646** 项）。
 - 真实桌面 Office（Word/Excel 客户端）的打开验证不在自动化范围（本机无 GUI 环境），结构对齐 OOXML 最小集且经 Python openpyxl/zipfile 校验，已在本文件如实标注。

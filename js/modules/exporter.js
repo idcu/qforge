@@ -127,6 +127,9 @@
       bank: { name: payload.bank.name, description: payload.bank.description || '', category: payload.bank.category || '' },
       questions: payload.entries.map((e) => toPlain(e.question, e.meta))
     };
+    // 内容校验和（P4）：对 questions 规范化 JSON 计算 FNV-1a；导入端复核，发现修改/损坏时警告。
+    // 注意：这是完整性校验，不是密码学签名；可检测传输损坏/手工误改，不防恶意重算。
+    if (QB.Source && QB.Source.checksumText) out.checksum = QB.Source.checksumText(JSON.stringify(out.questions));
     return JSON.stringify(out, null, 2);
   }
 

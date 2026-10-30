@@ -111,6 +111,21 @@ eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: '训练集' }, { answer: '�
 eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: 'def', accept: ['Def', 'DEF'] }] }, ['DEF']).isCorrect, true, '填空：备选答案命中');
 eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: 'def' }] }, ['']).isCorrect, false, '填空：空答案判错');
 eq(QB.judgeAnswer({ type: 'essay', reference_answer: '开放答案' }, '任意作答').isCorrect, null, '简答：返回 null 待自评');
+// 填空空位/答案数量不一致：按较大值保留并警告（旧实现会静默截断答案）
+{
+  const short = QB.Adapters.toStandard({ type: 'fill', question: '____ 与 ____', answer: '甲' });
+  eq(short.question.blanks.length, 2, '填空：2 个空位仅 1 个答案 → 保留 2 空');
+  eq(short.question.blanks[0].answer, '甲', '填空：第 1 空答案保留');
+  eq(short.question.blanks[1].answer, '', '填空：缺失答案补为空');
+  ok(short.warnings.some((w) => w.indexOf('空位 2 个、答案 1 个不一致') >= 0), '填空：数量不一致给警告');
+  const long = QB.Adapters.toStandard({ type: 'fill', question: '____', answer: '甲；乙；丙' });
+  eq(long.question.blanks.length, 3, '填空：1 个空位 3 个答案 → 保留 3 空（不丢答案）');
+  eq(long.question.blanks[2].answer, '丙', '填空：第 3 个答案保留');
+  ok(long.warnings.some((w) => w.indexOf('空位 1 个、答案 3 个不一致') >= 0), '填空：答案多于空位也警告');
+  const same = QB.Adapters.toStandard({ type: 'fill', question: '____ 与 ____', answer: '甲；乙' });
+  ok(!same.warnings.some((w) => w.indexOf('不一致') >= 0), '填空：数量一致无警告');
+  eq(QB.Adapters.splitFillAnswers('甲；乙、丙|丁').length, 4, 'splitFillAnswers 统一分隔规则');
+}
 
 /* ================= 2. contentHash 去重键 ================= */
 section('contentHash 去重键');

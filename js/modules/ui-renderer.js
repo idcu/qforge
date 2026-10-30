@@ -734,6 +734,14 @@
       '</div></div>';
   }
 
+  /** 导入预览的内容校验和行（meta 来自 JSON/qbk 导入器；无校验和返回空） */
+  function renderImportChecksum(meta) {
+    if (!meta || !meta.checksum) return '';
+    const ok = meta.checksumOk !== false;
+    return '<div class="li-meta" data-import-checksum="' + (ok ? 'ok' : 'mismatch') + '">内容校验和 <code>' +
+      esc(meta.checksum) + '</code> · ' + (ok ? '一致' : '不一致（文件可能被修改或传输损坏）') + '</div>';
+  }
+
   /**
    * 今日复习计划卡（统计页）：展示当前限额与本次队列构成，入口「调整复习设置」。
    * @param {{bank:Object, settings:Object, counts?:Object}} plan
@@ -1055,7 +1063,7 @@
     renderHistoryListRegions, renderSearchRegions,
     renderAnswerText, emptyState, progressBar,
     renderMixDialog, renderStartDialog,
-    renderReviewHistory, renderReviewPlan,
+    renderReviewHistory, renderReviewPlan, renderImportChecksum,
     toast, openModal, closeModal, confirmDialog
   };
   QB.UIRenderer.LIST_PAGE_SIZE = LIST_PAGE_SIZE;

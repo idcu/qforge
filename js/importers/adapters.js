@@ -209,7 +209,23 @@
     return String(answer === undefined || answer === null ? '' : answer).trim();
   }
 
-  /** 解析填空题各空 */
+  /** 填空题答案分段（公共：解析与不一致警告共用同一分隔规则） */
+  function splitFillAnswers(answer) {
+    return Array.isArray(answer)
+      ? answer.map(String).map((s) => s.trim()).filter(Boolean)
+      : String(answer || '').split(/[；;|、]/).map((s) => s.trim()).filter(Boolean);
+  }
+
+  /** 题干空位标记数（公共：与 BLANK_MARKER 唯一口径） */
+  function countBlankMarkers(questionText) {
+    return (String(questionText || '').match(BLANK_MARKER) || []).length;
+  }
+
+  /**
+   * 解析填空题各空。
+   * 空位数与答案数不一致时取**较大值**（旧实现取题干标记数或答案数之一，会静默丢答案/空位）；
+   * 不一致由 toStandard 给出警告，由用户核对。
+   */
   function parseBlanks(raw, questionText, answer) {
     if (Array.isArray(raw.blanks) && raw.blanks.length) {
       return raw.blanks.map((b) => {
@@ -223,13 +239,11 @@
         return { answer: String(b || '').trim(), accept: [], hint: '' };
       });
     }
-    // 从 answer 推导
-    const parts = Array.isArray(answer)
-      ? answer.map(String)
-      : String(answer || '').split(/[；;|、]/).map((s) => s.trim()).filter(Boolean);
-    const markerCount = (String(questionText || '').match(BLANK_MARKER) || []).length || parts.length || 1;
+    const parts = splitFillAnswers(answer);
+    const markerCount = countBlankMarkers(questionText);
+    const total = Math.max(markerCount, parts.length, 1);
     const blanks = [];
-    for (let i = 0; i < markerCount; i++) {
+    for (let i = 0; i < total; i++) {
       blanks.push({ answer: parts[i] !== undefined ? parts[i] : '', accept: [], hint: '' });
     }
     return blanks;
@@ -291,6 +305,15 @@
     } else if (type === 'fill') {
       item.blanks = parseBlanks(raw, stem, answer);
       item.answer = item.blanks.map((b) => b.answer).join('；');
+      // 空位与答案数不一致：按较大值保留，但必须提示（旧实现会静默截断答案）
+      if (!Array.isArray(raw.blanks) || !raw.blanks.length) {
+        const markerCount = countBlankMarkers(stem);
+        const answerCount = splitFillAnswers(answer).length;
+        if (markerCount && answerCount && markerCount !== answerCount) {
+          warnings.push('填空题干空位 ' + markerCount + ' 个、答案 ' + answerCount +
+            ' 个不一致，已按较大值保留（请核对）：' + stem.slice(0, 20));
+        }
+      }
       if (!item.blanks.some((b) => b.answer)) warnings.push('缺少填空答案：' + stem.slice(0, 20));
     } else if (type === 'essay') {
       item.reference_answer = String(firstOf(raw.reference_answer, raw.参考答案, raw.答案, answer, '')).trim();
@@ -651,6 +674,8 @@
     parseOptions,
     normalizeJudgeAnswer,
     parseBlanks,
+    splitFillAnswers,
+    countBlankMarkers,
     toStandard,
     sniffAndAdapt,
     adaptArray,
