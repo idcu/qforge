@@ -14,6 +14,40 @@
 
 ---
 
+## 854bdbb · feat(import,export): 内容校验和 + fix(import): 填空空位/答案不一致不再截断
+
+**核心改动**
+- 导出：JSON/.qbk 的 `questions` 规范化 JSON 计算 FNV-1a 32 位校验和，写入顶层 `checksum`
+  （复用 `QB.Source.checksumText`）；仅完整性检测，非密码学签名。
+- 导入：`JsonImporter` 复核 checksum，返回 `meta {checksum, checksumOk}`，不一致追加警告但不阻断；
+  `QbkImporter` 透传 meta；`UIRenderer.renderImportChecksum` 在导入预览显示「一致/不一致」。
+- 填空：`parseBlanks` 改为 `max(题干空位数, 答案分段数, 1)`，旧实现会静默丢弃多余答案/空位；
+  `toStandard` 数量不一致时警告。新增公共 `Adapters.splitFillAnswers/countBlankMarkers`，
+  解析与警告共用同一分隔/计数口径。
+- 文档同提交：README/DEVELOPMENT/EXPORT-FORMAT/IMPORT-FORMAT/user-guide。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3474/3474** 通过，0 失败，**24.3s**。
+  smoke 637→**646**（填空不一致 9 项）；exporter 195→**199**（checksum 4 项）；
+  assets 62→**64**（qbk checksum/回读）；ui 146→**151**（预览校验和 5 项）。
+- 实测：2 空位 1 答案 → 保留 2 空并警告；1 空位 3 答案 → 保留 3 空且答案不丢；
+  篡改 JSON 后 `checksumOk=false` 且出现「校验和不一致」警告。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.90ms、
+  XLSX 6.14ms、DOCX 2.58ms、按需单页 0.21ms、单题 update 0.21ms、heapUsed +2.70MB ≤ 40MB。
+
+**公共抽象清单（新增/调整）**
+- 新增 `Adapters.splitFillAnswers` / `Adapters.countBlankMarkers`（填空解析与警告唯一口径）。
+- 新增 `UIRenderer.renderImportChecksum`（导入预览纯 HTML 构建，可测试）。
+- 复用 `QB.Source.checksumText`；影响范围：填空题文本推导路径、JSON/qbk 导入预览；
+  结构化 `blanks` 与旧 18 列表格口径不变。
+
+**TODO/风险**
+- checksum 为 32 位 FNV，仅检测传输损坏/手工误改，不防恶意重算；不是签名。
+- 填空答案多于题干空位时会产生额外输入框（已警告），需用户核对题干标记。
+- 真实浏览器 UI 未验收（预览行仅逻辑层 HTML 断言）。
+
+---
+
 ## c8a7ed5 · feat(export,import): M4 文本格式小问分值往返（MD/DOCX/CSV/XLSX）
 
 **核心改动**
