@@ -14,6 +14,38 @@
 
 ---
 
+## 42177ac · feat(sync): 题目更新乐观并发（updated_at 版本 + 409 冲突）
+
+**核心改动**
+- 参考后端：`PATCH /api/questions/{qid}` 可选 `base_updated_at`；服务端 `updated_at` 单调递增
+  （`Math.max(now(), prev.updated_at+1)`，同毫秒多次写也能区分版本）；版本不一致返回
+  `409 { error:{code:"CONFLICT",message:"题目已在其他设备修改，请刷新后重试"}, current }`，
+  **不覆盖对方修改**；未提供 base 时保持旧行为。
+- api 适配器：`questions.update(id, patch, {baseUpdatedAt})` 透传 `base_updated_at`；
+  `httpError` 附带 `payload`（含 current）；`QuestionEditor.update` 接受 opts，
+  普通/材料题保存均传 `existing.updatedAt`。
+- 文档同提交：API-CONTRACT/ARCHITECTURE/COMPETITORS/user-guide/README/DEVELOPMENT。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3487/3487** 通过，0 失败，**24.7s**；
+  api-backend 178→**191**（新增 13 项）。
+- 服务端实测：匹配版本写入生效、`updated_at` 递增、过期版本 409 `CONFLICT`+`current`、冲突不覆盖；
+  api 适配器实测：`baseUpdatedAt` 成功、过期抛 409（code=CONFLICT，消息含「其他设备」）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.66ms、
+  按需单页 0.23ms、单题 update 0.22ms、heapUsed +2.70MB ≤ 40MB。
+
+**公共抽象清单（新增/调整）**
+- `api-adapter.questions.update(id, patch, {baseUpdatedAt})` 新增可选第三参；
+  `QuestionEditor.update(id, patch, opts)` 透传；`httpError` 新增 `err.payload`。
+- 影响范围：api 模式题目编辑（普通/材料题）；local 模式与未传 base 的旧调用不变。
+
+**TODO/风险**
+- 仅题目级冲突检测；题库/复习计划仍为整表 last-write-wins，未做实体级 rev/自动合并。
+- 参考后端仍无鉴权（单用户）；真实多用户部署需再加 token/账号。
+- 真实浏览器双设备冲突 UI 未验收（仅后端/适配器逻辑断言）。
+
+---
+
 ## 854bdbb · feat(import,export): 内容校验和 + fix(import): 填空空位/答案不一致不再截断
 
 **核心改动**
