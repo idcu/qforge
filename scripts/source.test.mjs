@@ -137,6 +137,17 @@ section('二进制快照分派（xlsx）');
   ok(threw, '假 zip 解析失败被正确抛出（真实 zip 在 DOMParser 分支验证）');
 }
 
+section('考试倒计时/刷新恢复关键接线（源码级回归）');
+{
+  const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8');
+  const uiSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8');
+  ok(appSrc.indexOf('timerText: State.timerText') >= 0, 'app.render 向答题区传入 timerText（真实浏览器曾因此不显示倒计时）');
+  ok(appSrc.indexOf("document.getElementById('quiz-timer')") >= 0, 'updateStatus 每秒更新 #quiz-timer');
+  ok(uiSrc.indexOf('id="quiz-timer"') >= 0, '答题头渲染 #quiz-timer 容器');
+  ok(appSrc.indexOf("addEventListener('pagehide'") >= 0 && appSrc.indexOf('ProgressSaver.flush') >= 0, 'pagehide 冲刷会话（防抖窗口内刷新不丢）');
+  ok(appSrc.indexOf('engine.remainingMs') >= 0, '倒计时统一走 QuizEngine.remainingMs（旧会话回退）');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
