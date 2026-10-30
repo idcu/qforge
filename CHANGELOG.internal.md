@@ -14,6 +14,44 @@
 
 ---
 
+## c2c92ab · perf(api): 作答热路径请求收敛（reviews.record + 权重缓存）
+
+**核心改动**
+- `QB.CONTRACTS.reviews` 新增 `record(bankId, map, entries)`：一次提交调度状态 + 评分日志。
+  - local-adapter：等价 `save(map) + revlog.append(entries)`，返回 `{ saved, logged }`。
+  - api-adapter：一个 `PUT /api/banks/{id}/reviews`（body `{ items, revlog }`），成功后缓存刚提交的 map，
+    失败丢弃缓存；服务端同一请求落两处数据。
+- `scripts/serve-api.mjs`：`PUT /reviews` 支持可选 `revlog`（数组），返回 `{ saved, logged }`；
+  非数组 `revlog` → `400 BAD_REQUEST`，避免静默半写。
+- `js/modules/srs-store.js`：`grade`/`gradeMany` 从 `writeMap + FSRSOpt.appendLog` 改为 `QB.DB.reviews.record`。
+- `js/data/api-adapter.js`：新增权重仓缓存（`read` 命中；`write` 缓存提交值；`remove`/`banks.remove`/`backup.import` 失效）。
+
+**验证数据（2026-10-31 本机 Node v24.14.0，Asia/Shanghai）**
+- **请求数 A/B（同一临时脚本、真实 Node HTTP、同库同题）**：
+  - 首次作答：**4 → 3**（GET reviews + GET weights + PUT record）；
+  - 连续作答（热态）：**4 → 1**（仅 PUT record；reviews/weights 缓存命中）；
+  - `gradeMany` 交卷批量：**4 → 1**；
+  - 错题路径：SRS 4 + wrongAdd 1 = 5 → 1 + 1 = 2。
+- `node scripts/test-all.mjs`：24 个运行项 **3591/3591** 通过，0 失败，**24.3s**
+  （contract 61→66、api-backend 208→223；其余套件不变）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.71ms、insertMany 5.40ms、
+  按需单页 0.21ms、单题 update 0.22ms、heapUsed **+2.71MB** ≤ 40MB。
+- 首屏体积：63 脚本 / 71 文件，**226.9 KB gzip / 623.9 KB raw**（代码增量约 +0.8KB gzip）。
+
+**公共抽象/影响**
+- 新增契约方法 `reviews.record`，影响 contracts/local-adapter/api-adapter/db 门面/SRSStore；
+  `reviews.save` 保留（整表写/备份/测试）。
+- 服务端 `PUT /reviews` 的既有 `{ items }` 客户端保持兼容；新增可选 `revlog` 与 `logged` 回执。
+- 权重缓存与 count/reviews 同口径：仅按本客户端写失效，多端写入可能读旧（单用户参考实现已知限制）。
+
+**TODO/风险**
+- 服务端 reviews 与 revlog 分文件写入，非跨文件事务；单请求内先后写，崩溃窗口仍可能只落其中之一（与改动前同等级）。
+- 缓存命中依赖单端写；多端/多人共享后端时需改用版本号或禁用缓存（后续同步设计）。
+- `record` 为必需契约方法：第三方适配器需实现，否则 `assertAdapter` 启动即报缺（已诚实报错）。
+- 本轮无 UI 行为变更，未做浏览器验收；HTTP 层由 223 项真实 Node E2E 覆盖。
+
+---
+
 ## 18ec08e · refactor(utils): 收敛 FNV/PRNG/答案文本/权重归一公共实现
 
 **核心改动**
