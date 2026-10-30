@@ -14,6 +14,45 @@
 
 ---
 
+## 801d49d · feat(security): 参考后端按 IP 限流（默认 1200 次/分钟，可关闭）
+
+**核心改动**
+- `scripts/serve-api.mjs` 新增固定窗口按 IP 限流（`normalizeRateLimit` / `clientKey` / `applyRateLimit`）：
+  - 默认 **1200 次/分钟/IP**；`RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` 可调，`RATE_LIMIT_MAX=0`
+    或 `createServer({ rateLimit:false })` 关闭。
+  - 仅 `/api/*` 计数；静态文件与 `/health` 不受影响。
+  - 未超限响应带 `X-RateLimit-Limit/Remaining/Reset`；超限返回 `429 RATE_LIMITED` +
+    `Retry-After`，`X-RateLimit-Remaining: 0`。
+  - `TRUST_PROXY=1`（或 `rateLimit.trustProxy`）时按 `X-Forwarded-For` 首段分桶；默认不信任，
+    避免伪造头绕过。
+  - `now` 可注入（`createServer({ now })`），供窗口重置测试；桶表超过 1 万时按过期时间清理。
+- 限流在 `api()` 入口、**Bearer 鉴权之前**计数，可限制令牌暴力尝试。
+- 测试 `api-backend` 新增 24 项：窗口内 200/剩余头、429+Retry-After+RATE_LIMITED、静态与
+  `/health` 不受限、窗口重置、trustProxy 分桶、关闭限流、适配器 429 诚实抛出。
+
+**验证数据（2026-10-31 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3615/3615** 通过，0 失败，**24.7s**
+  （api-backend 223→247；其余 23 套件不变）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.60ms、
+  insertMany 5.58ms、按需单页 0.24ms、3000 题库单题 update 0.21ms、heapUsed **+2.71MB** ≤ 40MB。
+- 限流行为实测：max=2/window=1000ms 时 3 次请求 → 200/200/429，`Retry-After: 1`；
+  时钟推进 1100ms 后恢复 200；静态 index 与 `/health` 在超限后仍 200。
+
+**公共抽象/影响**
+- 新增内部函数 `normalizeRateLimit` / `clientKey` / `applyRateLimit`（仅参考后端使用，不进前端包）。
+- 默认开启会改变参考后端行为：正常单用户答题/备份远低于 1200/min；大批量图片备份若超限，
+  可用 `RATE_LIMIT_MAX` 调高或设 0 关闭（文档已说明）。
+- CORS 预检 `OPTIONS` 在 `api()` 之前返回，不计数；未放行来源仍 403。
+
+**TODO/风险**
+- 桶表在进程内存，重启即清零；多进程/多实例部署需改为共享存储（如 Redis），当前参考实现不宣称。
+- 固定窗口在窗口边界可能出现双倍瞬时流量（例如最后 1 秒 + 下一秒首秒），属已知算法特性；
+  单用户场景可接受。
+- `TRUST_PROXY=1` 只能在可信反向代理后启用；直接暴露时开启会让客户端伪造 `X-Forwarded-For` 绕过。
+- 未做真实浏览器限流验收（无 UI 行为）；HTTP 层由 247 项 Node E2E 覆盖。
+
+---
+
 ## c2c92ab · perf(api): 作答热路径请求收敛（reviews.record + 权重缓存）
 
 **核心改动**
