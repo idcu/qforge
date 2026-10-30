@@ -109,6 +109,17 @@ let qA = null;
   eq(pageQ.body.total, 1, '关键词查询命中');
   const patched = await req('PATCH', '/api/questions/' + qA.id, { difficulty: 3 });
   eq(patched.body.difficulty, 3, 'PATCH 单题');
+  // 乐观并发：base_updated_at 与当前版本一致才允许写；过期 → 409 且不覆盖对方修改
+  const v1 = patched.body.updated_at;
+  const ok2 = await req('PATCH', '/api/questions/' + qA.id, { difficulty: 4, base_updated_at: v1 });
+  eq(ok2.status, 200, '带匹配 base_updated_at 的 PATCH 成功');
+  eq(ok2.body.difficulty, 4, '匹配版本写入生效');
+  ok(ok2.body.updated_at > v1, 'updated_at 单调递增');
+  const stale = await req('PATCH', '/api/questions/' + qA.id, { difficulty: 5, base_updated_at: v1 });
+  eq(stale.status, 409, '过期 base_updated_at → 409');
+  eq(stale.body.error.code, 'CONFLICT', '409 错误码 CONFLICT');
+  eq(stale.body.current.difficulty, 4, '409 返回服务端当前版本');
+  eq((await req('GET', '/api/questions/' + qA.id)).body.difficulty, 4, '冲突未覆盖服务端数据');
   // batch add：同 content_hash 去重
   const batch = await req('POST', '/api/banks/' + bankA.id + '/questions/batch', {
     op: 'add',
@@ -322,6 +333,18 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   eq(listed.total, 2, 'api：questions.list total=2');
   const qa = listed.items[0];
   ok(!!qa.contentHash, 'api：题目回读带 contentHash（客户端算、服务端存）');
+  // 客户端乐观并发：baseUpdatedAt 透传 base_updated_at；过期写抛 409
+  const baseVer = qa.updatedAt;
+  const upOk = await QB.DB.questions.update(qa.id, { difficulty: 4 }, { baseUpdatedAt: baseVer });
+  eq(upOk.difficulty, 4, 'api：带匹配 baseUpdatedAt 更新成功');
+  ok(upOk.updatedAt > baseVer, 'api：更新后 updatedAt 递增');
+  let conflictErr = null;
+  try { await QB.DB.questions.update(qa.id, { difficulty: 5 }, { baseUpdatedAt: baseVer }); }
+  catch (e) { conflictErr = e; }
+  eq(conflictErr && conflictErr.status, 409, 'api：过期 baseUpdatedAt 抛 409');
+  eq(conflictErr && conflictErr.code, 'CONFLICT', 'api：错误码 CONFLICT');
+  ok(conflictErr && String(conflictErr.message).indexOf('其他设备') >= 0, 'api：冲突消息可读');
+  eq((await QB.DB.questions.get(qa.id)).difficulty, 4, 'api：冲突后服务端值未被覆盖');
   ok(typeof QB.DB.questions.revision() === 'number', 'api：revision() 为客户端写修订号（数值；返回非数值会被 db.js 折算到缓存初值 -1 而永久命中旧数据）');
   const load1 = await QB.DB.loadQuestions(bank.id);
   const load2 = await QB.DB.loadQuestions(bank.id);

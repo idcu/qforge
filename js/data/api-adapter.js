@@ -96,6 +96,7 @@
     const err = new Error((info && info.message) || ('HTTP ' + status));
     err.status = status;
     err.code = info && info.code;
+    err.payload = payload;
     return err;
   }
   /** 404 → null（对齐 local-adapter 的「不存在返回 null」语义） */
@@ -225,9 +226,14 @@
       bumpRev(); countCache.delete(bankId);
       return fromWireQuestion(w);
     },
-    async update(id, patch) {
+    async update(id, patch, opts) {
       patch = patch || {};
+      opts = opts || {};
       const body = toWireQuestion(patch);
+      // 乐观并发：仅调用方显式提供基准版本时启用；服务端不一致返回 409
+      if (opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== null) {
+        body.base_updated_at = opts.baseUpdatedAt;
+      }
       // content_hash 必须由「合并后的完整题目」计算：残缺 patch（只带 type 等少数字段）
       // 直接算 hash 会写入与真实内容不符的去重键。组织属性（解析/分类/难度/标签/来源）
       // 不进 hash，此时不发送 content_hash，服务端保留原值。

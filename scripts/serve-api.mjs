@@ -176,15 +176,24 @@ export function createStore(dataDir) {
       writeJson(bankFile(bankId), list);
       return item;
     },
-    update(qid, patch) {
+    update(qid, patch, opts) {
+      opts = opts || {};
       for (const b of banks.list()) {
         const list = questions.all(b.id);
         const idx = list.findIndex((q) => q.id === qid);
         if (idx < 0) continue;
-        Object.assign(list[idx], patch, { id: qid, bank_id: b.id, updated_at: now() });
-        delete list[idx].bankId;
+        const prev = list[idx];
+        // 乐观并发：调用方给出 base_updated_at 且与服务端版本不一致 → 409 冲突，不覆盖对方修改
+        if (opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== null &&
+            Number(prev.updated_at) !== Number(opts.baseUpdatedAt)) {
+          return { conflict: true, current: prev };
+        }
+        // updated_at 单调递增（同一毫秒内多次写也能区分版本）
+        const nextUpdated = Math.max(now(), Number(prev.updated_at) + 1);
+        Object.assign(prev, patch, { id: qid, bank_id: b.id, updated_at: nextUpdated });
+        delete prev.bankId;
         writeJson(bankFile(b.id), list);
-        return list[idx];
+        return { conflict: false, question: prev };
       }
       return null;
     },
@@ -525,8 +534,18 @@ export function createHandler(opts) {
       const qid = segs[2];
       if (m === 'GET') { const x = store.questions.get(qid); return x ? json(res, 200, x) : fail(res, 404, 'NOT_FOUND', '题目不存在'); }
       if (m === 'PATCH') {
-        const x = store.questions.update(qid, await readJsonBody(req));
-        return x ? json(res, 200, x) : fail(res, 404, 'NOT_FOUND', '题目不存在');
+        const body = await readJsonBody(req) || {};
+        const base = body.base_updated_at;
+        delete body.base_updated_at;
+        const x = store.questions.update(qid, body, { baseUpdatedAt: base });
+        if (!x) return fail(res, 404, 'NOT_FOUND', '题目不存在');
+        if (x.conflict) {
+          return json(res, 409, {
+            error: { code: 'CONFLICT', message: '题目已在其他设备修改，请刷新后重试' },
+            current: x.current
+          });
+        }
+        return json(res, 200, x.question);
       }
       if (m === 'DELETE') { const x = store.questions.remove(qid); return x ? (res.writeHead(204), res.end()) : fail(res, 404, 'NOT_FOUND', '题目不存在'); }
       return fail(res, 405, 'METHOD_NOT_ALLOWED', m);

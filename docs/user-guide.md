@@ -21,7 +21,7 @@ node scripts/serve-api.mjs
 
 - 后端实现见 [API-CONTRACT.md](API-CONTRACT.md)（数据落工程根 `.qforge-data/` 的 JSON，已 gitignore；原子写入）。
 - **切换后端不改动任何前端代码/界面**——SRS 复习计划、备份、图片资产等都已纳入数据层契约（见 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3 与 [SRS.md](SRS.md) §9）。
-- 说明与已知限制：参考后端**无鉴权、单用户**；复习计划的并发写为「整表 last-write-wins」；后端不可用时界面会如实报网络错误（不静默返回假数据）。
+- 说明与已知限制：参考后端**无鉴权、单用户**；**题目编辑已启用 `updated_at` 乐观并发**（两台设备同时改同一题时，后提交者收到 409「题目已在其他设备修改」，不会静默覆盖）；复习计划的并发写仍为「整表 last-write-wins」；后端不可用时界面会如实报网络错误（不静默返回假数据）。
 
 
 ## 2. 题库管理

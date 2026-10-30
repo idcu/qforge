@@ -48,7 +48,7 @@
 | GET | `/api/banks/{id}/questions` | 分页查询 | — （query: `type`、`category`、`q`(关键词)、`page`、`size`） | `{ items, total, page, size }` |
 | POST | `/api/banks/{id}/questions` | 新增单题 | `Question`（不含 id/bankId） | `201` + `Question` |
 | GET | `/api/questions/{qid}` | 单题详情 | — | `Question` |
-| PATCH | `/api/questions/{qid}` | 修改单题 | `Question` 部分字段 | `Question` |
+| PATCH | `/api/questions/{qid}` | 修改单题；可选 `base_updated_at` 启用乐观并发 | `Question` 部分字段 + `base_updated_at?` | `Question`；版本过期 → `409 { error:{code:"CONFLICT"}, current }` |
 | DELETE | `/api/questions/{qid}` | 删除单题 | — | `204` |
 | POST | `/api/banks/{id}/questions/batch` | 批量增/删 | `{ "op": "add" \| "delete", "items"?: Question[], "ids"?: string[], "mode"?: "merge" \| "overwrite", "dedupe"?: true }` | `{ inserted?, duplicates?, skipped?, removed?, total }` |
 | POST | `/api/banks/{id}/import` | 导入（服务端解析或前端解析后提交） | `multipart/form-data`（file）或 `{ questions: Question[], mode }` | 同批量新增 |

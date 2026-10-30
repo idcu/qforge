@@ -16,8 +16,8 @@
   async function create(bankId, question) {
     return QB.DB.questions.create(bankId, question);
   }
-  async function update(id, patch) {
-    return QB.DB.questions.update(id, patch);
+  async function update(id, patch, opts) {
+    return QB.DB.questions.update(id, patch, opts);
   }
   async function remove(id) {
     return QB.DB.questions.remove(id);
@@ -545,7 +545,7 @@
         });
         if (built.errors.length) { errBox.textContent = built.errors.join('；'); return; }
         try {
-          if (existing) await update(existing.id, built.question);
+          if (existing) await update(existing.id, built.question, { baseUpdatedAt: existing.updatedAt });
           else await create(bank.id, built.question);
           UI.toast(existing ? '材料题已更新' : '材料题已新增', 'ok');
           done();
@@ -644,7 +644,7 @@
         const errs = validate(data);
         if (errs.length) { errBox.textContent = errs.join('；'); return; }
         try {
-          if (existing) await update(existing.id, data);
+          if (existing) await update(existing.id, data, { baseUpdatedAt: existing.updatedAt });
           else await create(bank.id, data);
           UI.toast(existing ? '题目已更新' : '题目已新增', 'ok');
           done();
