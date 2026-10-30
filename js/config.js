@@ -24,6 +24,9 @@
     // REST 后端基址：'' = 同源相对路径（部署到同域时零配置）；分离部署填 'https://api.example.com'
     API_BASE_URL: '',
     API_TIMEOUT_MS: 15000,        // REST 请求默认超时（api-adapter 实现时读取）
+    // 可选共享令牌（服务端 API_TOKEN 一致时启用）：请求自动带 Authorization: Bearer <token>。
+    // 注意：这是单用户/自托管的共享密钥，不是账号体系；同源公开部署时前端包内可见，仅作最低限度访问控制。
+    API_TOKEN: '',
     URL_IMPORT_MAX_BYTES: 8 * 1024 * 1024, // 网络地址导入单文件上限
     URL_IMPORT_TIMEOUT_MS: 15000           // 网络地址导入拉取超时
   };

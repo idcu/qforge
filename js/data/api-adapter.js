@@ -64,6 +64,9 @@
     if (!f) throw new Error('api-adapter：当前环境没有 fetch（无法访问后端）');
     opts = opts || {};
     const headers = Object.assign({}, opts.raw ? {} : JSON_HEADERS, opts.headers || {});
+    // 可选共享令牌：与服务端 API_TOKEN 一致才放行；空 = 不带头（旧部署零影响）
+    const token = (QB.CONFIG && QB.CONFIG.NETWORK && QB.CONFIG.NETWORK.API_TOKEN) || '';
+    if (token) headers.Authorization = 'Bearer ' + token;
     const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs()) : null;
     let res;

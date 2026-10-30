@@ -70,6 +70,24 @@ section('后端：CORS 显式放行（默认关闭）');
   await corsSrv.close();
 }
 
+section('后端：可选 Bearer 令牌鉴权');
+{
+  const authSrv = await createServer({ port: 0, dataDir: tmpDir(), token: 's3cr3t' });
+  const authBase = 'http://127.0.0.1:' + authSrv.port;
+  const deny = await fetch(authBase + '/api/banks');
+  eq(deny.status, 401, '无令牌访问 /api → 401');
+  eq(deny.headers.get('www-authenticate'), 'Bearer', '401 带 WWW-Authenticate: Bearer');
+  const denyBody = await deny.json();
+  eq(denyBody.error.code, 'UNAUTHORIZED', '401 错误码 UNAUTHORIZED');
+  const wrong = await fetch(authBase + '/api/banks', { headers: { Authorization: 'Bearer nope' } });
+  eq(wrong.status, 401, '错误令牌 → 401');
+  const okRes = await fetch(authBase + '/api/banks', { headers: { Authorization: 'Bearer s3cr3t' } });
+  eq(okRes.status, 200, '正确令牌 → 200');
+  eq((await fetch(authBase + '/index.html')).status, 200, '静态文件不受令牌保护（index 200）');
+  eq((await fetch(authBase + '/health')).status, 200, '/health 不受令牌保护');
+  await authSrv.close();
+}
+
 section('后端：题库 CRUD 与错误体');
 let bankA = null;
 let bankB = null;
@@ -544,6 +562,27 @@ section('后端不可达时的诚实拒绝（无假数据）');
   const msg = String(err && err.message);
   ok(/ECONNREFUSED|fetch failed|Failed to fetch|network/i.test(msg) && msg.indexOf('没有 fetch') < 0,
     '错误信息指向网络失败（' + msg + '）');
+}
+
+section('api 适配器：Bearer 令牌自动附带与 401 诚实抛出');
+{
+  const ctx = await createHarness(path.resolve(__dirname, '..'));
+  const { QB } = ctx;
+  const authSrv = await createServer({ port: 0, dataDir: tmpDir(), token: 'adapter-token' });
+  const authBase = 'http://127.0.0.1:' + authSrv.port;
+  QB.CONFIG.DATA_BACKEND = 'api';
+  QB.CONFIG.API_BASE_URL = authBase;
+  QB.CONFIG.NETWORK.API_TOKEN = 'adapter-token';
+  QB.ApiAdapter.useFetch((url, opts) => fetch(url, opts));
+  QB.DB.init();
+  eq((await QB.DB.banks.list()).length, 0, '正确令牌：适配器请求成功');
+  QB.CONFIG.NETWORK.API_TOKEN = 'wrong-token';
+  let err = null;
+  try { await QB.DB.banks.list(); } catch (e) { err = e; }
+  eq(err && err.status, 401, '错误令牌：适配器抛 401');
+  eq(err && err.code, 'UNAUTHORIZED', '错误令牌：错误码 UNAUTHORIZED');
+  ok(err && String(err.message).indexOf('API 令牌') >= 0, '错误令牌：消息可读');
+  await authSrv.close();
 }
 
 console.log('\n================ 汇总 ================');

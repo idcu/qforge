@@ -8,7 +8,7 @@
 | 项 | 约定 |
 | --- | --- |
 | 传输 | HTTPS，请求/响应体均为 `application/json; charset=utf-8` |
-| 鉴权 | `Authorization: Bearer <token>`（本期无后端；多用户时启用） |
+| 鉴权 | 可选 `Authorization: Bearer <token>`（单用户共享密钥，**非账号体系**）。参考后端默认关闭；设置 `API_TOKEN` 后仅保护 `/api/*`，静态文件与 `/health` 公开；未带/错误令牌 → `401 UNAUTHORIZED` + `WWW-Authenticate: Bearer`。前端 `NETWORK.API_TOKEN` 非空时自动附带 |
 | 分页 | 列表统一返回 `{ items, total, page, size }` |
 | 时间 | 毫秒时间戳（数值），字段名 `created_at` / `updated_at` |
 | 错误体 | `{ "error": { "code": "NOT_FOUND", "message": "题库不存在" } }` |
@@ -16,7 +16,7 @@
 | CORS | 默认**不放行跨源**（同源部署零配置）；跨源验收需参考后端显式 `CORS_ORIGIN`（逗号分隔来源或 `*`）。放行来源的预检 `OPTIONS` 返回 `204` + `Access-Control-Allow-Origin/Methods/Headers`；未放行来源预检返回 `403`，普通响应不带 ACAO |
 | 请求体上限 | 参考后端默认 32MB（`MAX_BODY_BYTES` 可调），超限返回 `413 PAYLOAD_TOO_LARGE` |
 
-**HTTP 状态码**：200 成功、201 创建、204 删除成功无返回、400 参数错误、404 资源不存在、409 冲突（重复）、413 请求体过大、422 校验失败、500 服务端错误。**静态文件路径含 `..` / 畸形编码 / NUL 一律 `403`**（参考后端与 `scripts/lib/static-server.mjs` 同一守卫）。
+**HTTP 状态码**：200 成功、201 创建、204 删除成功无返回、400 参数错误、401 未授权（令牌缺失/错误，启用 `API_TOKEN` 时）、404 资源不存在、409 冲突（重复/版本过期）、413 请求体过大、422 校验失败、500 服务端错误。**静态文件路径含 `..` / 畸形编码 / NUL 一律 `403`**（参考后端与 `scripts/lib/static-server.mjs` 同一守卫）。
 
 ## 2. 资源：题库（Banks）
 

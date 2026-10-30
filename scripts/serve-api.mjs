@@ -4,7 +4,8 @@
  * 用途：把 `CONFIG.DATA_BACKEND` 切到 `'api'` 后端到端验证「启用后端后 UI 代码零改动」。
  * 组成：静态文件服务（复用 lib/static-server.mjs）+ `/api/*`（照 docs/API-CONTRACT.md）。
  * 落盘：JSON 文件落在 dataDir（默认 <工程根>/.qforge-data，已 gitignore），
- *      写入用 tmp + rename **原子替换**，读取带内存缓存；仅单用户参考实现，无鉴权。
+ *      写入用 tmp + rename **原子替换**，读取带内存缓存；仅单用户参考实现，
+ *      可选 Bearer 令牌（API_TOKEN）保护 /api/*（静态文件与 /health 公开）。
  *
  * 用法：
  *   node scripts/serve-api.mjs [port] [host] [dataDir]
@@ -14,14 +15,16 @@
  * 已知裁剪（如实标注，见 docs/API-CONTRACT.md）：
  *   - 资产上传走**原始字节**（POST /api/assets，body=bytes），**不支持 multipart**；
  *     POST /api/banks/{id}/import 仅实现 `{ questions, mode }` JSON 分支。
- *   - 无鉴权/多用户；`reviews` 为整表 last-write-wins（多端冲突消解属后续项）。
+ *   - 单用户；`/api/*` 默认无鉴权，设置 `API_TOKEN` 后要求 `Authorization: Bearer <token>`
+ *     （未带/错误 → 401 `UNAUTHORIZED` + `WWW-Authenticate: Bearer`）；无多用户账号体系；
+ *     `reviews` 为整表 last-write-wins（多端冲突消解属后续项）。
  *   - CORS 默认关闭（同源部署零配置）；跨源验收需显式 `CORS_ORIGIN`（逗号分隔来源或 `*`），
- *     仅用于本机/受信环境，切勿在无鉴权前提下对公网放行。
+ *     仅用于本机/受信环境；对公网放行前必须同时启用 `API_TOKEN`。
  */
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveSafePath, sendFile } from './lib/static-server.mjs';
 
@@ -476,11 +479,31 @@ export function corsHeaders(origin, allow) {
   };
 }
 
+/** 常量时间比较 Bearer 令牌（长度不等直接 false，避免逐字符时序泄漏） */
+function tokenMatches(given, expected) {
+  if (!given || !expected) return false;
+  const a = Buffer.from(String(given));
+  const b = Buffer.from(String(expected));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function bearerToken(req) {
+  const h = (req.headers && req.headers.authorization) || '';
+  const m = /^Bearer\s+(.+)$/i.exec(String(h));
+  return m ? m[1] : '';
+}
+
 export function createHandler(opts) {
   const store = opts.store;
   const root = opts.root || ROOT;
+  // 可选共享令牌：空 = 不启用鉴权（默认，旧部署零影响）；启用后仅保护 /api/*，静态文件仍公开
+  const apiToken = opts.token == null ? (process.env.API_TOKEN || '') : opts.token;
 
   async function api(req, res, url, segs) {
+    if (apiToken && !tokenMatches(bearerToken(req), apiToken)) {
+      res.setHeader('WWW-Authenticate', 'Bearer');
+      return json(res, 401, { error: { code: 'UNAUTHORIZED', message: '需要有效的 API 令牌（Authorization: Bearer <token>）' } });
+    }
     const m = req.method;
     const q = url.searchParams;
     const has = (n) => segs.length === n;
@@ -718,7 +741,8 @@ export function createServer(options) {
   const handler = createHandler({
     store: store,
     root: options.root || ROOT,
-    corsOrigin: options.corsOrigin == null ? (process.env.CORS_ORIGIN || '') : options.corsOrigin
+    corsOrigin: options.corsOrigin == null ? (process.env.CORS_ORIGIN || '') : options.corsOrigin,
+    token: options.token == null ? (process.env.API_TOKEN || '') : options.token
   });
   const server = http.createServer(handler);
   // Node 默认 keepAliveTimeout=5s 明显短于浏览器复用空闲 socket 的预期：空闲 >5s 后浏览器
