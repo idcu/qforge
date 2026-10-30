@@ -14,6 +14,38 @@
 
 ---
 
+## c8a7ed5 · feat(export,import): M4 文本格式小问分值往返（MD/DOCX/CSV/XLSX）
+
+**核心改动**
+- 行式（MD/DOCX/TXT）：`materialBlock` 在小问标题后输出 `分值：N`（仅有显式分值）；
+  LineParser 新增小问上下文 `RE_CHILD_SCORE`，识别「分值/小问分值/分数/score：N」并回填
+  `children[*].score`（1–100，复用 `QB.normalizeChildScore`）。
+- 表格（CSV/XLSX）：仅当本次导出至少一个材料小问有显式分值时追加第 19 列「小问分值」；
+  块首行留空、小问行填值；旧 18 列表格零变化。导入端 `HEADER_ALIASES` 新增逻辑列 `childScore`
+  （仅「小问分值/小问分数/childscore/child_score」，避免误吞第三方普通「分值」列），
+  `rowToRaw` 读取后由 `toStandardMaterial` 回填。
+- 文档同提交：README/user-guide/EXPORT-FORMAT/IMPORT-FORMAT/SPEC-material/DEVELOPMENT；
+  M4 标记为已实施（每卷材料上限由「每题型抽取数量」天然约束）。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3454/3454** 通过，0 失败，**24.1s**。
+  exporter 186→**195**（新增 9 项）：MD/DOCX/TXT 含 `分值：25`；CSV/XLSX/MD 往返
+  `children[0].score=25`；表格 19 列（块首分值空、小问行 25）；无分值材料表格仍 18 列
+  （smoke 既有断言保持）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——XLSX 6.37ms、
+  DOCX 2.51ms、按需单页 0.21ms、单题 update 0.22ms、heapUsed +2.68MB ≤ 40MB。
+
+**公共抽象清单（新增/调整）**
+- 复用 `QB.normalizeChildScore`（未新增公共函数）；新增表格逻辑列 `childScore`
+  （`HEADER_ALIASES` 白名单别名）与 LineParser 内部 `RE_CHILD_SCORE`。
+- 影响范围：材料题 MD/DOCX/TXT/CSV/XLSX 导出与导入；普通 16 列/旧 18 列表格口径不变。
+
+**TODO/风险**
+- 第三方表格自带「小问分值」列会按分值读取（预期行为）；普通「分值」列不识别，避免误吞。
+- 真实浏览器 UI 仍未验收（本轮仅逻辑层/导出/导入断言）。
+
+---
+
 ## 1988e55 · feat(material): M4 小问乱序 + 子问分值 1–100 端到端
 
 **核心改动**
