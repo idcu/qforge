@@ -14,6 +14,45 @@
 
 ---
 
+## 4e64da8 · fix(exam): 刷新/切后台恢复考试，倒计时按持久化截止时间继续
+
+**问题（用户反馈）**
+- 考试中刷新页面会退出考试；再次打开没有倒计时。
+- 根因一：会话仅在 500ms 防抖后写入，刷新落在防抖窗口内会丢失最后一次状态；
+  且 beginQuiz 后停在第 1 题未作答时 `maybeResume` 直接忽略会话。
+- 根因二：考试只持久化总时长 `durationMs`，未持久化截止时间；恢复后 `startExamTimer` 若执行，
+  也会从整段时长重新计时（等于刷新暂停/重置考试）。
+
+**核心改动**
+- `QuizEngine.getState/restore` 新增 `startedAt`/`deadlineAt`；`loadQuestions` 清零；
+  `beginQuiz` 设 `startedAt=Date.now()`，限时考试设 `deadlineAt=startedAt+durationMs`。
+- `maybeResume`：考试**自动恢复、不弹确认**（停在第 1 题也恢复）；按 `deadlineAt` 计算剩余，
+  已超时则提示并自动交卷；练习仍弹确认。**考试**历史用时改用持久化 `startedAt`（包含刷新/关闭期间）；
+  练习恢复从恢复时刻重新计时（不继承离线时长）。
+- `startExamTimer`：优先按 `deadlineAt` 计算剩余（旧会话无该字段回退整段），初始即写入并 `updateStatus`。
+- `ProgressSaver`：新增 `_pendingSave`/`flush()`；`pagehide` 与 `visibilitychange(hidden)` 冲刷 500ms 防抖，
+  刷新/切后台不丢最后一次作答；`clear()` 同时丢弃 pending，避免交卷后 flush 把会话写回。
+- 文档同提交：README/ARCHITECTURE/user-guide/DEVELOPMENT。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3495/3495** 通过，0 失败，**26.7s**。
+  smoke 646→**651**（startedAt/deadlineAt 保存与 restore 5 项）；
+  storage 20→**23**（flush 立即落盘、clear 后 flush 不复活会话 3 项）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.87ms、
+  按需单页 0.23ms、单题 update 0.21ms、heapUsed +2.70MB ≤ 40MB。
+- 未做真实浏览器刷新验收：本轮只有逻辑层/会话持久化断言，刷新与倒计时真机路径仍需补验（不声称通过）。
+
+**公共抽象清单（新增/调整）**
+- `QuizEngine` 新增持久字段 `startedAt`/`deadlineAt`；`ProgressSaver` 新增 `flush()` 与 `_pendingSave`。
+- 影响范围：考试开始/恢复/计时/历史用时、页面卸载时机会话落盘；练习确认与交卷清空语义不变。
+
+**TODO/风险**
+- 旧版考试会话缺少 `deadlineAt` 时只能回退整段时长（无法还原真实剩余）。
+- api 模式 pagehide 的网络写入仅尽力而为，页面卸载不保证完成；本地模式同步落盘。
+- 参考后端仍无鉴权；真实浏览器刷新/倒计时未验收。
+
+---
+
 ## 42177ac · feat(sync): 题目更新乐观并发（updated_at 版本 + 409 冲突）
 
 **核心改动**

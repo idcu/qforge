@@ -1322,8 +1322,8 @@
     const engine = new QB.QuizEngine();
     engine.restore(s);
     State.engine = engine;
-    // 保留原始开始时间：历史用时包含刷新/关闭期间；考试剩余时间由 deadlineAt 决定
-    State.quizMeta = { startTs: engine.startedAt || Date.now(), title: '继续上次' };
+    // 考试保留原始开始时间（历史用时含刷新/关闭期间，剩余时间由 deadlineAt 决定）；练习从恢复时刻重新计时
+    State.quizMeta = { startTs: isExam ? (engine.startedAt || Date.now()) : Date.now(), title: '继续上次' };
     State.view = 'quiz';
     hydrateQuizReviewContext(State.bankId, engine);
     if (isExam && engine.durationMs > 0) {
