@@ -14,6 +14,37 @@
 
 ---
 
+## 3f6bccb · test(source): 考试倒计时/刷新恢复接线回归 + 真机验收记录
+
+**核心改动**
+- `source.test.mjs` 新增 5 项源码级接线断言（这类「渲染层支持、调用方未接线」缺陷 Node 单元测试覆盖不到）：
+  - `app.render` 向 `renderQuizRegions` 传入 `timerText: State.timerText`；
+  - `updateStatus` 更新 `#quiz-timer`；
+  - 答题头渲染 `#quiz-timer`；
+  - `pagehide` → `ProgressSaver.flush`；
+  - 倒计时统一走 `QuizEngine.remainingMs`。
+- README/DEVELOPMENT 记录真实浏览器验收证据与测试总数（3509）。
+
+**真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**
+- 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 `29:45`，**PASS**。
+- 关闭标签后重新打开：自动恢复考试，显示「第 1 / 3 题」，提示「已恢复考试，剩余 29:11」，**PASS**。
+- 刷新后仍自动回到同一题，倒计时从 `28:48` 持续递减到 `27:26`，未重置为 30:00，**PASS**。
+- 截图：`qforge-exam-timer.png`（本机临时目录）。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3509/3509** 通过，0 失败，**24.2s**（source 30→35）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.49ms、
+  按需单页 0.21ms、单题 update 0.21ms、heapUsed +2.70MB ≤ 40MB。
+
+**公共抽象/影响**
+- 本提交不含运行时行为变更，仅源码级回归守卫与验收记录；不改变倒计时算法。
+
+**TODO/风险**
+- 源码级断言只能防止关键接线被删除，不能替代浏览器交互测试；后续 UI 大改仍需真机回归。
+- 首次浏览器自动化曾因未设置题型数量而无法开始考试（产品行为：0 题不开始），并非倒计时缺陷。
+
+---
+
 ## 419d65b · fix(exam): 答题头显示倒计时 + 旧会话 remainingMs 回退
 
 **问题（用户反馈）**
