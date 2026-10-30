@@ -14,6 +14,49 @@
 
 ---
 
+## 18ec08e · refactor(utils): 收敛 FNV/PRNG/答案文本/权重归一公共实现
+
+**核心改动**
+- 新增 `js/utils/fnv.js`（`QB.FNV.hashString/hashBytes/toHex`）：question-id 的 contentHash、assets 的
+  内容寻址 id、source 的文本/字节校验和统一改调；删除 4 处本地 FNV 循环（question-id 1、assets 1、source 2）。
+- 新增 `js/utils/random.js`（`QB.mulberry32`）：shuffle/shuffleOptions 与 FSRS fuzz 统一改调；
+  删除 shuffle.js 与 fsrs.js 各一份复制实现。
+- 新增 `js/utils/answer-text.js`（`QB.AnswerText.joinBlanks/blankAnswers/answerText`）：
+  填空多空拼接、旧 `answer` 回退、按题型答案行统一；exporter、share-page、question-editor、
+  adapters、judge-answer 改调。
+- 新增 `js/utils/weights.js`（`QB.Weights.normalizeStore`）：local-adapter 与 api-adapter 改用，
+  **数据层不再反向依赖应用层 `QB.FSRSOpt`**；fsrs-opt 保留同名导出，旧调用方兼容。
+- `index.html` 与 `scripts/_harness.mjs` 同步加载顺序（新增 4 个 utils，63 个脚本）。
+
+**验证数据（2026-10-31 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3571/3571** 通过，0 失败，**25.9s**
+  （smoke 658→676、contract 57→61，其余 22 套件不变）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.79ms、
+  insertMany 7.01ms、按需单页 0.21ms、单题 update 0.21ms、heapUsed **+2.71MB** ≤ 40MB。
+  （insertMany 较上轮 5.39ms 有波动，仍远低于 30ms 门限，未做因果归因。）
+- 真实浏览器：`serve.mjs` 127.0.0.1:8777 + Edge headless `--dump-dom`，`data-theme`/导航/
+  空库首页均由脚本渲染，CSP 无阻断。
+- 首屏体积：63 个脚本 / 71 个文件，**226.1 KB gzip / 621.7 KB raw**
+  （较上轮 +2.4KB gzip，来自 4 个新 utils 文件）。
+- 黄金值：`FNV('abc')=1a47e90b`、`mulberry32(42)` 前三值 `0.601103752/0.448290559/0.852465793`、
+  `Assets.idFor([97,98,99])=as1a47e90b-3`。
+
+**公共抽象/影响**
+- 新增 `QB.FNV`、`QB.mulberry32`、`QB.AnswerText`、`QB.Weights` 四个公共抽象；调用方覆盖
+  question-id/assets/source/shuffle/fsrs/exporter/share-page/question-editor/adapters/judge-answer/
+  local-adapter/api-adapter/fsrs-opt。
+- `scripts/serve-api.mjs` 的 FNV 仍为 Node ESM 独立实现（经典脚本不能 import）；等价性由
+  api-backend 的「资产 FNV id 与服务端一致」断言守护。
+- `scripts/migrate.test.mjs` 与 `scripts/fsrs-opt.test.mjs` 保留独立 FNV/PRNG 作为测试预言机，
+  **不属于生产重复实现**。
+
+**TODO/风险**
+- 本轮无用户可见行为变更；黄金值 + 全量回归覆盖，但未对导出文件做真机逐字节复核（由 199 项导出测试覆盖）。
+- 共享脚本加载顺序由手工维护，新增模块仍须同时改 `index.html` 与 `_harness.mjs`（漏改会在测试/浏览器一端静默失败）。
+- 首屏体积持续增长（226.1KB gzip）；后续新增工具应优先合并进现有 utils，避免碎片化模块。
+
+---
+
 ## 889060b · feat(security): 静态站 CSP 与安全响应头基线
 
 **核心改动**
