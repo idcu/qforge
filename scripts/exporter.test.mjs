@@ -294,17 +294,23 @@ const matMd = QB.Exporters.buildContent('markdown', matPayload).content;
 ok(matMd.indexOf('## 1. [材料题] 材料引导语') >= 0, '材料 MD：权威引导行');
 ok(matMd.indexOf('材料：共享材料正文') >= 0, '材料 MD：材料行');
 ok(matMd.indexOf('(1). [单选]') >= 0 && matMd.indexOf('(2). [判断]') >= 0, '材料 MD：两个小问行');
+ok(matMd.indexOf('分值：25') >= 0, '材料 MD：小问分值行（M4）');
 ok(matMd.indexOf('> 分类：会计基础') >= 0, '材料 MD：父题分类在小问前');
 ok(matMd.indexOf('**答案：**') < 0, '材料 MD：不输出父题空答案行');
 const matDocLines = QB.Exporters._toDocLines(matPayload);
 ok(matDocLines.some((l) => l === '1. [材料题] 材料引导语'), '材料 DOCX：引导段');
 ok(matDocLines.some((l) => l === '(1). [单选] 小问一'), '材料 DOCX：小问段');
+ok(matDocLines.some((l) => l === '分值：25'), '材料 DOCX：小问分值段（M4）');
 ok(!matDocLines.some((l) => l === '答案：'), '材料 DOCX：无父题空答案段');
 const matTxt = QB.Exporters.buildContent('txt', matPayload).content;
 ok(matTxt.indexOf('═══ 1. [材料题]') >= 0 && matTxt.indexOf('材料：共享材料正文') >= 0, '材料 TXT：横幅与材料正文');
+ok(matTxt.indexOf('分值：25') >= 0, '材料 TXT：小问分值行（M4）');
 // 表格：条件表头 + 多行块
 const matTable = QB.Exporters._toTable(matPayload);
-eq(matTable[0].length, 18, '材料表格：18 列（追加材料/小问）');
+eq(matTable[0].length, 19, '材料表格：19 列（材料/小问 + 小问分值，M4）');
+eq(matTable[0][18], '小问分值', '材料表格：第 19 列为小问分值');
+eq(matTable[2][18], '25', '材料表格：小问行分值列 25');
+eq(matTable[1][18], '', '材料表格：块首行分值列留空');
 eq(matTable.length, 4, '材料表格：表头 + 块首 + 2 小问行');
 eq(matTable[1][1], '共享材料正文', '块首行材料列');
 eq(matTable[2][2], '1', '小问行序号 1');
@@ -312,12 +318,15 @@ eq(matTable[2][12], 'B', '小问行答案列 B（shift=2）');
 const matCsv = QB.Exporters.buildContent('csv', matPayload).content;
 const matCsvRt = await QB.CsvImporter.parse({ text: matCsv, fileName: 'm.csv' });
 eq(matCsvRt.questions.length, 1, '材料 CSV 往返：1 题');
+eq(matCsvRt.questions[0].children[0].score, 25, '材料 CSV 往返：小问分值保留（M4）');
 eq(QB.makeContentHash(matCsvRt.questions[0]), QB.makeContentHash(matQ), '材料 CSV 往返：hash 相等');
 const matXlsxRt = await QB.XlsxImporter.parse({
   arrayBuffer: QB.Exporters.buildContent('xlsx', matPayload).content, fileName: 'm.xlsx'
 });
+eq(matXlsxRt.questions[0].children[0].score, 25, '材料 XLSX 往返：小问分值保留（M4）');
 eq(QB.makeContentHash(matXlsxRt.questions[0]), QB.makeContentHash(matQ), '材料 XLSX 往返：hash 相等');
 const matMdRt = await QB.MdImporter.parse({ text: matMd, fileName: 'm.md' });
+eq(matMdRt.questions[0].children[0].score, 25, '材料 MD 往返：小问分值保留（M4）');
 eq(QB.makeContentHash(matMdRt.questions[0]), QB.makeContentHash(matQ), '材料 MD 往返：hash 相等');
 // JSON：材料题嵌套字段（material/children）无损——修复前 toPlain 未输出导致往返丢材料题
 const matJson = QB.Exporters.buildContent('json', matPayload).content;

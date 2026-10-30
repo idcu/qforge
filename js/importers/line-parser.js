@@ -36,6 +36,8 @@
   const RE_CHILD_Q = /^\s*[(（]\s*(\d+)\s*[)）]\s*[.、．)）:：]?\s*(.*)$/;
   // 容错写法：1-1 / 1–1（解析支持，导出统一不用）
   const RE_CHILD_Q_DASHED = /^\s*(\d+)\s*[-–—]\s*(\d+)\s*[.、．)）:：]?\s*([\s\S]*)$/;
+  // 小问分值行（M4）：材料块内、小问上下文中的「分值：25」（归一由 QB.normalizeChildScore）
+  const RE_CHILD_SCORE = /^\s*(?:小问分值|分值|分数|score)\s*[:：]\s*(\d+(?:\.\d+)?)\s*分?\s*$/i;
 
   /** 识别小问起始行，返回 {no, rest} 或 null（仅材料块内调用） */
   function matchChildStart(t) {
@@ -90,7 +92,9 @@
       category: block.category || '',
       difficulty: block.difficulty || 0,
       tags: block.tags || [],
-      reference_answer: type === 'essay' ? block.answer : ''
+      reference_answer: type === 'essay' ? block.answer : '',
+      // 材料小问分值（M4）：普通题不使用；0 表示未设置
+      score: block.score || 0
     };
   }
 
@@ -99,7 +103,7 @@
    * 第一道题号之前的内容（文档标题/导出信息/前言）自动忽略。
    */
   function newBlock(stem) {
-    return { stem: stem || '', options: [], answer: '', analysis: '', category: '', difficulty: 0, tags: [], typeHint: '' };
+    return { stem: stem || '', options: [], answer: '', analysis: '', category: '', difficulty: 0, tags: [], score: 0, typeHint: '' };
   }
 
   /**
@@ -176,8 +180,10 @@
         const mm = t.match(RE_MATERIAL_PREFIX);
         if (mm) { collectingMaterial = true; parentAnalysisOpen = false; if (mm[1].trim()) mb.material += (mb.material ? '\n' : '') + mm[1].trim(); return; }
 
-        // 4) 已进入小问：答案/解析/分类/选项等归属当前小问
+        // 4) 已进入小问：分值/答案/解析/分类/选项等归属当前小问
         if (cur) {
+          const sm = t.match(RE_CHILD_SCORE);
+          if (sm) { cur.score = QB.normalizeChildScore(sm[1]); return; }
           let m = t.match(RE_ANSWER);
           if (m) { cur.answer = m[1].trim(); return; }
           const am = QB.Adapters.matchAnalysisMarker(t);

@@ -151,11 +151,14 @@
     row[15 + shift] = q.source || '';
   }
 
-  /** 材料题 → 1 块首行 + N 小问行（shift=2 的 18 列布局；CSV 与 XLSX 共用） */
-  function materialToRows(e, withWrong) {
+  /**
+   * 材料题 → 1 块首行 + N 小问行（shift=2 的 18 列布局，存在小问分值时追加第 19 列；CSV/XLSX 共用）
+   */
+  function materialToRows(e, withWrong, withScore) {
     const q = e.question;
+    const width = 18 + (withScore ? 1 : 0);
     const rows = [];
-    const head = new Array(18).fill('');
+    const head = new Array(width).fill('');
     head[0] = QB.typeLabel(q.type); // 材料题
     head[1] = q.material || '';
     head[3] = q.question || '';
@@ -167,18 +170,19 @@
     if (withWrong) head.push(String((e.meta && e.meta.wrongCount) || 1));
     rows.push(head);
     (q.children || []).forEach((c) => {
-      const row = new Array(18).fill('');
+      const row = new Array(width).fill('');
       fillQuestionRow(row, c, 2);
       row[2] = String(rows.length); // 块首已占 1 行 → 小问序号 1..N
+      if (withScore) row[18] = String(QB.normalizeChildScore(c.score) || '');
       if (withWrong) row.push('');
       rows.push(row);
     });
     return rows;
   }
 
-  /** 单题 → 表格行（普通表 16 列；含材料表 18 列） */
-  function entryToRow(e, withMaterial, withWrong) {
-    const width = withMaterial ? 18 : 16;
+  /** 单题 → 表格行（普通表 16 列；含材料表 18 列，存在小问分值时 19 列） */
+  function entryToRow(e, withMaterial, withWrong, withScore) {
+    const width = (withMaterial ? 18 : 16) + (withMaterial && withScore ? 1 : 0);
     const row = new Array(width).fill('');
     fillQuestionRow(row, e.question, withMaterial ? 2 : 0);
     if (withWrong) row.push(String(e.meta.wrongCount || 1));
@@ -189,14 +193,19 @@
   function toTable(payload) {
     const withWrong = payload.kind === 'wrong';
     const withMaterial = payload.entries.some((en) => en.question && en.question.type === 'material');
+    // 仅当材料题小问确有显式分值时追加「小问分值」列；旧 18 列表格保持零变化
+    const withScore = withMaterial && payload.entries.some((en) =>
+      en.question && en.question.type === 'material' &&
+      (en.question.children || []).some((c) => QB.normalizeChildScore(c.score) > 0));
     const header = (withMaterial ? MATERIAL_TABLE_HEADER : TABLE_HEADER).slice();
+    if (withScore) header.push('小问分值');
     if (withWrong) header.push('错误次数');
     const rows = [];
     payload.entries.forEach((en) => {
       if (withMaterial && en.question.type === 'material') {
-        materialToRows(en, withWrong).forEach((r) => rows.push(r));
+        materialToRows(en, withWrong, withScore).forEach((r) => rows.push(r));
       } else {
-        rows.push(entryToRow(en, withMaterial, withWrong));
+        rows.push(entryToRow(en, withMaterial, withWrong, withScore));
       }
     });
     return [header].concat(rows);
@@ -285,6 +294,9 @@
     if (q.analysis) L.push(sx.meta('解析', q.analysis));
     (q.children || []).forEach((c, ci) => {
       L.push(sx.childHead(ci + 1, c));
+      // 小问分值（M4）：仅显式设置时输出；LineParser 识别「分值：N」并回填 children[*].score
+      const score = QB.normalizeChildScore(c.score);
+      if (score > 0) L.push(sx.meta('分值', String(score)));
       optionLines(c, (letter, text) => L.push(sx.option(letter, text)));
       L.push(sx.answer(answerLine(c)));
       if (c.analysis) L.push(sx.meta('解析', c.analysis));

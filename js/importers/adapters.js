@@ -424,7 +424,9 @@
     difficulty: ['难度', 'difficulty', 'level'],
     tags: ['标签', '知识点', '关键词', 'tags', 'keywords'],
     material: ['材料', '共享材料', '材料题', '阅读材料', 'material', 'passage'],
-    childNo: ['小问', '小问序号', '小题', '子问题', 'child']
+    childNo: ['小问', '小问序号', '小题', '子问题', 'child'],
+    // 小问分值（M4）：仅表头明确为「小问分值/小问分数」才识别，避免误吞普通「分值」列
+    childScore: ['小问分值', '小问分数', 'childscore', 'child_score']
   };
 
   function matchHeader(name) {
@@ -494,7 +496,9 @@
         source: cell(row, 'source'),
         reference_answer: cell(row, 'reference'),
         difficulty: cell(row, 'difficulty'),
-        tags: cell(row, 'tags')
+        tags: cell(row, 'tags'),
+        // 小问分值（M4）：仅材料小问行有值；普通题行由 toStandard 忽略
+        score: cell(row, 'childScore')
       };
       const opts = [];
       Object.keys(colIndex).forEach((k) => {
