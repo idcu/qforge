@@ -71,19 +71,13 @@
 
   /* ---------------- 权重存取（全局 + 按题库 preset，经契约层 QB.DB.weights） ----------------
    * 存储结构：{ global?: {w,...meta}, banks?: { [bankId]: {w,...meta} } }
-   * normalizeStore 是纯归一函数（唯一实现，local-adapter.weights 复用）。
+   * normalizeStore 的纯归一实现已下沉 utils/weights.js（数据层与领域模块共用）。
    * 旧版本 {w,...}（单组全局权重）读取时自动归一为 global，不写迁移。
    * 训练样本同样按作用域读取（readLogForScope）：按库训练只用该库 revlog，
    * 全局训练用全部（含旧无 b 日志），preset 与训练数据作用域一致。 */
 
-  function normalizeStore(raw) {
-    if (!raw || typeof raw !== 'object') return { global: null, banks: {} };
-    if (Array.isArray(raw.w)) return { global: raw, banks: raw.banks && typeof raw.banks === 'object' ? raw.banks : {} };
-    return {
-      global: raw.global && Array.isArray(raw.global.w) ? raw.global : null,
-      banks: raw.banks && typeof raw.banks === 'object' ? raw.banks : {}
-    };
-  }
+  // 归一逻辑已下沉 utils/weights.js（数据层可直接使用，避免「数据→应用」反向依赖）
+  const normalizeStore = QB.Weights.normalizeStore;
 
   async function readStore() {
     return await QB.DB.weights.read();

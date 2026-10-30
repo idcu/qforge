@@ -371,7 +371,7 @@
   const weights = {
     async read() {
       const r = await req('GET', ROUTES.weights);
-      return { global: r.global || null, banks: r.banks || {} };
+      return QB.Weights.normalizeStore(r);
     },
     async write(store) { await req('PUT', ROUTES.weights, store || { global: null, banks: {} }); },
     async remove(scope) { await req('DELETE', ROUTES.weightsScope(scope)); }

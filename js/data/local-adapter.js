@@ -676,10 +676,10 @@
   };
 
   const weights = {
-    /** 全局 + 按题库 preset（归一为 { global, banks }；归一逻辑复用 fsrs-opt 纯函数） */
-    read() { return QB.FSRSOpt.normalizeStore(Storage.get(K.metaFsrsWeights, null)); },
+    /** 全局 + 按题库 preset（归一为 { global, banks }；归一逻辑见 utils/weights.js） */
+    read() { return QB.Weights.normalizeStore(Storage.get(K.metaFsrsWeights, null)); },
     write(store) {
-      const s = QB.FSRSOpt.normalizeStore(store);
+      const s = QB.Weights.normalizeStore(store);
       if (!s.global && !Object.keys(s.banks).length) Storage.remove(K.metaFsrsWeights); // 回到纯默认状态
       else Storage.setSync(K.metaFsrsWeights, s);
     },

@@ -48,25 +48,14 @@
     return { ok: true, url: u, ext: ext };
   }
 
-  /** 文本/字节 → 32 位正整数 FNV-1a（与 makeContentHash 同算法，独立实现避免耦合题干结构） */
+  /** 文本/字节 → 8 位 FNV-1a 校验和（唯一实现见 utils/fnv.js） */
   function checksumText(text) {
-    let h = 0x811c9dc5;
-    const s = String(text == null ? '' : text);
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 0x01000193) >>> 0;
-    }
-    return h.toString(16).padStart(8, '0');
+    return QB.FNV.toHex(QB.FNV.hashString(text));
   }
 
   function checksumBytes(buf) {
-    let h = 0x811c9dc5;
     const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array((buf && buf.buffer) || 0);
-    for (let i = 0; i < bytes.length; i++) {
-      h ^= bytes[i];
-      h = Math.imul(h, 0x01000193) >>> 0;
-    }
-    return h.toString(16).padStart(8, '0');
+    return QB.FNV.toHex(QB.FNV.hashBytes(bytes));
   }
 
   /** 拉取网络文件快照（默认 fetch 可注入，便于测试与替换） */

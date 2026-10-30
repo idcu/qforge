@@ -43,12 +43,7 @@
   }
 
   function answerOf(q) {
-    if (q.type === 'fill') {
-      if (Array.isArray(q.blanks) && q.blanks.length) return q.blanks.map((b) => b.answer).join('；');
-      return q.answer || '';
-    }
-    if (q.type === 'essay') return q.reference_answer || q.answer || '';
-    return q.answer || '';
+    return QB.AnswerText.answerText(q);
   }
 
   function answerLabel(q) {

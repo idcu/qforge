@@ -204,7 +204,7 @@
           });
         }
       });
-      question.answer = question.blanks.map((b) => b.answer).join('；');
+      question.answer = QB.AnswerText.joinBlanks(question.blanks);
     } else {
       question.options = [];
       question.reference_answer = String(fv.essayRef || '').trim();
@@ -720,7 +720,7 @@
 
     function answerPreview(q) {
       if (q.type === 'essay') return (q.reference_answer || '').slice(0, 12) || '（参考答案）';
-      if (q.type === 'fill') return (q.blanks || []).map((b) => b.answer).join('；');
+      if (q.type === 'fill') return QB.AnswerText.joinBlanks(q.blanks);
       return q.answer || '';
     }
 

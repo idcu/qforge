@@ -33,14 +33,9 @@
   function extOfMime(mime) { return MIME_EXT[String(mime || '').toLowerCase()] || 'img'; }
   function mimeOfExt(ext) { return EXT_MIME[String(ext || '').toLowerCase()] || 'application/octet-stream'; }
 
-  /** FNV-1a 32 位（字节）→ 8 位 hex，拼上长度抗碰撞 */
+  /** FNV-1a 32 位（字节）→ 8 位 hex，拼上长度抗碰撞（唯一实现见 utils/fnv.js） */
   function idFor(bytes) {
-    let h = 0x811c9dc5;
-    for (let i = 0; i < bytes.length; i++) {
-      h ^= bytes[i];
-      h = Math.imul(h, 0x01000193) >>> 0;
-    }
-    return 'as' + h.toString(16).padStart(8, '0') + '-' + bytes.length;
+    return 'as' + QB.FNV.toHex(QB.FNV.hashBytes(bytes)) + '-' + bytes.length;
   }
 
   /* ---------------- 内存驱动（测试/回退） ---------------- */

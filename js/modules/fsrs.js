@@ -179,17 +179,7 @@
 
   /* ---------------- fuzz（间隔抖动，opt-in） ---------------- */
 
-  /** mulberry32 确定性 PRNG（与 QB.shuffle 同族；返回 [0,1)） */
-  function mulberry32(seed) {
-    let a = seed >>> 0;
-    return function () {
-      a = (a + 0x6D2B79F5) >>> 0;
-      let t = a;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
+  /** mulberry32 确定性 PRNG（唯一实现见 utils/random.js；返回 [0,1)） */
 
   /**
    * 官方 fuzz：< 2.5 天不抖动；否则在 [round(ivl−δ), round(ivl+δ)] 内取值，
@@ -312,7 +302,7 @@
     const n = Number(rating);
     const r = clamp(Math.round(Number.isNaN(n) ? RATINGS.good : n), 1, 4);
     opts = opts || {};
-    const fuzzRand = opts.fuzzSeed == null ? null : mulberry32(opts.fuzzSeed | 0);
+    const fuzzRand = opts.fuzzSeed == null ? null : QB.mulberry32(opts.fuzzSeed | 0);
 
     if (prev && prev.algo === 'fsrs' && prev.learning) {
       return reviewLearning(prev, r, now, w, fuzzRand);

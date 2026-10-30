@@ -155,6 +155,42 @@ ok(h1.indexOf('2:') === 0, 'v2 hash 带版本前缀 2:');
     !== QB.makeContentHash({ type: 'judge', question: jt, options: [], answer: '错误' }), '判断：同题干正误答案不同 → hash 不同');
 }
 
+/* ================= 2.2 公共抽象（FNV / PRNG / 答案文本 / 权重归一） ================= */
+section('公共抽象唯一实现');
+{
+  // FNV-1a：字符串（UTF-16 码元）与 ASCII 字节同值；contentHash/资产/校验和共用
+  eq(QB.FNV.toHex(QB.FNV.hashString('abc')), '1a47e90b', 'FNV 字符串 abc 黄金值');
+  eq(QB.FNV.toHex(QB.FNV.hashBytes(new Uint8Array([97, 98, 99]))), '1a47e90b', 'FNV 字节 abc 黄金值');
+  eq(QB.Source.checksumText('abc'), '1a47e90b', 'Source.checksumText 复用 FNV');
+  eq(QB.Source.checksumBytes(new Uint8Array([97, 98, 99])), '1a47e90b', 'Source.checksumBytes 复用 FNV');
+  eq(QB.Assets.idFor(new Uint8Array([97, 98, 99])), 'as1a47e90b-3', 'Assets.idFor 复用 FNV（id=hex+长度）');
+  eq(QB.FNV.toHex(0xffffffff), 'ffffffff', 'FNV toHex 8 位补零/无符号');
+
+  // mulberry32：shuffle 与 FSRS fuzz 共用同一序列
+  const rnd = QB.mulberry32(42);
+  const seq = [rnd(), rnd(), rnd()];
+  ok(Math.abs(seq[0] - 0.601103752) < 1e-9 && Math.abs(seq[1] - 0.448290559) < 1e-9 &&
+    Math.abs(seq[2] - 0.852465793) < 1e-9, 'mulberry32(42) 黄金序列');
+  const sA = QB.shuffle([1, 2, 3, 4, 5], 7);
+  const sB = QB.shuffle([1, 2, 3, 4, 5], 7);
+  eq(JSON.stringify(sA), JSON.stringify(sB), 'QB.shuffle 同种子可复现');
+
+  // 答案文本：填空多空 / 旧 answer 回退 / 简答参考答案 / 普通 answer
+  eq(QB.AnswerText.joinBlanks([{ answer: 'a' }, { answer: 'b' }]), 'a；b', 'joinBlanks 默认中文分号');
+  eq(QB.AnswerText.joinBlanks([{ answer: 'a' }, { answer: 'b' }], ' '), 'a b', 'joinBlanks 自定义分隔符');
+  eq(QB.AnswerText.blankAnswers({ type: 'fill', blanks: [], answer: 'legacy' }), 'legacy', 'blankAnswers 无 blanks 回退 answer');
+  eq(QB.AnswerText.blankAnswers({ type: 'fill', blanks: [{ answer: 'a' }], answer: 'legacy' }), 'a', 'blankAnswers 优先 blanks');
+  eq(QB.AnswerText.answerText({ type: 'essay', reference_answer: 'ref', answer: 'legacy' }), 'ref', 'answerText 简答优先参考答案');
+  eq(QB.AnswerText.answerText({ type: 'single', answer: 'B' }), 'B', 'answerText 选择类取 answer');
+
+  // 权重仓归一：旧单组 {w,...} → global；空/非法 → 空仓
+  const legacy = QB.Weights.normalizeStore({ w: [1, 2], trainedAt: 5 });
+  eq(legacy.global.w[0], 1, 'Weights 旧单组归一为 global');
+  eq(JSON.stringify(legacy.banks), '{}', 'Weights 旧单组 banks 为空对象');
+  eq(JSON.stringify(QB.Weights.normalizeStore(null)), JSON.stringify({ global: null, banks: {} }), 'Weights null → 空仓');
+  ok(QB.FSRSOpt.normalizeStore === QB.Weights.normalizeStore, 'FSRSOpt 导出同一归一函数（旧调用方兼容）');
+}
+
 /* ================= 2.5 选项乱序与答案重映射 ================= */
 section('选项乱序 shuffleOptions');
 const singleQ = {

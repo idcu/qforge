@@ -304,7 +304,7 @@
       if (!item.answer) warnings.push('缺少答案：' + stem.slice(0, 20));
     } else if (type === 'fill') {
       item.blanks = parseBlanks(raw, stem, answer);
-      item.answer = item.blanks.map((b) => b.answer).join('；');
+      item.answer = QB.AnswerText.joinBlanks(item.blanks);
       // 空位与答案数不一致：按较大值保留，但必须提示（旧实现会静默截断答案）
       if (!Array.isArray(raw.blanks) || !raw.blanks.length) {
         const markerCount = countBlankMarkers(stem);

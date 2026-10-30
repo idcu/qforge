@@ -14,14 +14,9 @@
   /** hash 版本前缀；旧版（v1，仅题型+题干）无此前缀，由 Migration 一次性重算 */
   const HASH_VERSION = '2';
 
-  /** FNV-1a 32 位散列 → 8 位十六进制 */
+  /** FNV-1a 32 位散列 → 8 位十六进制（唯一实现见 utils/fnv.js） */
   function fnv1a(str) {
-    let h = 0x811c9dc5;
-    for (let i = 0; i < str.length; i++) {
-      h ^= str.charCodeAt(i);
-      h = Math.imul(h, 0x01000193);
-    }
-    return (h >>> 0).toString(16).padStart(8, '0');
+    return QB.FNV.toHex(QB.FNV.hashString(str));
   }
 
   function normText(s) {

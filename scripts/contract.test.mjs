@@ -5,6 +5,7 @@
  * 删库级联唯一入口（cascadeDelete）的语义。
  * 运行：node scripts/contract.test.mjs
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
@@ -94,6 +95,17 @@ section('weights 仓库（本地）');
   QB.DB.weights.remove();
   eq(QB.DB.weights.read().global, null, 'remove() 清全局');
   eq(QB.Storage.get(QB.KEYS.metaFsrsWeights, null), null, '空存储时删除整键（回到纯默认）');
+
+  // 旧单组 {w,...} 读取归一为 global（数据层直接用 QB.Weights，不再反向依赖 FSRSOpt）
+  const legacyW = QB.FSRS.DEFAULT_W.map((v, i) => (i === 0 ? v + 1 : v));
+  QB.Storage.setSync(QB.KEYS.metaFsrsWeights, { w: legacyW, trainedAt: 9 });
+  eq(QB.DB.weights.read().global.w[0], legacyW[0], '旧单组权重读取归一为 global');
+  eq(Object.keys(QB.DB.weights.read().banks).length, 0, '旧单组权重 banks 为空');
+  QB.DB.weights.remove();
+
+  const localSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'data', 'local-adapter.js'), 'utf8');
+  ok(localSrc.indexOf('QB.FSRSOpt') < 0, 'local-adapter 不再反向依赖应用层 FSRSOpt');
+  ok(localSrc.indexOf('QB.Weights.normalizeStore') >= 0, 'local-adapter 使用数据层可用的 QB.Weights');
 }
 
 section('backup 仓库（本地）');

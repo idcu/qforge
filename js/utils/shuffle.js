@@ -5,16 +5,7 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  /** mulberry32 PRNG */
-  function mulberry32(seed) {
-    let a = seed >>> 0;
-    return function () {
-      a = (a + 0x6d2b79f5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
+  /** mulberry32 唯一实现见 utils/random.js */
 
   /**
    * 返回打乱后的新数组（不改原数组）
@@ -23,7 +14,7 @@
    */
   QB.shuffle = function shuffle(arr, seed) {
     const a = Array.isArray(arr) ? arr.slice() : [];
-    const rnd = seed === undefined || seed === null ? Math.random : mulberry32(seed);
+    const rnd = seed === undefined || seed === null ? Math.random : QB.mulberry32(seed);
     for (let i = a.length - 1; i > 0; i--) {
       const j = Math.floor(rnd() * (i + 1));
       const t = a[i];

@@ -68,16 +68,9 @@
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
   function typeTag(q) { return QB.typeBadge ? QB.typeBadge(q.type) : q.type; }
-  function blankAnswers(q) {
-    if (Array.isArray(q.blanks) && q.blanks.length) return q.blanks.map((b) => b.answer).join('；');
-    return q.answer || '';
-  }
-  /** 题面下的答案行文本（多题型统一） */
-  function answerLine(q) {
-    if (q.type === 'fill') return blankAnswers(q);
-    if (q.type === 'essay') return q.reference_answer || q.answer || '';
-    return q.answer || '';
-  }
+  /** 答案文本统一走 QB.AnswerText（填空/简答/其余题型的答案行唯一实现） */
+  function blankAnswers(q) { return QB.AnswerText.blankAnswers(q); }
+  function answerLine(q) { return QB.AnswerText.answerText(q); }
   /** 材料题子问题：复用各题型字段，但不携带 category/difficulty/tags（子问题继承父题，见 SPEC-material §2.1） */
   function childPlain(c) {
     const item = toPlain(c, null);

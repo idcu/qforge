@@ -94,7 +94,7 @@
       });
       return {
         isCorrect: allCorrect,
-        correctAnswer: blanks.map((b) => b.answer).join('；'),
+        correctAnswer: QB.AnswerText.joinBlanks(blanks),
         userAnswer: answers.map((a) => (a === undefined ? '' : a)).join('；'),
         detail
       };
