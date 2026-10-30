@@ -14,6 +14,36 @@
 
 ---
 
+## 04a8852 · feat(sync): 参考后端可选 Bearer 令牌鉴权
+
+**核心改动**
+- `scripts/serve-api.mjs`：新增 `tokenMatches`/`bearerToken`（`timingSafeEqual` 常量时间比较，长度不等直接拒绝）。
+  `createServer({ token })` 或环境变量 `API_TOKEN` 启用后，仅 `/api/*` 校验 `Authorization: Bearer <token>`；
+  缺失/错误 → `401` + `WWW-Authenticate: Bearer` + `{ error: { code: 'UNAUTHORIZED' } }`；
+  静态文件与 `/health` 保持公开；默认空 = 不启用（旧部署零影响）。CORS 注释明确「对公网放行前必须同时启用 API_TOKEN」。
+- `js/config.js`：`NETWORK.API_TOKEN('')`（共享密钥，非账号体系；同源公开部署时前端包内可见）。
+- `js/data/api-adapter.js`：`req()` 在 `API_TOKEN` 非空时自动附带 Bearer 头；401 经既有 `httpError` 诚实抛出
+  （保留 `.status/.code/payload`，消息含「API 令牌」）。
+- 测试 `scripts/api-backend.test.mjs` 新增 12 项：服务端 8 项（无令牌 401、WWW-Authenticate、UNAUTHORIZED、
+  错误令牌 401、正确令牌 200、静态 index 200、/health 200 等）+ 适配器 4 项（正确令牌成功、错误令牌 401、
+  code UNAUTHORIZED、消息可读）。
+
+**验证数据（2026-10-30 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3520/3520** 通过，0 失败，**24.1s**（api-backend 191→202）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.56ms、按需单页 0.21ms、
+  单题 update 0.21ms、heapUsed **+2.70MB** ≤ 40MB。
+
+**公共抽象/影响**
+- 无新增公共抽象；`NETWORK.API_TOKEN` 为配置层新增键，缺省空串保持旧行为，未改动现有调用方签名。
+- 服务端鉴权是 `createHandler` 内部守卫，不影响静态文件路由与既有多用户无关路径。
+
+**TODO/风险**
+- 共享令牌是**单用户最低限度访问控制**，不是账号体系/多用户隔离；公开前端包内可见，不能当作机密。
+- 仍无速率限制、无设备级令牌轮换；多用户/设备级凭证仍属 `SYNC-PLUGIN-PLAN.md` 设计稿。
+- 未做真实浏览器跨源 + 令牌组合验收（Node E2E 已覆盖 HTTP 层；CORS 与鉴权各自有断言）。
+
+---
+
 ## 3f6bccb · test(source): 考试倒计时/刷新恢复接线回归 + 真机验收记录
 
 **核心改动**
