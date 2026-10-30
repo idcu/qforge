@@ -1023,10 +1023,20 @@ eq((await QB.History.list(bankB.id)).length, 0, '历史按题库隔离');
 
 const engine0 = new QB.QuizEngine();
 engine0.loadQuestions(listA.items.slice(0, 3), 'mixed');
+engine0.mode = 'exam';
+engine0.durationMs = 60000;
+engine0.startedAt = 1700000000000;
+engine0.deadlineAt = engine0.startedAt + engine0.durationMs;
 await QB.ProgressSaver.save(bankA.id, engine0);
 const savedSession = await QB.ProgressSaver.load();
 eq(savedSession.bankId, bankA.id, '进度会话已保存');
 eq(savedSession.questions.length, 3, '进度会话题目数 3');
+eq(savedSession.startedAt, 1700000000000, '考试开始时间随会话保存');
+eq(savedSession.deadlineAt, 1700000060000, '考试截止时间随会话保存（刷新后按剩余计时）');
+const restoredExam = new QB.QuizEngine();
+ok(restoredExam.restore(savedSession), '考试会话可恢复');
+eq(restoredExam.deadlineAt, 1700000060000, 'restore 保留截止时间');
+eq(restoredExam.startedAt, 1700000000000, 'restore 保留开始时间');
 
 /* ================= 7. 答题引擎 ================= */
 section('答题引擎（练习 + 考试）');

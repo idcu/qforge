@@ -48,6 +48,8 @@
     this.pointsMap = opts.pointsMap && Object.keys(opts.pointsMap).length ? opts.pointsMap : null;
     this.durationMs = Number(opts.durationMs) > 0 ? Number(opts.durationMs) : 0;
     this.showTimer = !!opts.showTimer;
+    this.startedAt = 0;
+    this.deadlineAt = 0;
     this.reset();
   };
 
@@ -443,7 +445,9 @@
       results: this.results,
       pointsMap: this.pointsMap,
       durationMs: this.durationMs,
-      showTimer: this.showTimer
+      showTimer: this.showTimer,
+      startedAt: this.startedAt || 0,
+      deadlineAt: this.deadlineAt || 0
     };
   };
 
@@ -458,6 +462,8 @@
     this.pointsMap = state.pointsMap && Object.keys(state.pointsMap).length ? state.pointsMap : null;
     this.durationMs = Number(state.durationMs) > 0 ? Number(state.durationMs) : 0;
     this.showTimer = !!state.showTimer;
+    this.startedAt = Number(state.startedAt) > 0 ? Number(state.startedAt) : 0;
+    this.deadlineAt = Number(state.deadlineAt) > 0 ? Number(state.deadlineAt) : 0;
     return this.questions.length > 0;
   };
 

@@ -323,8 +323,11 @@
     const engine = new QB.QuizEngine();
     engine.loadQuestions(questions, 'mixed', opts || {});
     engine.mode = mode || 'practice';
+    engine.startedAt = Date.now();
+    // 考试截止时间随会话持久化：刷新/崩溃恢复后按剩余时间继续，而不是重新计时
+    if (engine.mode === 'exam' && engine.durationMs > 0) engine.deadlineAt = engine.startedAt + engine.durationMs;
     State.engine = engine;
-    State.quizMeta = { startTs: Date.now(), title: title || '', focusLeaves: 0, locked: false };
+    State.quizMeta = { startTs: engine.startedAt, title: title || '', focusLeaves: 0, locked: false };
     State.view = 'quiz';
     startQuizTimer(engine);
     QB.ProgressSaver.save(State.bankId, engine);
@@ -342,11 +345,15 @@
 
   function startExamTimer() {
     stopTimer();
-    const dur = (State.engine && State.engine.durationMs) || 0;
-    if (dur <= 0) return; // 0=不限时，不启动倒计时
-    State.timerText = QB.Helpers.formatDuration(dur);
+    const eng = State.engine;
+    const total = (eng && eng.durationMs) || 0;
+    if (total <= 0) return; // 0=不限时，不启动倒计时
+    // 优先按持久化截止时间计算剩余；旧会话无 deadlineAt 时回退整段时长
+    const rem = eng && eng.deadlineAt ? Math.max(0, eng.deadlineAt - Date.now()) : total;
+    State.timerText = QB.Helpers.formatDuration(rem);
+    updateStatus();
     State.timer = QB.createExamTimer({
-      durationMs: dur,
+      durationMs: rem,
       onTick: (rem) => { State.timerText = QB.Helpers.formatDuration(rem); updateStatus(); },
       onExpire: () => { UI.toast('考试时间到，已自动交卷', 'err'); finishQuiz(); }
     });
@@ -423,7 +430,7 @@
       catch (e) { /* Storage.onError 已提示；成绩与历史不受影响 */ }
     }
     const score = engine.getScore();
-    const durationMs = Date.now() - (State.quizMeta.startTs || Date.now());
+    const durationMs = Date.now() - (State.quizMeta.startTs || engine.startedAt || Date.now());
     const historyRecord = await QB.History.add({
       bankId: State.bankId,
       bankName: State.bank ? State.bank.name : '',
@@ -1298,25 +1305,37 @@
     if (!s || !Array.isArray(s.questions) || !s.questions.length) return;
     if (!(State.banks || []).some((b) => b.id === s.bankId)) { await QB.ProgressSaver.clear(); return; }
     const answered = (s.results || []).filter(Boolean).length;
-    if (answered === 0 && (s.currentIndex || 0) === 0) return;
-
     const isExam = s.mode === 'exam';
-    const ok = await UI.confirmDialog(
-      '检测到未完成的' + (isExam ? '考试' : '练习') + '进度（第 ' + ((s.currentIndex || 0) + 1) + ' / ' + s.questions.length +
-      ' 题，已答 ' + answered + ' 题）。是否继续？',
-      '继续答题'
-    );
-    if (!ok) { await QB.ProgressSaver.clear(); return; }
+    // 练习：无任何进度直接丢弃；考试：即使停在第 1 题也要恢复（用户刷新不应退出考试）
+    if (!isExam && answered === 0 && (s.currentIndex || 0) === 0) return;
+    if (!isExam) {
+      const ok = await UI.confirmDialog(
+        '检测到未完成的练习进度（第 ' + ((s.currentIndex || 0) + 1) + ' / ' + s.questions.length +
+        ' 题，已答 ' + answered + ' 题）。是否继续？',
+        '继续答题'
+      );
+      if (!ok) { await QB.ProgressSaver.clear(); return; }
+    }
 
     State.bankId = s.bankId;
     await QB.DB.setCurrentBankId(s.bankId);
     const engine = new QB.QuizEngine();
     engine.restore(s);
     State.engine = engine;
-    State.quizMeta = { startTs: Date.now(), title: '继续上次' };
+    // 保留原始开始时间：历史用时包含刷新/关闭期间；考试剩余时间由 deadlineAt 决定
+    State.quizMeta = { startTs: engine.startedAt || Date.now(), title: '继续上次' };
     State.view = 'quiz';
-    startQuizTimer(engine);
     hydrateQuizReviewContext(State.bankId, engine);
+    if (isExam && engine.durationMs > 0) {
+      const rem = engine.deadlineAt ? engine.deadlineAt - Date.now() : engine.durationMs;
+      if (rem <= 0) {
+        UI.toast('考试时间已到，已自动交卷', 'err');
+        await finishQuiz();
+        return;
+      }
+      UI.toast('已恢复考试，剩余 ' + QB.Helpers.formatDuration(rem), 'ok');
+    }
+    startQuizTimer(engine);
     render();
   }
 
@@ -1324,6 +1343,19 @@
 
   async function boot() {
     QB.DB.init();
+    // 刷新/切后台时冲刷会话防抖：考试中最后一次作答不在 500ms 窗口内也能恢复
+    const flushSession = () => {
+      try {
+        const p = QB.ProgressSaver.flush();
+        if (p && typeof p.catch === 'function') p.catch(() => { /* 尽力而为，不产生未处理拒绝 */ });
+      } catch (e) { /* 尽力而为 */ }
+    };
+    if (window.addEventListener) window.addEventListener('pagehide', flushSession);
+    if (document.addEventListener) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushSession();
+      });
+    }
     // v1→v2 contentHash / v2→v3 分片 存量迁移（幂等）。仅 local 后端：api 模式下数据在服务端，
     // 本地 schema 迁移无对象，且服务端数据须已是 v3 形状（见 docs/API-CONTRACT.md）。
     if (QB.Migration && QB.DB.backend !== 'api') await QB.Migration.run();

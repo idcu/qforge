@@ -115,6 +115,21 @@ section('Helpers.debounce().cancel（丢弃挂起调用）');
   eq(d.cancel(), false, '无待取消项时 cancel 返回 false');
 }
 
+section('pagehide 冲刷：防抖窗口内刷新不丢会话');
+{
+  S.clearAll();
+  const engine = { getState: () => ({ questions: [{ type: 'judge', question: '冲刷' }], results: [true], currentIndex: 0, mode: 'exam' }) };
+  QB.ProgressSaver.saveDebounced('bank-flush', engine);
+  await QB.ProgressSaver.flush();
+  const sess = QB.Storage.get(QB.KEYS.session, null);
+  eq(sess && sess.bankId, 'bank-flush', 'flush 立即写入挂起会话');
+  eq(sess.questions[0].question, '冲刷', 'flush 写入最新状态');
+  // 交卷清空后 flush 不得把会话写回
+  await QB.ProgressSaver.clear();
+  await QB.ProgressSaver.flush();
+  eq(QB.Storage.get(QB.KEYS.session, null), null, 'clear 后 flush 不复活会话');
+}
+
 section('会话清空压过挂起的防抖保存（交卷后不再提示「继续上次」）');
 {
   S.clearAll();

@@ -149,7 +149,9 @@ app.beginQuiz(questions, mode, title, opts{pointsMap,durationMs,showTimer}) → 
   交卷后：结果页对待自评简答/材料小问调用 selfAssessAt(index, isCorrect, childIndex)，
           与答题中自评共用 collectGraded → SRS/错题；同时 History.update 回写本场得分/正确率/题型分布
   计分：每题型分值 = pointsMap[type] 或 CONFIG.POINTS_PER_CORRECT；材料题满分 = 各小问按小问题型分值累加
-  计时：startQuizTimer(engine) → 考试 durationMs>0 倒计时（到期自动交卷）；练习 showTimer 正计时（仅显示用时）
+  计时：startQuizTimer(engine) → 考试 durationMs>0 倒计时（到期自动交卷）；startedAt/deadlineAt 随会话持久化，
+        刷新/恢复后按 deadlineAt 剩余时间继续；练习 showTimer 正计时（仅显示用时）
+  恢复：maybeResume → 考试自动恢复（不弹确认；已超时则自动交卷），练习需确认；pagehide/visibilitychange → ProgressSaver.flush 冲刷防抖会话
   finishQuiz() → History.add(record)（返回记录 id 供结果页自评回写）→ ProgressSaver.clear → 结果视图
 ```
 
