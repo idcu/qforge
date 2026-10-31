@@ -6,6 +6,35 @@
 
 ---
 
+## db75ec5 · fix(import,sync): 粘贴材料题回退、wire 来源/历史字段、不定项乱序与逾期排序
+
+**核心改动**
+- `js/modules/data-io.js` `parsePastedText`：以 `[` 开头的行式材料块（`[材料题]`）不再直接当 JSON；
+  先试 JSON，仅“JSON 解析失败”回退行式解析。
+- `js/data/wire.js`：`bank.from/to` 补 `source` 对象；`attempt.from` 补 `pending/unanswered`。
+  `js/data/api-adapter.js` `toWireBank` 补 `source`，API/备份不再丢来源徽章。
+- `js/utils/shuffle.js` `shuffleOptions` 纳入 `indefinite`（与 README/开始弹窗“单选/多选/不定项”一致）。
+- `js/modules/review-queue.js`：默认保持“逾期在前、按 due 升序”，仅 `shuffleDue:true` 才打乱展示顺序。
+- 文档同步：API-CONTRACT Bank.source/AttemptRecord 字段、ARCHITECTURE 不定项、SRS §6.1 排序口径。
+
+**验证数据（2026-11-01 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/smoke-test.mjs`：**722/722**（粘贴 [材料题] 1 题/2 小问；不定项 50 个种子内至少 1 次重排、
+  不改原题、contentHash 不变）。
+- `node scripts/review-queue.test.mjs`：**51/51**（默认顺序 q-3（逾期 2 天）在 q-4 前）。
+- `node scripts/api-backend.test.mjs`：**281/281**（题库 source PATCH/回读；history pending/unanswered 保留）。
+
+**公共抽象/影响**
+- `QB.Wire.bank`/`attempt` 字段面扩大：API、备份跨布局、source 徽章/URL 刷新依赖该映射；
+  新增字段必须同时改 `wire.js`、`api-adapter.toWire*` 与 API-CONTRACT。
+- `shuffleOptions` 行为扩展：不定项也洗牌；contentHash 仍按选项文本集合/答案文本语义，键不变。
+
+**TODO/风险**
+- 粘贴 `[` 回退仅在 JSON 语法失败时触发；如果用户粘贴的是“结构错误但语法正确”的 JSON，仍会得到
+  JsonImporter 的结构错误（符合预期，不静默改走行式）。
+- 未做真实浏览器粘贴验收；解析断言覆盖数据层。
+
+---
+
 ## b847852 · fix(fsrs): 新卡 learning steps 对齐 SRS.md/Anki
 
 **核心改动**
