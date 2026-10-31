@@ -757,7 +757,7 @@
           kwTimer = setTimeout(() => { state.keyword = e.target.value.trim(); state.page = 1; render(); }, 250);
         });
 
-        modal.addEventListener('click', async (e) => {
+        const onManagerClick = async (e) => {
           const prev = e.target.closest('[data-qm="prev"]');
           const next = e.target.closest('[data-qm="next"]');
           const batch = e.target.closest('[data-qm="batch-del"]');
@@ -791,6 +791,9 @@
             UI.toast('已删除', 'ok');
             render();
           }
+        };
+        modal.addEventListener('click', (e) => {
+          onManagerClick(e).catch((ex) => UI.toast('操作失败：' + (ex && ex.message ? ex.message : ex), 'err'));
         });
 
         render();

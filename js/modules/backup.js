@@ -62,7 +62,7 @@
    * @param {'replace'|'merge'} mode
    *   replace（默认）= 先内存快照旧数据，全量写入成功后再删除载荷中不存在的旧键，
    *     任一步失败尽力回滚到快照后抛出（不再先删后写、失败即全丢）；
-   *   merge = 同名逻辑键覆盖（保留其余现有数据）。
+   *   merge = 同名逻辑键覆盖（备份中未包含的键保留；banks/history/revlog 若在备份中则整体替换，非实体级合并）。
    * @returns {{keys:number, mode:string}}
    */
   function applyData(data, mode) {
@@ -326,7 +326,7 @@
           '<div class="checkbox-row"><input type="radio" name="bk-mode" id="bk-replace" value="replace" checked>' +
           '<label for="bk-replace">覆盖恢复（清空现有全部数据后写入，推荐）</label></div>' +
           '<div class="checkbox-row"><input type="radio" name="bk-mode" id="bk-merge" value="merge">' +
-          '<label for="bk-merge">合并恢复（同名键覆盖，保留其余现有数据与图片）</label></div>' +
+          '<label for="bk-merge">合并恢复（同名键覆盖；备份未包含的键与图片保留。注意：题库/历史/日志若在备份中会整体替换，不是按 id 合并）</label></div>' +
           '<p class="li-meta">当前已用约 ' + Math.round(used / 1024) + ' KB。恢复后建议刷新页面。</p>' +
           '<div class="modal-actions"><button class="btn btn-ghost" data-bk="cancel">取消</button>' +
           '<button class="btn btn-danger" data-bk="ok">确认恢复</button></div>',
