@@ -6,6 +6,35 @@
 
 ---
 
+## b847852 · fix(fsrs): 新卡 learning steps 对齐 SRS.md/Anki
+
+**核心改动**
+- `js/modules/fsrs.js` `reviewNew`：**again/hard → step0（1m）**，**good → step1（10m）**，**easy → 直接毕业**；
+  旧实现 hard→10m、good 直接毕业，与 SRS.md §4 相反。`reviewLearning` 每次评分 `reps+1`（learning 步骤也计数）。
+- 测试更新：`fsrs.test` 新卡 good 进入 10m、hard 1m；连续 good 先走完 10m 再统计长期增长；
+  `srs.test` good 首答当日仍在学习队列/次日两题到期；`fsrs-opt.test` preset 比较由 due 改为 stability。
+- 文档同步：SRS.md §4（reps 累计、relearning）、user-guide 学习步骤与 21 权重、README 特性。
+
+**验证数据（2026-11-01 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/fsrs.test.mjs`：**136/136**（新增 good 学习步骤/10m、hard step0/1m、reps 5 累计）。
+- `node scripts/srs.test.mjs`：**62/62**（good 首答 learning.step=1、due=T0+10m；次日两题到期；批量 easy 次日 0）。
+- `node scripts/fsrs-opt.test.mjs`：**114/114**（preset 4.8 > 默认 2.3065 比较稳定度）。
+- `node scripts/test-all.mjs`：24 个运行项 **3717/3717 通过，0 失败**。
+
+**公共抽象/影响**
+- 行为变更：新卡首答 good 不再直接排 2 天，而是 10 分钟后进入学习队列；hard 从 10m 改为 1m；
+  easy 仍直接毕业。已有复习状态不重算，仅影响后续评分。
+- `reps` 现在包含 learning/relearning 步骤；依赖 reps 的统计/调试值会变大（不影响调度公式）。
+- 文档与实现此前冲突，本提交以 **SRS.md/Anki 语义**为准。
+
+**TODO/风险**
+- 该变更会增加“首答正确也要 10m 后再见”的会话长度；若产品要低摩擦策略，应改回并在 SRS.md 明确
+  “简化 learning steps”，不可继续声称对齐 Anki。
+- 未做真实浏览器计时验证；Node 断言覆盖状态机与到期判定。
+- `srs.js`/`fsrs-opt.js` 文件头仍写 FSRS-4.5，属 P3 注释清理，后续批次处理。
+
+---
+
 ## 2299046 · fix(quiz): 材料题全半对统一按半对计分与 SRS hard
 
 **核心改动**
