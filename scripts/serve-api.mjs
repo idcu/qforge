@@ -69,7 +69,16 @@ export function createStore(dataDir) {
   function readJson(file, fallback) {
     if (cache.has(file)) return cache.get(file);
     let value = fallback;
-    try { if (fs.existsSync(file)) value = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { value = fallback; }
+    if (fs.existsSync(file)) {
+      try {
+        value = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch (e) {
+        // 数据文件损坏不能静默当空库：否则下一次写入会覆盖原文件，造成不可恢复的数据丢失。
+        const err = new Error('数据文件损坏或不是合法 JSON：' + path.basename(file));
+        err.status = 500;
+        throw err;
+      }
+    }
     cache.set(file, value);
     return value;
   }
@@ -157,8 +166,16 @@ export function createStore(dataDir) {
       const total = items.length;
       const size = Number(query.size) || total || 1;
       const page = Number(query.page) || 1;
-      const start = (page - 1) * size;
-      return { items: items.slice(start, start + size), total: total, page: page, size: size };
+      // offset 优先（与前端本地语义一致）；未给 offset 时按 page/size。
+      const start = query.offset !== undefined && query.offset !== null
+        ? Math.max(0, Number(query.offset) || 0)
+        : (page - 1) * size;
+      return {
+        items: items.slice(start, start + size),
+        total: total,
+        page: Math.floor(start / size) + 1,
+        size: size
+      };
     },
     get(qid) {
       for (const b of banks.list()) {
@@ -634,7 +651,8 @@ export function createHandler(opts) {
     if (segs.length === 4 && segs[1] === 'banks' && segs[3] === 'questions') {
       const bankId = segs[2];
       if (m === 'GET') return json(res, 200, store.questions.list(bankId, {
-        type: q.get('type'), category: q.get('category'), q: q.get('q'), page: q.get('page'), size: q.get('size')
+        type: q.get('type'), category: q.get('category'), q: q.get('q'),
+        page: q.get('page'), size: q.get('size'), offset: q.get('offset')
       }));
       if (m === 'POST') return json(res, 201, store.questions.create(bankId, await readJsonBody(req)));
       return fail(res, 405, 'METHOD_NOT_ALLOWED', m);

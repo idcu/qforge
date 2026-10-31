@@ -52,12 +52,20 @@
     return new URL(FILE_NAME, base).href;
   }
 
+  /** UTF-8 安全的 Basic 认证头（中文账号/应用密码不能直接 btoa，会抛 InvalidCharacterError） */
+  function base64Utf8(text) {
+    if (typeof TextEncoder !== 'undefined') {
+      const bytes = new TextEncoder().encode(String(text));
+      if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    }
+    return Buffer.from(String(text), 'utf-8').toString('base64');
+  }
+
   function authHeader(user, pass) {
-    const raw = user + ':' + pass;
-    const b64 = (typeof btoa !== 'undefined')
-      ? btoa(raw)
-      : Buffer.from(raw, 'utf-8').toString('base64');
-    return 'Basic ' + b64;
+    return 'Basic ' + base64Utf8(user + ':' + pass);
   }
 
   function defaultFetch() {

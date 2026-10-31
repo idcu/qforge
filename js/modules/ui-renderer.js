@@ -75,6 +75,13 @@
 
   /** 本地存储健康卡（占用条 + 配额告警），纯展示 */
   function renderStorageHealth() {
+    // API 模式数据在自托管后端，不能再用 localStorage 配额文案误导用户。
+    if (QB.DB && QB.DB.backend === 'api') {
+      return '<div class="card storage-health"><h3 class="card-title">后端存储</h3>' +
+        '<div class="li-meta sh-label">数据保存在自托管后端（API），本机仅保留界面偏好；' +
+        '请在「备份与恢复」中定期导出后端全量数据。</div>' +
+        '<button type="button" class="btn btn-sm btn-ghost" data-action="backup-manage">备份与恢复</button></div>';
+    }
     let used = 0;
     try { used = QB.Storage.usageBytes() || 0; } catch (e) { used = 0; }
     const quota = QB.CONFIG.STORAGE_QUOTA_BYTES;
@@ -112,7 +119,8 @@
   function renderHome(bank, counts) {
     if (!bank) return renderBanks([], null);
     const total = counts.total || 0;
-    const isHttp = location.protocol === 'http:' || location.protocol === 'https:';
+    const proto = global.location && global.location.protocol;
+    const isHttp = proto === 'http:' || proto === 'https:';
     const src = QB.Source.normalize(bank.source);
     let html = '<div class="card"><h3 class="card-title">' + esc(bank.name) + '</h3>' +
       '<div class="bank-meta">' + (bank.description ? esc(bank.description) + '<br>' : '') +

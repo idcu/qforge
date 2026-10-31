@@ -10,25 +10,10 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  /* ---------------- CRC32（zlib 标准多项式，公共小工具） ---------------- */
-
-  const CRC_TABLE = (function () {
-    const t = new Uint32Array(256);
-    for (let n = 0; n < 256; n++) {
-      let c = n;
-      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-      t[n] = c >>> 0;
-    }
-    return t;
-  })();
-
-  function crc32(bytes) {
-    let c = 0xFFFFFFFF;
-    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
-    return (c ^ 0xFFFFFFFF) >>> 0;
-  }
-
   /* ---------------- 基础编码 ---------------- */
+
+  // CRC32 唯一实现见 utils/crc32.js（QB.Crc32）；此处保留同名导出供旧测试/调用方使用。
+  const crc32 = (bytes) => QB.Crc32(bytes);
 
   function encodeUtf8(text) {
     if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(String(text));

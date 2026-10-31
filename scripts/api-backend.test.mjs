@@ -433,6 +433,21 @@ section('后端：JSON 原子落盘与重启持久化');
   ok(logTotal >= 1, '重启后评分日志仍在（' + logTotal + ' 条）');
 }
 
+section('后端：损坏的 JSON 数据文件不得静默当空库');
+{
+  const badDir = tmpDir();
+  fs.writeFileSync(path.join(badDir, 'banks.json'), '{not-json', 'utf8');
+  const badSrv = await createServer({ port: 0, dataDir: badDir });
+  const badBase = 'http://127.0.0.1:' + badSrv.port;
+  try {
+    const r = await fetch(badBase + '/api/banks');
+    eq(r.status, 500, '坏 banks.json → 500（不静默返回空库）');
+  } finally {
+    await badSrv.close();
+    fs.rmSync(badDir, { recursive: true, force: true });
+  }
+}
+
 section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改动）');
 {
   // 两个独立 harness 上下文（同一 Node 进程内互不干扰：各自 window/Storage）
@@ -467,6 +482,9 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   eq(await QB.DB.questions.count(bank.id), 2, 'api：insertMany 后 count=2');
   const listed = await QB.DB.questions.list(bank.id, {});
   eq(listed.total, 2, 'api：questions.list total=2');
+  const offList = await QB.DB.questions.list(bank.id, { offset: 1, limit: 2 });
+  eq(offList.items.length, 1, 'api：offset=1/limit=2 返回第 2 题起（不再折算成整页）');
+  eq(offList.items[0].id, listed.items[1].id, 'api：非整数倍 offset 读到正确题');
   const qa = listed.items[0];
   ok(!!qa.contentHash, 'api：题目回读带 contentHash（客户端算、服务端存）');
   // 客户端乐观并发：baseUpdatedAt 透传 base_updated_at；过期写抛 409

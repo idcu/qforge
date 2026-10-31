@@ -56,6 +56,8 @@ section('Basic 认证头');
 {
   const expect = 'Basic ' + Buffer.from('u:p').toString('base64');
   eq(D.authHeader('u', 'p'), expect, 'Authorization: Basic base64(user:pass)');
+  const cn = D.authHeader('中文账号', '应用密码');
+  eq(Buffer.from(cn.replace(/^Basic /, ''), 'base64').toString('utf8'), '中文账号:应用密码', '中文账号/密码按 UTF-8 编码（不再 btoa 抛错）');
 }
 
 function fakeFetch(recorder, response) {

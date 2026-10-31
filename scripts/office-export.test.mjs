@@ -79,6 +79,14 @@ function byType(qs) {
 section('ZipWriter CRC32');
 eq(QB.ZipWriter.crc32(Buffer.from('123456789', 'utf8')).toString(16), 'cbf43926', "CRC32('123456789') = 0xCBF43926");
 eq(QB.ZipWriter.crc32(Buffer.alloc(0)), 0, '空输入 CRC32 = 0');
+{
+  const tiny = QB.ZipWriter.build([{ name: 'a.txt', text: 'hello' }]);
+  let threw = false;
+  try { await QB.ZipReader.readEntries(tiny, { maxTotalBytes: 1 }); } catch (e) { threw = /上限/.test(e.message); }
+  ok(threw, 'ZIP 解压总量超过上限时拒绝（防 zip bomb）');
+  const entries = await QB.ZipReader.readEntries(tiny);
+  ok(entries['a.txt'] && QB.decodeUtf8(entries['a.txt']) === 'hello', '正常 ZIP 仍可读（CRC 校验通过）');
+}
 
 /* ================= 2. 六题型夹具 ================= */
 const FIXTURES = [

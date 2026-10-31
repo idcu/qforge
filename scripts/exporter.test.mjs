@@ -199,6 +199,17 @@ ok(metaMulti.tags.join('、') === '基础、高频考点', 'CSV 往返：标签�
 assertSelfConsistent(csvRt, 'CSV 往返');
 
 // 解析类合并文本：导出为单列「解析」，再导入应原样保留分段（不拆回多列）
+section('CSV 公式注入防护');
+{
+  const payload = {
+    kind: 'bank', bank: { name: '注入测试' },
+    entries: [{ question: { type: 'judge', question: '=HYPERLINK("http://evil")', options: [], answer: '正确' }, meta: {} }]
+  };
+  const csv = QB.Exporters.buildContent('csv', payload).content;
+  const line = csv.split(/\r\n/).find((l) => l.indexOf('HYPERLINK') >= 0) || '';
+  ok(line.indexOf("'=HYPERLINK") >= 0, "以 = 开头的题干导出前置单引号（Excel 不执行公式）");
+}
+
 section('CSV 往返：合并解析文本（单列）');
 const mergedBuilt = QB.Exporters.buildContent('csv', {
   kind: 'bank', bank: { name: '合并解析往返' },

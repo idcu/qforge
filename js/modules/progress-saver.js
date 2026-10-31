@@ -13,7 +13,10 @@
     _ensure() {
       if (!this._debounced) {
         this._debounced = QB.Helpers.debounce((bankId, state) => {
-          QB.DB.progress.sessionSave(Object.assign({ bankId: bankId }, state));
+          const p = QB.DB.progress.sessionSave(Object.assign({ bankId: bankId }, state));
+          if (p && typeof p.catch === 'function') {
+            p.catch((e) => console.warn('[qforge] 会话防抖保存失败：', e && e.message ? e.message : e));
+          }
         }, 500);
       }
     },

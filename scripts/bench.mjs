@@ -177,7 +177,7 @@ row('错题本批量写入（100 题）', await timed(async () => {
 let shuffledCount = 0;
 row('shuffleOptions 选项乱序（540 题）', await timed(() => {
   shuffledCount = idx.items.reduce((n, q) => n + (QB.shuffleOptions(q) !== q ? 1 : 0), 0);
-}, 20), '实际乱序 ' + shuffledCount + ' 题（仅单选/多选）');
+}, 20), '实际乱序 ' + shuffledCount + ' 题（单选/多选/不定项）');
 
 /* ---------- 9. 多格式导出构建 ---------- */
 const exportPayload = await QB.Exporters.collect('bank', benchBank);

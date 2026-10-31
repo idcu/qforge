@@ -22,6 +22,7 @@ const MODULES = [
   'js/utils/judge-answer.js',
   'js/utils/result-policy.js',
   'js/utils/question-id.js',
+  'js/utils/crc32.js',
   'js/utils/zip-reader.js',
   'js/utils/zip-writer.js',
   'js/utils/xml-lite.js',

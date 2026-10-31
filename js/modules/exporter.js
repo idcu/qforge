@@ -64,7 +64,9 @@
     return String(s || '导出').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60).trim() || '导出';
   }
   function csvCell(v) {
-    const s = String(v == null ? '' : v);
+    let s = String(v == null ? '' : v);
+    // CSV 公式注入防护：Excel 会把 = + @ 或“-字母”开头的单元格当公式执行；前置单引号强制文本。
+    if (/^[=+@]/.test(s) || /^-\D/.test(s)) s = "'" + s;
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
   function typeTag(q) { return QB.typeBadge ? QB.typeBadge(q.type) : q.type; }

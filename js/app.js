@@ -418,6 +418,10 @@
   async function finishQuiz() {
     const engine = State.engine;
     if (!engine) return;
+    // 防双击/自动交卷与手动交卷并发：入口即上锁，重复调用直接返回。
+    State.quizMeta = State.quizMeta || {};
+    if (State.quizMeta.locked || State.quizMeta.finishing) return;
+    State.quizMeta.finishing = true;
     const isExam = engine.mode === 'exam';
     stopTimer();
     if (isExam) {
@@ -450,6 +454,7 @@
       focusLeaves: isExam ? (State.quizMeta.focusLeaves || 0) : 0
     });
     State.quizMeta.locked = true;
+    State.quizMeta.finishing = false;
     await QB.ProgressSaver.clear();
     State.resultMeta = {
       title: isExam ? '考试结果' : '练习结果',
@@ -1105,7 +1110,14 @@
       const action = el.getAttribute('data-action');
       if (action === 'search-input' || action === 'search-type' || action === 'search-category') return;
       e.preventDefault();
-      handleAction(el);
+      // 所有 action 统一兜底：异步失败不能让用户毫无反馈（也不留未处理 rejection）。
+      const task = handleAction(el);
+      if (task && typeof task.catch === 'function') {
+        task.catch((err) => {
+          console.error('[qforge] action failed:', err);
+          UI.toast('操作失败：' + (err && err.message ? err.message : err), 'err');
+        });
+      }
     });
 
     v.addEventListener('keydown', (e) => {
@@ -1286,7 +1298,8 @@
       if (engine.mode !== 'exam' && !engine.hasAnswered()) {
         if (engine.canSubmit()) submitCurrent();
       } else if (engine.isLastQuestion()) {
-        finishQuiz();
+        // 考试交卷必须先走「交卷」按钮的未答/半对确认；键盘 Enter 不直接交卷。
+        if (engine.mode !== 'exam') finishQuiz();
       } else {
         engine.nextQuestion(); render();
       }

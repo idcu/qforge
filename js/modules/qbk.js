@@ -45,7 +45,10 @@
    * @returns {Promise<{jsonName:string, text:string, assets:Array<{id:string, bytes:Uint8Array, mime:string}>}>}
    */
   async function parseBundle(buffer, opts) {
-    const ab = buffer instanceof Uint8Array ? buffer.buffer : buffer;
+    // Uint8Array 可能只是大 buffer 的子视图：必须按 byteOffset/byteLength 切片，不能直接取 .buffer。
+    const ab = buffer instanceof Uint8Array
+      ? buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+      : buffer;
     const entries = await QB.ZipReader.readEntries(ab);
     const candidates = opts && opts.jsonName ? [opts.jsonName] : ['bank.json', 'backup.json'];
     const jsonName = candidates.find((n) => entries[n]);

@@ -24,14 +24,18 @@
             const ok = async () => {
               const name = nameEl.value.trim();
               if (!name) { UI.toast('请填写题库名称', 'err'); return; }
-              const bank = await QB.DB.banks.create({
-                name: name,
-                category: modal.querySelector('#bk-cat').value.trim(),
-                description: modal.querySelector('#bk-desc').value.trim()
-              });
-              UI.closeModal();
-              UI.toast('题库已创建', 'ok');
-              resolve(bank);
+              try {
+                const bank = await QB.DB.banks.create({
+                  name: name,
+                  category: modal.querySelector('#bk-cat').value.trim(),
+                  description: modal.querySelector('#bk-desc').value.trim()
+                });
+                UI.closeModal();
+                UI.toast('题库已创建', 'ok');
+                resolve(bank);
+              } catch (e) {
+                UI.toast('创建失败：' + (e && e.message ? e.message : e), 'err');
+              }
             };
             modal.querySelector('[data-action="modal-ok"]').onclick = ok;
             nameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
@@ -86,9 +90,14 @@
         '删除'
       );
       if (!ok) return false;
-      await QB.DB.banks.remove(bank.id, { cascade: true });
-      UI.toast('题库已删除', 'ok');
-      return true;
+      try {
+        await QB.DB.banks.remove(bank.id, { cascade: true });
+        UI.toast('题库已删除', 'ok');
+        return true;
+      } catch (e) {
+        UI.toast('删除失败：' + (e && e.message ? e.message : e), 'err');
+        return false;
+      }
     },
 
     /** 导入内置示例题目 */

@@ -216,10 +216,10 @@
       if (query.category) p.set('category', query.category);
       if (query.keyword) p.set('q', query.keyword);
       if (query.limit != null || query.offset != null) {
-        // 服务端按 page/size 分页；本地 offset/limit 语义按 size=limit 对齐（offset 为 limit 整数倍时等价）
+        // 服务端同时支持 offset/size；不再把 offset 折算成页（避免非整数倍 offset 静默取整）。
         const size = Math.max(1, Number(query.limit) || 1);
         p.set('size', String(size));
-        p.set('page', String(1 + Math.floor((Number(query.offset) || 0) / size)));
+        p.set('offset', String(Math.max(0, Number(query.offset) || 0)));
       } else if (query.page || query.size) {
         p.set('page', String(query.page || 1));
         p.set('size', String(query.size || 20));

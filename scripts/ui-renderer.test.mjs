@@ -395,6 +395,18 @@ section('结果页：材料题全半对按「半对」呈现');
   ok(html.indexOf('◐ 半对') >= 0, '逐题回顾标记半对（不再 ✔ 正确）');
 }
 
+section('首页存储卡：API 模式不显示 local 配额文案');
+{
+  window.location = { protocol: 'http:' };
+  QB.DB.backend = 'api';
+  const homeApi = UI.renderHome({ name: 'B', description: '' }, { total: 1, byType: {} });
+  ok(homeApi.indexOf('后端存储') >= 0, 'API 模式：显示「后端存储」');
+  ok(homeApi.indexOf('数据保存在本浏览器') < 0, 'API 模式：不出现「数据保存在本浏览器」误导文案');
+  QB.DB.backend = 'local';
+  const homeLocal = UI.renderHome({ name: 'B', description: '' }, { total: 1, byType: {} });
+  ok(homeLocal.indexOf('本地存储') >= 0, 'local 模式：仍显示本地存储卡');
+}
+
 section('导入预览：内容校验和行（P4）');
 {
   eq(UI.renderImportChecksum(null), '', '无校验和 meta 不渲染');
