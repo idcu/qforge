@@ -191,6 +191,50 @@ section('公共抽象唯一实现');
   ok(QB.FSRSOpt.normalizeStore === QB.Weights.normalizeStore, 'FSRSOpt 导出同一归一函数（旧调用方兼容）');
 }
 
+/* ================= 2.3 开始弹窗参数记忆（StartPrefs） ================= */
+section('开始弹窗上次参数（StartPrefs）');
+{
+  QB.Storage.remove(QB.KEYS.metaStartPrefs);
+  const p0 = QB.StartPrefs.load('practice');
+  eq(Object.keys(p0.counts).length, QB.CONFIG.TYPES.length, '默认偏好含全部题型数量');
+  eq(p0.counts.single, 0, '默认数量 0（不选）');
+  eq(p0.durationMin, 0, '练习模式不保存时长');
+  eq(p0.showTimer, false, '练习计时默认关');
+  eq(p0.shuffleOptions, !!QB.CONFIG.SHUFFLE_OPTIONS, '选项乱序默认取全局配置');
+  eq(p0.shuffleChildren, false, '小问乱序默认关');
+  const e0 = QB.StartPrefs.load('exam');
+  eq(e0.durationMin, QB.CONFIG.DEFAULT_EXAM_MINUTES || 30, '考试时长默认取全局配置');
+
+  const n = QB.StartPrefs.normalize({
+    counts: { single: 5, judge: -1, multi: 9999 },
+    points: { single: 20, judge: 200 },
+    category: '物业',
+    durationMin: 45,
+    showTimer: true,
+    shuffleOptions: false,
+    shuffleChildren: true
+  }, 'exam');
+  eq(n.counts.single, 5, '数量保留合法值');
+  eq(n.counts.judge, 0, '负数量归一为 0');
+  eq(n.counts.multi, 999, '数量超上限钳制');
+  eq(n.points.single, 20, '分值保留合法值');
+  eq(n.points.judge, 100, '分值超上限钳制');
+  eq(n.durationMin, 45, '考试时长保留');
+  eq(n.showTimer, false, '考试模式不保存练习计时');
+  eq(n.shuffleOptions, false, '显式关闭选项乱序');
+  eq(n.shuffleChildren, true, '小问乱序保留');
+  eq(n.category, '物业', '分类保留');
+
+  const saved = QB.StartPrefs.save('practice', {
+    counts: { single: 3 }, points: { single: 15 }, category: '分类A',
+    showTimer: true, shuffleChildren: true
+  });
+  eq(saved.counts.single, 3, 'save 返回归一值');
+  eq(QB.StartPrefs.load('practice').counts.single, 3, 'save/load 往返');
+  eq(QB.StartPrefs.load('exam').counts.single, 0, '练习偏好不影响考试偏好');
+  QB.Storage.remove(QB.KEYS.metaStartPrefs);
+}
+
 /* ================= 2.5 选项乱序与答案重映射 ================= */
 section('选项乱序 shuffleOptions');
 const singleQ = {

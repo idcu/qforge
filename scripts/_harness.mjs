@@ -57,6 +57,7 @@ const MODULES = [
   'js/modules/srs.js',
   'js/modules/srs-store.js',
   'js/modules/sched-settings.js',
+  'js/modules/start-prefs.js',
   'js/modules/review-queue.js',
   'js/modules/progress-saver.js',
   'js/modules/question-editor.js',

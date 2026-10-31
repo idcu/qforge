@@ -79,6 +79,31 @@ section('练习/考试开始弹窗：每题型数量+分值、考试时长、练
   ok(e.indexOf('data-bp-pts=') >= 0, '考试弹窗也含每题分值列');
 }
 
+section('开始弹窗回填上次参数（StartPrefs）');
+{
+  const prefs = {
+    counts: { single: 5, judge: 2 },
+    points: { single: 15 },
+    category: '分类B',
+    durationMin: 45,
+    showTimer: true,
+    shuffleOptions: false,
+    shuffleChildren: true
+  };
+  const p = UI.renderStartDialog('practice', avail, cats, { prefs: prefs });
+  ok(/data-bp-type="single"[^>]*value="5"/.test(p), '回填单选题数量 5');
+  ok(/data-bp-type="judge"[^>]*value="2"/.test(p), '回填判断题数量 2');
+  ok(/data-bp-pts="single"[^>]*value="15"/.test(p), '回填单选每题分值 15');
+  ok(p.indexOf('<option value="分类B" selected>') >= 0, '回填分类选中');
+  ok(/id="st-timer" checked/.test(p), '回填练习计时开');
+  ok(/id="st-shuffle-child" checked/.test(p), '回填小问乱序开');
+  ok(!/id="st-shuffle-opt" checked/.test(p), '回填选项乱序关');
+
+  const e = UI.renderStartDialog('exam', avail, cats, { prefs: prefs });
+  ok(/id="st-duration"[^>]*value="45"/.test(e), '考试时长回填 45 分钟');
+  ok(e.indexOf('id="st-timer"') < 0, '考试弹窗仍不含练习计时');
+}
+
 section('可用数量显示与分类转义');
 {
   const html = UI.renderStartDialog('practice', avail, cats, {});

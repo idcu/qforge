@@ -148,6 +148,16 @@ section('考试倒计时/刷新恢复关键接线（源码级回归）');
   ok(appSrc.indexOf('engine.remainingMs') >= 0, '倒计时统一走 QuizEngine.remainingMs（旧会话回退）');
 }
 
+section('开始弹窗参数记忆接线（源码级回归）');
+{
+  const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8');
+  const indexSrc = fs.readFileSync(path.join(QB_DIR, 'index.html'), 'utf8');
+  ok(appSrc.indexOf('QB.StartPrefs.load(mode)') >= 0, 'openStartDialog 读取上次参数');
+  ok(appSrc.indexOf('QB.StartPrefs.save(mode') >= 0, '开始成功后保存本次参数');
+  ok(appSrc.indexOf("if (!State.bank) { UI.toast('请先选择题库或新建题库'") >= 0, '无题库时不打开空弹窗');
+  ok(indexSrc.indexOf('js/modules/start-prefs.js') >= 0, 'index.html 加载 start-prefs.js');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

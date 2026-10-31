@@ -146,7 +146,7 @@
    */
 
   /** 两布局同名同义、只存在于本地侧的偏好键（后端载荷无对应键，恢复时保留本机现值） */
-  const LOCAL_ONLY_META_KEYS = [QB.KEYS.metaDav, QB.KEYS.metaTheme, QB.KEYS.metaCurrentBank, QB.KEYS.metaSchema];
+  const LOCAL_ONLY_META_KEYS = [QB.KEYS.metaDav, QB.KEYS.metaTheme, QB.KEYS.metaCurrentBank, QB.KEYS.metaSchema, QB.KEYS.metaStartPrefs];
 
   function hasKey(obj, k) { return Object.prototype.hasOwnProperty.call(obj, k); }
   function isPlainMap(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }

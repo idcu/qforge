@@ -995,11 +995,14 @@
    */
   function openStartDialog(mode, opts) {
     opts = opts || {};
+    if (!State.bank) { UI.toast('请先选择题库或新建题库', 'err'); return; }
     const pool0 = opts.pool || State.allQuestions;
+    if (!pool0.length) { UI.toast('当前题池没有题目，请先导入或换题库', 'err'); return; }
     const avail = QB.Blueprint.availability(pool0, {});
     const cats = QB.SearchFilter.categories(pool0);
     const quizTitle = opts.quizTitle || (mode === 'exam' ? '考试模式' : '练习模式');
-    UI.openModal(UI.renderStartDialog(mode, avail, cats, { title: opts.title }), (modal) => {
+    const prefs = QB.StartPrefs.load(mode);
+    UI.openModal(UI.renderStartDialog(mode, avail, cats, { title: opts.title, prefs: prefs }), (modal) => {
       modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
       modal.querySelector('[data-action="modal-ok"]').onclick = () => {
         const { counts, points } = readTypeInputs(modal);
@@ -1022,6 +1025,18 @@
         if (shortages.length) {
           UI.toast('部分题型数量不足，实际组卷 ' + questions.length + ' 题', 'err');
         }
+        // 记住本次可用参数（非关键数据：失败不阻断开始答题）
+        try {
+          QB.StartPrefs.save(mode, {
+            counts: counts,
+            points: points,
+            category: category,
+            durationMin: mode === 'exam' ? durationMin : 0,
+            showTimer: showTimer,
+            shuffleOptions: shuffleOpts,
+            shuffleChildren: shuffleChildren
+          });
+        } catch (e) { /* 配额/存储异常：忽略偏好保存，不影响本次组卷 */ }
         // 仅显式填写的每题分值才作为本场覆盖；留空=按题目自带分值/默认（M4）
         const pointsMap = {};
         items.forEach((it) => {

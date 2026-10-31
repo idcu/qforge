@@ -26,6 +26,7 @@
     metaFsrsWeights: 'meta:fsrsWeights',
     metaDav: 'meta:dav',
     metaCurrentBank: 'meta:currentBank',
+    metaStartPrefs: 'meta:startPrefs',
     metaTheme: 'meta:theme',
     metaSchema: 'meta:schemaVersion'
   };
