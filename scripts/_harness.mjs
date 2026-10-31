@@ -20,6 +20,7 @@ const MODULES = [
   'js/utils/answer-normalize.js',
   'js/utils/answer-text.js',
   'js/utils/judge-answer.js',
+  'js/utils/result-policy.js',
   'js/utils/question-id.js',
   'js/utils/zip-reader.js',
   'js/utils/zip-writer.js',

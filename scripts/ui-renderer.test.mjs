@@ -148,8 +148,9 @@ section('答题卡：状态类与图例（正确/错误/已答/未答/待自评�
   const qs = [{ type: 'single', question: 'a', options: ['1', '2'], answer: 'A' },
     { type: 'judge', question: 'b', answer: 'A' },
     { type: 'essay', question: 'c', reference_answer: 'x' },
-    { type: 'single', question: 'd', options: ['1', '2'], answer: 'A' }];
-  const statuses = ['correct', 'wrong', 'pending', 'empty'];
+    { type: 'single', question: 'd', options: ['1', '2'], answer: 'A' },
+    { type: 'single', question: 'e', options: ['1', '2'], answer: 'A' }];
+  const statuses = ['correct', 'partial', 'pending', 'empty', 'wrong'];
   const engine = {
     mode: 'practice', questions: qs, currentIndex: 1, results: [null, null, null, null], answers: [undefined, undefined, undefined, undefined],
     getCurrentQuestion: () => qs[1],
@@ -161,11 +162,13 @@ section('答题卡：状态类与图例（正确/错误/已答/未答/待自评�
   };
   const html = UI.renderQuiz(engine, {});
   ok(html.indexOf('ac-cell ac-correct') >= 0, '答题卡含「正确」状态格（ac-correct）');
+  ok(html.indexOf('ac-cell ac-partial') >= 0, '答题卡含「半对」状态格（ac-partial）');
   ok(html.indexOf('ac-cell ac-wrong') >= 0, '答题卡含「错误」状态格（ac-wrong）');
   ok(html.indexOf('ac-cell ac-pending') >= 0, '答题卡含「待自评」状态格（ac-pending）');
   ok(html.indexOf('ac-cell ac-empty') >= 0, '答题卡含「未答」状态格（ac-empty）');
-  ok(html.indexOf('ac-cell ac-wrong cur') >= 0, '当前题高亮 cur 与状态类叠加（ac-wrong cur）');
+  ok(html.indexOf('ac-cell ac-partial cur') >= 0, '当前题高亮 cur 与半对状态叠加（ac-partial cur）');
   ok(html.indexOf('ac-dot ac-correct') >= 0 && html.indexOf('ac-dot ac-wrong') >= 0, '图例含正确/错误色点');
+  ok(html.indexOf('ac-dot ac-partial') >= 0, '图例含半对色点');
   ok(html.indexOf('ac-dot ac-pending') >= 0, '图例含待自评色点');
 }
 
@@ -358,6 +361,38 @@ section('结果页：未作答与待自评分开计数（回归）');
   ok(mhtml.indexOf('data-action="result-self-correct" data-qidx="0" data-child="1"') >= 0, '材料待自评小问按钮带 data-child');
   ok(mhtml.indexOf('data-child="0"') < 0, '已判定小问不渲染自评按钮');
   ok(mhtml.indexOf('得分 10/10') >= 0, '材料小问显示得分/满分');
+}
+
+section('列表：材料题答案预览（错题/收藏/搜索共用）');
+{
+  const mq = {
+    type: 'material', material: '共享材料正文', question: '材料引导语',
+    children: [
+      { type: 'single', question: '小问1', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' },
+      { type: 'fill', question: '小问2 ____', blanks: [{ answer: '答案2', accept: [], hint: '' }], answer: '答案2' }
+    ],
+    analysis: '整题解析'
+  };
+  const html = UI.renderWrongList([{ questionKey: 'k-material', question: mq, wrongCount: 1, lastAt: 0 }], 0);
+  ok(html.indexOf('材料：共享材料正文') >= 0, '材料题：列表显示共享材料');
+  ok(html.indexOf('（1）单选 小问1') >= 0, '材料题：列表显示小问 1 题干');
+  ok(html.indexOf('（2）填空 小问2') >= 0, '材料题：列表显示小问 2 题干');
+  ok(html.indexOf('答案：答案2') >= 0, '材料题：列表显示小问答案');
+  ok(html.indexOf('解析：整题解析') >= 0, '材料题：列表显示整题解析');
+}
+
+section('结果页：材料题全半对按「半对」呈现');
+{
+  const q = { type: 'indefinite', question: '半对题', options: [{ letter: 'A', text: 'a' }, { letter: 'B', text: 'b' }], answer: 'AB' };
+  const r = { isCorrect: true, partial: true, points: { max: 10, earned: 5 }, correctAnswer: 'AB', userAnswer: 'A', children: null };
+  const engine = {
+    questions: [q], results: [r], mode: 'practice',
+    getScore: () => ({ score: 5, correct: 0, wrong: 0, partial: 1, pending: 0, unanswered: 0, pendingSelfAssess: 0, accuracy: 100 }),
+    breakdown: () => ({ byType: {}, byCategory: [], byDifficulty: [] })
+  };
+  const html = UI.renderResult(engine, { name: 'B' }, {});
+  ok(html.indexOf('<div class="st-label">半对</div>') >= 0, '结果页统计卡含「半对 1」');
+  ok(html.indexOf('◐ 半对') >= 0, '逐题回顾标记半对（不再 ✔ 正确）');
 }
 
 section('导入预览：内容校验和行（P4）');

@@ -488,6 +488,31 @@ section('材料题模型 / 判分 / 引擎 / 哈希');
   ok(!aggHalf.partial, '含硬错误：partial=false');
   eq(aggHalf.points.earned, 35, '得分=0+5+10+10+10=35');
 
+  // 全半对（两个不定项小问均少选）：整题 partial 优先，不得被 isCorrect=true 抢先计为 correct
+  const MQP = {
+    type: 'material', material: '半对材料', question: '半对引导语',
+    children: [
+      { type: 'indefinite', question: '小问A', options: [{ letter: 'A', text: 'a' }, { letter: 'B', text: 'b' }], answer: 'AB' },
+      { type: 'indefinite', question: '小问B', options: [{ letter: 'A', text: 'a' }, { letter: 'B', text: 'b' }], answer: 'AB' }
+    ]
+  };
+  const vP = QB.judgeAnswer(MQP, ['A', 'A']);
+  eq(vP.isCorrect, true, '全半对：聚合 isCorrect=true（无硬错）');
+  eq(vP.partial, true, '全半对：聚合 partial=true');
+  eq(vP.points.earned, 10, '全半对：得分 10 / 满分 20');
+  eq(QB.ResultPolicy.kind(vP), 'partial', '全半对：ResultPolicy.kind=partial');
+  const EP = new QB.QuizEngine();
+  EP.loadQuestions([MQP], 'mixed', { shuffleOptions: false });
+  EP.results[0] = Object.assign({ type: 'material', srsRecorded: false }, vP);
+  const sp = EP.getScore();
+  eq(sp.correct, 0, '全半对：correct 不再 +1');
+  eq(sp.partial, 1, '全半对：partial +1');
+  eq(sp.accuracy, 100, '全半对：正确率沿用 (correct+partial)/decided 口径');
+  eq(sp.score, 10, '全半对：得分 10');
+  eq(EP.statusAt(0), 'partial', '全半对：答题卡状态 partial');
+  eq(EP.byType().material.correct, 0, '全半对：按题型 correct 不计');
+  eq(QB.SRSStore.ratingForResult(EP.results[0]), QB.SRS.RATINGS.hard, '全半对：SRS 评分 hard（不再 good）');
+
   // 校验：少于 2 个小问给警告；二层嵌套被拒绝
   const bad = QB.Adapters.toStandard({ type: 'material', material: 'm', children: [{ type: 'judge', question: 'x', answer: '正确' }] });
   ok(bad.warnings.some((w) => w.indexOf('不足 2') >= 0), '单子问题材料题警告');

@@ -34,9 +34,11 @@
    * 全对 good；不定项少选（partial）hard；错 again。
    */
   function ratingForResult(r) {
-    if (!r || r.isCorrect === null || r.isCorrect === undefined) return null;
-    return r.isCorrect ? QB.SRS.RATINGS.good
-      : (r.partial ? QB.SRS.RATINGS.hard : QB.SRS.RATINGS.again);
+    const kind = QB.ResultPolicy.kind(r);
+    if (kind === 'pending' || kind === 'empty') return null;
+    return kind === 'correct' ? QB.SRS.RATINGS.good
+      : kind === 'partial' ? QB.SRS.RATINGS.hard
+      : QB.SRS.RATINGS.again;
   }
 
   /**

@@ -622,6 +622,7 @@ body {
 .ac-cell.ac-empty { background: var(--surface-2); color: var(--text-muted); }
 .ac-cell.ac-answered { background: var(--primary-weak); color: var(--primary); border-color: var(--primary); }
 .ac-cell.ac-correct { background: var(--success); color: #fff; border-color: var(--success); }
+.ac-cell.ac-partial { background: var(--warning); color: #fff; border-color: var(--warning); }
 .ac-cell.ac-wrong { background: var(--danger); color: #fff; border-color: var(--danger); }
 .ac-cell.ac-pending { background: var(--warning-weak); color: var(--warning); border-color: var(--warning); }
 .ac-legend { margin-top: 10px; font-size: 12px; color: var(--text-muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
@@ -629,6 +630,7 @@ body {
 .ac-dot.ac-empty { background: var(--surface-2); }
 .ac-dot.ac-answered { background: var(--primary-weak); border-color: var(--primary); }
 .ac-dot.ac-correct { background: var(--success); border-color: var(--success); }
+.ac-dot.ac-partial { background: var(--warning); border-color: var(--warning); }
 .ac-dot.ac-wrong { background: var(--danger); border-color: var(--danger); }
 .ac-dot.ac-pending { background: var(--warning-weak); border-color: var(--warning); }
 

@@ -91,14 +91,16 @@
     let score = 0;
     this.results.forEach((r) => {
       if (!r) return;
-      if (r.isCorrect === true) correct++;
-      else if (r.partial) partial++;
-      else if (r.isCorrect === false) wrong++;
+      // 结果种类唯一入口：材料题“全半对”按 partial 计，不再被 isCorrect=true 抢先计 correct。
+      const kind = QB.ResultPolicy.kind(r);
+      if (kind === 'correct') correct++;
+      else if (kind === 'partial') partial++;
+      else if (kind === 'wrong') wrong++;
       // 每题分值按本场「题型分值」解析；材料题按小问累计得分
       const points = this.pointOf(r.type);
       if (r.points) score += r.points.earned || 0;
-      else if (r.isCorrect === true) score += points;
-      else if (r.partial) score += Math.round(points * 0.5);
+      else if (kind === 'correct') score += points;
+      else if (kind === 'partial') score += Math.round(points * 0.5);
     });
     const total = this.questions.length;
     const decided = correct + wrong + partial;
@@ -107,7 +109,7 @@
     this.questions.forEach((q, i) => {
       const r = this.results[i];
       if (!r) { unanswered++; return; }
-      if (r.isCorrect === null || r.isCorrect === undefined) pendingSelfAssess++;
+      if (QB.ResultPolicy.kind(r) === 'pending') pendingSelfAssess++;
     });
     return {
       score: score,
@@ -354,7 +356,7 @@
       const r = this.results[i];
       if (!r) return;
       agg[q.type].total++;
-      if (r.isCorrect === true) agg[q.type].correct++;
+      if (QB.ResultPolicy.kind(r) === 'correct') agg[q.type].correct++;
     });
     return agg;
   };
@@ -382,7 +384,10 @@
   /** 第 i 题的作答状态：correct / wrong / pending（简答待自评）/ answered（已答未判）/ empty */
   QuizEngine.prototype.statusAt = function (i) {
     const r = this.results[i];
-    if (r) return r.isCorrect === true ? 'correct' : (r.isCorrect === false ? 'wrong' : 'pending');
+    if (r) {
+      const kind = QB.ResultPolicy.kind(r);
+      return kind === 'correct' ? 'correct' : kind === 'partial' ? 'partial' : kind === 'pending' ? 'pending' : 'wrong';
+    }
     const q = this.questions[i];
     const a = this.answers[i];
     if (!q) return 'empty';
@@ -414,11 +419,11 @@
       const m = {};
       this.questions.forEach((q, i) => {
         const r = this.results[i];
-        if (!r || r.isCorrect === null) return;
+        if (!r || !QB.ResultPolicy.isDecided(r)) return;
         const key = keyOf(q);
         if (!m[key]) m[key] = { key: key, correct: 0, total: 0 };
         m[key].total++;
-        if (r.isCorrect === true) m[key].correct++;
+        if (QB.ResultPolicy.kind(r) === 'correct') m[key].correct++;
       });
       return Object.keys(m).sort().map((k) => {
         const o = m[k];

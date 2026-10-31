@@ -370,7 +370,8 @@
         : '') +
       '<span class="q-progress">第 ' + prog.current + ' / ' + prog.total + ' 题</span>' +
       (q.category ? ' <span class="q-progress">· ' + esc(q.category) + '</span>' : '') + '</div>' +
-      '<div class="q-score">得分 ' + score.score + ' · ✔ ' + score.correct + ' · ✘ ' + score.wrong +
+      '<div class="q-score">得分 ' + score.score + ' · ✔ ' + score.correct +
+      (score.partial > 0 ? ' · ◐ ' + score.partial : '') + ' · ✘ ' + score.wrong +
       (unansweredNow > 0 ? ' · ○ 未答 ' + unansweredNow : '') +
       '<span id="quiz-timer">' + (opts.timerText ? ' · ⏱ ' + esc(opts.timerText) : '') + '</span></div>' +
       '</div>' });
@@ -453,6 +454,7 @@
     return '<div class="ac-legend"><span class="ac-dot ac-empty"></span>未答 ' +
       '<span class="ac-dot ac-answered"></span>已答 ' +
       '<span class="ac-dot ac-correct"></span>正确 ' +
+      '<span class="ac-dot ac-partial"></span>半对 ' +
       '<span class="ac-dot ac-wrong"></span>错误 ' +
       '<span class="ac-dot ac-pending"></span>待自评</div>';
   }
@@ -501,12 +503,15 @@
     const selfBox = pendingSelf > 0
       ? '<div class="stat-box"><div class="st-num">' + pendingSelf + '</div><div class="st-label">待自评</div></div>'
       : '';
+    const partialBox = score.partial > 0
+      ? '<div class="stat-box"><div class="st-num">' + score.partial + '</div><div class="st-label">半对</div></div>'
+      : '';
     let html = '<div class="card"><h3 class="card-title">' + (meta.title || '本次结果') + '</h3>' +
       '<div class="stat-grid">' +
       '<div class="stat-box"><div class="st-num">' + score.score + '</div><div class="st-label">得分' + (score.pending > 0 ? '（不含未判定）' : '') + '</div></div>' +
       '<div class="stat-box"><div class="st-num">' + score.correct + '</div><div class="st-label">正确</div></div>' +
       '<div class="stat-box"><div class="st-num">' + score.wrong + '</div><div class="st-label">错误</div></div>' +
-      pendingBox + selfBox +
+      partialBox + pendingBox + selfBox +
       '<div class="stat-box"><div class="st-num">' + score.accuracy + '%</div><div class="st-label">正确率' + (score.pending > 0 ? '（不含未判定）' : '') + '</div></div>' +
       '</div>' +
       (unanswered > 0 ? '<div class="li-meta" style="margin-top:8px">○ ' + unanswered +
@@ -544,8 +549,9 @@
     html += '<div class="section-title">逐题回顾</div>';
     engine.questions.forEach((q, i) => {
       const r = engine.results[i];
-      const cls = !r ? 'neutral' : (r.isCorrect === null ? 'neutral' : (r.isCorrect ? 'ok' : (r.partial ? 'neutral' : 'no')));
-      const mark = !r ? '○ 未作答' : (r.isCorrect === null ? '○ 待自评（不计分）' : (r.isCorrect ? '✔ 正确' : (r.partial ? '◐ 半对' : '✘ 错误')));
+      const kind = QB.ResultPolicy.kind(r);
+      const cls = kind === 'empty' ? 'neutral' : (kind === 'pending' ? 'neutral' : (kind === 'correct' ? 'ok' : (kind === 'partial' ? 'neutral' : 'no')));
+      const mark = kind === 'empty' ? '○ 未作答' : (kind === 'pending' ? '○ 待自评（不计分）' : (kind === 'correct' ? '✔ 正确' : (kind === 'partial' ? '◐ 半对' : '✘ 错误')));
       let childDetail = '';
       if (q.type === 'material' && r && Array.isArray(r.children)) {
         childDetail = r.children.map((cv, j) => {
@@ -663,7 +669,20 @@
     return renderFavoritesListRegions(items, page).map((r) => r.html).join('');
   }
 
+  /** 材料题列表答案预览（错题本/收藏夹/搜索共用；不含交互，只读） */
+  function renderMaterialAnswerText(q) {
+    let s = '';
+    if (q.material) s += '<div class="li-meta">材料：' + plain(q.material) + '</div>';
+    (q.children || []).forEach((c, i) => {
+      s += '<div class="li-meta">（' + (i + 1) + '）' + esc(QB.typeBadge(c.type)) + ' ' + plain(c.question) + '</div>';
+      s += renderAnswerText(c);
+    });
+    if (q.analysis) s += '<div class="li-meta">解析：' + plain(q.analysis) + '</div>';
+    return s;
+  }
+
   function renderAnswerText(q) {
+    if (q.type === 'material') return renderMaterialAnswerText(q);
     if (q.type === 'judge') return '<div class="li-meta">答案：' + plain(q.answer) + '</div>' +
       (q.analysis ? '<div class="li-meta">解析：' + plain(q.analysis) + '</div>' : '');
     if (q.type === 'fill') return '<div class="li-meta">答案：' + plain(q.answer) + '</div>' +
