@@ -6,6 +6,28 @@
 
 ---
 
+## a47df06 · fix(backup): 明确合并恢复同名键语义并补管理器异步兜底
+
+**核心改动**
+- `js/modules/backup.js` 注释与恢复弹窗文案：合并恢复为**同名逻辑键覆盖**；`banks/history/revlog`
+  若在备份中整体替换，备份未包含的键与图片保留，不再声称“保留其余现有数据”（避免实体级合并误解）。
+- `docs/API-CONTRACT.md` 同步 `mode=merge` 口径；`docs/user-guide.md` 恢复说明同步。
+- `js/modules/question-editor.js`：管理器点击处理改为 `onManagerClick(e).catch(toast)`，编辑/删除/批删
+  失败不再产生未处理 Promise 拒绝。
+
+**验证数据（2026-11-01 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3741/3741 通过，0 失败**。
+- `node --expose-gc scripts/bench.mjs --assert`：19 项门禁全过，heapUsed **+2.72MB**。
+- 文档/文案变更无新增断言；原有 backup 90 项合并/覆盖/回滚断言保持通过。
+
+**公共抽象/影响**
+- 不改 `applyData` 执行逻辑，仅修正文档与用户告知；需要实体级合并时应新增 `mode=merge-entities`，不复用现有 `merge`。
+
+**TODO/风险**
+- 实体级合并（按 id 并集、冲突按 updated_at/last）仍未实现；本轮选择“如实说明”而非半实现。
+
+---
+
 ## b0c4d3e · refactor(editor,quiz): 清理重复定义与小问分值显式语义
 
 **核心改动**
