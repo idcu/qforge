@@ -15,6 +15,8 @@
     from(w) {
       return {
         id: w.id, name: w.name, description: w.description || '', category: w.category || '',
+        // 来源溯源（file/paste/drop/url）：题库元数据的一部分，API/备份必须与 local 同链路保留
+        source: w.source || null,
         // 复习调度设置（可选）：wire snake_case ↔ 本地 camelCase；缺失时为 null（使用默认限额）
         sched: w.sched ? {
           newPerDay: w.sched.new_per_day,
@@ -26,6 +28,7 @@
     to(b) {
       const out = {
         id: b.id, name: b.name, description: b.description || '', category: b.category || '',
+        source: b.source || null,
         created_at: b.createdAt, updated_at: b.updatedAt
       };
       if (b.sched) {
@@ -91,6 +94,7 @@
         id: w.id, bankId: w.bank_id, bankName: w.bank_name, mode: w.mode,
         total: w.total, correct: w.correct, wrong: w.wrong, partial: w.partial || 0,
         score: w.score, accuracy: w.accuracy, byType: w.by_type || {},
+        pending: w.pending || 0, unanswered: w.unanswered || 0,
         durationMs: w.duration_ms || 0, focusLeaves: w.focus_leaves || 0, createdAt: w.created_at
       };
     },

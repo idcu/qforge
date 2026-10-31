@@ -286,6 +286,19 @@ const jq = { type: 'judge', question: '判断', answer: '正确' };
 const fq = { type: 'fill', question: '填空 ___', blanks: [{ answer: 'x' }] };
 ok(QB.shuffleOptions(jq, 1) === jq, '判断题不参与乱序（同引用）');
 ok(QB.shuffleOptions(fq, 1) === fq, '填空题不参与乱序（同引用）');
+{
+  const indq = { type: 'indefinite', question: '不定项乱序', answer: 'ABD',
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }, { letter: 'C', text: '丙' }, { letter: 'D', text: '丁' }] };
+  const before = JSON.stringify(indq.options.map((o) => o.text));
+  let changed = false;
+  for (let seed = 1; seed <= 50 && !changed; seed++) {
+    const out = QB.shuffleOptions(indq, seed);
+    if (out !== indq && JSON.stringify(out.options.map((o) => o.text)) !== before) changed = true;
+  }
+  ok(changed, '不定项参与选项乱序（与 README/弹窗文案一致）');
+  ok(JSON.stringify(indq.options.map((o) => o.text)) === before, '不定项乱序不修改原题');
+  ok(QB.makeContentHash(QB.shuffleOptions(indq, 7)) === QB.makeContentHash(indq), '不定项乱序 contentHash 不变');
+}
 // 引擎默认开启乱序；可显式关闭
 const engSh = new QB.QuizEngine();
 engSh.loadQuestions([singleQ, multiQ]);
@@ -1328,6 +1341,19 @@ const pasteRes = await QB.DataIO.parsePastedText(pasted);
 eq(pasteRes.questions.length, 2, '粘贴行式文本解析 2 题');
 eq(pasteRes.questions[0].answer, 'B', '粘贴：单选答案 B');
 eq(pasteRes.questions[1].type, 'judge', '粘贴：判断题型识别');
+const pasteMaterial = await QB.DataIO.parsePastedText([
+  '1. [材料题] 粘贴材料引导语',
+  '材料：共享材料正文',
+  '(1). [单选] 小问一',
+  'A. 甲',
+  'B. 乙',
+  '答案：A',
+  '(2). [判断题] 小问二',
+  '答案：正确'
+].join('\n'));
+eq(pasteMaterial.questions.length, 1, '粘贴 [材料题] 不再误判为 JSON，解析 1 题');
+eq(pasteMaterial.questions[0].type, 'material', '粘贴 [材料题]：题型 material');
+eq(pasteMaterial.questions[0].children.length, 2, '粘贴 [材料题]：2 个小问');
 const pasteJson = await QB.DataIO.parsePastedText(JSON.stringify([
   { type: 'single', question: 'JSON 粘贴题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
 ]));

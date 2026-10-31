@@ -111,6 +111,11 @@ section('队列：learning 优先、分钟级未到过滤、逾期排序');
   eq(r.questions[2].id, 'q-4', '随后是逾期 1 天的 q-4');
   ok(r.questions.indexOf(qs[1]) < 0, '分钟级未到的 learning 卡不出现');
   eq(r.counts.total, 4, '总队列 4 张');
+
+  // 默认不传 shuffleDue：必须保持“逾期在前、按 due 升序”，与 README/SRS 文案一致
+  const rd = QB.ReviewQueue.build(qs, map, { settings: { newPerDay: 10, reviewPerDay: 10 }, now: now });
+  eq(rd.questions[1].id, 'q-3', '默认顺序：逾期更久的 q-3 在前');
+  eq(rd.questions[2].id, 'q-4', '默认顺序：随后是 q-4');
 }
 
 section('队列：种子确定性 + 材料题 hash 键');

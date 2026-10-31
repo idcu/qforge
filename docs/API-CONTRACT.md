@@ -26,17 +26,15 @@
 | GET | `/api/banks` | 题库列表 | — | `{ items: Bank[], total }` |
 | POST | `/api/banks` | 新建题库 | `{ name, description?, category? }` | `201` + `Bank` |
 | GET | `/api/banks/{id}` | 题库详情 | — | `Bank` |
-| PATCH | `/api/banks/{id}` | 修改（部分字段）；可选乐观并发 | `{ name?, description?, category?, source_kind?, source_uri?, source_checksum?, source_fetched_at?, base_updated_at? }`；`base_updated_at` 与服务端 `updated_at` 不一致 → `409 CONFLICT` + `current`，不覆盖他端修改 | `Bank`（`updated_at` 单调递增） |
+| PATCH | `/api/banks/{id}` | 修改（部分字段）；可选乐观并发 | `{ name?, description?, category?, source?, sched?, base_updated_at? }`；`source` 为 `{kind,uri,fetchedAt,checksum,refreshable}` 对象；`base_updated_at` 与服务端 `updated_at` 不一致 → `409 CONFLICT` + `current`，不覆盖他端修改 | `Bank`（`updated_at` 单调递增） |
 | DELETE | `/api/banks/{id}?cascade=true` | 删除题库 | — | `204` |
 
 **Bank 结构**
 ```json
 { "id": "bank_xxx", "name": "物业管理知识题库", "description": "",
   "category": "物业",
-  "source_kind": "local | file | paste | drop | url",
-  "source_uri": "文件名 / 剪贴板 / 远端 URL",
-  "source_checksum": "a2cd0a87",
-  "source_fetched_at": 0,
+  "source": { "kind": "local | file | paste | drop | url", "uri": "文件名 / 剪贴板 / 远端 URL",
+              "fetchedAt": 0, "checksum": "a2cd0a87", "refreshable": false },
   "sched": { "new_per_day": 20, "review_per_day": 200 },
   "created_at": 0, "updated_at": 0 }
 ```
@@ -106,7 +104,7 @@
 ```json
 { "id": "h_xxx", "bank_id": "bank_xxx", "bank_name": "物业题库",
   "mode": "practice | exam", "total": 20, "correct": 15, "wrong": 5,
-  "partial": 0, "score": 150, "accuracy": 75,
+  "partial": 0, "pending": 0, "unanswered": 0, "score": 150, "accuracy": 75,
   "by_type": { "multi": { "correct": 5, "total": 8 } },
   "duration_ms": 90000, "focus_leaves": 0, "created_at": 0 }
 ```

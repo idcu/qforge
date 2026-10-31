@@ -93,7 +93,8 @@
     const pickedDue = due.slice(0, reviewCap).map((x) => x.q);
     const pickedNew = fresh.slice(0, newCap);
 
-    const orderedDue = opts.shuffleDue === false ? pickedDue : QB.shuffle(pickedDue, opts.seed);
+    // 默认保持“逾期在前、按 due 升序”；仅显式 shuffleDue:true 才打乱展示顺序（选取仍按逾期优先）。
+    const orderedDue = opts.shuffleDue === true ? QB.shuffle(pickedDue, opts.seed) : pickedDue;
     const orderedNew = QB.shuffle(pickedNew, opts.seed === undefined ? undefined : opts.seed + 1);
     const out = learningQs.concat(orderedDue, orderedNew);
 

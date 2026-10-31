@@ -59,7 +59,7 @@
 | `utils/fnv.js` | `QB.FNV` | FNV-1a 32 位散列唯一实现：`hashString`（UTF-16 码元）/`hashBytes`/`toHex`；question-id、assets、source 共用（serve-api 为 Node ESM 独立实现，等价性由 E2E 守护） |
 | `utils/random.js` | `QB.mulberry32` | 确定性 PRNG 唯一实现（`[0,1)`），供 `QB.shuffle`/`shuffleOptions` 与 FSRS fuzz 共用 |
 | `utils/answer-text.js` | `QB.AnswerText` | 填空答案拼接/回退与按题型答案行文本：`joinBlanks/blankAnswers/answerText`；exporter/share-page/question-editor/adapters/judge-answer 共用 |
-| `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions`/`QB.shuffleChildren` | 基于 `QB.mulberry32` 的种子化洗牌/抽样；选项乱序并同步重映射答案；材料题小问乱序保留原 contentHash（整题身份不随展示顺序变化） |
+| `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions`/`QB.shuffleChildren` | 基于 `QB.mulberry32` 的种子化洗牌/抽样；选项乱序（单选/多选/不定项）并同步重映射答案；材料题小问乱序保留原 contentHash（整题身份不随展示顺序变化） |
 | `utils/answer-normalize.js` | `QB.normalizeAnswer`/`QB.parseBoolean`/`QB.normalizeLetters` | 全角转半角、去空白、去标点、大小写归一；布尔归一 |
 | `utils/judge-answer.js` | `QB.judgeAnswer` / `QB.childPoints` / `QB.normalizeChildScore` | 按 `type` 策略表判分；`judgeAnswer(q, ans, opts?)` 的 `opts.pointOf(type)` 提供本场「按题型分值」，`opts.useTypePoints` 为 true（本场显式设置分值）时才覆盖小问自带分；口径唯一：**本场显式题型分值 > `children[*].score`（1–100） > `CONFIG.POINTS_PER_CORRECT`**；小问分值归一由 `normalizeChildScore` 统一（编辑器/导入/存储/导出共用） |
 | `utils/result-policy.js` | `QB.ResultPolicy.kind/isDecided/isWrong` | **判分结果语义唯一入口**：`empty/pending/partial/correct/wrong`；材料题“全半对”按 `partial` 优先，计分/答题卡/结果页/SRS 评分统一使用，禁止各处 if-else |

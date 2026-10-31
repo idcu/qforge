@@ -153,7 +153,7 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 2. **review**：已毕业卡且 `due <= 今日 23:59:59.999`（逾期在前，按 due 升序）；上限 `reviewPerDay - learning.length`。
 3. **new**：无调度状态的题；上限 `newPerDay`。
 
-顺序固定为 learning → review → new（review/new 组内按种子洗牌，可复现）。限额按题库存于 `bank.sched = {newPerDay, reviewPerDay}`（wire：`sched.new_per_day / review_per_day`），复用 banks 仓库，故 local / api / 备份三端一致；默认值唯一来源 `CONFIG.LIMITS.NEW_PER_DAY=20 / REVIEW_PER_DAY=200`，0 表示该组不排。统计页提供「调整复习设置」，首页「今日复习」显示本轮实际排入的题量与构成（不再显示原始到期总数）。
+顺序固定为 learning → review（逾期在前、按 `due` 升序）→ new（组内按种子洗牌，可复现）。review 组仅在调用方显式 `shuffleDue:true` 时才打乱展示顺序（选取仍按逾期优先）；默认保持逾期优先，与 README 一致。限额按题库存于 `bank.sched = {newPerDay, reviewPerDay}`（wire：`sched.new_per_day / review_per_day`），复用 banks 仓库，故 local / api / 备份三端一致；默认值唯一来源 `CONFIG.LIMITS.NEW_PER_DAY=20 / REVIEW_PER_DAY=200`，0 表示该组不排。统计页提供「调整复习设置」，首页「今日复习」显示本轮实际排入的题量与构成（不再显示原始到期总数）。
 
 **每日累计额度（2026-10-30）**：限额是跨会话累计，不是「每点一次重新发一整套」。`QB.ReviewQueue.dailyFromLog(log, bankId, now)` 从 revlog 推导：
 - 某 hash 的**首条日志**（全量日志内最早 `t`）落在今日 → 计入「今日已引入新卡」；

@@ -107,11 +107,16 @@
   }
 
   /** 粘贴文本嗅探：JSON 走 JsonImporter，其余按行式（Markdown/纯文本，LineParser 同源） */
-  function parsePastedText(text) {
+  async function parsePastedText(text) {
     const trimmed = String(text || '').trim();
     if (!trimmed) throw new Error('内容为空');
+    // 以 [ 开头的行式材料块（[材料题]）不能直接当 JSON；先试 JSON，仅“JSON 语法失败”回退行式。
     if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
-      return QB.JsonImporter.parse({ text: trimmed, fileName: '粘贴.json' });
+      try {
+        return await QB.JsonImporter.parse({ text: trimmed, fileName: '粘贴.json' });
+      } catch (e) {
+        if (!/JSON 解析失败/.test(String(e && e.message))) throw e;
+      }
     }
     return QB.MdImporter.parse({ text: trimmed, fileName: '粘贴.md' });
   }

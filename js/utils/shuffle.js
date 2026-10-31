@@ -48,7 +48,7 @@
   };
 
   /**
-   * 选项乱序（公共抽象，仅 single/multi）
+   * 选项乱序（公共抽象，仅 single/multi/indefinite）
    * 返回题目的浅克隆：选项重排并重新分配字母 A..，答案字母同步重映射。
    * - 不修改原题（落库数据保持 A/B/C/D 原序）；
    * - 题干与题型不变，故 contentHash 保持不变，错题/收藏键不受影响；
@@ -62,7 +62,7 @@
       const children = (q.children || []).map((cq, i) => QB.shuffleOptions(cq, seed === undefined ? seed : seed + i + 1));
       return Object.assign({}, q, { children: children });
     }
-    if (q.type !== 'single' && q.type !== 'multi') return q;
+    if (q.type !== 'single' && q.type !== 'multi' && q.type !== 'indefinite') return q;
     const opts = Array.isArray(q.options) ? q.options : [];
     if (opts.length < 2) return q;
 
