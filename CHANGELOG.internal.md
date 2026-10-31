@@ -6,6 +6,39 @@
 
 ---
 
+## 8dafa54 · fix(security): 参考后端静态服务拒绝数据/开发目录
+
+**核心改动**
+- `scripts/lib/static-server.mjs`：`resolveSafePath` 新增静态暴露守卫——任一路径段以 `.`
+  开头（`.git`/`.trae`/`.qforge-data` 等）或命中 `DENY_SEGMENTS`（`scripts`/`qforge-evaluation`/
+  `CHANGELOG.internal.md`）一律返回 null；新增 `opts.denyDirs` 按绝对路径前缀拒绝（供参考后端 dataDir）。
+- `scripts/serve-api.mjs`：静态回退调用 `resolveSafePath(root, req.url, { denyDirs: [store.root] })`；
+  `createServer` 在 dataDir 位于静态 root 内时打印告警（拒绝访问 ≠ 物理隔离，生产建议 DATA_DIR 移出 root）。
+- `scripts/serve.mjs` 复用同一守卫（无 dataDir 参数），点目录/开发目录同样不可达。
+- 文档同步：API-CONTRACT 安全表、DEVELOPMENT 参考后端说明、README 安全基线；
+  测试计数 static-server 22→29、api-backend 272→277、全量 3682→3694。
+
+**验证数据（2026-11-01 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/static-server.test.mjs`：**29/29 通过**（新增 7 项：`.git`/`.qforge-data`/
+  `scripts`/`qforge-evaluation`/`CHANGELOG` 拒绝、denyDirs 拒绝 dataDir、denyDirs 不影响正常资源）。
+- `node scripts/api-backend.test.mjs`：**277/277 通过**（新增 5 项：dataDir 位于静态 root 内时
+  `GET /<dataDir>/banks.json`、`/.git/config`、`/scripts/serve-api.mjs`、`/CHANGELOG.internal.md`
+  全部 403；数据创建前提 201）。
+- `node scripts/test-all.mjs`：**24 个运行项 3694/3694 通过，0 失败**。
+- 复现对照：修复前临时 dataDir `POST /api/banks` 201 后 `GET /<dataDir>/banks.json` 返回 200 与
+  题库 JSON；修复后同路径 403。
+
+**公共抽象/影响**
+- 无新增业务公共抽象；`resolveSafePath` 为静态服务安全守卫唯一实现（`serve.mjs`/`serve-api.mjs` 共用）。
+- `DENY_SEGMENTS` 为新增导出常量，后续新增开发目录只需追加该清单。
+
+**TODO/风险**
+- 默认 `DATA_DIR` 仍在 `<工程根>/.qforge-data`：本提交靠“拒绝访问”而非“物理隔离”；生产部署仍应把
+  DATA_DIR 移出静态 root（README/DEVELOPMENT 已注明）。
+- 未做真实浏览器/公网部署验收；Node E2E 已覆盖 HTTP 层。
+
+---
+
 ## 21d751c · feat(sync): 复习进度多端冲突合并（rev + last）
 
 **核心改动**
