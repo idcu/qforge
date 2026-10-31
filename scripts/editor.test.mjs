@@ -121,7 +121,8 @@ const mkChild = (type, extra) => QB.QuestionEditor.buildChildQuestion(type, Obje
   const single = mkChild('single');
   eq(single.type, 'single', '子问题保留题型');
   eq(single.answer, 'A', '子问题单选答案 A');
-  eq(single.score, 10, '子问题默认分值 10');
+  eq(single.score, 0, '子问题未填分值保持 0（不写显式默认 10）');
+  eq(mkChild('single', {}).score, 0, '未填分值不伪造显式值');
   eq(mkChild('single', { score: '25' }).score, 25, '子问题分值可设为 25');
   eq(mkChild('single', { score: 999 }).score, 100, '子问题分值上限 100（公共归一）');
   ok(!('category' in single) && !('difficulty' in single) && !('tags' in single), '子问题不携带分类/难度/标签（继承父题）');
@@ -164,6 +165,7 @@ const mkChild = (type, extra) => QB.QuestionEditor.buildChildQuestion(type, Obje
   eq((body.match(/data-cc-card=/g) || []).length, 2, '渲染 2 张小问卡片');
   ok(body.indexOf('data-cc="type"') >= 0 && body.indexOf('data-cc="answer"') >= 0, '卡片含题型与作答区');
   ok(body.indexOf('data-cc="score"') >= 0 && body.indexOf('class="me-score"') >= 0, '卡片含小问分值输入（data-cc=score）');
+  ok(body.indexOf('placeholder="默认 10"') >= 0, '分值输入以 placeholder 提示默认 10（不伪造显式值）');
   ok(body.indexOf('data-cc="opt-add"') >= 0 || body.indexOf('data-cc="blank-add"') >= 0, '作答区控件使用 cc 前缀（与普通题作用域隔离）');
   ok(body.indexOf('材&lt;b&gt;料') >= 0, '材料正文转义');
 

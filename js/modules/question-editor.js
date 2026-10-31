@@ -78,15 +78,6 @@
 
   const DIFF_OPTS = [0, 1, 2, 3, 4, 5];
 
-  /**
-   * 是否允许在编辑器中打开编辑。
-   * 材料题（含子问题）暂不支持嵌套编辑：旧实现会退回 essay 表单并部分改写父题，
-   * 因此显式禁止，避免“看起来能编辑、保存后半损坏”。
-   */
-  function canEditQuestion(q) {
-    return !!q && q.type !== 'material';
-  }
-
   function typeOptions(cur) {
     // M1：材料题（material）仅支持 JSON 导入/做题，嵌套编辑器在 M3 开放
     return QB.CONFIG.TYPES.filter((t) => t !== 'material').map((t) =>
@@ -325,9 +316,10 @@
     delete q.category;
     delete q.difficulty;
     delete q.tags;
-    // 小问分值 1..100（公共归一）；空/非法回落默认 10，口径见 QB.normalizeChildScore
+    // 小问分值 1..100（公共归一）；空/非法保持 0（=未设置，实际按默认 10 计），
+    // 不再把默认值写成“显式分值”，避免编辑器创建的材料题总触发第 19 列导出。
     const score = QB.normalizeChildScore(fv.score);
-    q.score = score > 0 ? score : 10;
+    q.score = score > 0 ? score : 0;
     return { question: q, errors: r.errors };
   }
 
@@ -390,11 +382,11 @@
 
   /** 子问题卡片（data-cc 前缀，作用域内独立） */
   function childCardBody(c, i) {
-    const score = QB.normalizeChildScore(c.score) || 10;
+    const score = QB.normalizeChildScore(c.score);
     return '<div class="me-child" data-cc-card="' + i + '">' +
       '<div class="me-child-head"><b>小问 ' + (i + 1) + '</b>' +
       '<select data-cc="type">' + childTypeOptions(c.type) + '</select>' +
-      '<label class="me-score-label">分值<input type="number" class="me-score" data-cc="score" min="1" max="100" value="' + score + '" /></label>' +
+      '<label class="me-score-label">分值<input type="number" class="me-score" data-cc="score" min="1" max="100" value="' + (score || '') + '" placeholder="默认 10" /></label>' +
       '<button type="button" class="btn btn-sm btn-ghost btn-danger-text" data-cc="del-child">删除小问</button></div>' +
       '<label class="qe-label">小问题干</label><textarea data-cc="question" rows="2" placeholder="小问题干（填空用 ____ 表示空位）">' + esc(c.question || '') + '</textarea>' +
       '<div data-cc="answer">' + answerSection(c, 'cc') + '</div>' +
@@ -468,7 +460,7 @@
         const common = {
           question: card.querySelector('[data-cc="question"]').value,
           analysis: card.querySelector('[data-cc="analysis"]').value,
-          score: QB.normalizeChildScore(card.querySelector('[data-cc="score"]').value) || 10
+          score: QB.normalizeChildScore(card.querySelector('[data-cc="score"]').value) || 0
         };
         children[idx] = Object.assign(blankChild(sel.value), common);
         renderChildren();

@@ -418,10 +418,19 @@
   async function finishQuiz() {
     const engine = State.engine;
     if (!engine) return;
-    // 防双击/自动交卷与手动交卷并发：入口即上锁，重复调用直接返回。
+    // 防双击/自动交卷与手动交卷并发：入口即上锁，重复调用直接返回；失败时释放锁供重试。
     State.quizMeta = State.quizMeta || {};
     if (State.quizMeta.locked || State.quizMeta.finishing) return;
     State.quizMeta.finishing = true;
+    try {
+      await finishQuizCore(engine);
+    } catch (e) {
+      State.quizMeta.finishing = false;
+      throw e;
+    }
+  }
+
+  async function finishQuizCore(engine) {
     const isExam = engine.mode === 'exam';
     stopTimer();
     if (isExam) {
@@ -1431,7 +1440,7 @@
         }
         promptUpdate(reg.installing);
         reg.addEventListener('updatefound', () => promptUpdate(reg.installing));
-        // 不自动 reload：新 SW 等待所有标签关闭后激活（无 skipWaiting），
+        // 不自动 reload：SW 安装时 skipWaiting 并立即接管（activate 清旧缓存），由用户手动刷新切换，
         // 避免答题中刷新丢失进度；用户下次打开即为新版本。
       }).catch(() => { /* 离线/受限环境忽略 */ });
     });

@@ -253,7 +253,7 @@
   function inferType(options, answer, raw) {
     if (Array.isArray(answer) && answer.length > 1) return 'multi';
     const letters = normalizeLetters(answer);
-    if (options.length >= 2 && options.length <= 2 && options.every((o) => parseBool(o.text) !== null)) return 'judge';
+    if (options.length === 2 && options.every((o) => parseBool(o.text) !== null)) return 'judge';
     if (letters.length > 1) return 'multi';
     if (raw && (raw.blanks || raw.填空)) return 'fill';
     if (!options.length && raw && (raw.reference_answer || raw.参考答案)) return 'essay';

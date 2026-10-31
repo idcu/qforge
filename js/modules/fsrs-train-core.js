@@ -139,8 +139,7 @@
     let bestW = w.slice();
     const m = new Array(w.length).fill(0);
     const v = new Array(w.length).fill(0);
-    let cur = loss(w, seqs);
-    let bestLoss = cur;
+    let bestLoss = loss(w, seqs);
     for (let it = 1; it <= iters; it++) {
       const g = gradient(w, seqs);
       for (let i = 0; i < w.length; i++) {
@@ -153,7 +152,6 @@
       }
       const next = loss(w, seqs);
       if (isFinite(next) && next < bestLoss) { bestLoss = next; bestW = w.slice(); }
-      if (isFinite(next)) cur = next;
     }
     return { weights: bestW, loss: bestLoss, iterations: iters };
   }
