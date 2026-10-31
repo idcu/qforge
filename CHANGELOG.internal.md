@@ -6,6 +6,71 @@
 
 ---
 
+## b0c4d3e · refactor(editor,quiz): 清理重复定义与小问分值显式语义
+
+**核心改动**
+- `js/modules/question-editor.js`：删除首个重复 `canEditQuestion`（旧注释“材料题不可编辑”已过时，
+  后定义 M3 起有效）；小问分值留空保持 0（未设置，实际仍按默认 10 计），输入框改 `placeholder="默认 10"`，
+  不再把默认值写成显式 `score:10`（避免编辑器创建的材料题总触发第 19 列导出）。
+- `js/app.js`：`finishQuiz` 拆为入口锁 wrapper + `finishQuizCore`；core 抛错时释放 `finishing` 锁，
+  允许用户重试，避免一次失败后永久无法交卷。
+- 清理：`fsrs-train-core` 未使用 `cur`、`adapters.inferType` 冗余 `>=2 && <=2`、`srs.js`/`fsrs-opt.js`
+  陈旧 FSRS-4.5 注释、`app.js` SW skipWaiting 注释。
+- 文档同步：README/DEVELOPMENT 编辑器 70→72、合计 3739→3741；DEVELOPMENT M4 口径改为“未填=0 未设置”。
+
+**验证数据（2026-11-01 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/editor.test.mjs`：**72/72**（新增：未填 score=0、placeholder 默认 10）。
+- `node scripts/test-all.mjs`：24 个运行项 **3741/3741 通过，0 失败**。
+
+**公共抽象/影响**
+- 材料题小问 `score` 语义：`0` = 未设置（按默认 10 计），`1–100` = 显式分值；导出/导入/判分口径不变，
+  但编辑器新建材料题不再自动写 `score=10`，表格导出的“小问分值”列仅在用户显式填写时出现。
+- `finishQuizCore` 为内部函数，不对外暴露；入口锁行为不变。
+
+**TODO/风险**
+- 已有通过编辑器创建、已落库 `score=10` 的材料题不会自动清洗；如需彻底 0 化，应加迁移/编辑器回写。
+- 仍未做真实浏览器交卷失败重试验收；Node 全量回归覆盖状态机与解析逻辑。
+
+---
+
+## 52adbfd · fix(security,storage): CSV/ZIP/WebDAV 边界与 API/异步健壮性
+
+**核心改动**
+- `js/modules/exporter.js`：CSV 公式注入防护（`=`/`+`/`@` 或 `-`+非数字 前置 `'`）。
+- 新增 `js/utils/crc32.js`（`QB.Crc32` 唯一实现）；`zip-writer` 改用共享 CRC；`zip-reader` 增加
+  条目数 10000 / 单条 32MB / 总量 64MB 上限与 CRC 校验；`qbk.parseBundle` 修正 Uint8Array 子视图。
+- `sync-dav.authHeader` 改 UTF-8 base64（中文账号/应用密码不再抛 `InvalidCharacterError`）。
+- `serve-api`：题目列表支持 `offset/size`（offset 优先）；坏 JSON 数据文件解析失败抛 500，不再静默当空库；
+  `api-adapter.list` 直接透传 offset，不再折算页。
+- `app.finishQuiz` 入口锁（重复调用直接返回）；考试键盘 Enter 不绕过交卷确认；
+  action 委托、会话防抖保存、建库/删库补 catch/toast。
+- `ui-renderer.renderStorageHealth`：API 模式显示「后端存储」，不再展示 localStorage 配额文案。
+- 文档同步：API-CONTRACT（offset/Bank.source/AttemptRecord）、EXPORT-FORMAT（CSV 注入）、ARCHITECTURE
+  （CRC/ZIP 安全边界）、README 安全基线/性能数、DEVELOPMENT 测试计数。
+
+**验证数据（2026-11-01 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3739/3739 通过，0 失败**。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**；JSON.parse **1.56ms**、
+  insertMany **5.45ms**、按需单页 **0.24ms**、3000 题单题 update **0.20ms**、
+  FSRS 全量训练 **3635.77ms** / 热启动 **1448.10ms（2.51×）**、heapUsed **+2.72MB**。
+- 新增断言：exporter +1（CSV 注入）、office-export +2（ZIP 超限/CRC 正常读）、sync-dav +1（中文凭据）、
+  ui-renderer +3（API 存储卡）、api-backend +3（source 回读/pending-unanswered/offset/corrupt 500）。
+
+**公共抽象/影响**
+- 新增 `QB.Crc32`（ZipReader/ZipWriter 共用）；`ZipReader.readEntries` 新增可选 `opts` 安全上限，
+  现有调用不传 opts 时使用默认值，正常 OOXML/qbk 不受影响。
+- `QB.API.questions.list` 新增可选 `offset` 查询；旧 `page/size` 兼容。
+- CSV 导出对危险前缀加 `'`，是文本层防护；再次导入该前缀会作为内容保留（已知取舍）。
+
+**TODO/风险**
+- **SRS 整表写放大未改**：`reviews.record` 仍整表 map + 整份 revlog 写（此前实测 20k 状态+20k 日志 18.41ms、
+  map 2.42MB）；需要 per-question patch / append-only log 或换存储布局，单独批次处理。
+- `finishQuiz` 失败释放锁依赖 `finishQuizCore` 抛出；若未来在 core 内吞错，需同步调整。
+- ZIP CRC 会拒绝 CRC 错误的“可解压但损坏”包（预期安全行为）；未做真实浏览器大文件/恶意包验收。
+- 未做真实 Office GUI/浏览器 E2E；Node 断言与 Python openpyxl/zipfile 校验已覆盖。
+
+---
+
 ## db75ec5 · fix(import,sync): 粘贴材料题回退、wire 来源/历史字段、不定项乱序与逾期排序
 
 **核心改动**
