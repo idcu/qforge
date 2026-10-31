@@ -14,6 +14,41 @@
 
 ---
 
+## 8d7b091 · feat(sync): 题库元数据乐观并发（base_updated_at）
+
+**核心改动**
+- `scripts/serve-api.mjs` 的 `PATCH /api/banks/{id}` 支持可选 `base_updated_at`：与服务端
+  `updated_at` 不一致 → `409 CONFLICT` + `current`，不覆盖他端修改；`base_updated_at` 不落盘。
+- `store.banks.update` 的 `updated_at` 改为**单调递增**（`max(now, prev+1)`），同一毫秒内多次写
+  也能区分版本。
+- `api-adapter.banks.update(id, patch, opts)` 透传 `baseUpdatedAt → base_updated_at`；local 适配器
+  忽略该参数（单端无并发语义）。
+- 调用方接入：`SchedSettings.save`（复习限额）、`BankManager.rename`（名称/描述）、
+  `data-io.stampSource`（导入来源）均带当前 `bank.updatedAt`；改名冲突提示
+  「题库已在其他设备修改，请刷新后重试」，不再静默覆盖。
+
+**验证数据（2026-10-31 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3661/3661** 通过，0 失败，**24.2s**
+  （api-backend 247→260；其余 23 套件不变）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.94ms、
+  insertMany 5.46ms、按需单页 0.21ms、3000 题库单题 update 0.20ms、heapUsed **+2.71MB** ≤ 40MB。
+- 新增断言实测：匹配版本 PATCH 200 且 `updated_at` 递增；过期版本 409 CONFLICT + `current`，
+  库名仍为服务端值；适配器 `baseUpdatedAt` 冲突抛 409/CONFLICT 且消息含「其他设备」。
+
+**公共抽象/影响**
+- `banks.update(id, patch, opts{baseUpdatedAt})` 为唯一并发入口；影响 SchedSettings、BankManager、
+  data-io；local 适配器签名兼容（第三参忽略）。
+- 服务端仍兼容不带 `base_updated_at` 的旧客户端（last-write-wins），只有显式带版本才校验。
+- 新增 409 错误处理在题库改名弹窗；复习设置弹窗沿用 `保存失败：<message>` 提示。
+
+**TODO/风险**
+- 调用方对象缺 `updatedAt` 时不带版本（退化为 last-write-wins）；正常 local/api 读取均带该字段。
+- `stampSource` 冲突时静默忽略来源更新（不阻断导入），属已知取舍。
+- reviews/weights 仍为整表 last-write-wins（本轮未改），多端作答冲突需版本号/合并策略（后续项）。
+- 未做真实浏览器多标签并发验收；HTTP 层由 260 项 Node E2E 覆盖。
+
+---
+
 ## d244846 · feat(quiz): 开始弹窗记忆上次组卷参数 + 空题池守卫
 
 **核心改动**
