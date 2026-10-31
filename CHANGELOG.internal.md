@@ -14,6 +14,42 @@
 
 ---
 
+## d244846 · feat(quiz): 开始弹窗记忆上次组卷参数 + 空题池守卫
+
+**核心改动**
+- 新增 `js/modules/start-prefs.js`（`QB.StartPrefs.normalize/load/save`）：按 practice/exam 分模式保存
+  各题型数量/分值、分类、考试时长、练习计时、选项/小问乱序开关；数量 0–999、分值 0–100、
+  时长 0–1440 归一钳制，练习/考试互不覆盖。
+- 偏好键 `QB.KEYS.metaStartPrefs`（`meta:startPrefs`）；列入 `backup.js` 的 `LOCAL_ONLY_META_KEYS`，
+  不随题库跨设备/后端同步（本机 UI 偏好）。
+- `ui-renderer.renderStartDialog` 支持 `opts.prefs` 回填：`typeCountRows` 新增按题型
+  `countValues/pointsValues`，`categoryOptions` 支持 `selected`，时长/计时/乱序开关按偏好勾选。
+- `app.openStartDialog`：**无题库或题池为空时 toast 并返回**，不再打开全 0 的空弹窗；开始成功后
+  保存本次参数（`StartPrefs.save`），存储失败仅忽略偏好、不阻断组卷。
+
+**验证数据（2026-10-31 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3648/3648** 通过，0 失败，**24.6s**
+  （smoke 676→696、ui-renderer 153→162、source 35→39；其余 21 套件不变）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse 1.89ms、
+  insertMany 5.88ms、按需单页 0.23ms、3000 题库单题 update 0.24ms、heapUsed **+2.71MB** ≤ 40MB。
+- 真机（`serve.mjs` 127.0.0.1:8777）：选择示例题库 → 练习模式设置判断题 3 题 → 开始 → 结束练习 →
+  返回首页 → 再次打开练习模式，判断题数量仍为 3，控制台无错误，**PASS**。
+- 首屏体积：64 脚本 / 72 文件，**228.8 KB gzip / 628.5 KB raw**（新增 1 个模块，约 +1.9KB gzip）。
+
+**公共抽象/影响**
+- 新增 `QB.StartPrefs`（归一/存取唯一实现）；影响 `app.js`（load/save + 守卫）、
+  `ui-renderer.js`（回填参数）、`backup.js`（本机专有偏好）、`index.html`/`_harness.mjs`（加载顺序）。
+- 新增本机键 `meta:startPrefs`，DATABASE 文档已记录；备份转换不包含该键。
+- `typeCountRows` 旧参数 `countValue/pointsDefault` 保留，组卷弹窗调用不受影响。
+
+**TODO/风险**
+- 首次使用无历史偏好时数量仍为 0（需手动设置一次）；未默认灌题，避免误开整库。
+- 上次数量大于当前题库可用数时，仍按 Blueprint 实际数量组卷并 toast 提示（已有行为）。
+- 偏好仅本机（不跨设备/后端同步）；无过期/清理入口，用户可清站点数据。
+- 未做弱网/存储配额下的浏览器专项验收；save 失败已有 try/catch 不阻断答题。
+
+---
+
 ## 801d49d · feat(security): 参考后端按 IP 限流（默认 1200 次/分钟，可关闭）
 
 **核心改动**
