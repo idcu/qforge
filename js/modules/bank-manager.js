@@ -56,10 +56,20 @@
             modal.querySelector('[data-action="modal-ok"]').onclick = async () => {
               const name = nameEl.value.trim();
               if (!name) { UI.toast('题库名称不能为空', 'err'); return; }
-              const updated = await QB.DB.banks.update(bank.id, {
-                name: name,
-                description: modal.querySelector('#bk-desc').value.trim()
-              });
+              let updated = null;
+              try {
+                updated = await QB.DB.banks.update(bank.id, {
+                  name: name,
+                  description: modal.querySelector('#bk-desc').value.trim()
+                }, { baseUpdatedAt: bank.updatedAt });
+              } catch (e) {
+                UI.toast(e && e.code === 'CONFLICT'
+                  ? '题库已在其他设备修改，请刷新后重试'
+                  : '保存失败：' + (e && e.message ? e.message : e), 'err');
+                UI.closeModal();
+                resolve(null);
+                return;
+              }
               UI.closeModal();
               UI.toast('已保存', 'ok');
               resolve(updated);

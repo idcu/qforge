@@ -188,7 +188,13 @@
     async list() { const r = await req('GET', ROUTES.banks); return (r.items || []).map(fromWireBank); },
     async get(id) { const w = await reqMaybe('GET', ROUTES.bank(enc(id))); return w ? fromWireBank(w) : null; },
     async create(data) { return fromWireBank(await req('POST', ROUTES.banks, toWireBank(data))); },
-    async update(id, patch) { return fromWireBank(await req('PATCH', ROUTES.bank(enc(id)), toWireBank(patch))); },
+    async update(id, patch, opts) {
+      const body = toWireBank(patch);
+      if (opts && opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== null) {
+        body.base_updated_at = opts.baseUpdatedAt;
+      }
+      return fromWireBank(await req('PATCH', ROUTES.bank(enc(id)), body));
+    },
     async remove(id, options) {
       const cascade = !options || options.cascade !== false;
       await req('DELETE', ROUTES.bank(enc(id)) + '?cascade=' + (cascade ? 'true' : 'false'));

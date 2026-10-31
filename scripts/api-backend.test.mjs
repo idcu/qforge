@@ -165,6 +165,16 @@ let bankB = null;
   eq(one.body.name, '后端库A', 'GET 单库详情');
   const patched = await req('PATCH', '/api/banks/' + bankA.id, { name: '后端库A2' });
   eq(patched.body.name, '后端库A2', 'PATCH 部分更新');
+  const bankV1 = patched.body.updated_at;
+  const okBase = await req('PATCH', '/api/banks/' + bankA.id, { name: '后端库A3', base_updated_at: bankV1 });
+  eq(okBase.status, 200, '带匹配 base_updated_at 的题库 PATCH 成功');
+  eq(okBase.body.name, '后端库A3', '匹配版本写入生效');
+  ok(okBase.body.updated_at > bankV1, '题库 updated_at 单调递增');
+  const staleBank = await req('PATCH', '/api/banks/' + bankA.id, { name: '覆盖尝试', base_updated_at: bankV1 });
+  eq(staleBank.status, 409, '过期 base_updated_at → 409');
+  eq(staleBank.body.error.code, 'CONFLICT', '题库 409 错误码 CONFLICT');
+  eq(staleBank.body.current.name, '后端库A3', '题库 409 返回服务端当前版本');
+  eq((await req('GET', '/api/banks/' + bankA.id)).body.name, '后端库A3', '题库冲突未覆盖服务端数据');
   const missing = await req('GET', '/api/banks/nope');
   eq(missing.status, 404, '不存在题库 404');
   eq(missing.body.error.code, 'NOT_FOUND', '错误体 { error: { code } }');
@@ -501,6 +511,20 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   ok(log.some((e) => e.h === 'h1' && e.b === bank.id), 'api：revlog append/list 往返');
   await QB.DB.weights.write({ global: { w: QB.FSRS.DEFAULT_W, trainedAt: 7 }, banks: {} });
   eq((await QB.DB.weights.read()).global.trainedAt, 7, 'api：weights write/read 往返');
+
+  // 题库元数据乐观并发：适配器 baseUpdatedAt → 409 诚实抛出，不覆盖他端修改
+  const cb = await QB.DB.banks.create({ name: '并发库' });
+  const cbV1 = cb.updatedAt;
+  const cbOk = await QB.DB.banks.update(cb.id, { name: '并发库2' }, { baseUpdatedAt: cbV1 });
+  eq(cbOk.name, '并发库2', 'api：匹配版本题库更新成功');
+  ok(cbOk.updatedAt > cbV1, 'api：题库 updatedAt 递增');
+  let cbErr = null;
+  try { await QB.DB.banks.update(cb.id, { name: '并发库3' }, { baseUpdatedAt: cbV1 }); } catch (e) { cbErr = e; }
+  eq(cbErr && cbErr.status, 409, 'api：过期版本抛 409');
+  eq(cbErr && cbErr.code, 'CONFLICT', 'api：题库冲突错误码 CONFLICT');
+  ok(cbErr && String(cbErr.message).indexOf('其他设备') >= 0, 'api：题库冲突消息可读');
+  eq((await QB.DB.banks.get(cb.id)).name, '并发库2', 'api：冲突未覆盖他端修改');
+  await QB.DB.banks.remove(cb.id);
 
   const bytes = new Uint8Array([9, 8, 7]);
   QB.Assets.useDriver(QB.ApiAdapter.assetDriver());

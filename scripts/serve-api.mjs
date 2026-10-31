@@ -105,7 +105,9 @@ export function createStore(dataDir) {
       const list = banks.list();
       const idx = list.findIndex((b) => b.id === id);
       if (idx < 0) return null;
-      list[idx] = Object.assign({}, list[idx], patch, { id: id, updated_at: now() });
+      // updated_at 单调递增（同一毫秒内多次写也能区分版本，供 base_updated_at 并发校验）
+      const nextUpdated = Math.max(now(), Number(list[idx].updated_at) + 1 || 0);
+      list[idx] = Object.assign({}, list[idx], patch, { id: id, updated_at: nextUpdated });
       writeJson(files.banks, list);
       return list[idx];
     },
@@ -579,7 +581,19 @@ export function createHandler(opts) {
       const id = segs[2];
       if (m === 'GET') { const b = store.banks.get(id); return b ? json(res, 200, b) : fail(res, 404, 'NOT_FOUND', '题库不存在'); }
       if (m === 'PATCH') {
-        const b = store.banks.update(id, await readJsonBody(req));
+        const body = await readJsonBody(req) || {};
+        const current = store.banks.get(id);
+        if (!current) return fail(res, 404, 'NOT_FOUND', '题库不存在');
+        // 乐观并发：调用方给出 base_updated_at 且与服务端版本不一致 → 409，不覆盖他端修改
+        if (body.base_updated_at !== undefined && body.base_updated_at !== null &&
+            Number(current.updated_at) !== Number(body.base_updated_at)) {
+          return json(res, 409, {
+            error: { code: 'CONFLICT', message: '题库已在其他设备修改，请刷新后重试' },
+            current: current
+          });
+        }
+        delete body.base_updated_at;
+        const b = store.banks.update(id, body);
         return b ? json(res, 200, b) : fail(res, 404, 'NOT_FOUND', '题库不存在');
       }
       if (m === 'DELETE') {

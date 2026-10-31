@@ -26,7 +26,7 @@
 | GET | `/api/banks` | 题库列表 | — | `{ items: Bank[], total }` |
 | POST | `/api/banks` | 新建题库 | `{ name, description?, category? }` | `201` + `Bank` |
 | GET | `/api/banks/{id}` | 题库详情 | — | `Bank` |
-| PATCH | `/api/banks/{id}` | 修改（部分字段） | `{ name?, description?, category?, source_kind?, source_uri?, source_checksum?, source_fetched_at? }` | `Bank` |
+| PATCH | `/api/banks/{id}` | 修改（部分字段）；可选乐观并发 | `{ name?, description?, category?, source_kind?, source_uri?, source_checksum?, source_fetched_at?, base_updated_at? }`；`base_updated_at` 与服务端 `updated_at` 不一致 → `409 CONFLICT` + `current`，不覆盖他端修改 | `Bank`（`updated_at` 单调递增） |
 | DELETE | `/api/banks/{id}?cascade=true` | 删除题库 | — | `204` |
 
 **Bank 结构**

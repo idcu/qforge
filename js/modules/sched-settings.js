@@ -43,7 +43,7 @@
   async function save(bank, patch) {
     if (!bank || !bank.id) throw new Error('缺少题库，无法保存复习设置');
     const settings = normalize(Object.assign({}, ofBank(bank), patch || {}));
-    const updated = await QB.DB.banks.update(bank.id, { sched: settings });
+    const updated = await QB.DB.banks.update(bank.id, { sched: settings }, { baseUpdatedAt: bank.updatedAt });
     return { bank: updated, settings: settings };
   }
 

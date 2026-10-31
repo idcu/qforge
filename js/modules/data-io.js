@@ -73,9 +73,10 @@
   /** 落库成功后更新题库来源（provenance） */
   async function stampSource(bank, source) {
     try {
-      await QB.DB.banks.update(bank.id, { source: source });
+      const updated = await QB.DB.banks.update(bank.id, { source: source }, { baseUpdatedAt: bank.updatedAt });
       bank.source = source;
-    } catch (e) { /* 来源记录失败不影响题目导入 */ }
+      if (updated && updated.updatedAt) bank.updatedAt = updated.updatedAt;
+    } catch (e) { /* 来源记录失败（含并发冲突）不影响题目导入 */ }
   }
 
   /** 解析结果 → 预览 → 落库（文件/粘贴/拖拽/URL 共用）；source 为来源描述 */
