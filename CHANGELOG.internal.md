@@ -6,6 +6,42 @@
 
 ---
 
+## 2299046 · fix(quiz): 材料题全半对统一按半对计分与 SRS hard
+
+**核心改动**
+- 新增 `js/utils/result-policy.js`（`QB.ResultPolicy.kind/isDecided/isWrong`）：`empty/pending/partial/correct/wrong`
+  唯一入口，**`partial` 优先于 `isCorrect`**；`index.html` 与 `scripts/_harness.mjs` 按依赖顺序加载。
+- `js/modules/quiz-engine.js`：`getScore`/`statusAt`/`byType`/`breakdown` 改用 ResultPolicy；材料题全半对不再
+  被 `isCorrect=true` 抢先计 correct，`partial++`；`statusAt` 新增 `partial` 状态。
+- `js/modules/srs-store.js`：`ratingForResult` 改用 ResultPolicy；全半对 → **hard**（原来 good）。
+- `js/modules/wrong-book.js`：`isWrongResult` 改用 ResultPolicy（partial 仍不算错题）。
+- `js/modules/ui-renderer.js`：结果页新增“半对”统计卡与 `◐ 半对` 逐题标记；答题卡新增 `ac-partial` 状态/图例；
+  `renderAnswerText` 新增 material 分支（错题/收藏/搜索展示共享材料、小问题干/答案/解析）。
+- `css/style.css`：`.ac-cell.ac-partial` / `.ac-dot.ac-partial`。
+- 文档同步：ARCHITECTURE utils 表 + 公共抽象 + 影响范围、SRS §3 评分映射、user-guide 判分规则、README 成绩报告。
+
+**验证数据（2026-11-01 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/smoke-test.mjs`：**716/716**（新增 11 项：两个不定项小问均少选 → 聚合 `isCorrect=true/partial=true`、
+  `points.earned=10/20`；`getScore` `correct=0, partial=1, score=10, accuracy=100`；`statusAt=partial`；
+  `byType.material.correct=0`；SRS `hard`）。
+- `node scripts/ui-renderer.test.mjs`：**171/171**（新增 9 项：`ac-partial` 格/当前题叠加/图例半对；材料列表
+  材料+小问 1/2+答案+解析；结果页“半对”统计卡与 `◐ 半对`）。
+- `node scripts/test-all.mjs`：24 个运行项 **3714/3714 通过，0 失败**。
+
+**公共抽象/影响**
+- 新增 `QB.ResultPolicy`，影响 quiz-engine（计分/状态/分布）、srs-store（评分映射）、wrong-book（错题口径）、
+  ui-renderer（结果页/列表预览）；后续新增题型的结果语义必须复用该入口。
+- 行为变更：材料题“全半对”从“correct + SRS good”改为“partial + SRS hard”；历史记录/结果页会新增“半对”计数。
+  已有历史记录不回填，后续作答按新口径。
+
+**TODO/风险**
+- `score.accuracy` 仍沿用 `(correct+partial)/decided`，全半对正确率仍显示 100%；本次只修正 correct/partial 归属、
+  结果页标记与 SRS 评分，是否改为 `correct/decided` 需产品决策（避免改变既有正确率口径）。
+- `byType` 仅统计 correct，未新增 partial 字段；历史 byType 结构未变，避免破坏导出/统计。
+- 未做真实浏览器截图验收；UI 字符串级断言 + 全量回归已覆盖。
+
+---
+
 ## 8dafa54 · fix(security): 参考后端静态服务拒绝数据/开发目录
 
 **核心改动**
