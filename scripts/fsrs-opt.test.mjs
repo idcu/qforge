@@ -293,7 +293,7 @@ section('preset 权重经 grade 端到端生效（srs-store 接线）');
   const sB = await QB.SRSStore.grade(bB.id, qB, QB.SRS.RATINGS.good, T);
   eq(sA.stability, 4.8, 'bA 评分用 preset 稳定度 4.8');
   eq(sB.stability, 2.3065, 'bB 无 preset 用官方默认 2.3065（py-fsrs 6.3.2 w2）');
-  ok(sA.due > sB.due, 'preset 更稳定 → 到期更远（' + sA.due + ' > ' + sB.due + '）');
+  ok(sA.stability > sB.stability, 'preset 更稳定 → 稳定度更大（' + sA.stability + ' > ' + sB.stability + '）');
 
   // 全局权重变化不影响已有 preset：bA 第二次 good 的稳定度 = wA 下纯函数重放结果
   await O.saveWeights(QB.FSRS.DEFAULT_W.map((v, i) => (i === 2 ? 8 : v)), { samples: 400 });

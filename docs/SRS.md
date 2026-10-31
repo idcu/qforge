@@ -65,6 +65,8 @@
 
 - 毕业前 `due` 为分钟级，只出现在「今日复习」队列，不参与长期预报。
 - 毕业后续接的长期间隔由 FSRS 公式用毕业时刻的 S/D 计算（不是固定一天）。
+- `reps` 在每次评分（含 learning/relearning）累计；learning 期间只推进步骤与分钟级 due，S/D 沿用。
+- 已毕业卡遗忘（again）→ `learning{mode:'review'}`，同样走 1m/10m；毕业沿用又错更新后的 S/D。
 
 ## 5. FSRS-6 调度公式（`fsrs.js`）
 

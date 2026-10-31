@@ -260,7 +260,7 @@
     const step = prev.learning.step || 0;
     const base = {
       algo: 'fsrs', stability: prev.stability, difficulty: prev.difficulty,
-      reps: prev.reps, lapses: prev.lapses, last: now
+      reps: prev.reps + 1, lapses: prev.lapses, last: now
     };
     if (r === RATINGS.again) {
       return Object.assign(base, { due: now + LEARNING_STEPS[0], learning: { step: 0, mode: mode } });
@@ -274,15 +274,21 @@
     return graduate(base, r, now, w, mode, fuzzRand);
   }
 
-  /** 新卡首次评分：again/hard 进 learning，good/easy 直接毕业 */
+  /**
+   * 新卡首次评分（对齐 SRS.md §4 / Anki 默认 learning steps）：
+   *   again / hard → step 0（1 分钟）
+   *   good         → step 1（10 分钟）
+   *   easy         → 直接毕业，按 FSRS 长期间隔
+   * hard 不再跳到 10 分钟、good 不再直接毕业；两者必须走完 1m/10m 才毕业。
+   */
   function reviewNew(r, now, w, fuzzRand) {
     const s = initStability(r, w);
     const d = initDifficulty(r, w);
     const base = { algo: 'fsrs', stability: s, difficulty: d, reps: 1, lapses: r === RATINGS.again ? 1 : 0, last: now };
-    if (r === RATINGS.again) {
+    if (r === RATINGS.again || r === RATINGS.hard) {
       return Object.assign(base, { due: now + LEARNING_STEPS[0], learning: { step: 0, mode: 'new' } });
     }
-    if (r === RATINGS.hard) {
+    if (r === RATINGS.good) {
       return Object.assign(base, { due: now + LEARNING_STEPS[1], learning: { step: 1, mode: 'new' } });
     }
     return graduate(base, r, now, w, 'new', fuzzRand);

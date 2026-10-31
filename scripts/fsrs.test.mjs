@@ -141,9 +141,10 @@ section('端到端 review：新卡首次评分');
   eq(a.reps, 1, 'reps=1');
   eq(a.lapses, 1, 'again：lapses=1');
   eq(g.lapses, 0, 'good：lapses=0');
-  // 毕业卡按整日排期：good 2 天、easy 8 天
-  ok(!g.learning && !e.learning, 'good/easy 新卡直接毕业');
-  eq((g.due - g.last) / DAY, 2, 'good 毕业后隔 2 天（round(S)=2）');
+  // 新卡 good 进入 10m 学习步骤；easy 直接毕业（按整日排期 8 天）
+  ok(g.learning && g.learning.step === 1, 'good 新卡进入 learning 步骤 1（不再是直接毕业）');
+  eq(g.due - g.last, 10 * MIN, 'good 新卡 10 分钟后再见');
+  ok(!e.learning, 'easy 新卡直接毕业');
   eq((e.due - e.last) / DAY, 8, 'easy 毕业后隔 8 天（round(S)=8）');
 }
 
@@ -157,8 +158,12 @@ section('新卡 learning steps（1m / 10m）');
   eq(a.lapses, 1, '首次 again 计 lapse');
 
   const h = review(null, R.hard, T0);
-  eq(h.learning.step, 1, '新卡 hard → learning 步骤 1（10m）');
-  eq(h.due - T0, 10 * MIN, '10 分钟后再见');
+  eq(h.learning.step, 0, '新卡 hard → learning 步骤 0（1m）');
+  eq(h.due - T0, MIN, '1 分钟后再见');
+
+  const gd = review(null, R.good, T0);
+  eq(gd.learning.step, 1, '新卡 good → learning 步骤 1（10m）');
+  eq(gd.due - T0, 10 * MIN, '10 分钟后再见');
 
   // again → 1m 后 again 重置步骤 → good 推进 → hard 停留 → good 毕业（以 good 重新初始化 s/d）
   let st = review(null, R.again, T0);
@@ -215,20 +220,22 @@ section('同日复习走 short-term 稳定度（elapsed < 1 天）');
 
 section('连续 good：稳定度与间隔增长');
 {
+  // 第一次 good 进入 10m 学习步，第二次 good 毕业；从毕业卡开始统计长期增长
   let st = review(null, R.good, T0);
+  st = review(st, R.good, st.due);
   let prevS = st.stability;
   let prevInterval = (st.due - st.last) / DAY;
   let grew = 0;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 3; i++) {
     const atDue = st.due;
     st = review(st, R.good, atDue);
     const interval = (st.due - st.last) / DAY;
-    ok(st.stability > prevS, '第 ' + (i + 2) + ' 次 good 稳定度增长（' + st.stability.toFixed(3) + ' > ' + prevS.toFixed(3) + '）');
+    ok(st.stability > prevS, '第 ' + (i + 3) + ' 次 good 稳定度增长（' + st.stability.toFixed(3) + ' > ' + prevS.toFixed(3) + '）');
     ok(interval >= prevInterval, '间隔不缩短（' + interval + ' ≥ ' + prevInterval + '）');
     if (interval > prevInterval) grew++;
     prevInterval = interval; prevS = st.stability;
   }
-  eq(st.reps, 5, 'reps 累计 5');
+  eq(st.reps, 5, 'reps 累计 5（学习步骤也计数）');
   ok(grew >= 1, '间隔确实增长（' + grew + ' 次）');
 }
 
@@ -246,7 +253,7 @@ section('又错（again）：间隔骤缩、lapses 累计、间隔不长于旧�
 
 section('提前/逾期复习的保留率效应');
 {
-  const g = review(null, R.good, T0);
+  const g = review(review(null, R.good, T0), R.good, T0 + 10 * MIN);
   const late = review(g, R.good, g.due + 30 * DAY);
   const onTime = review(g, R.good, g.due);
   ok(late.stability > onTime.stability, '逾期复习（R 低）后稳定度提升幅度大于准点复习');

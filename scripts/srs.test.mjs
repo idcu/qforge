@@ -55,14 +55,16 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
   const againState = await QB.SRSStore.grade(b1.id, qa, QB.SRS.RATINGS.again, T0);
   eq(againState.algo, 'fsrs', 'again：状态 algo=fsrs');
   ok(againState.stability > 0 && againState.due > T0 && againState.due <= T0 + DAY, 'again：进入 1 分钟学习步（当日到期）');
-  eq(await QB.SRSStore.countDue(b1.id, allQ, T0 + 1000), 2, '评 again 后当天仍 2 道到期');
+  eq(await QB.SRSStore.countDue(b1.id, allQ, T0 + 61 * 1000), 2, '评 again 1 分钟后：两题均到期（again 学习步 + 新题）');
   eq(againState.lapses, 1, 'again：lapses=1');
 
-  // good（qb，新题）：初始稳定度 2.3065 天（py-fsrs 6.3.2 w2）→ round 2 天，1 天后不到期、3 天后到期
+  // good（qb，新题）：初始稳定度 2.3065 天，但进入 10m 学习步（不是直接排 2 天）
   const goodState = await QB.SRSStore.grade(b1.id, qb, QB.SRS.RATINGS.good, T0);
   eq(goodState.stability, 2.3065, 'good：初始稳定度 2.3065 天');
-  eq(await QB.SRSStore.countDue(b1.id, allQ, T0 + DAY + 1000), 1, '次日：good 题未到期，仅 again 题（学习步已逾期）到期，共 1 道');
-  eq(await QB.SRSStore.countDue(b1.id, allQ, T0 + 3 * DAY + 1000), 2, '第 3 天：两题均到期，2 道');
+  eq(goodState.learning.step, 1, 'good：进入 learning 步骤 1（10m）');
+  eq(goodState.due, T0 + 10 * 60 * 1000, 'good：10 分钟后到期');
+  eq(await QB.SRSStore.countDue(b1.id, allQ, T0 + DAY + 1000), 2, '次日：两题学习步均逾期，2 道到期');
+  eq(await QB.SRSStore.countDue(b1.id, allQ, T0 + 3 * DAY + 1000), 2, '第 3 天：两题仍到期（未完成学习步），2 道');
 
   // 跨库隔离
   eq(await QB.SRSStore.countDue(b2.id, (await QB.DB.questions.list(b2.id, {})).items, T0 + 1000), 1, '题库隔离：库2 仍 1 道到期');
@@ -84,12 +86,11 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
     eq(bf.today, 2, 'forecast：清空后今天到期 2（含新题）');
     eq(bf.newCount, 2, 'forecast：新题 2');
     eq(bf.learned, 0, 'forecast：已学 0');
-    await QB.SRSStore.grade(b1.id, allQ[0], QB.SRS.RATINGS.good, T0); // S≈2.31 → round 2 天 → 第 3 个自然日
+    await QB.SRSStore.grade(b1.id, allQ[0], QB.SRS.RATINGS.good, T0); // good → 10m 学习步，仍计入今天
     const af = await QB.SRSStore.forecast(b1.id, allQ, 7, T0);
-    eq(af.today, 1, 'forecast：good 后今天剩 1 道新题');
+    eq(af.today, 2, 'forecast：good 后今天含学习步 1 + 新题 1');
     eq(af.learned, 1, 'forecast：已学 1');
-    // due 为 T0+2 天（整日反解 round(2.3065)=2），dayIndex 差为 2 → 落在「3 天后」桶
-    eq(af.days[2].count, 1, 'forecast：第 3 天 1 道（2 天整日间隔）');
+    eq(af.days[2].count, 0, 'forecast：学习步未毕业，第 3 天无长期到期');
     eq(af.days[1].count, 0, 'forecast：明天 0 道');
     // 逾期并入今天
     await QB.SRSStore.grade(b1.id, allQ[1], QB.SRS.RATINGS.again, T0 - 10 * DAY);
@@ -98,10 +99,10 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
   }
   await QB.SRSStore.clear(b1.id);
 
-  // gradeMany：清空后两题重新都 good，2 天后到期 → 次日 0 道
+  // gradeMany：清空后两题重新都 easy（直接毕业 8 天）→ 次日 0 道
   const qs = allQ;
-  await QB.SRSStore.gradeMany(b1.id, qs.map((question) => ({ question, rating: QB.SRS.RATINGS.good })), T0);
-  eq(await QB.SRSStore.countDue(b1.id, qs, T0 + DAY + 1000), 0, '批量 good 后次日无到期');
+  await QB.SRSStore.gradeMany(b1.id, qs.map((question) => ({ question, rating: QB.SRS.RATINGS.easy })), T0);
+  eq(await QB.SRSStore.countDue(b1.id, qs, T0 + DAY + 1000), 0, '批量 easy 后次日无到期');
   await QB.SRSStore.clear(b1.id);
   eq(await QB.SRSStore.countDue(b1.id, qs, T0 + 1000), 2, 'clear 后恢复为新题全到期');
 }
