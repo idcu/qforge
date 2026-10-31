@@ -21,6 +21,9 @@
  *     `last` 合并后重试一次）；无账号级多端实时推送。
  *   - CORS 默认关闭（同源部署零配置）；跨源验收需显式 `CORS_ORIGIN`（逗号分隔来源或 `*`），
  *     仅用于本机/受信环境；对公网放行前必须同时启用 `API_TOKEN`。
+ *   - **静态文件不得暴露数据目录/开发目录**：`resolveSafePath` 拒绝点目录、`scripts`、
+ *     `qforge-evaluation`、`CHANGELOG.internal.md`，并按绝对路径拒绝 dataDir；`API_TOKEN`
+ *     只保护 `/api/*`，不保护静态文件（见 2026-11-01 评估 P0-1）。
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -838,7 +841,7 @@ export function createHandler(opts) {
     try {
       if (segs[0] === 'api') return await api(req, res, url, segs);
       if (url.pathname === '/health') return json(res, 200, { ok: true, backend: 'qforge-reference', dataDir: store.root });
-      const filePath = resolveSafePath(root, req.url);
+      const filePath = resolveSafePath(root, req.url, { denyDirs: [store.root] });
       if (!filePath) { res.writeHead(403); res.end('Forbidden'); return; }
       return sendFile(res, filePath, req.url);
     } catch (e) {
@@ -853,6 +856,12 @@ export function createHandler(opts) {
 export function createServer(options) {
   options = options || {};
   const store = createStore(options.dataDir);
+  const staticRoot = path.resolve(options.root || ROOT);
+  // 数据目录若位于静态根内：静态服务已按绝对路径拒绝，但启动时仍显式告警，
+  // 提醒部署者这是“被拒绝访问”而非“物理隔离”；彻底隔离请把 DATA_DIR 移出静态根。
+  if (store.root === staticRoot || store.root.startsWith(staticRoot + path.sep)) {
+    console.warn('[qforge] 注意：dataDir 位于静态根内（' + store.root + '），静态服务已拒绝访问；生产部署建议把 DATA_DIR 移出静态根。');
+  }
   const handler = createHandler({
     store: store,
     root: options.root || ROOT,

@@ -50,6 +50,17 @@ section('含 .. 的路径一律拒绝（与目标是否存在无关）');
   ok(resolveSafePath(ROOT, tricky) === null, '含 .. 的路径即使归一后落在 root 内也拒绝（' + tricky + '）');
 }
 
+section('静态暴露守卫（点目录/开发目录/dataDir）');
+{
+  ok(resolveSafePath(ROOT, '/.git/config') === null, '.git 点目录拒绝');
+  ok(resolveSafePath(ROOT, '/.qforge-data/banks.json') === null, '.qforge-data 数据目录拒绝');
+  ok(resolveSafePath(ROOT, '/scripts/serve-api.mjs') === null, 'scripts 开发目录拒绝');
+  ok(resolveSafePath(ROOT, '/qforge-evaluation/x.html') === null, '内部评估目录拒绝');
+  ok(resolveSafePath(ROOT, '/CHANGELOG.internal.md') === null, '内部变更日志拒绝');
+  ok(resolveSafePath(ROOT, '/js/app.js', { denyDirs: [path.join(ROOT, 'js')] }) === null, 'denyDirs 按绝对路径拒绝 dataDir');
+  ok(resolveSafePath(ROOT, '/index.html', { denyDirs: [path.join(ROOT, 'js')] }) === path.join(ROOT, 'index.html'), 'denyDirs 不影响正常静态资源');
+}
+
 section('安全响应头（与 index.html meta CSP 同源）');
 {
   const html = securityHeaders('index.html');

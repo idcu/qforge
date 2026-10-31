@@ -18,6 +18,7 @@ import { createServer } from './serve-api.mjs';
 import { CSP } from './lib/security-headers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..');
 
 let pass = 0;
 const failures = [];
@@ -56,6 +57,33 @@ section('后端：健康检查与静态文件');
   eq(jsFile.headers.get('x-content-type-options'), 'nosniff', 'JS 静态响应仍带 nosniff');
   const trav = await req('GET', '/..%2f..%2f..%2fetc%2fpasswd');
   eq(trav.status, 403, '路径穿越被拒绝（403）');
+}
+
+section('后端：静态服务不暴露数据目录/开发目录（P0-1）');
+{
+  // dataDir 故意放在静态 root 内：静态服务必须按绝对路径拒绝，而不是只靠“路径不在 root”兜底。
+  const dataDirInside = fs.mkdtempSync(path.join(ROOT, '.qforge-static-'));
+  const insideSrv = await createServer({ port: 0, dataDir: dataDirInside });
+  const insideBase = 'http://127.0.0.1:' + insideSrv.port;
+  try {
+    const create = await fetch(insideBase + '/api/banks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'static-leak-check' })
+    });
+    eq(create.status, 201, '数据目录内创建题库成功（前提）');
+    const leak = await fetch(insideBase + '/' + path.basename(dataDirInside) + '/banks.json');
+    eq(leak.status, 403, 'GET 数据目录 banks.json 被拒绝（403）');
+    const git = await fetch(insideBase + '/.git/config');
+    eq(git.status, 403, 'GET .git/config 被拒绝（403）');
+    const scripts = await fetch(insideBase + '/scripts/serve-api.mjs');
+    eq(scripts.status, 403, 'GET scripts/ 开发文件被拒绝（403）');
+    const changelog = await fetch(insideBase + '/CHANGELOG.internal.md');
+    eq(changelog.status, 403, 'GET 内部 CHANGELOG 被拒绝（403）');
+  } finally {
+    await insideSrv.close();
+    fs.rmSync(dataDirInside, { recursive: true, force: true });
+  }
 }
 
 section('后端：CORS 显式放行（默认关闭）');

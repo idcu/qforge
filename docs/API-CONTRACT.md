@@ -8,7 +8,7 @@
 | 项 | 约定 |
 | --- | --- |
 | 传输 | HTTPS，请求/响应体均为 `application/json; charset=utf-8` |
-| 鉴权 | 可选 `Authorization: Bearer <token>`（单用户共享密钥，**非账号体系**）。参考后端默认关闭；设置 `API_TOKEN` 后仅保护 `/api/*`，静态文件与 `/health` 公开；未带/错误令牌 → `401 UNAUTHORIZED` + `WWW-Authenticate: Bearer`。前端 `NETWORK.API_TOKEN` 非空时自动附带 |
+| 鉴权 | 可选 `Authorization: Bearer <token>`（单用户共享密钥，**非账号体系**）。参考后端默认关闭；设置 `API_TOKEN` 后仅保护 `/api/*`，静态文件与 `/health` 公开；未带/错误令牌 → `401 UNAUTHORIZED` + `WWW-Authenticate: Bearer`。前端 `NETWORK.API_TOKEN` 非空时自动附带。**Bearer 不保护静态文件**：静态服务另行拒绝点目录、`scripts`、`qforge-evaluation`、`CHANGELOG.internal.md`，并按绝对路径拒绝 `dataDir`（防止 `/.qforge-data/banks.json` 被直读） |
 | 分页 | 列表统一返回 `{ items, total, page, size }` |
 | 时间 | 毫秒时间戳（数值），字段名 `created_at` / `updated_at` |
 | 错误体 | `{ "error": { "code": "NOT_FOUND", "message": "题库不存在" } }` |
