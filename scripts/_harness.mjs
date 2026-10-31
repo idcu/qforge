@@ -26,6 +26,7 @@ const MODULES = [
   'js/utils/xml-lite.js',
   'js/utils/assets.js',
   'js/utils/weights.js',
+  'js/utils/review-merge.js',
   'js/data/contracts.js',
   'js/data/wire.js',
   'js/data/local-adapter.js',

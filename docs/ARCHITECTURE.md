@@ -68,6 +68,7 @@
 | `utils/xml-lite.js` | `QB.XmlLite.parse` | 自研极简 XML 解析器（OOXML 子集：标签/属性/命名空间/实体/注释/CDATA/DOCTYPE 跳过，深度先序查询；畸形 XML 抛错），替代 DOMParser，Node/浏览器/CI 同路径 |
 | `utils/assets.js` | `QB.Assets` | 图片资产存储（IndexedDB，内容寻址 id=`QB.FNV`-长度，同图去重）；驱动可注入（idbDriver/memoryDriver），与 Repository 双实现同构 |
 | `utils/weights.js` | `QB.Weights` | FSRS 权重仓归一（旧单组 `{w,...}` → global，非法/空 → `{global:null,banks:{}}`）；local-adapter 与 fsrs-opt 共用，数据层不反向依赖应用层 |
+| `utils/review-merge.js` | `QB.ReviewMerge` | 多端复习状态合并唯一实现：`mergeMaps(local, remote)` 同 contentHash 保留 `last` 更大者（缺失/非法 `last` 视为 0，相同保留远端），`lastOf(state)`；api-adapter 的 409 冲突重试与测试共用 |
 
 ### 3.3 数据访问层（data）
 | 文件 | 职责 |
@@ -198,6 +199,7 @@ Exporters.openFlow({kind, bank})
 | `QB.mulberry32` | 确定性 PRNG（种子化） | `QB.shuffle`/`shuffleOptions`、FSRS fuzz |
 | `QB.AnswerText` | 填空多空拼接/旧 answer 回退、按题型答案行 | 导出、分享页、编辑器预览、导入、判分反馈 |
 | `QB.Weights.normalizeStore` | FSRS 权重仓归一（旧单组→global） | local-adapter、api-adapter、fsrs-opt |
+| `QB.ReviewMerge.mergeMaps` | 多端复习状态合并（同键保留 `last` 更大者） | api-adapter 409 合并重试、smoke 测试 |
 | `reviews.record(bankId, map, logs)` | 调度状态 + 评分日志一次提交（api 模式 1 个 PUT） | srs-store.grade/gradeMany |
 | `shuffle(arr, seed?)` / `shuffleOptions(q, seed?)` | 随机/种子化洗牌；选项乱序+答案重映射的派生克隆 | 抽题、答题选项乱序 |
 | `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步 | local-adapter 及所有持久化 |

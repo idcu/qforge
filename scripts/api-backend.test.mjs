@@ -274,9 +274,22 @@ section('后端：SRS（reviews / revlog / fsrs-weights）');
 {
   const empty = await req('GET', '/api/banks/' + bankA.id + '/reviews');
   eq(Object.keys(empty.body.items).length, 0, 'reviews 初始为空 map');
+  eq(empty.body.rev, 0, 'reviews 初始 rev=0');
   const saved = await req('PUT', '/api/banks/' + bankA.id + '/reviews', { items: { h1: { algo: 'fsrs', stability: 2.3065 } } });
   eq(saved.body.saved, 1, 'reviews 整表 upsert');
+  eq(saved.body.rev, 1, 'reviews PUT 返回递增 rev');
   eq((await req('GET', '/api/banks/' + bankA.id + '/reviews')).body.items.h1.stability, 2.3065, 'reviews 回读');
+  const baseOk = await req('PUT', '/api/banks/' + bankA.id + '/reviews', {
+    items: { h1: { algo: 'fsrs', stability: 2.5 } }, base_rev: 1
+  });
+  eq(baseOk.body.rev, 2, '带匹配 base_rev 的 reviews PUT 成功');
+  const staleReviews = await req('PUT', '/api/banks/' + bankA.id + '/reviews', {
+    items: { h2: { algo: 'fsrs', stability: 9 } }, base_rev: 1
+  });
+  eq(staleReviews.status, 409, '过期 base_rev → 409');
+  eq(staleReviews.body.error.code, 'CONFLICT', 'reviews 409 错误码 CONFLICT');
+  eq(staleReviews.body.current.h1.stability, 2.5, 'reviews 409 返回服务端当前 map');
+  eq((await req('GET', '/api/banks/' + bankA.id + '/reviews')).body.items.h1.stability, 2.5, 'reviews 冲突未覆盖服务端');
   await req('DELETE', '/api/banks/' + bankA.id + '/reviews');
   eq(Object.keys((await req('GET', '/api/banks/' + bankA.id + '/reviews')).body.items).length, 0, 'reviews 整表清除');
 
@@ -615,6 +628,36 @@ section('作答热路径请求收敛（api）：reviews.record + 权重缓存');
   const bad = await req('PUT', '/api/banks/' + bank.id + '/reviews', { items: {}, revlog: 'x' });
   eq(bad.status, 400, 'revlog 非数组 → 400');
   eq(bad.body.error.code, 'BAD_REQUEST', 'revlog 非数组错误码 BAD_REQUEST');
+}
+
+section('多端复习进度冲突：409 + 按 last 合并重试');
+{
+  const ctx = await createHarness(path.resolve(__dirname, '..'));
+  const { QB } = ctx;
+  QB.CONFIG.DATA_BACKEND = 'api';
+  QB.CONFIG.API_BASE_URL = base;
+  QB.ApiAdapter.useFetch((url, opts) => fetch(url, opts));
+  QB.DB.init();
+  const bank = await QB.DB.banks.create({ name: '复习合并库' });
+
+  await QB.DB.reviews.list(bank.id); // 本端缓存 rev=0
+  // 模拟另一端先写一条：服务端 rev 变为 1
+  await req('PUT', '/api/banks/' + bank.id + '/reviews', {
+    items: { b1: { algo: 'fsrs', last: 200, stability: 2 } }
+  });
+
+  const rec = await QB.DB.reviews.record(bank.id, {
+    a1: { algo: 'fsrs', last: 100, stability: 1 }
+  }, [{ t: 100, h: 'a1', r: 2, b: bank.id }]);
+  eq(rec.merged, true, '过期 rev 触发 409 后合并重试');
+  const list = await QB.DB.reviews.list(bank.id);
+  ok(list.a1 && list.b1, '合并后本端缓存含双方键');
+  const server = (await req('GET', '/api/banks/' + bank.id + '/reviews')).body;
+  ok(server.items.a1 && server.items.b1, '服务端落盘含双方键');
+  eq(server.rev, 2, '合并重试后 rev=2');
+  const logs = (await req('GET', '/api/revlog')).body.items.filter((e) => e.b === bank.id);
+  eq(logs.length, 1, '冲突重试只追加一次评分日志');
+  await QB.DB.banks.remove(bank.id);
 }
 
 section('跨布局整链 E2E：本地备份 → 真实后端（POST /api/backup）→ 读回 → 再恢复到本地');

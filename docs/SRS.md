@@ -260,7 +260,8 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 - **读写均为异步**：`local-adapter` 返回值是普通值（`await` 零额外开销，local 行为逐字节等价），`api-adapter` 返回 Promise；调用点一律 `await`，故「切到后端后 UI 零改动」。
 - **禁止双向委托**：`local-adapter.reviews/revlog/weights` 必须直读写 LocalStorage，**不得**反向调用 `SRSStore`/`FSRSOpt`（否则与「领域模块 → `QB.DB.*`」互为委托成自递归）。`QB.Weights.normalizeStore`（纯函数，utils/weights.js）是 `{global,banks}` 归一结构的唯一实现，被 `local-adapter.weights`/`api-adapter.weights` 复用（`FSRSOpt.normalizeStore` 为兼容导出）。
 - 纯函数（`ratingForResult`/`collectGraded`/`keyFor`/`fsrsRating`/`dayIndex`/桶计算）保持同步。
-- **api 模式缓存与热路径（已实现）**：`api-adapter.reviews.list` 按库缓存，`save`/`remove`/`banks.remove`/`backup.import` 一律失效；`reviews.record` 成功后缓存刚提交的 map。权重仓同样缓存（`write` 后命中、`remove`/`banks.remove`/`backup.import` 失效）。实测作答写路径由「GET reviews + GET weights + PUT reviews + POST revlog」收敛为首次 3 请求、热态/批量 1 请求（错误题额外 1 条错题记录）。多端写入可能读到旧缓存，属单用户参考实现已知限制。
+- **api 模式缓存与热路径（已实现）**：`api-adapter.reviews.list` 按库缓存，并同时缓存响应里的 `rev`（`reviewRevCache`）；`save`/`remove`/`banks.remove`/`backup.import` 一律失效两份缓存；`reviews.record` 成功后缓存刚提交的 map 与新 `rev`。权重仓同样缓存（`write` 后命中、`remove`/`banks.remove`/`backup.import` 失效）。实测作答写路径由「GET reviews + GET weights + PUT reviews + POST revlog」收敛为首次 3 请求、热态/批量 1 请求（错误题额外 1 条错题记录）。
+- **多端复习进度冲突合并（已实现）**：服务端每库维护单调递增 `review_rev`（`PUT` 成功 +1，`DELETE` 同样递增）；`record` 携带缓存的 `base_rev`。另一设备先写导致版本过期时，服务端返回 `409 CONFLICT` + `current` 且不落盘；客户端用 `QB.ReviewMerge.mergeMaps(local, current)` 合并（**同 contentHash 保留 `last` 更大者**，缺失/非法 `last` 视为 0，相同保留服务端）后带新 `base_rev` 重试一次，成功返回 `{..., merged:true}`，评分日志只提交一次。二次仍冲突或非冲突错误 → 清空双缓存并抛出。`revlog`/`weights` 仍为整仓写入（多端并发属后续项）。
 
 ## 10. API 与测试
 

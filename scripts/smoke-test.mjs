@@ -191,6 +191,23 @@ section('公共抽象唯一实现');
   ok(QB.FSRSOpt.normalizeStore === QB.Weights.normalizeStore, 'FSRSOpt 导出同一归一函数（旧调用方兼容）');
 }
 
+/* ================= 2.4 复习状态多端合并（ReviewMerge） ================= */
+section('复习状态合并 ReviewMerge');
+{
+  const local = { a: { last: 100, stability: 1 }, same: { last: 50, stability: 5 } };
+  const remote = { b: { last: 200, stability: 2 }, same: { last: 50, stability: 9 } };
+  const m = QB.ReviewMerge.mergeMaps(local, remote);
+  ok(m.a && m.b, '合并保留双方独有键');
+  eq(m.same.stability, 9, 'last 相同保留远端（服务端已接受值）');
+  eq(QB.ReviewMerge.mergeMaps({ a: { last: 300 } }, { a: { last: 100 } }).a.last, 300, '本地更新 last 更大时保留本地');
+  eq(QB.ReviewMerge.mergeMaps({ a: { last: 100 } }, { a: { last: 300 } }).a.last, 300, '远端更新 last 更大时保留远端');
+  eq(QB.ReviewMerge.mergeMaps({ a: { stability: 1 } }, { a: { last: 5 } }).a.last, 5, '缺失 last 视为 0，远端胜出');
+  eq(QB.ReviewMerge.lastOf({ last: -1 }), 0, '负 last 归零');
+  eq(QB.ReviewMerge.lastOf(null), 0, '空状态 last 为 0');
+  ok(!Object.prototype.hasOwnProperty.call(local, 'b'), '合并不修改本地入参');
+  ok(!Object.prototype.hasOwnProperty.call(remote, 'a'), '合并不修改远端入参');
+}
+
 /* ================= 2.3 开始弹窗参数记忆（StartPrefs） ================= */
 section('开始弹窗上次参数（StartPrefs）');
 {

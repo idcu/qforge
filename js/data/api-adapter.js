@@ -175,6 +175,7 @@
    * 见 docs/API-CONTRACT.md §9。
    */
   const reviewCache = new Map();
+  const reviewRevCache = new Map(); // 按库服务端版本号（与 reviewCache 同步失效）
 
   /* ---------------- 权重仓缓存（作答热路径） ----------------
    * 每次评分都要读活动权重（题库 preset → 全局 → 默认）；无缓存时每个答案打一次 GET。
@@ -200,6 +201,7 @@
       await req('DELETE', ROUTES.bank(enc(id)) + '?cascade=' + (cascade ? 'true' : 'false'));
       countCache.delete(id);
       reviewCache.delete(id); // 级联已删该库 reviews，缓存须一并丢弃
+      reviewRevCache.delete(id);
       weightsCache = null; // 级联可能删除该库 preset，权重缓存一并丢弃
     }
   };
@@ -351,10 +353,11 @@
   const reviews = {
     /** 该库调度状态 map（按库缓存；无缓存时 GET 并缓存） */
     async list(bankId) {
-      if (reviewCache.has(bankId)) return reviewCache.get(bankId);
+      if (reviewCache.has(bankId) && reviewRevCache.has(bankId)) return reviewCache.get(bankId);
       const r = await req('GET', ROUTES.reviews(enc(bankId)));
       const items = (r && r.items) || {};
       reviewCache.set(bankId, items);
+      reviewRevCache.set(bankId, Number(r && r.rev) || 0);
       return items;
     },
     /** 整表提交；**写路径一律失效**（finally：失败也要丢弃本地那份，避免假读） */
@@ -363,6 +366,7 @@
         await req('PUT', ROUTES.reviews(enc(bankId)), { items: map || {} });
       } finally {
         reviewCache.delete(bankId);
+        reviewRevCache.delete(bankId);
       }
     },
     async remove(bankId) {
@@ -370,6 +374,7 @@
         await req('DELETE', ROUTES.reviews(enc(bankId)));
       } finally {
         reviewCache.delete(bankId);
+        reviewRevCache.delete(bankId);
       }
     },
     /**
@@ -377,15 +382,42 @@
      * 成功后缓存刚提交的 map（下次作答 0 GET）；失败丢弃缓存，避免读到半写入结果。
      */
     async record(bankId, map, entries) {
+      const body = { items: map || {}, revlog: entries || [] };
+      const baseRev = reviewRevCache.get(bankId);
+      if (baseRev !== undefined) body.base_rev = baseRev;
       try {
-        const r = await req('PUT', ROUTES.reviews(enc(bankId)), { items: map || {}, revlog: entries || [] });
-        reviewCache.set(bankId, map || {});
+        const r = await req('PUT', ROUTES.reviews(enc(bankId)), body);
+        reviewCache.set(bankId, body.items);
+        reviewRevCache.set(bankId, Number(r && r.rev) || 0);
         return {
-          saved: r && typeof r.saved === 'number' ? r.saved : Object.keys(map || {}).length,
+          saved: r && typeof r.saved === 'number' ? r.saved : Object.keys(body.items).length,
           logged: r && typeof r.logged === 'number' ? r.logged : (Array.isArray(entries) ? entries.length : 0)
         };
       } catch (e) {
+        const payload = e && e.payload;
+        if (e && e.status === 409 && e.code === 'CONFLICT' && payload &&
+            payload.current && typeof payload.rev === 'number') {
+          const merged = QB.ReviewMerge.mergeMaps(map || {}, payload.current);
+          let r2 = null;
+          try {
+            r2 = await req('PUT', ROUTES.reviews(enc(bankId)), {
+              items: merged, revlog: entries || [], base_rev: payload.rev
+            });
+          } catch (e2) {
+            reviewCache.delete(bankId);
+            reviewRevCache.delete(bankId);
+            throw e2;
+          }
+          reviewCache.set(bankId, merged);
+          reviewRevCache.set(bankId, Number(r2 && r2.rev) || 0);
+          return {
+            saved: r2 && typeof r2.saved === 'number' ? r2.saved : Object.keys(merged).length,
+            logged: r2 && typeof r2.logged === 'number' ? r2.logged : (Array.isArray(entries) ? entries.length : 0),
+            merged: true
+          };
+        }
         reviewCache.delete(bankId);
+        reviewRevCache.delete(bankId);
         throw e;
       }
     }
@@ -428,6 +460,7 @@
         // bulk 变更可能重写任意库的题目/进度：两份缓存整表清空（失败也清，防读到半写入结果）
         countCache.clear();
         reviewCache.clear();
+        reviewRevCache.clear();
         weightsCache = null;
       }
     }

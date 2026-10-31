@@ -17,7 +17,8 @@
  *     POST /api/banks/{id}/import 仅实现 `{ questions, mode }` JSON 分支。
  *   - 单用户；`/api/*` 默认无鉴权，设置 `API_TOKEN` 后要求 `Authorization: Bearer <token>`
  *     （未带/错误 → 401 `UNAUTHORIZED` + `WWW-Authenticate: Bearer`）；无多用户账号体系；
- *     `reviews` 为整表 last-write-wins（多端冲突消解属后续项）。
+ *     `reviews` 以每库 `review_rev` 做乐观并发（`base_rev` 不符 → 409 + current，由客户端按
+ *     `last` 合并后重试一次）；无账号级多端实时推送。
  *   - CORS 默认关闭（同源部署零配置）；跨源验收需显式 `CORS_ORIGIN`（逗号分隔来源或 `*`），
  *     仅用于本机/受信环境；对公网放行前必须同时启用 `API_TOKEN`。
  */
@@ -280,10 +281,34 @@ export function createStore(dataDir) {
       return { added: added, list: p.favorite.slice() };
     },
     favoriteClear(bankId) { const p = progress._of(bankId); p.favorite = []; progress._save(bankId, p); },
-    // 复习状态（reviews 仓库的底层，同一 progress 文件）
+    // 复习状态（reviews 仓库的底层，同一 progress 文件）；review_rev 单调递增供多端冲突检测
+    reviewGet(bankId) {
+      const p = progress._of(bankId);
+      return { items: p.review || {}, rev: Number(p.review_rev) || 0 };
+    },
     reviewMap(bankId) { return progress._of(bankId).review || {}; },
-    reviewSave(bankId, map) { const p = progress._of(bankId); p.review = map || {}; progress._save(bankId, p); },
-    reviewRemove(bankId) { const p = progress._of(bankId); p.review = {}; progress._save(bankId, p); }
+    /**
+     * 整表写；opts.baseRev 给定时校验版本，不一致返回 { conflict:true, current, rev } 且不落盘。
+     * 成功返回 { conflict:false, rev }。
+     */
+    reviewSave(bankId, map, opts) {
+      opts = opts || {};
+      const p = progress._of(bankId);
+      const rev = Number(p.review_rev) || 0;
+      if (opts.baseRev !== undefined && opts.baseRev !== null && Number(opts.baseRev) !== rev) {
+        return { conflict: true, current: p.review || {}, rev: rev };
+      }
+      p.review = map || {};
+      p.review_rev = rev + 1;
+      progress._save(bankId, p);
+      return { conflict: false, rev: p.review_rev };
+    },
+    reviewRemove(bankId) {
+      const p = progress._of(bankId);
+      p.review = {};
+      p.review_rev = (Number(p.review_rev) || 0) + 1;
+      progress._save(bankId, p);
+    }
   };
 
   const history = {
@@ -681,20 +706,27 @@ export function createHandler(opts) {
     // ---- reviews（SRS 调度状态整表） ----
     if (segs.length === 4 && segs[1] === 'banks' && segs[3] === 'reviews') {
       const bankId = segs[2];
-      if (m === 'GET') return json(res, 200, { items: store.progress.reviewMap(bankId) });
+      if (m === 'GET') return json(res, 200, store.progress.reviewGet(bankId));
       if (m === 'PUT') {
         const body = await readJsonBody(req);
         const map = (body && body.items) ? body.items : (body || {});
         if (body && body.revlog !== undefined && !Array.isArray(body.revlog)) {
           return fail(res, 400, 'BAD_REQUEST', 'revlog 必须为数组');
         }
-        store.progress.reviewSave(bankId, map);
+        const saved = store.progress.reviewSave(bankId, map, { baseRev: body && body.base_rev });
+        if (saved.conflict) {
+          return json(res, 409, {
+            error: { code: 'CONFLICT', message: '复习进度已在其他设备修改，请重试' },
+            current: saved.current,
+            rev: saved.rev
+          });
+        }
         let logged = 0;
         if (body && Array.isArray(body.revlog) && body.revlog.length) {
           store.revlog.append(body.revlog);
           logged = body.revlog.length;
         }
-        return json(res, 200, { saved: Object.keys(map).length, logged: logged });
+        return json(res, 200, { saved: Object.keys(map).length, logged: logged, rev: saved.rev });
       }
       if (m === 'DELETE') { store.progress.reviewRemove(bankId); return (res.writeHead(204), res.end()); }
       return fail(res, 405, 'METHOD_NOT_ALLOWED', m);

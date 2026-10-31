@@ -243,7 +243,7 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 | --- | --- | --- |
 | `banks.json` | 题库数组 | `banks`（§2.1）/ `/api/banks` |
 | `questions/<bankId>.json` | 该库题目数组 | `questions`（§2.2）/ `/api/banks/{id}/questions` |
-| `progress/<bankId>.json` | `{wrong:[], favorite:[], review:{}}`（错题/收藏/复习计划分三段） | `wrong_questions` / `favorites` / `review_schedule` / `/api/banks/{id}/{wrong,favorites,reviews}` |
+| `progress/<bankId>.json` | `{wrong:[], favorite:[], review:{}, review_rev}`（错题/收藏/复习计划三段 + 复习版本号，`review_rev` 服务端维护、单调递增，供多端 409 冲突检测；本地布局无此字段） | `wrong_questions` / `favorites` / `review_schedule` / `/api/banks/{id}/{wrong,favorites,reviews}` |
 | `history.json` | 答题历史数组 | `attempts`（§2.5）/ `/api/history` |
 | `session.json` | 单条会话快照（`null` 或对象） | `sessions`（§2.6）/ `/api/session` |
 | `revlog.json` | 评分日志数组（服务端补 id/时间戳并按上限 FIFO） | `review_log`（§2.8）/ `/api/revlog` |

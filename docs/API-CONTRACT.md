@@ -130,9 +130,9 @@
 
 | 方法 | 路径 | 说明 | 请求体 / 响应 |
 | --- | --- | --- | --- |
-| GET | `/api/banks/{id}/reviews` | 该库全部调度状态（content_hash → state 的**整表 map**） | `{ items: { hash: { algo, due, stability, difficulty, reps, lapses, last, learning } } }` |
-| PUT | `/api/banks/{id}/reviews` | 整表 upsert；可选同请求追加评分日志（作答热路径，**一次网络请求**） | `{ items: {...}, revlog?: [{t,h,r,b}] }` → `{ saved, logged }`（**last-write-wins**，多端冲突消解属后续项）；`revlog` 非数组 → `400 BAD_REQUEST` |
-| DELETE | `/api/banks/{id}/reviews` | 清空该库调度状态 | — | `204` |
+| GET | `/api/banks/{id}/reviews` | 该库全部调度状态（content_hash → state 的**整表 map**） | `{ items: { hash: { algo, due, stability, difficulty, reps, lapses, last, learning } }, rev }`（`rev` 为该库复习版本号，服务端维护，单调递增） |
+| PUT | `/api/banks/{id}/reviews` | 整表 upsert；可选同请求追加评分日志（作答热路径，**一次网络请求**）；可选 `base_rev` 做乐观并发 | `{ items: {...}, revlog?: [{t,h,r,b}], base_rev? }` → `{ saved, logged, rev }`；`base_rev` 与服务端当前版本不符 → `409` + `{ error: { code: 'CONFLICT' }, current, rev }` 且**不落盘**；`revlog` 非数组 → `400 BAD_REQUEST` |
+| DELETE | `/api/banks/{id}/reviews` | 清空该库调度状态（服务端 `rev` 同样 +1，使其他设备缓存的版本失效） | — | `204` |
 | GET | `/api/revlog` | 评分日志（全局，按人） | `{ items: [{id,h,r,t,b?}], total }` |
 | POST | `/api/revlog` | 追加评分日志（可批量；服务端补 id/时间戳并按上限 FIFO） | `{ items: [{h,r,t,b?}] }` → `{ saved, items }` |
 | GET | `/api/fsrs-weights` | 个性化权重（**整仓**：全局 + 各库 preset） | `{ global?: {w:[21],...}, banks?: {bankId: {...}} }` |
@@ -182,7 +182,7 @@
 | `progress.favoriteList/favoriteToggle/favoriteClear` | Progress 的 favorites 端点 |
 | `progress.historyList/historyAdd/historyUpdate/historyRemove/historyClear` | history 端点（`historyUpdate` → `PATCH /api/history/{id}`） |
 | `progress.sessionSave/sessionLoad/sessionClear` | session 端点 |
-| `reviews.list(bankId)` / `reviews.save(bankId, map)` / `reviews.remove(bankId)` / `reviews.record(bankId, map, entries)` | `GET`/`PUT`/`DELETE` `§6 /api/banks/{id}/reviews`；`record` 复用 `PUT`（body 携 `revlog`，状态+日志一次提交） |
+| `reviews.list(bankId)` / `reviews.save(bankId, map)` / `reviews.remove(bankId)` / `reviews.record(bankId, map, entries)` | `GET`/`PUT`/`DELETE` `§6 /api/banks/{id}/reviews`；`record` 复用 `PUT`（body 携 `revlog`，状态+日志一次提交，并带缓存来的 `base_rev`）；`save`/`remove` 为整表写，成功或失败后都失效 reviews/rev 缓存；`record` 遇 409 按 `QB.ReviewMerge.mergeMaps`（同键保留 `last` 更大者）合并后重试一次 |
 | `revlog.list()` / `revlog.append(entries)` | `GET`/`POST` `§6 /api/revlog` |
 | `weights.read()` / `weights.write(store)` / `weights.remove(scope)` | `GET`/`PUT`/`DELETE` `§6 /api/fsrs-weights[/{scope}]` |
 | `backup.export()` / `backup.import({data}, mode)` | `GET`/`POST` `§7 /api/backup?mode=` |
@@ -195,7 +195,9 @@
 >
 > **本阶段验证**：21 套件 + smoke 共 **22** 项 / **2885** 断言在 UTC 与 Asia/Shanghai 双时区全绿；浏览器 E2E 分别验证了**本地模式**（练习答题→交卷→结果页、统计页到期预报 + FSRS 诊断、今日复习、备份下载）与 **`?backend=api` 真实后端**（建库→导入样例 18 题→答题→交卷→统计→备份下载；服务端 `.qforge-data/` 实际落盘 `banks.json`/`questions/*.json`/`progress/*.json`/`revlog.json`/`history.json`；拒绝「继续上次」触发 `DELETE /api/session`，服务端 `session.json` 随之消失），**控制台 0 error / 0 warning**。
 >
-> **api 模式按库缓存**：`reviews.list` 按库缓存（同一库两次 render 之间只打一次 `GET .../reviews`），`save`/`remove`/`banks.remove`/`backup.import` 一律失效，`record` 成功后缓存刚提交的 map；权重仓同样按客户端写失效缓存；`questions.count` 同思路（**仅无 `type/category/q` 筛选的 list 才更新总数缓存**，否则筛选后的 total 会污染题库总数；`backup.import` 后整表清空）。api 模式下渲染热路径因此不再逐次打 REST。
+> **api 模式按库缓存**：`reviews.list` 按库缓存（同一库两次 render 之间只打一次 `GET .../reviews`），并同时缓存该响应里的 `rev`（`reviewRevCache`）；`save`/`remove`/`banks.remove`/`backup.import` 一律失效两份缓存，`record` 成功后缓存刚提交的 map 与新 `rev`；权重仓同样按客户端写失效缓存；`questions.count` 同思路（**仅无 `type/category/q` 筛选的 list 才更新总数缓存**，否则筛选后的 total 会污染题库总数；`backup.import` 后整表清空）。api 模式下渲染热路径因此不再逐次打 REST。
+>
+> **复习进度多端冲突合并（`rev` + `last`）**：服务端为每库维护单调递增的 `review_rev`，`PUT` 成功即 +1（`DELETE` 同样递增）；客户端 `record` 携带缓存的 `base_rev`。另一设备先写入导致版本过期时，服务端返回 `409 CONFLICT` + `current`（对方整表 map）且不落盘；`api-adapter` 用公共工具 `QB.ReviewMerge.mergeMaps(local, remote)` 合并（**同一 content_hash 保留 `last` 更大者**，缺失/非法 `last` 视为 0，时间相同保留服务端）后带新 `base_rev` 重试**一次**，成功返回 `{..., merged:true}`，评分日志只提交一次（失败分支不先追加 revlog）。二次仍冲突或非冲突错误 → 清空双缓存并抛出，由上层提示重试。
 >
 > **已知噪声修复（2026-10-19，实测闭环）**：`req()` 原先对 204 直接 `return null` 而**不消费响应体**，浏览器会为「其实已成功」的请求记 `net::ERR_ABORTED`（已由「`DELETE /api/session` 后服务端 `session.json` 消失」证实请求成功；`keepAliveTimeout` 并非成因——其调整后错误仍在）。现改为**始终消费响应体**（二进制走 `arrayBuffer`、其余走 `text`，204 读空体），在建新标签（空控制台）实测该条目消失。
 >
