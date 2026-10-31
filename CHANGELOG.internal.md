@@ -6,6 +6,54 @@
 
 ---
 
+## 21d751c · feat(sync): 复习进度多端冲突合并（rev + last）
+
+**核心改动**
+- 服务端 `scripts/serve-api.mjs`：`progress` 新增 `review_rev`（每库单调递增），`reviewGet`
+  返回 `{ items, rev }`，`reviewSave(bankId, map, {baseRev})` 在版本不符时返回
+  `{ conflict:true, current, rev }` 且**不落盘**，成功 `rev+1`；`reviewRemove` 同样 `rev+1`。
+  `PUT /api/banks/{id}/reviews` 读取可选 `base_rev`：冲突 → `409 CONFLICT` + `current` + `rev`，
+  成功响应 `{ saved, logged, rev }`；`revlog` 仍在保存成功后才 append（冲突分支不写日志）。
+- `js/data/api-adapter.js`：新增 `reviewRevCache`，`reviews.list` 需 map+rev 双缓存命中才返回，
+  否则 GET 并缓存 `r.rev`；`save`/`remove`/`banks.remove`/`backup.import` 同步清两份缓存。
+  `record` 携带 `base_rev`（有缓存时）；409 + `current/rev` → `QB.ReviewMerge.mergeMaps` 合并后
+  带 `payload.rev` 重试一次；成功缓存合并 map 与新 rev 并返回 `merged:true`；二次失败清双缓存抛出。
+- 新增 `js/utils/review-merge.js`（`QB.ReviewMerge.mergeMaps/lastOf`）：同 contentHash 保留
+  `last` 更大者，缺失/非法 `last` 视为 0，相同保留远端（服务端已接受值）；纯函数不改入参。
+  `index.html` 与 `scripts/_harness.mjs` 按依赖顺序加载。
+- 文档同步：API-CONTRACT（GET/PUT/DELETE reviews、适配器映射、缓存与冲突合并段）、
+  ARCHITECTURE（utils 表 + 公共抽象表）、SRS §9.1、DATABASE §3.2（`review_rev`）、
+  DEVELOPMENT（实现说明 + 测试矩阵）、user-guide（后端并发口径）、README（特性/计数/体积）。
+- `sw.js`：`CACHE` 由 `qforge-v6` → **`qforge-v7`**（本轮新增/改动 js 后按约定换代）。
+
+**验证数据（2026-11-01 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3682/3682** 通过，0 失败，**24.8s**
+  （smoke 696→**705**、api-backend 260→**272**，其余 22 套件不变）。
+- `node --expose-gc scripts/bench.mjs --assert`：**19 项门禁全过**——JSON.parse **1.60ms**、
+  insertMany **5.37ms**、按需单页 **0.21ms**、3000 题单题 update **0.21ms**、
+  heapUsed **+2.70MB** ≤ 40MB。
+- 首屏静态体积复测：**65 个 index 脚本 / 73 个文件，230.1KB gzip / 632.0KB raw**。
+- 新增断言实测：服务端 rev 初始 0，PUT 后 1，匹配 `base_rev=1` 成功 rev=2，过期 `base_rev=1`
+  → 409 CONFLICT + current 且服务端值未被覆盖；客户端先 list（rev0）→ 另一端 raw PUT 写 b1（rev1）
+  → `QB.DB.reviews.record` 写 a1 → `merged:true`，双方键保留，服务端 rev=2，revlog **只 1 条**。
+  ReviewMerge 9 项：双方独有键、last 相同保留远端、local/remote 更大 last、缺失/负 last 归零、
+  不改入参。
+
+**公共抽象/影响**
+- `QB.ReviewMerge.mergeMaps(local, remote)` 为多端复习状态合并唯一实现；影响 api-adapter
+  `record` 的 409 重试与 smoke 测试。新增模块须同时加入 `index.html` 与 `_harness.MODULES`。
+- `reviews.record` 对外返回形状新增可选 `merged` 字段（local 适配器不返回该字段，调用方按可选处理）。
+- 服务端兼容不带 `base_rev` 的旧客户端（仍为 last-write-wins）；客户端无 rev 缓存时同样不带版本。
+
+**TODO/风险**
+- 冲突合并只重试一次；若两次间隔内又有第三方写入，第二次 409 会清缓存并抛出，由上层提示重试，
+  属已知取舍（不做无限重试/实时推送）。
+- 冲突路径在首次 PUT 被 409 后需要额外 1 次 PUT；revlog 不重复提交，但网络请求数为 2。
+- `revlog`/`weights` 仍为整仓写入，多端并发合并属后续项；本轮未做真实浏览器多标签并发验收，
+  HTTP 层由 12 项 Node E2E 覆盖。
+
+---
+
 ## 环境
 
 - Node v24.14.0；Windows。
