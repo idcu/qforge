@@ -197,6 +197,7 @@ CREATE TABLE assets (
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |
 | `qb:meta:startPrefs` | —（前端偏好） | 最近一次练习/考试开始参数（各题型数量/分值、分类、时长、计时/乱序开关），仅本机 |
 | `qb:meta:migrationLock` | —（迁移运行期） | `{owner, at}` 多标签迁移锁；TTL 30s，陈锁可接管；迁移完成即释放，不进备份 |
+| `qb:meta:migrationBackup` | —（迁移运行期回落） | **F1 迁移前自动全量备份**（标准备份信封 + `progress` 进度标记）；仅当 IndexedDB 不可用时回落本键，不进备份、恢复入口见 §7.1 |
 | `qb:meta:hashMap:<bankId>` | —（迁移运行期） | `{oldHash: newHash}` 断点续跑的哈希映射；迁移成功后保留到最后一步再移除，供中断重入复用，不进备份 |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
 | `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 **5**（v2 contentHash → v3 题目分片 → v4 分片一致修复 → v5 hash 64 位 + per-hash 复习 + 分段日志），启动时由 `Migration.run({force?})` 幂等升级（v1→…→v5 链式；已是 5 仅做 `ensureLayout` 归一） |
@@ -272,11 +273,13 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 | 错题 / 收藏 / 复习计划 | `user:wrong:<bankId>`（`{questionKey,wrongCount,lastAt}`）/ `user:fav:<bankId>`（`{questionKey,addedAt}`）/ 复习为 per-hash（`user:review:<bankId>:<hash>` + `user:reviewMeta:<bankId>`）+ `user:reviewRev:<bankId>`（本地版本号）；**备份前经 `foldLayout` 折叠为旧整表 `user:review:<bankId>`（contentHash → state），并剔除清单/版本号** | `progress`（`{ bankId: { wrong:[{question_key,wrong_count,last_at}], favorite:[{question_key,added_at}], review:{} } }`，`review_rev` 在服务端进度文件中） |
 | 历史 | `user:history`（`bankId/bankName/byType/durationMs/focusLeaves/createdAt`） | `history`（`bank_id/bank_name/by_type/duration_ms/focus_leaves/created_at`） |
 | 会话 / 评分日志 / 权重 | `user:session` / 评分日志分段（`user:revlogMeta` + `user:revlog:<i>`；**备份前折叠为 `user:revlog` 数组**）/ `meta:fsrsWeights` | `session` / `revlog` / `weights` |
-| 本机专有偏好 | `meta:dav` / `meta:theme` / `meta:currentBank` / `meta:schemaVersion` / `meta:startPrefs`；迁移运行期键（`meta:migrationLock` / `meta:hashMap:<bankId>`）**不进备份** | **无对应键**（后端布局不含本机偏好/运行期元数据） |
+| 本机专有偏好 | `meta:dav` / `meta:theme` / `meta:currentBank` / `meta:schemaVersion` / `meta:startPrefs`；迁移运行期键（`meta:migrationLock` / `meta:migrationBackup` / `meta:hashMap:<bankId>`）**不进备份** | **无对应键**（后端布局不含本机偏好/运行期元数据） |
 
 转换规则（`serverToLocal`）：题目按 `bankId` 展开为分片 + 清单（切分复用 `QB.QuestionShards.plan`），进度按库拆成三个前缀键，历史/会话/日志/权重落到对应本地键（日志先落旧整表 `user:revlog`，恢复后由迁移归一为分段）；`meta:*` 本机专有偏好**原样直通**，本地布局残留键（缓存产物，如空的 `questions:<id>`/`<id>:meta`）**丢弃**以免覆盖转换结果。反向（`localToServer`）按上面 `banks` 列表重组分片（拼接复用 `QB.QuestionShards.concatShards`）后输出后端 7 键；本机专有 meta 偏好不透传（后端无对应语义）。恢复时若本端布局载荷缺本机专有偏好，`applyBackup` 保留 LocalStorage 现值（避免「恢复一次丢主题/WebDAV 配置」）。
 
-**schema v5 备份口径**：`readAllData`（前端备份与 `backup.export` 共用）先 `foldLayout` —— per-hash 复习状态折叠为旧整表 `user:review:<bank>`（旧整表与 per-hash 同键按 `last` 合并、per 优先），分段日志折叠为 `user:revlog` 数组（清单优先、无清单按物理段号升序拼接），并剔除运行期元数据（迁移锁/哈希映射 `meta:hashMap`/本地复习版本号 `user:reviewRev`/复习清单/日志清单/段键）。因此**备份文件格式保持单一整表形状**，旧版本与跨设备都能吃；本地恢复后立即 `Migration.run({force:true})` + `ensureLayout()` 归一为新布局（`force` 因版本戳可能被一并恢复为最新而载荷仍是旧 hash/旧布局），失败按 `applyData` 快照回滚。
+**schema v5 备份口径**：`readAllData`（前端备份与 `backup.export` 共用）先 `foldLayout` —— per-hash 复习状态折叠为旧整表 `user:review:<bank>`（旧整表与 per-hash 同键按 `last` 合并、per 优先），分段日志折叠为 `user:revlog` 数组（清单优先、无清单按物理段号升序拼接），并剔除运行期元数据（迁移锁/自动备份/哈希映射 `meta:hashMap`/本地复习版本号 `user:reviewRev`/复习清单/日志清单/段键）。因此**备份文件格式保持单一整表形状**，旧版本与跨设备都能吃；本地恢复后立即 `Migration.run({force:true})` + `ensureLayout()` 归一为新布局（`force` 因版本戳可能被一并恢复为最新而载荷仍是旧 hash/旧布局），失败按 `applyData` 快照回滚。
+
+**迁移前自动备份（F1，2026-11-02）**：`Migration.run` 抢锁后、任何写入前调用 `QB.Backup.saveAutoBackup`，复用同一 `buildBackup`/`readAllData` 链路（不复制导出逻辑），信封字段 `{app:'qforge-backup', version, schemaVersion, exportedAt, data, progress:{purpose:'pre-migration', phase:'captured'|'migrated', fromVersion, toVersion, startedAt, doneAt}}`。存储优先 IndexedDB（库 `qforge-backup` / store `snapshots` / key `pre-migration`，不占 LocalStorage 配额），无 IndexedDB（Node 测试/受限环境）回落 `qb:meta:migrationBackup`；写入后**回读校验**，失败清理半写并抛错 → 迁移立即中止（未写入任何数据）。备份文件本身就是标准信封，可直接走 `applyBackup`（备份弹窗「恢复迁移前自动备份」按钮；恢复后提示刷新页面），与手动下载的全量备份同构、可被现有恢复流程读回。
 
 ## 8. 数据访问契约（阶段 C，代码侧权威）
 

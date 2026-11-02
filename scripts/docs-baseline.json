@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-02T07:18:51.584Z",
+  "generatedAt": "2026-11-02T08:07:42.145Z",
   "runItems": 24,
   "suiteFiles": 23,
-  "totalAssertions": 3860,
+  "totalAssertions": 3882,
   "gateCount": 35,
   "counts": {
     "smoke-test.mjs": 724,
@@ -16,7 +16,7 @@
     "exporter.test.mjs": 200,
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
-    "migrate.test.mjs": 129,
+    "migrate.test.mjs": 151,
     "office-export.test.mjs": 1150,
     "pwa.test.mjs": 85,
     "review-queue.test.mjs": 51,
@@ -33,7 +33,7 @@
   "firstScreen": {
     "scripts": 68,
     "files": 76,
-    "rawKB": "690.5",
-    "gzipKB": "248.8"
+    "rawKB": "697.8",
+    "gzipKB": "250.8"
   }
 }

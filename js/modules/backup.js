@@ -33,9 +33,10 @@
   const REVIEW_META_PREFIX = QB.KEYS.reviewMeta(''); // 'user:reviewMeta:'
   const SEG_PREFIX = 'user:revlog:';
 
-  /** 运行期元数据：不进入备份（迁移锁/断点映射/本地同步版本号） */
+  /** 运行期元数据：不进入备份（迁移锁/断点映射/本地同步版本号/迁移前自动备份） */
   function isRuntimeKey(k) {
     return k === QB.KEYS.metaMigrationLock ||
+      k === QB.KEYS.metaMigrationBackup ||
       k === QB.KEYS.revlogMeta ||
       k.indexOf(QB.KEYS.metaHashMap('')) === 0 ||
       k.indexOf('user:reviewRev:') === 0 ||
@@ -116,20 +117,138 @@
   /**
    * 读取全部应用数据 → 备份对象（值为已解析的 JS 对象；敏感密码已脱敏）。
    * 载荷经 QB.DB.backup.export（local=LocalStorage / api=REST），故为异步。
+   * @param {number} [now]
+   * @param {{progress?:Object}} [opts] progress：自动备份的进度标记（阶段/版本/时间戳）
    * @returns {Promise<Object>}
    */
-  async function buildBackup(now) {
+  async function buildBackup(now, opts) {
     const payload = await QB.DB.backup.export();
-    return {
+    const out = {
       app: MAGIC,
       version: QB.CONFIG.VERSION,
+      schemaVersion: QB.Migration ? QB.Migration.SCHEMA_VERSION : 0,
       exportedAt: new Date(now == null ? Date.now() : now).toISOString(),
       data: redactSecrets((payload && payload.data) || {})
     };
+    const progress = opts && opts.progress;
+    if (progress && typeof progress === 'object') out.progress = progress;
+    return out;
   }
 
   function isBackup(obj) {
     return obj && typeof obj === 'object' && obj.app === MAGIC && obj.data && typeof obj.data === 'object';
+  }
+
+  /**
+   * 恢复前版本校验：备份 schema 高于当前客户端时明确拒绝（不半恢复）。
+   * 缺失 schemaVersion 的旧备份按 0 处理（全部可恢复，随后由 Migration 归一）。
+   */
+  function assertCompatible(backup) {
+    const v = Number(backup && backup.schemaVersion);
+    const cur = QB.Migration ? QB.Migration.SCHEMA_VERSION : 0;
+    if (Number.isFinite(v) && v > cur) {
+      throw new Error('备份 schema v' + v + ' 高于当前客户端 v' + cur + '，请先升级 qforge 再恢复（未写入任何数据）');
+    }
+  }
+
+  /* ---------------- 迁移前自动备份（F1） ----------------
+   * 迁移真正写入前先落一份全量备份，写失败即中止迁移。
+   * 优先 IndexedDB（不占 LocalStorage 配额，浏览器 http(s) 常态可用）；
+   * 无 IndexedDB（Node 测试 / 受限环境）回落 LocalStorage 的 meta:migrationBackup。
+   * 存储对象本身就是标准备份信封，可直接交给 applyBackup 恢复。
+   */
+  const AUTO_DB = 'qforge-backup';
+  const AUTO_STORE = 'snapshots';
+  const AUTO_ID = 'pre-migration';
+
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(AUTO_DB, 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore(AUTO_STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('IndexedDB 打开失败'));
+    });
+  }
+
+  function idbRequest(mode, fn) {
+    return idbOpen().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(AUTO_STORE, mode);
+      const store = tx.objectStore(AUTO_STORE);
+      let out;
+      try { out = fn(store); } catch (e) { reject(e); return; }
+      tx.oncomplete = () => { db.close(); resolve(out && out.result !== undefined ? out.result : undefined); };
+      tx.onerror = () => { db.close(); reject(tx.error || new Error('IndexedDB 事务失败')); };
+      tx.onabort = () => { db.close(); reject(tx.error || new Error('IndexedDB 事务中止')); };
+    }));
+  }
+
+  function hasIdb() {
+    return typeof indexedDB !== 'undefined' && indexedDB !== null;
+  }
+
+  /**
+   * 写迁移前自动备份；**写失败即抛错**（调用方须中止迁移）。
+   * @param {{fromVersion:number, toVersion:number}} info
+   * @returns {Promise<Object>} 已落盘的备份信封
+   */
+  async function saveAutoBackup(info) {
+    const startedAt = new Date().toISOString();
+    const envelope = await buildBackup(undefined, {
+      progress: {
+        purpose: 'pre-migration',
+        phase: 'captured',
+        fromVersion: info.fromVersion,
+        toVersion: info.toVersion,
+        startedAt: startedAt
+      }
+    });
+    if (hasIdb()) {
+      try {
+        await idbRequest('readwrite', (store) => store.put(envelope, AUTO_ID));
+        const back = await readAutoBackup();
+        if (!isBackup(back) || back.progress.startedAt !== startedAt) throw new Error('自动备份校验失败（IndexedDB 回读不一致）');
+      } catch (e) {
+        try { await idbRequest('readwrite', (store) => store.delete(AUTO_ID)); } catch (_) { /* 尽力清理半写记录 */ }
+        throw e;
+      }
+    } else {
+      try {
+        QB.Storage.setSync(QB.KEYS.metaMigrationBackup, envelope);
+        const back = QB.Storage.getFresh(QB.KEYS.metaMigrationBackup, null);
+        if (!isBackup(back) || back.progress.startedAt !== startedAt) throw new Error('自动备份校验失败（LocalStorage 回读不一致）');
+      } catch (e) {
+        // 落盘失败会把值留在缓存/待写队列：清掉，避免迁移中止后残留「半写备份」
+        try { QB.Storage.remove(QB.KEYS.metaMigrationBackup); } catch (_) { /* ignore */ }
+        throw e;
+      }
+    }
+    return envelope;
+  }
+
+  /** 读取迁移前自动备份（无则 null） */
+  async function readAutoBackup() {
+    if (hasIdb()) {
+      const v = await idbRequest('readonly', (store) => store.get(AUTO_ID));
+      return isBackup(v) ? v : null;
+    }
+    const v = QB.Storage.getFresh(QB.KEYS.metaMigrationBackup, null);
+    return isBackup(v) ? v : null;
+  }
+
+  /** 标记自动备份已完成迁移（进度标记；失败静默，不影响迁移结果） */
+  async function markAutoBackupDone() {
+    const back = await readAutoBackup();
+    if (!back) return false;
+    back.progress = Object.assign({}, back.progress, { phase: 'migrated', doneAt: new Date().toISOString() });
+    if (hasIdb()) await idbRequest('readwrite', (store) => store.put(back, AUTO_ID));
+    else QB.Storage.setSync(QB.KEYS.metaMigrationBackup, back);
+    return true;
+  }
+
+  /** 删除迁移前自动备份（用户在备份弹窗里确认后调用） */
+  async function clearAutoBackup() {
+    if (hasIdb()) { await idbRequest('readwrite', (store) => store.delete(AUTO_ID)); return; }
+    QB.Storage.remove(QB.KEYS.metaMigrationBackup);
   }
 
   /**
@@ -189,6 +308,7 @@
    */
   async function applyBackup(backup, opts) {
     if (!isBackup(backup)) throw new Error('不是有效的 qforge 备份文件');
+    assertCompatible(backup); // 高版本备份明确拒绝，不静默半恢复
     const mode = (opts || {}).mode;
     let data = backup.data;
     if (QB.DB.backend === 'api') {
@@ -477,6 +597,7 @@
       '<div class="modal-actions" style="justify-content:flex-start;flex-wrap:wrap">' +
       '<button class="btn" data-bk="export">下载全量备份</button>' +
       '<button class="btn btn-ghost" data-bk="import">从备份恢复</button>' +
+      '<button class="btn btn-ghost" data-bk="auto-restore">恢复迁移前自动备份</button>' +
       '<button class="btn btn-ghost" data-bk="dav">☁ WebDAV 云备份</button>' +
       '<button class="btn btn-ghost" data-bk="gc">清理未引用图片</button>' +
       '<button class="btn btn-ghost" data-bk="close">关闭</button></div>',
@@ -487,6 +608,19 @@
           QB.UIRenderer.toast(r.assetCount ? '备份已生成（含图片 ' + r.assetCount + ' 张，.qfbk）' : '备份已生成（.json）', 'ok');
         };
         modal.querySelector('[data-bk="import"]').onclick = () => pickAndRestore();
+        modal.querySelector('[data-bk="auto-restore"]').onclick = async () => {
+          try {
+            const auto = await readAutoBackup();
+            if (!auto) { QB.UIRenderer.toast('没有可用的迁移前自动备份', 'err'); return; }
+            const at = QB.Helpers.escapeHtml(auto.exportedAt || '未知');
+            const ok = await QB.UIRenderer.confirmDialog(
+              '用迁移前自动备份（' + at + '）覆盖恢复当前全部数据？恢复后请刷新页面。', '覆盖恢复'
+            );
+            if (!ok) return;
+            const r = await applyBackup(auto, { mode: 'replace' });
+            QB.UIRenderer.toast('已从迁移前自动备份恢复 ' + r.keys + ' 个数据键，建议刷新页面', 'ok');
+          } catch (e) { QB.UIRenderer.toast('恢复失败：' + e.message, 'err'); }
+        };
         modal.querySelector('[data-bk="dav"]').onclick = () => {
           if (QB.SyncDAV) QB.SyncDAV.openFlow();
           else QB.UIRenderer.toast('WebDAV 模块未加载', 'err');
@@ -509,6 +643,7 @@
   QB.Backup = {
     buildBackup, applyBackup, isBackup, redactSecrets, readAllData, applyData, foldLayout,
     isServerFormat, isLocalFormat, serverToLocal, localToServer,
+    assertCompatible, saveAutoBackup, readAutoBackup, markAutoBackupDone, clearAutoBackup,
     buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,
     confirmRestore,
     download, pickAndRestore, openFlow

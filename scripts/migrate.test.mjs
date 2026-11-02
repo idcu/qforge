@@ -19,7 +19,9 @@ function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failure
 function eq(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
 function section(t) { console.log('\n== ' + t + ' =='); }
 function snap() {
-  return JSON.stringify(QB.Storage.keys().sort().map((k) => [k, QB.Storage.get(k)]));
+  // 自动备份键是运行期元数据（F1），不参与「迁移前数据逐字节一致」比对
+  const skip = QB.KEYS.metaMigrationBackup;
+  return JSON.stringify(QB.Storage.keys().filter((k) => k !== skip).sort().map((k) => [k, QB.Storage.get(k)]));
 }
 
 const DAY = 24 * 3600 * 1000;
@@ -410,6 +412,86 @@ section('ensureLayout：幂等布局归一（备份恢复用）');
   const r2 = QB.Migration.ensureLayout();
   eq(r2.converted, 0, '再次归一无改动（幂等）');
   eq(r2.revlog, false, '再次归一不重复转换日志');
+}
+
+section('F1 迁移前自动备份：write 前落盘、进度标记、可从备份完整恢复');
+{
+  QB.Storage.clearAll();
+  const bank = await QB.DB.banks.create({ name: '自动备份库' });
+  const a = q1();
+  const b = q2();
+  const h1old = '2:55555555';
+  const h2old = '2:66666666';
+  QB.QuestionShards.writeAll(bank.id, [
+    Object.assign({ bankId: bank.id, contentHash: h1old, category: '' }, a),
+    Object.assign({ bankId: bank.id, contentHash: h2old, category: '' }, b)
+  ]);
+  const legacy = {
+    [h1old]: { algo: 'fsrs', stability: 2.2, reps: 1, last: T0, due: T0 },
+    [h2old]: { algo: 'fsrs', stability: 3.3, reps: 2, last: T0 - DAY, due: T0 }
+  };
+  QB.Storage.set(QB.KEYS.review(bank.id), legacy);
+  QB.Storage.set(QB.KEYS.revlog, [{ id: 'rl-f1', t: T0, h: h1old, r: 3 }]);
+  QB.Storage.set(QB.KEYS.metaSchema, 4);
+
+  const r = await QB.Migration.run();
+  eq(r.autoBackup, true, '迁移结果标记 autoBackup');
+
+  const auto = await QB.Backup.readAutoBackup();
+  ok(QB.Backup.isBackup(auto), '自动备份是标准备份信封（可交给恢复流程）');
+  eq(auto.schemaVersion, 5, '备份带 schema 版本 5');
+  eq(auto.progress.purpose, 'pre-migration', '备份带用途标记');
+  eq(auto.progress.phase, 'migrated', '迁移完成后进度标记为 migrated');
+  eq(auto.progress.fromVersion, 4, '备份记录迁移前版本 4');
+  ok(typeof auto.exportedAt === 'string' && auto.exportedAt.length > 0, '备份带时间戳');
+  eq(auto.data[QB.KEYS.review(bank.id)][h1old].stability, 2.2, '备份载荷是迁移前旧布局/旧 hash');
+
+  const migrated = QB.DB.reviews.list(bank.id);
+  const migratedHashes = Object.keys(migrated);
+  eq(migratedHashes.length, 2, '迁移后 2 条状态');
+
+  // 清空后从自动备份恢复：状态与迁移后逐键一致（备份→恢复→再迁移闭环）
+  QB.Storage.clearAll();
+  await QB.Backup.applyBackup(auto, { mode: 'replace' });
+  const restored = QB.DB.reviews.list(bank.id);
+  eq(Object.keys(restored).length, 2, '恢复后 2 条状态');
+  migratedHashes.forEach((h) => {
+    eq(JSON.stringify(restored[h]), JSON.stringify(migrated[h]), '恢复后状态逐键一致：' + h);
+  });
+  const restoredQs = (await QB.DB.questions.list(bank.id, {})).items;
+  eq(restoredQs.length, 2, '恢复后题目 2 道');
+  restoredQs.forEach((q) => ok(QB.isCurrentHash(q.contentHash), '恢复后 hash 已归一为 v3：' + q.id));
+  eq(QB.DB.revlog.list().length, 1, '恢复后日志 1 条');
+}
+
+section('F1 自动备份失败 → 迁移中止且不写入任何数据');
+{
+  QB.Storage.clearAll();
+  const bank = await QB.DB.banks.create({ name: '备份失败库' });
+  const a = q1();
+  const h1old = '2:77777777';
+  QB.QuestionShards.writeAll(bank.id, [Object.assign({ bankId: bank.id, contentHash: h1old, category: '' }, a)]);
+  QB.Storage.set(QB.KEYS.review(bank.id), { [h1old]: { algo: 'fsrs', stability: 1.9, reps: 1, last: T0, due: T0 } });
+  QB.Storage.set(QB.KEYS.metaSchema, 4);
+  const before = snap();
+
+  const rawSet = window.localStorage.setItem.bind(window.localStorage);
+  window.localStorage.setItem = (k, v) => {
+    if (k === 'qb:' + QB.KEYS.metaMigrationBackup) {
+      const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e;
+    }
+    return rawSet(k, v);
+  };
+  let threw = null;
+  try { await QB.Migration.run(); } catch (e) { threw = e; }
+  window.localStorage.setItem = rawSet;
+
+  ok(threw !== null, '备份失败时迁移抛错（不静默继续）');
+  ok(/自动备份失败/.test(threw && threw.message || ''), '错误信息可读并指明自动备份失败');
+  eq(QB.Migration.currentVersion(), 4, '版本号仍为 4（未标记完成）');
+  eq(snap(), before, '业务数据逐字节未改动（备份失败在写入之前）');
+  ok(!QB.Storage.keys().includes(QB.KEYS.metaMigrationLock), '迁移锁已释放');
+  ok(!QB.Storage.keys().includes(QB.KEYS.metaMigrationBackup), '未留下半写备份键');
 }
 
 console.log('\n================ 汇总 ================');

@@ -42,6 +42,8 @@
     metaSchema: 'meta:schemaVersion',
     // 迁移锁/旧→新 hash 映射（迁移日志，运行期元数据，不进备份）
     metaMigrationLock: 'meta:migrationLock',
+    // 迁移前自动备份（schema/时间戳/进度标记；只在 IndexedDB 不可用时回落本键，运行期元数据，不进备份）
+    metaMigrationBackup: 'meta:migrationBackup',
     metaHashMap: (bankId) => 'meta:hashMap:' + bankId
   };
 

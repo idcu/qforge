@@ -6,6 +6,54 @@
 
 ---
 
+## 待回填 · feat(migration): 迁移前自动全量备份与恢复入口（Phase F1）
+
+**核心改动**
+- `js/modules/migrate.js`：`doRun` 抢到迁移锁之后、`snapshotAll()` 与**任何写入之前**调用
+  `QB.Backup.saveAutoBackup({fromVersion,toVersion})`；备份模块缺失或写盘失败时释放锁并抛出
+  「迁移已中止：自动备份失败（…）」，**迁移不执行任何写入**。成功迁移后 `markAutoBackupDone()`
+  把进度标记为 `migrated`（失败静默，不影响迁移结果）；失败路径仍 `restoreAll(snap)`，备份键保留。
+- `js/modules/backup.js` 复用既有 `buildBackup`/`readAllData`/`foldLayout` 链路（**未复制导出逻辑**）：
+  - `buildBackup` 信封新增 `schemaVersion`（取 `QB.Migration.SCHEMA_VERSION`）与可选 `progress`。
+  - `saveAutoBackup`：优先 IndexedDB（库 `qforge-backup` / store `snapshots` / key `pre-migration`，
+    不占 LocalStorage 配额）；无 IDB（Node 测试/受限环境）回落 `meta:migrationBackup`。
+    写入后**回读校验**（`startedAt` 一致），失败清理半写记录（IDB `delete` / `Storage.remove`）再抛错。
+  - `readAutoBackup` / `markAutoBackupDone` / `clearAutoBackup`；备份弹窗新增「恢复迁移前自动备份」按钮
+    （`confirmDialog` → `applyBackup(auto,{mode:'replace'})` → 提示刷新页面）。
+  - `assertCompatible(backup)`：备份 `schemaVersion` 高于当前客户端时**明确拒绝**
+    （「备份 schema vX 高于当前客户端 vY，请先升级 qforge 再恢复（未写入任何数据）」），
+    缺省 `schemaVersion` 按 0 处理；`applyBackup` 在校验信封后调用。
+- `js/data/contracts.js`：新增运行期键 `metaMigrationBackup: 'meta:migrationBackup'`；
+  `backup.isRuntimeKey` 将其排除出导出载荷（自动备份不备份自己）。
+- 文档同步：`docs/DATABASE.md`（§3 键表 + §7.1 自动备份口径与恢复入口）、`README.md`
+  （migrate.test 151、合计 3882、首屏 250.8 KB gzip / 697.8 KB raw）、
+  `docs/DEVELOPMENT.md`（测试矩阵 151/3882、首屏体积）、`scripts/docs-baseline.json` 刷新。
+
+**验证数据（2026-11-02 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/migrate.test.mjs`：**151/151 通过**（原 129；新增「写前落盘 + 进度标记 +
+  备份恢复逐键一致」与「备份失败 → 迁移中止且不写入任何数据」两组）。
+- `node scripts/test-all.mjs`：**24 个运行项 / 0 失败 / 26.2s / 3882 断言**（原 3860）。
+- `node --expose-gc scripts/bench.mjs --assert`：**35/35 门禁通过**。
+  - schema v5 迁移（含迁移前自动备份的一次全量序列化）：1000 题 **27.47ms / heap 峰值 +15.44MB**、
+    3000 题 **83.72ms / +47.02MB**、20000 题 **564.42ms / +106.81MB**（门禁 120MB）；
+    三档完整性 **1000/1000、3000/3000、20000/20000**（复习状态逐键相等、题目/日志 hash 全 v3、旧整表键清理、版本=5）。
+  - 迁移后 per-hash 单次评分本地写 **0.03 / 0.02 / 0.14ms**；heapUsed 增量 **+2.67MB**；API PATCH P95 **4.46ms**；导出体积 675.6KB。
+- `node scripts/docs-check.mjs --write`：24 运行项 / **3882 断言** / **35 门禁** / 76 文件（68 内联 js）/
+  **250.8 KB gzip · 697.8 KB raw**，文档 0 漂移；基线已刷新。
+
+**公共抽象（新增/调整）**
+- 新增 `QB.Backup.assertCompatible/saveAutoBackup/readAutoBackup/markAutoBackupDone/clearAutoBackup`（导出面扩展，未改既有签名）。
+- 新增运行期键常量 `QB.KEYS.metaMigrationBackup`（仅回落路径使用，不进备份）。
+- 自动备份复用 `buildBackup`/`readAllData`/`foldLayout`，无重复导出实现。
+
+**TODO/风险**
+- Node 无 IndexedDB，bench 中自动备份走 LocalStorage 回落：迁移耗时/heap 已含额外一次全量序列化；
+  **20000 题 heap 峰值由 89.22MB 升至约 107MB**（+约 18MB），仍在门禁内但已接近。
+- 浏览器侧 IndexedDB 拆分写入未做真机测量（Node 无法覆盖），后续 F2 将如实标注估算口径。
+- 自动备份目前固定保留最近一次（key `pre-migration` 整键覆盖），无多份轮转与自动清理策略。
+
+---
+
 ## fcd6820 · ci(docs): docs-check 静态基线 + 独立轻量 CI job（Phase E）
 
 **核心改动**
