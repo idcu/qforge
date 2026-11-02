@@ -628,7 +628,7 @@ section('作答热路径请求收敛（api）：reviews.record + 权重缓存');
   const origFetch = globalThis.fetch;
   let calls = [];
   QB.ApiAdapter.useFetch((url, opts) => {
-    calls.push({ method: (opts && opts.method) || 'GET', url: String(url).replace(base, '') });
+    calls.push({ method: (opts && opts.method) || 'GET', url: String(url).replace(base, ''), body: opts && opts.body });
     return origFetch(url, opts);
   });
   QB.CONFIG.DATA_BACKEND = 'api';
@@ -640,18 +640,22 @@ section('作答热路径请求收敛（api）：reviews.record + 权重缓存');
 
   calls = [];
   await QB.SRSStore.grade(bank.id, q, 2, 1000);
-  eq(calls.length, 3, '首次作答 3 请求（GET reviews + GET weights + PUT record）');
+  eq(calls.length, 3, '首次作答 3 请求（GET reviews + GET weights + PATCH record）');
   eq(calls.filter((c) => c.method === 'GET' && c.url.indexOf('/fsrs-weights') >= 0).length, 1, '首次作答读一次权重');
-  ok(calls.some((c) => c.method === 'PUT' && c.url.indexOf('/reviews') >= 0), '状态与日志经 PUT reviews 一次提交');
+  const writeCall = calls[calls.length - 1];
+  eq(writeCall.method, 'PATCH', '状态与日志经 PATCH reviews 增量提交');
+  const sent = JSON.parse(writeCall.body);
+  eq(Object.keys(sent.items).length, 1, 'B1：增量上行只含本批改动的 1 个 content_hash');
+  eq(sent.items[q.contentHash].algo, 'fsrs', 'B1：增量载荷含完整调度状态');
   const savedMap = (await req('GET', '/api/banks/' + bank.id + '/reviews')).body.items;
   ok(savedMap[q.contentHash] && savedMap[q.contentHash].algo === 'fsrs', '服务端已落调度状态');
   const log1 = (await req('GET', '/api/revlog')).body.items.filter((e) => e.b === bank.id);
-  eq(log1.length, 1, '同一 PUT 请求写入 1 条评分日志');
+  eq(log1.length, 1, '同一 PATCH 请求写入 1 条评分日志');
 
   calls = [];
   await QB.SRSStore.grade(bank.id, q, 2, 2000);
   eq(calls.length, 1, '热态作答仅 1 请求（reviews/weights 缓存命中，GET 归零）');
-  eq(calls[0].method, 'PUT', '热态请求为 PUT reviews');
+  eq(calls[0].method, 'PATCH', '热态请求为 PATCH reviews（增量）');
   const log2 = (await req('GET', '/api/revlog')).body.items.filter((e) => e.b === bank.id);
   eq(log2.length, 2, '第二次作答再写 1 条日志');
 
@@ -679,6 +683,47 @@ section('作答热路径请求收敛（api）：reviews.record + 权重缓存');
   const bad = await req('PUT', '/api/banks/' + bank.id + '/reviews', { items: {}, revlog: 'x' });
   eq(bad.status, 400, 'revlog 非数组 → 400');
   eq(bad.body.error.code, 'BAD_REQUEST', 'revlog 非数组错误码 BAD_REQUEST');
+}
+
+section('B1 增量复习写入（PATCH）与 B3 revlog 版本');
+{
+  const ctx = await createHarness(path.resolve(__dirname, '..'));
+  const { QB } = ctx;
+  QB.CONFIG.DATA_BACKEND = 'api';
+  QB.CONFIG.API_BASE_URL = base;
+  QB.ApiAdapter.useFetch((url, opts) => fetch(url, opts));
+  QB.DB.init();
+  const bank = await QB.DB.banks.create({ name: '增量复习库' });
+
+  await QB.DB.reviews.save(bank.id, {
+    keep1: { algo: 'fsrs', last: 10, stability: 1 },
+    keep2: { algo: 'fsrs', last: 20, stability: 2 }
+  });
+  await QB.DB.reviews.list(bank.id); // 缓存 rev=1
+  const rev0 = QB.DB.revlog.revision();
+  const res = await QB.DB.reviews.patch(bank.id, {
+    add1: { algo: 'fsrs', last: 100, stability: 3 }
+  }, [{ t: 100, h: 'add1', r: 3, b: bank.id }]);
+  const server = (await req('GET', '/api/banks/' + bank.id + '/reviews')).body;
+  ok(server.items.keep1 && server.items.keep2 && server.items.add1, 'B1：PATCH 只合并增量，未提交键保留');
+  eq(server.rev, 2, 'B1：PATCH 递增服务端 rev');
+  eq(res.logged, 1, 'B1：增量写同时追加 1 条评分日志');
+  ok(QB.DB.revlog.revision() > rev0, 'B3：revlog.revision() 随评分写入自增');
+  eq((await QB.DB.reviews.list(bank.id)).add1.stability, 3, 'B1：增量写后本地缓存同步');
+
+  await QB.DB.reviews.patch(bank.id, { keep1: null }, []);
+  const afterDel = (await req('GET', '/api/banks/' + bank.id + '/reviews')).body;
+  ok(!afterDel.items.keep1 && afterDel.items.keep2, 'B1：PATCH null 删除指定键且不影响其它键');
+  ok(!(await QB.DB.reviews.list(bank.id)).keep1, 'B1：null 删除同步本地缓存');
+
+  const miss = await req('PATCH', '/api/banks/' + bank.id + '/reviews', { revlog: [] });
+  eq(miss.status, 400, 'PATCH 缺 items → 400');
+  const conf = await req('PATCH', '/api/banks/' + bank.id + '/reviews', {
+    items: { add2: { algo: 'fsrs', last: 5 } }, base_rev: 0
+  });
+  eq(conf.status, 409, 'PATCH base_rev 过期 → 409');
+  ok(conf.body.current && conf.body.rev === afterDel.rev, '409 返回 current 与最新 rev');
+  await QB.DB.banks.remove(bank.id);
 }
 
 section('多端复习进度冲突：409 + 按 last 合并重试');

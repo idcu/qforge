@@ -649,8 +649,11 @@
    * api 适配器以同名方法对应 docs/API-CONTRACT.md §6–§8 端点。
    */
   const REVLOG_MAX = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000; // revlog FIFO 上限
+  let revlogRev = 0; // 本地 revlog 写修订号（供统计页派生数据缓存失效；B3）
   const revlog = {
     list() { return Storage.get(K.revlog, []) || []; },
+    /** revlog 写修订号（同步数值；append/record/cascade/backup 后自增） */
+    revision() { return revlogRev; },
     /**
      * 构造追加后的新数组（纯函数，不落盘）：补 id/时间戳 + FIFO 裁剪。
      * append 与 reviews.record 共用，避免「状态+日志」热路径各写一份实现。
@@ -672,6 +675,7 @@
       if (!entries || !entries.length) return revlog.list();
       const list = revlog.build(revlog.list(), entries);
       Storage.setSync(K.revlog, list);
+      revlogRev += 1;
       return list;
     }
   };
@@ -684,6 +688,47 @@
     const next = reviewRevOf(bankId) + 1;
     Storage.setSync(K.reviewRev(bankId), next);
     return next;
+  }
+
+  /**
+   * 复习写入公共实现：record（整表）与 patch（增量）共用同一合并/回滚语义。
+   * - 写前直读最新落盘快照，按 QB.ReviewMerge 合并（同键取 last 大者），避免「先读后写」期间
+   *   另一标签的评分被覆盖；状态/日志/版本号三键同快照提交，任一步失败按调用前快照回滚。
+   * - full=true 时 saved 返回合并后总键数（整表语义）；增量时返回本次改动键数。
+   */
+  function commitReview(bankId, delta, entries, full) {
+    const key = K.review(bankId);
+    const keyRev = K.reviewRev(bankId);
+    const prevMap = Storage.getFresh(key, null);
+    const prevLog = Storage.getFresh(K.revlog, []);
+    const prevRev = Number(Storage.getFresh(keyRev, 0)) || 0;
+    const incoming = delta || {};
+    // null 值表示删除该 content_hash（PATCH 契约），先剔除再合并
+    const upserts = {};
+    const deletes = [];
+    Object.keys(incoming).forEach((k) => {
+      if (incoming[k] === null) deletes.push(k);
+      else upserts[k] = incoming[k];
+    });
+    const merged = (prevMap && typeof prevMap === 'object')
+      ? QB.ReviewMerge.mergeMaps(upserts, prevMap)
+      : upserts;
+    deletes.forEach((k) => { delete merged[k]; });
+    const nextLog = revlog.build(prevLog, entries || []);
+    const logged = Array.isArray(entries) ? entries.length : 0;
+    try {
+      Storage.setSync(key, merged);
+      Storage.setSync(K.revlog, nextLog);
+      Storage.setSync(keyRev, prevRev + 1);
+    } catch (e) {
+      // 回滚（尽力而为）：恢复到调用前快照，避免状态/日志半写
+      try { Storage.setSync(key, prevMap || {}); } catch (_) { /* lastError 已记录 */ }
+      try { Storage.setSync(K.revlog, prevLog); } catch (_) { /* lastError 已记录 */ }
+      try { Storage.setSync(keyRev, prevRev); } catch (_) { /* lastError 已记录 */ }
+      throw e;
+    }
+    if (logged) revlogRev += 1;
+    return { saved: full ? Object.keys(merged).length : Object.keys(incoming).length, logged: logged, rev: prevRev + 1 };
   }
 
   const reviews = {
@@ -699,37 +744,18 @@
       bumpReviewRev(bankId);
     },
     /**
-     * 作答热路径：调度状态 + 评分日志一次提交（等价 save + revlog.append）。
+     * 作答热路径（整表）：调度状态 + 评分日志一次提交（等价 save + revlog.append）。
      * api 适配器对应 PUT /reviews（body 可携 revlog），把两次网络请求收敛为一次。
-     *
-     * 本地多标签安全：写前直读最新落盘快照，按 QB.ReviewMerge 语义合并（同键取 last 大者），
-     * 避免「先读后写」期间另一标签的评分被整表覆盖；状态/日志/版本号三键同快照提交，
-     * 任一步失败按调用前快照回滚（不留下「有状态无日志」的脏数据）。
      */
     record(bankId, map, entries) {
-      const key = K.review(bankId);
-      const keyRev = K.reviewRev(bankId);
-      const prevMap = Storage.getFresh(key, null);
-      const prevLog = Storage.getFresh(K.revlog, []);
-      const prevRev = Number(Storage.getFresh(keyRev, 0)) || 0;
-      const incoming = map || {};
-      const merged = (prevMap && typeof prevMap === 'object')
-        ? QB.ReviewMerge.mergeMaps(incoming, prevMap)
-        : incoming;
-      const nextLog = revlog.build(prevLog, entries || []);
-      const logged = Array.isArray(entries) ? entries.length : 0;
-      try {
-        Storage.setSync(key, merged);
-        Storage.setSync(K.revlog, nextLog);
-        Storage.setSync(keyRev, prevRev + 1);
-      } catch (e) {
-        // 回滚（尽力而为）：恢复到调用前快照，避免状态/日志半写
-        try { Storage.setSync(key, prevMap || {}); } catch (_) { /* lastError 已记录 */ }
-        try { Storage.setSync(K.revlog, prevLog); } catch (_) { /* lastError 已记录 */ }
-        try { Storage.setSync(keyRev, prevRev); } catch (_) { /* lastError 已记录 */ }
-        throw e;
-      }
-      return { saved: Object.keys(merged).length, logged: logged, rev: prevRev + 1 };
+      return commitReview(bankId, map, entries, true);
+    },
+    /**
+     * 作答热路径（增量，B1）：只提交本批改动的 content_hash 状态（api 上行 O(改动数)）。
+     * 注：本地仍按单键 map 整表落盘（LocalStorage 布局未改，见 CHANGELOG 的 B1 遗留说明）。
+     */
+    patch(bankId, delta, entries) {
+      return commitReview(bankId, delta, entries, false);
     }
   };
 
@@ -758,7 +784,9 @@
     import(payload, mode) {
       const data = payload && payload.data;
       if (!data || typeof data !== 'object') throw new Error('backup.import 需要 { data } 载荷');
-      return QB.Backup.applyData(data, mode);
+      const out = QB.Backup.applyData(data, mode);
+      revlogRev += 1; // 备份可能替换 revlog，统计页派生数据失效（B3）
+      return out;
     }
   };
 
@@ -778,7 +806,7 @@
     // 该库评分日志（revlog 条目 b=bankId，F4 起记录；旧无 b 日志保留）
     const log = revlog.list();
     const kept = log.filter((e) => !e || e.b !== id);
-    if (kept.length !== log.length) Storage.setSync(K.revlog, kept);
+    if (kept.length !== log.length) { Storage.setSync(K.revlog, kept); revlogRev += 1; }
     const hist = Storage.get(K.history, []).filter((h) => h.bankId !== id);
     Storage.setSync(K.history, hist);
     const cur = Storage.get(K.metaCurrentBank, null);

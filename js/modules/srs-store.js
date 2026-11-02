@@ -21,6 +21,16 @@
     return await QB.DB.reviews.save(bankId, map);
   }
 
+  /**
+   * 热路径提交：适配器支持 patch 时只上行本批改动键（B1），否则回退整表 record。
+   * 返回形状 { saved, logged, rev? }，调用方当前均忽略返回值。
+   */
+  async function commitGraded(bankId, delta, fullMap, entries) {
+    const repo = QB.DB.reviews;
+    if (typeof repo.patch === 'function') return await repo.patch(bankId, delta, entries);
+    return await repo.record(bankId, fullMap, entries);
+  }
+
   function keyFor(q) { return q.contentHash || QB.makeContentHash(q); }
 
   /** 应用层评分 0–3（again/hard/good/easy）→ FSRS 评分 1–4；已是 1–4 原样透传 */
@@ -76,8 +86,8 @@
     const fr = fsrsRating(rating);
     const next = QB.FSRS.review(map[k], fr, ts, await QB.FSRSOpt.getActiveWeights(bankId));
     map[k] = next;
-    // 热路径：状态 + 评分日志一次提交（api 模式 1 个请求；local 模式两次本地写）
-    await QB.DB.reviews.record(bankId, map, [{ t: ts, h: k, r: fr, b: bankId }]);
+    // 热路径：状态 + 评分日志一次提交；api 模式只上行本批改动键（patch），一个请求
+    await commitGraded(bankId, { [k]: next }, map, [{ t: ts, h: k, r: fr, b: bankId }]);
     return next;
   }
 
@@ -88,13 +98,15 @@
     const map = await readMap(bankId);
     const w = await QB.FSRSOpt.getActiveWeights(bankId);
     const logs = [];
+    const delta = {};
     entries.forEach((e) => {
       const k = keyFor(e.question);
       const fr = fsrsRating(e.rating);
       map[k] = QB.FSRS.review(map[k], fr, ts, w);
+      delta[k] = map[k];
       logs.push({ t: ts, h: k, r: fr, b: bankId });
     });
-    await QB.DB.reviews.record(bankId, map, logs);
+    await commitGraded(bankId, delta, map, logs);
   }
 
   /** 今日到期题目（未学过的题也算到期） */

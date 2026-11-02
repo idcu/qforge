@@ -362,6 +362,27 @@ export function createStore(dataDir) {
       progress._save(bankId, p);
       return { conflict: false, rev: p.review_rev };
     },
+    /**
+     * 增量写（PATCH /reviews）：仅合并调用方给出的 content_hash → 状态，其余键保持不变。
+     * 值为 null 表示删除该键；opts.baseRev 同 reviewSave 的乐观并发校验。
+     */
+    reviewPatch(bankId, patch, opts) {
+      opts = opts || {};
+      const p = progress._of(bankId);
+      const rev = Number(p.review_rev) || 0;
+      if (opts.baseRev !== undefined && opts.baseRev !== null && Number(opts.baseRev) !== rev) {
+        return { conflict: true, current: p.review || {}, rev: rev };
+      }
+      const items = p.review || {};
+      Object.keys(patch || {}).forEach((k) => {
+        if (patch[k] === null) delete items[k];
+        else items[k] = patch[k];
+      });
+      p.review = items;
+      p.review_rev = rev + 1;
+      progress._save(bankId, p);
+      return { conflict: false, rev: p.review_rev };
+    },
     reviewRemove(bankId) {
       const p = progress._of(bankId);
       p.review = {};
@@ -764,23 +785,21 @@ export function createHandler(opts) {
       }
       return fail(res, 405, 'METHOD_NOT_ALLOWED', m);
     }
-    // ---- reviews（SRS 调度状态整表） ----
+    // ---- reviews（SRS 调度状态：PUT 整表 / PATCH 增量） ----
     if (segs.length === 4 && segs[1] === 'banks' && segs[3] === 'reviews') {
       const bankId = segs[2];
       if (m === 'GET') return json(res, 200, store.progress.reviewGet(bankId));
-      if (m === 'PUT') {
+      if (m === 'PUT' || m === 'PATCH') {
         const body = await readJsonBody(req);
-        // 契约 §6：PUT 体必须是 { items:{...}, revlog?:[], base_rev? }。
+        // 契约 §6：体必须是 { items:{...}, revlog?:[], base_rev? }。
         // 缺 items 时旧实现把 body 本身当调度表，会把 base_rev/revlog 写成伪状态键污染 FSRS。
-        if (!body || typeof body !== 'object' || Array.isArray(body) ||
-            !body.items || typeof body.items !== 'object' || Array.isArray(body.items)) {
-          return fail(res, 400, 'BAD_REQUEST', 'items 必须为对象（content_hash → 调度状态）');
-        }
+        const bad = reviewBodyError(body);
+        if (bad) return fail(res, 400, 'BAD_REQUEST', bad);
         const map = body.items;
-        if (body.revlog !== undefined && !Array.isArray(body.revlog)) {
-          return fail(res, 400, 'BAD_REQUEST', 'revlog 必须为数组');
-        }
-        const saved = store.progress.reviewSave(bankId, map, { baseRev: body && body.base_rev });
+        // PUT = 整表替换；PATCH = 仅合并给出键（null 删除），上行体积随改动数而非库规模增长
+        const saved = m === 'PUT'
+          ? store.progress.reviewSave(bankId, map, { baseRev: body.base_rev })
+          : store.progress.reviewPatch(bankId, map, { baseRev: body.base_rev });
         if (saved.conflict) {
           return json(res, 409, {
             error: { code: 'CONFLICT', message: '复习进度已在其他设备修改，请重试' },
@@ -789,7 +808,7 @@ export function createHandler(opts) {
           });
         }
         let logged = 0;
-        if (body && Array.isArray(body.revlog) && body.revlog.length) {
+        if (Array.isArray(body.revlog) && body.revlog.length) {
           store.revlog.append(body.revlog);
           logged = body.revlog.length;
         }
@@ -889,6 +908,16 @@ export function createHandler(opts) {
     if (!buf.length) return {};
     try { return JSON.parse(buf.toString('utf8')); }
     catch (e) { const err = new Error('请求体不是合法 JSON'); err.status = 400; throw err; }
+  }
+
+  /** reviews 写入体校验（PUT 整表 / PATCH 增量共用）：items 必须是对象，revlog 若存在必须是数组 */
+  function reviewBodyError(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+        !body.items || typeof body.items !== 'object' || Array.isArray(body.items)) {
+      return 'items 必须为对象（content_hash → 调度状态）';
+    }
+    if (body.revlog !== undefined && !Array.isArray(body.revlog)) return 'revlog 必须为数组';
+    return null;
   }
 
   return async function handler(req, res) {

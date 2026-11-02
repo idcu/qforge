@@ -120,7 +120,7 @@
 ## 6. 资源：间隔重复（SRS）
 
 > **契约归属（2026-10-19 阶段 C 起，已落地并接线）**：SRS 三块存储原语已进入 `QB.CONTRACTS`——
-> `reviews:[list,save,remove,record]`、`revlog:[list,append]`、`weights:[read,write,remove]`，并已由
+> `reviews:[list,save,remove,record,patch]`、`revlog:[list,append,revision]`、`weights:[read,write,remove]`，并已由
 > `local-adapter`（**直读写 LocalStorage，是唯一存储权威**）与 `api-adapter`（REST）双双实现；
 > 领域模块 `SRSStore`/`FSRSOpt` 只保留算法与作用域过滤，存储一律经 `QB.DB.reviews/revlog/weights`
 > 委托（均为异步，见 §9 接线进度）。参考后端 `scripts/serve-api.mjs` 实现了下表端点。**未实现**：
@@ -131,6 +131,7 @@
 | --- | --- | --- | --- |
 | GET | `/api/banks/{id}/reviews` | 该库全部调度状态（content_hash → state 的**整表 map**） | `{ items: { hash: { algo, due, stability, difficulty, reps, lapses, last, learning } }, rev }`（`rev` 为该库复习版本号，服务端维护，单调递增） |
 | PUT | `/api/banks/{id}/reviews` | 整表 upsert；可选同请求追加评分日志（作答热路径，**一次网络请求**）；可选 `base_rev` 做乐观并发 | `{ items: {...}, revlog?: [{t,h,r,b}], base_rev? }` → `{ saved, logged, rev }`；**缺 `items` / `items` 非对象（含数组）→ `400 BAD_REQUEST`，不落盘、不递增 `rev`**；`base_rev` 与服务端当前版本不符 → `409` + `{ error: { code: 'CONFLICT' }, current, rev }` 且**不落盘**；`revlog` 非数组 → `400 BAD_REQUEST` |
+| PATCH | `/api/banks/{id}/reviews` | **增量 upsert（作答热路径，B1）**：只合并 `items` 给出的 `content_hash`，其余键保持不变；`null` 值删除该键；可选同请求追加评分日志；可选 `base_rev` | `{ items: { hash: state \| null }, revlog?: [{t,h,r,b}], base_rev? }` → `{ saved, logged, rev }`；校验与 409 语义同 PUT；上行体积随改动键数而非库规模增长 |
 | DELETE | `/api/banks/{id}/reviews` | 清空该库调度状态（服务端 `rev` 同样 +1，使其他设备缓存的版本失效） | — | `204` |
 | GET | `/api/revlog` | 评分日志（全局，按人） | `{ items: [{id,h,r,t,b?}], total }` |
 | POST | `/api/revlog` | 追加评分日志（可批量；服务端补 id/时间戳并按上限 FIFO） | `{ items: [{h,r,t,b?}] }` → `{ saved, items }` |
@@ -182,7 +183,8 @@
 | `progress.historyList/historyAdd/historyUpdate/historyRemove/historyClear` | history 端点（`historyUpdate` → `PATCH /api/history/{id}`） |
 | `progress.sessionSave/sessionLoad/sessionClear` | session 端点 |
 | `reviews.list(bankId)` / `reviews.save(bankId, map)` / `reviews.remove(bankId)` / `reviews.record(bankId, map, entries)` | `GET`/`PUT`/`DELETE` `§6 /api/banks/{id}/reviews`；`record` 复用 `PUT`（body 携 `revlog`，状态+日志一次提交，并带缓存来的 `base_rev`）；`save`/`remove` 为整表写，成功或失败后都失效 reviews/rev 缓存；`record` 遇 409 按 `QB.ReviewMerge.mergeMaps`（同键保留 `last` 更大者）合并后重试一次 |
-| `revlog.list()` / `revlog.append(entries)` | `GET`/`POST` `§6 /api/revlog` |
+| `reviews.patch(bankId, delta, entries)`（可选，B1） | `PATCH §6 /api/banks/{id}/reviews`；仅上行 `delta` 改动键；409 时只重试我方 `last` 更大的键；适配器未实现时 `SRSStore` 回退 `record` 整表 |
+| `revlog.list()` / `revlog.append(entries)` / `revlog.revision()` | `GET`/`POST` `§6 /api/revlog`；`revision()` 为同步本地写修订号（append/record/backup 后自增，供统计页派生数据缓存失效，B3） |
 | `weights.read()` / `weights.write(store)` / `weights.remove(scope)` | `GET`/`PUT`/`DELETE` `§6 /api/fsrs-weights[/{scope}]` |
 | `backup.export()` / `backup.import({data}, mode)` | `GET`/`POST` `§7 /api/backup?mode=` |
 | 资产驱动（`QB.ASSET_DRIVER_CONTRACT`：`put/get/all/ids/remove/clear`） | `§8 /api/assets`（原始字节上传，见下） |

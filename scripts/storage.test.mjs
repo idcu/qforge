@@ -194,6 +194,24 @@ section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
   S.clearAll();
 }
 
+section('本地 reviews.patch（B1）与 revlog.revision（B3）');
+{
+  S.clearAll();
+  const b = 'b-patch';
+  S.setSync(QB.KEYS.review(b), { keep1: { last: 10 }, keep2: { last: 20 } });
+  const rev0 = QB.DB.revlog.revision();
+  const r = QB.DB.reviews.patch(b, { add1: { last: 100 } }, [{ t: 100, h: 'add1', r: 3, b: b }]);
+  const map = QB.DB.reviews.list(b);
+  ok(map.keep1 && map.keep2 && map.add1, 'patch 只合并增量，其它键保留');
+  eq(r.saved, 1, 'patch 回执 saved 为本次改动键数');
+  ok(QB.DB.revlog.revision() > rev0, 'revlog.revision 随追加自增');
+  const rev1 = QB.DB.revlog.revision();
+  QB.DB.reviews.patch(b, { keep1: null }, []);
+  ok(!QB.DB.reviews.list(b).keep1 && QB.DB.reviews.list(b).keep2, 'patch null 删除指定键');
+  eq(QB.DB.revlog.revision(), rev1, '无日志的 patch 不递增 revlog.revision');
+  S.clearAll();
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

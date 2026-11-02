@@ -6,7 +6,62 @@
 
 ---
 
-## （待回填） · fix(api,storage): 服务端权威 content_hash、版本/复习体校验与本地多标签复习合并
+## （待回填） · feat(srs): 增量复习写入（PATCH）、题面 hash 去 GET 与 revlog 写修订号
+
+**核心改动（对应 EVALUATION-2026-11-02 的 B1–B3）**
+- B1 服务端 `scripts/serve-api.mjs`：`PUT /api/banks/{id}/reviews` 保持整表语义；新增
+  `PATCH /api/banks/{id}/reviews` 只合并 `items` 给出的键、`null` 删除该键，`rev`/`logged`
+  与 `base_rev` 409 语义与 PUT 一致；两法共用 `reviewBodyError(body)` 校验（缺 `items`/非对象 → 400）。
+- B1 客户端 `js/data/api-adapter.js`：新增 `reviews.patch(bankId, delta, entries)`，上行只含本批改动键；
+  409 仅重试「我方 `last` 更大」的键；`record` 保留整表 PUT 供旧调用方。提取 `writeReviews()` 公共实现
+  （PUT 整表 / PATCH 增量共用缓存写回与 409 重试，避免两份逻辑漂移）。
+- B1 本地 `js/data/local-adapter.js`：新增 `reviews.patch`；`record/patch` 共用 `commitReview()` 做
+  `getFresh` + `ReviewMerge` + 单快照提交/失败回滚。**本地存储布局未改**（仍是单键整表落盘，见风险）。
+- B1 `js/modules/srs-store.js`：`commitGraded()` 适配器有 `patch` 时走增量、否则回退 `record`；
+  `grade`/`gradeMany` 只上行本批变化的状态。
+- B2 `api-adapter.questions.update`：删除「内容 patch 先 GET 完整题再算 hash」逻辑，改由服务端按合并结果
+  权威重算（A3 能力复用），少一次往返并消除先读后写期间内容漂移。
+- B3 `js/data/api-adapter.js` + `local-adapter.js`：新增 `revlog.revision()`（同步写修订号，评分日志
+  追加/备份导入/级联删库后自增）；`js/app.js` 统计页按修订号缓存 `FSRSOpt.diagnose()` 结果，
+  不再每次进统计页全量重扫 revlog。
+- 文档同步：`docs/API-CONTRACT.md`（§6 新增 PATCH reviews、契约归属与 `revlog.revision`）、
+  `docs/ARCHITECTURE.md`（公共抽象表新增 `reviews.patch` / `revlog.revision()`，srs-store 优先 patch）。
+
+**验证数据（2026-11-02 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3782/3782 通过，0 失败，26.6s**
+  （A 阶段 3765 → B 阶段 3782：api-backend 297→309、storage 34→39）。
+- `node --expose-gc scripts/bench.mjs --assert`：**20/20 门禁通过**，heapUsed **+2.72MB**（5.52→8.24）；
+  3000 题按需单页 0.23ms、全量读取 3.50ms、单题 update 0.26ms、insertMany 6.44ms。
+- B1 上行体积实测（临时脚本按实际状态字段构造，JSON 字节）：
+  | 状态数 | 整表 PUT body | 单键 PATCH body | 缩减 |
+  | --- | --- | --- | --- |
+  | 300 | 44,049 B | 244 B | -42.8 KB / 180.5× |
+  | 3,000 | 438,542 B | 244 B | -428.0 KB / 1797.3× |
+  | 20,000 | 2,922,312 B | 244 B | **-2.79 MB / 11976.7×** |
+  即 2 万状态库每次作答上行从 ~2.92MB 降到 244B（含 1 条 revlog + base_rev）。
+- 回归锁死：PATCH 合并不覆盖未提交键、`rev` 递增、`logged`/`saved` 回执、缓存同步、`null` 删除、
+  缺 `items` → 400、`base_rev` 过期 → 409 返回 `current/rev`；本地 `reviews.patch` + `revlog.revision`。
+
+**公共抽象/影响**
+- 新增 `reviews.patch(bankId, delta, entries)`（api/local 双实现，契约 `reviews:[list,save,remove,record,patch]`）。
+- 新增 `revlog.revision()`（api/local 双实现，同步数值，供派生数据缓存失效）。
+- 新增内部公共实现：服务端 `reviewBodyError(body)` / `progress.reviewPatch`、
+  `api-adapter.writeReviews(method, ...)`、`local-adapter.commitReview(...)`（无公开签名变化）。
+- **API 兼容性**：PUT 整表端点与签名不变；PATCH 为新增端点。`questions.update` 签名不变，
+  仅不再由客户端计算 `content_hash`（服务端已权威重算，A3 起生效）。
+
+**TODO/风险**
+- B1 **本地写路径仍为 O(n)**：LocalStorage 布局（`user:review:<bankId>` 单键整表）未拆分。原因：
+  改为 per-hash 键或追加日志会牵动 `backup.js` 跨布局转换、`migrate.js` 哈希重映射与多套件测试，
+  风险超预期；按约定先落最小可行方案（服务端/上行 O(改动数)，本地整表），读路径仍兼容老数据。
+  后续若做，需先定「备份双读旧布局 + 一次性迁移」方案。
+- `revlog.revision()` 仅反映**本客户端**写入；多端写入时统计缓存仍可能读到旧派生值（与
+  reviews 缓存同一最终一致口径），跨端刷新依赖重新拉取 revlog。
+- PATCH 409 重试只保留我方 `last` 更大的键；同键同 `last` 时以服务端为准（与 `ReviewMerge` 一致）。
+
+---
+
+## 5c2b2d1 · fix(api,storage): 服务端权威 content_hash、版本/复习体校验与本地多标签复习合并
 
 **核心改动（对应 EVALUATION-2026-11-02 的 A1–A5）**
 - A1 `scripts/serve-api.mjs`：题目 `updated_at` 只接受有限正数；显式 `base_updated_at` 非有限值 →

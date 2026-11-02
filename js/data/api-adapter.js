@@ -178,6 +178,12 @@
   const reviewCache = new Map();
   const reviewRevCache = new Map(); // 按库服务端版本号（与 reviewCache 同步失效）
 
+  /* ---------------- revlog 写修订号（供统计页缓存失效，B3） ----------------
+   * 同步数值：append/record/patch 与 backup.import 后自增，调用方据此判断缓存的
+   * revlog 派生统计（FSRSOpt.diagnose）是否还能复用。 */
+  let logRev = 0;
+  const bumpLogRev = () => { logRev += 1; };
+
   /* ---------------- 权重仓缓存（作答热路径） ----------------
    * 每次评分都要读活动权重（题库 preset → 全局 → 默认）；无缓存时每个答案打一次 GET。
    * 单用户参考后端下按客户端写失效：write 后缓存提交值、remove 后丢缓存、级联删库与
@@ -204,6 +210,7 @@
       reviewCache.delete(id); // 级联已删该库 reviews，缓存须一并丢弃
       reviewRevCache.delete(id);
       weightsCache = null; // 级联可能删除该库 preset，权重缓存一并丢弃
+      if (cascade) bumpLogRev(); // 级联会删除该库评分日志，统计缓存失效
     }
   };
 
@@ -254,18 +261,9 @@
       if (opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== null) {
         body.base_updated_at = opts.baseUpdatedAt;
       }
-      // content_hash 必须由「合并后的完整题目」计算：残缺 patch（只带 type 等少数字段）
-      // 直接算 hash 会写入与真实内容不符的去重键。组织属性（解析/分类/难度/标签/来源）
-      // 不进 hash，此时不发送 content_hash，服务端保留原值。
-      const CONTENT_KEYS = ['type', 'question', 'options', 'answer', 'blanks', 'reference_answer', 'material', 'children'];
-      const touchesContent = CONTENT_KEYS.some((k) => patch[k] !== undefined);
-      if (touchesContent) {
-        const cur = await questions.get(id);
-        if (!cur) throw new Error('题目不存在: ' + id);
-        body.content_hash = QB.makeContentHash(Object.assign({}, cur, patch));
-      } else {
-        delete body.content_hash;
-      }
+      // content_hash 由服务端按「合并后的完整题目」权威重算（B2/A3），客户端不再为
+      // 内容 patch 先 GET 完整题再算 hash——少一次往返，也避免先读后写期间内容漂移。
+      delete body.content_hash;
       const w = await reqMaybe('PATCH', ROUTES.question(enc(id)), body);
       if (!w) throw new Error('题目不存在: ' + id);
       bumpRev();
@@ -351,6 +349,71 @@
   };
 
   /* ---------------- SRS：调度状态 / 评分日志 / 权重（存储原语） ---------------- */
+  /** 把一次写入结果应用到按库缓存：full=整表覆盖；增量则与现有缓存按键合并 */
+  function cacheReviewWrite(bankId, items, full) {
+    if (full) {
+      reviewCache.set(bankId, items || {});
+      return;
+    }
+    if (!reviewCache.has(bankId)) return;
+    const upserts = {};
+    const deletes = [];
+    Object.keys(items || {}).forEach((k) => {
+      if (items[k] === null) deletes.push(k);
+      else upserts[k] = items[k];
+    });
+    const merged = QB.ReviewMerge.mergeMaps(upserts, reviewCache.get(bankId) || {});
+    deletes.forEach((k) => { delete merged[k]; });
+    reviewCache.set(bankId, merged);
+  }
+
+  /**
+   * reviews 写入公共实现（PUT 整表 / PATCH 增量共用，避免两份 409 重试逻辑漂移）：
+   * - full=true：body.items 为完整 map，成功后整表覆盖缓存；
+   * - full=false：body.items 为增量，成功后与缓存按键合并；
+   * - 409：用 conflictMerge(items, current) 得到重试载荷（整表用 mergeMaps；增量只保留我方 last 更大的键），
+   *   带服务端 rev 重试一次，二次失败清缓存并抛出。
+   */
+  async function writeReviews(method, bankId, items, entries, opts) {
+    opts = opts || {};
+    const body = { items: items || {}, revlog: entries || [] };
+    const baseRev = reviewRevCache.get(bankId);
+    if (baseRev !== undefined) body.base_rev = baseRev;
+    const send = (b) => req(method, ROUTES.reviews(enc(bankId)), b);
+    const ok = (r, used) => {
+      cacheReviewWrite(bankId, used, !!opts.full);
+      reviewRevCache.set(bankId, Number(r && r.rev) || 0);
+      if (Array.isArray(entries) && entries.length) bumpLogRev();
+      return {
+        saved: r && typeof r.saved === 'number' ? r.saved : Object.keys(used).length,
+        logged: r && typeof r.logged === 'number' ? r.logged : (Array.isArray(entries) ? entries.length : 0)
+      };
+    };
+    try {
+      return ok(await send(body), body.items);
+    } catch (e) {
+      const payload = e && e.payload;
+      if (e && e.status === 409 && e.code === 'CONFLICT' && payload &&
+          payload.current && typeof payload.rev === 'number') {
+        const merged = opts.conflictMerge
+          ? opts.conflictMerge(body.items, payload.current)
+          : QB.ReviewMerge.mergeMaps(body.items, payload.current);
+        let r2 = null;
+        try {
+          r2 = await send({ items: merged, revlog: body.revlog, base_rev: payload.rev });
+        } catch (e2) {
+          reviewCache.delete(bankId);
+          reviewRevCache.delete(bankId);
+          throw e2;
+        }
+        return Object.assign(ok(r2, merged), { merged: true });
+      }
+      reviewCache.delete(bankId);
+      reviewRevCache.delete(bankId);
+      throw e;
+    }
+  }
+
   const reviews = {
     /** 该库调度状态 map（按库缓存；无缓存时 GET 并缓存） */
     async list(bankId) {
@@ -379,48 +442,30 @@
       }
     },
     /**
-     * 作答热路径：一次 PUT 同时提交调度状态与评分日志（服务端在同一请求内落盘）。
-     * 成功后缓存刚提交的 map（下次作答 0 GET）；失败丢弃缓存，避免读到半写入结果。
+     * 作答热路径（整表）：一次 PUT 同时提交调度状态与评分日志。
+     * 保留整表语义供旧调用方/第三方适配器；新调用方优先 patch（上行 O(改动数)）。
      */
     async record(bankId, map, entries) {
-      const body = { items: map || {}, revlog: entries || [] };
-      const baseRev = reviewRevCache.get(bankId);
-      if (baseRev !== undefined) body.base_rev = baseRev;
-      try {
-        const r = await req('PUT', ROUTES.reviews(enc(bankId)), body);
-        reviewCache.set(bankId, body.items);
-        reviewRevCache.set(bankId, Number(r && r.rev) || 0);
-        return {
-          saved: r && typeof r.saved === 'number' ? r.saved : Object.keys(body.items).length,
-          logged: r && typeof r.logged === 'number' ? r.logged : (Array.isArray(entries) ? entries.length : 0)
-        };
-      } catch (e) {
-        const payload = e && e.payload;
-        if (e && e.status === 409 && e.code === 'CONFLICT' && payload &&
-            payload.current && typeof payload.rev === 'number') {
-          const merged = QB.ReviewMerge.mergeMaps(map || {}, payload.current);
-          let r2 = null;
-          try {
-            r2 = await req('PUT', ROUTES.reviews(enc(bankId)), {
-              items: merged, revlog: entries || [], base_rev: payload.rev
-            });
-          } catch (e2) {
-            reviewCache.delete(bankId);
-            reviewRevCache.delete(bankId);
-            throw e2;
-          }
-          reviewCache.set(bankId, merged);
-          reviewRevCache.set(bankId, Number(r2 && r2.rev) || 0);
-          return {
-            saved: r2 && typeof r2.saved === 'number' ? r2.saved : Object.keys(merged).length,
-            logged: r2 && typeof r2.logged === 'number' ? r2.logged : (Array.isArray(entries) ? entries.length : 0),
-            merged: true
-          };
+      return writeReviews('PUT', bankId, map, entries, { full: true });
+    },
+    /**
+     * 作答热路径（增量，B1）：只上行本批改动的 content_hash 状态，服务端按键合并。
+     * 409 时仅重试我方 last 更大的键（同键 last 大者胜，与服务端 ReviewMerge 语义一致）。
+     */
+    async patch(bankId, delta, entries) {
+      return writeReviews('PATCH', bankId, delta, entries, {
+        full: false,
+        conflictMerge: function (mine, current) {
+          const out = {};
+          Object.keys(mine || {}).forEach((k) => {
+            const theirs = current && current[k];
+            const ml = Number(mine[k] && mine[k].last) || 0;
+            const tl = Number(theirs && theirs.last) || 0;
+            if (!theirs || ml > tl) out[k] = mine[k];
+          });
+          return out;
         }
-        reviewCache.delete(bankId);
-        reviewRevCache.delete(bankId);
-        throw e;
-      }
+      });
     }
   };
 
@@ -428,8 +473,11 @@
     async list() { const r = await req('GET', ROUTES.revlog); return (r && r.items) || []; },
     async append(entries) {
       const r = await req('POST', ROUTES.revlog, { items: entries || [] });
+      if (Array.isArray(entries) && entries.length) bumpLogRev();
       return (r && r.items) || [];
-    }
+    },
+    /** revlog 写修订号（同步数值，供统计页派生数据缓存失效；B3） */
+    revision() { return logRev; }
   };
 
   const weights = {
@@ -463,6 +511,7 @@
         reviewCache.clear();
         reviewRevCache.clear();
         weightsCache = null;
+        bumpLogRev(); // 备份载荷可能替换 revlog，统计页派生数据失效
       }
     }
   };

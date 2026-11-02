@@ -33,6 +33,8 @@
     // 当前题库 revlog 缓存（今日配额推导用；评分/交卷后失效）
     reviewLog: null,
     reviewLogBankId: null,
+    // 统计页 FSRS 诊断缓存：{rev, value}，按 QB.DB.revlog.revision() 失效（避免每次 render 全量扫日志）
+    fsrsDiag: null,
     fsrsScope: null       // FSRS 权重作用域：null=全局，或 bankId
   };
 
@@ -199,6 +201,7 @@
   function invalidateReviewLog() {
     State.reviewLog = null;
     State.reviewLogBankId = null;
+    State.fsrsDiag = null; // 评分日志变化后统计页诊断缓存一并失效
   }
 
   /** 题库列表/当前库元数据变更后使缓存失效（本地可精确失效，api 模式避免多余 GET） */
@@ -259,7 +262,12 @@
       }
       case 'stats': {
         const fc = State.bankId ? await QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
-        const diag = await QB.FSRSOpt.diagnose();
+        // B3：诊断需扫全量 revlog；按适配器写修订号缓存，重复打开统计页不再重复读/扫描
+        const logRev = typeof QB.DB.revlog.revision === 'function' ? QB.DB.revlog.revision() : null;
+        if (!State.fsrsDiag || State.fsrsDiag.rev !== logRev) {
+          State.fsrsDiag = { rev: logRev, value: await QB.FSRSOpt.diagnose() };
+        }
+        const diag = State.fsrsDiag.value;
         const banks = await QB.DB.banks.list();
         if (State.fsrsScope && !banks.some((b) => b.id === State.fsrsScope)) State.fsrsScope = null;
         const scopeBank = banks.find((b) => b.id === State.fsrsScope);
