@@ -120,6 +120,7 @@ node scripts/test-all.mjs
 ```bash
 node --expose-gc scripts/bench.mjs   # 采样 10 次取中位数，输出耗时与 heapUsed（--expose-gc 令 heapUsed 稳定可复核）
 node --expose-gc scripts/bench.mjs --assert   # 性能门禁：35 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
+node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
 
 2026-10-19（Node v24.14.0，Windows，`--expose-gc`）实测中位数：

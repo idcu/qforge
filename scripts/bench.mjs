@@ -631,6 +631,70 @@ for (const tier of [1000, 3000, 20000]) {
   });
   if (migRes && migRes.locked) console.log('  [bench] 迁移锁未释放（tier=' + tier + '）');
 }
+/* ---------- 12b. 可选规模测量（F2）：node scripts/bench.mjs --scale=50000 ----------
+ * 仅在显式传 --scale=<n> 时运行，不进入默认门禁（避免拖慢 CI）。
+ * 口径：harness 的 localStorage 是内存 Map，**无浏览器配额约束**，因此这里量的是
+ * 「按 QB.Storage.usageBytes 同口径的 UTF-16 估算字节」与 UTF-8 参考字节，
+ * 不是浏览器真实配额占用；浏览器侧 5MB 上限见 QB.CONFIG.STORAGE.QUOTA_BYTES。 */
+function localStorageBytes(ls) {
+  let utf16 = 0;
+  let utf8 = 0;
+  for (let i = 0; i < ls.length; i++) {
+    const k = ls.key(i);
+    const v = ls.getItem(k) || '';
+    utf16 += (k.length + v.length + 2) * 2;
+    utf8 += Buffer.byteLength(k) + Buffer.byteLength(v);
+  }
+  return { keys: ls.length, utf16: utf16, utf8: utf8 };
+}
+
+let scaleRow = null;
+const scaleArg = process.argv.find((a) => a.indexOf('--scale=') === 0);
+if (scaleArg) {
+  const scaleN = Number(scaleArg.slice('--scale='.length));
+  if (!Number.isInteger(scaleN) || scaleN <= 0) throw new Error('--scale 需为正整数，例如 --scale=50000');
+  const legacy = await buildLegacyBank(scaleN, 'scale');
+  const before = localStorageBytes(window.localStorage);
+  const heap0 = (bestEffortGc(), process.memoryUsage().heapUsed);
+  const inst = instrumentHeapPeak();
+  const t0 = process.hrtime.bigint();
+  try {
+    await QB.Migration.run({ force: true });
+  } finally {
+    inst.restore();
+  }
+  const msScale = Number(process.hrtime.bigint() - t0) / 1e6;
+  const peakMb = (inst.tracker.peak - heap0) / 1024 / 1024;
+  const after = localStorageBytes(window.localStorage);
+
+  let same = 0;
+  legacy.questions.forEach((q) => {
+    const got = QB.ReviewStore.get(legacy.bankId, QB.makeContentHash(q));
+    const want = legacy.oldMap[q.contentHash];
+    if (got && JSON.stringify(got) === JSON.stringify(want)) same++;
+  });
+  const questionsOk = QB.QuestionShards.readAll(legacy.bankId).every((q) => QB.isCurrentHash(q.contentHash));
+  const logs = QB.RevlogStore.list();
+  // 评分日志有 FIFO 上限（REVLOG_MAX=20000）：超过则只保留最近 20000 条，属设计行为而非丢数据
+  const logCap = QB.RevlogStore.MAX;
+  const expectedLogs = Math.min(scaleN, logCap);
+  const revlogOk = logs.length === expectedLogs && logs.every((e) => QB.isCurrentHash(e.h));
+  const versionOk = QB.Migration.currentVersion() === QB.Migration.SCHEMA_VERSION;
+  scaleRow = {
+    n: scaleN, ms: msScale, peakMb: peakMb, before: before, after: after,
+    same: same, questionsOk: questionsOk, revlogOk: revlogOk, versionOk: versionOk,
+    logs: logs.length, logCap: logCap, expectedLogs: expectedLogs
+  };
+  report.push({
+    name: 'schema v5 迁移（' + scaleN + ' 题，--scale 可选规模）',
+    median: msScale, min: msScale, max: msScale,
+    extra: '完整性 ' + same + '/' + scaleN + '，hash 全 v3=' + questionsOk
+      + '，revlog ' + logs.length + ' 条（FIFO 上限 ' + logCap + '，期望 ' + expectedLogs + '）全 v3=' + revlogOk
+      + '，版本=' + (versionOk ? '5' : '异常') + '，heap 峰值 +' + peakMb.toFixed(2) + ' MB'
+  });
+  QB.Storage.clearAll();
+}
+
 QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
 
 
@@ -664,6 +728,20 @@ console.log('DOM 增量更新（区域对账，非整块 innerHTML）：勾选�
   + '（占 HTML 字节 ' + pct(regionBytes(wrongAfter, planWrong.changed), regionBytes(wrongAfter)) + '），对账 '
   + ms(rowBy('错题本 移除一条 区域对账').median) + '，' + planWrong.unchanged.length + ' 个区域保持原 DOM 节点');
 console.log('DOM 增量更新内存末态 heapUsed ' + mb(uiPatchHeap) + '（含 3000 题库 + 全部区域快照对象）');
+if (scaleRow) {
+  const quota = QB.CONFIG.STORAGE.QUOTA_BYTES;
+  const kbPer = (bytes) => (bytes / 1024 / scaleRow.n).toFixed(2) + ' KB/题';
+  console.log('规模测量（--scale=' + scaleRow.n + '，LocalStorage 估算口径：UTF-16 字节，非浏览器真实配额）：'
+    + '迁移前 ' + scaleRow.before.keys + ' 键 / ' + mb(scaleRow.before.utf16)
+    + '（UTF-8 参考 ' + mb(scaleRow.before.utf8) + '）→ 迁移后 ' + scaleRow.after.keys + ' 键 / '
+    + mb(scaleRow.after.utf16) + '（UTF-8 参考 ' + mb(scaleRow.after.utf8) + '）；单题成本 迁移前 '
+    + kbPer(scaleRow.before.utf16) + ' / 迁移后 ' + kbPer(scaleRow.after.utf16)
+    + '；迁移 ' + ms(scaleRow.ms) + '，heap 峰值 +' + scaleRow.peakMb.toFixed(2) + ' MB'
+    + '；revlog 保留 ' + scaleRow.logs + ' 条（FIFO 上限 ' + scaleRow.logCap + '）'
+    + '；相对 ' + mb(quota) + ' 估算配额：迁移前 ' + pct(scaleRow.before.utf16, quota)
+    + ' / 迁移后 ' + pct(scaleRow.after.utf16, quota)
+    + (scaleRow.after.utf16 > quota ? '（超限，需降级策略）' : '（未超限）'));
+}
 console.log('============================================\n');
 
 /* ---------- 性能门禁（可选 --assert） ----------
