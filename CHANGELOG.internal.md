@@ -6,7 +6,7 @@
 
 ---
 
-## （hash 待回填）· feat(storage): 运行时探测 LocalStorage 配额上限
+## bc8e963 · feat(storage): 运行时探测 LocalStorage 配额上限
 
 **核心改动**
 - `js/data/store.js`：新增唯一探测实现 `measureLSQuota()` + 对外 `Store.ensureLSQuota(opts)`（探测并写缓存）
