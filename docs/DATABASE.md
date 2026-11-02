@@ -184,6 +184,7 @@ CREATE TABLE assets (
 | `qb:user:wrong:<bankId>` | `wrong_questions` | `{questionKey, wrongCount, lastAt}` |
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
 | `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}` |
+| `qb:user:reviewRev:<bankId>` | 本地同步元数据 | 单调递增的本地复习版本号（服务端 `review_rev` 的本地对应物）；用于 storage 事件按版本合并与写前重读，不进备份 |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
 | `qb:user:session` | `sessions` | 单条会话快照 |
 | `qb:user:revlog` | `review_log` | 全局 FIFO 评分日志，元素 `{id,h,r,t,b?}`（`b`=bankId） |
@@ -243,7 +244,8 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 | --- | --- | --- |
 | `banks.json` | 题库数组 | `banks`（§2.1）/ `/api/banks` |
 | `questions/<bankId>.json` | 该库题目数组 | `questions`（§2.2）/ `/api/banks/{id}/questions` |
-| `progress/<bankId>.json` | `{wrong:[], favorite:[], review:{}, review_rev}`（错题/收藏/复习计划三段 + 复习版本号，`review_rev` 服务端维护、单调递增，供多端 409 冲突检测；本地布局无此字段） | `wrong_questions` / `favorites` / `review_schedule` / `/api/banks/{id}/{wrong,favorites,reviews}` |
+| `progress/<bankId>.json` | `{wrong:[], favorite:[], review:{}, review_rev}`（错题/收藏/复习计划三段 + 复习版本号，`review_rev` 服务端维护、单调递增，供多端 409 冲突检测；本地对应物是独立键 `qb:user:reviewRev:<bankId>`，不写入本文件） | `wrong_questions` / `favorites` / `review_schedule` / `/api/banks/{id}/{wrong,favorites,reviews}` |
+| `repairs.json` | 版本号补写审计数组 `{at, kind, bank_id, question_id, before}`（旧题缺/非法 `updated_at` 被补写时记录，最多 200 条；不参与备份载荷） | 仅运维审计 |
 | `history.json` | 答题历史数组 | `attempts`（§2.5）/ `/api/history` |
 | `session.json` | 单条会话快照（`null` 或对象） | `sessions`（§2.6）/ `/api/session` |
 | `revlog.json` | 评分日志数组（服务端补 id/时间戳并按上限 FIFO） | `review_log`（§2.8）/ `/api/revlog` |
@@ -260,7 +262,7 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 | --- | --- | --- |
 | 题库 | `banks`（数组，`createdAt/updatedAt`） | `banks`（数组，`created_at/updated_at`） |
 | 题目 | `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`）+ `questions:<bankId>:<i>`（分片）；旧兼容 `questions:<bankId>` 单 blob | `questions`（`{ bankId: [题目] }`，题目带 `bank_id/created_at/updated_at/content_hash`） |
-| 错题 / 收藏 / 复习计划 | `user:wrong:<bankId>`（`{questionKey,wrongCount,lastAt}`）/ `user:fav:<bankId>`（`{questionKey,addedAt}`）/ `user:review:<bankId>`（`contentHash → state` map） | `progress`（`{ bankId: { wrong:[{question_key,wrong_count,last_at}], favorite:[{question_key,added_at}], review:{} } }`） |
+| 错题 / 收藏 / 复习计划 | `user:wrong:<bankId>`（`{questionKey,wrongCount,lastAt}`）/ `user:fav:<bankId>`（`{questionKey,addedAt}`）/ `user:review:<bankId>`（`contentHash → state` map）+ `user:reviewRev:<bankId>`（本地版本号） | `progress`（`{ bankId: { wrong:[{question_key,wrong_count,last_at}], favorite:[{question_key,added_at}], review:{} } }`，`review_rev` 在服务端进度文件中） |
 | 历史 | `user:history`（`bankId/bankName/byType/durationMs/focusLeaves/createdAt`） | `history`（`bank_id/bank_name/by_type/duration_ms/focus_leaves/created_at`） |
 | 会话 / 评分日志 / 权重 | `user:session` / `user:revlog` / `meta:fsrsWeights` | `session` / `revlog` / `weights` |
 | 本机专有偏好 | `meta:dav` / `meta:theme` / `meta:currentBank` / `meta:schemaVersion` / `meta:startPrefs` | **无对应键**（后端布局不含本机偏好） |

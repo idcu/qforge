@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
-import { createServer } from './serve-api.mjs';
+import { createServer, createStore } from './serve-api.mjs';
 import { CSP } from './lib/security-headers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -709,6 +709,69 @@ section('多端复习进度冲突：409 + 按 last 合并重试');
   const logs = (await req('GET', '/api/revlog')).body.items.filter((e) => e.b === bank.id);
   eq(logs.length, 1, '冲突重试只追加一次评分日志');
   await QB.DB.banks.remove(bank.id);
+}
+
+section('后端数据边界回归（A1 updated_at / A2 reviews 污染 / A3 权威 hash）');
+{
+  // A1/A3 的脏数据场景需要直接改盘上的 JSON（API 不允许写非法版本号）
+  const dir = tmpDir();
+  const mk = () => createStore(dir);
+  let store = mk();
+  const bank = store.banks.create({ name: '边界库' });
+  const forged = store.questions.create(bank.id, {
+    type: 'single', question: '权威 hash 题', options: [{ letter: 'A', text: '对' }], answer: 'A',
+    content_hash: '2:forged'
+  });
+  ok(forged.content_hash !== '2:forged', 'A3 服务端忽略客户端伪造 content_hash');
+  // 与客户端同一实现：服务端重算必须逐字节等于 QB.makeContentHash
+  const ctx = await createHarness(path.resolve(__dirname, '..'));
+  eq(forged.content_hash, ctx.QB.makeContentHash(forged), 'A3 服务端重算与客户端 makeContentHash 一致');
+
+  // A1：旧题缺 updated_at → 下一次写补写为有限值，且留下可回溯审计
+  let list = JSON.parse(fs.readFileSync(path.join(dir, 'questions', bank.id + '.json'), 'utf8'));
+  delete list[0].updated_at;
+  fs.writeFileSync(path.join(dir, 'questions', bank.id + '.json'), JSON.stringify(list));
+  store = mk(); // 新实例，绕过旧内存缓存
+  const repaired = store.questions.update(forged.id, { difficulty: 5 }, {});
+  ok(repaired && Number.isFinite(repaired.question.updated_at) && repaired.question.updated_at > 0,
+    'A1 缺 updated_at 的旧题被补写为有限时间戳');
+  const repairs = JSON.parse(fs.readFileSync(path.join(dir, 'repairs.json'), 'utf8'));
+  ok(Array.isArray(repairs) && repairs.some((r) => r.kind === 'updated_at_missing' && r.question_id === forged.id),
+    'A1 补写写入 repairs.json（可回溯）');
+  const badBase = store.questions.update(forged.id, { difficulty: 6 }, { baseUpdatedAt: 'abc' });
+  ok(badBase && badBase.invalid === true, 'A1 非法 base_updated_at → invalid（路由映射 400）');
+
+  // A3 存量兼容：老行是旧版裸 hash，再导入同内容题必须去重（双读重算）
+  list = JSON.parse(fs.readFileSync(path.join(dir, 'questions', bank.id + '.json'), 'utf8'));
+  list[0].content_hash = 'deadbeef';
+  fs.writeFileSync(path.join(dir, 'questions', bank.id + '.json'), JSON.stringify(list));
+  store = mk();
+  const again = store.questions.insertMany(bank.id, [{
+    type: 'single', question: '权威 hash 题', options: [{ letter: 'A', text: '对' }], answer: 'A',
+    content_hash: '2:another'
+  }], { mode: 'merge' });
+  eq(again.duplicates, 1, 'A3 旧版 hash 存量行按现算法重算后仍能去重');
+
+  // A2：缺 items 的 PUT /reviews 必须 4xx，且不得把 base_rev/revlog 写成伪状态键
+  const polluteBank = (await req('POST', '/api/banks', { name: '污染库' })).body;
+  const missingItems = await req('PUT', '/api/banks/' + polluteBank.id + '/reviews', {
+    base_rev: 999, revlog: [{ t: 1, h: 'x', r: 2 }]
+  });
+  eq(missingItems.status, 400, 'A2 缺 items → 400');
+  const arrayItems = await req('PUT', '/api/banks/' + polluteBank.id + '/reviews', { items: [] });
+  eq(arrayItems.status, 400, 'A2 items 为数组 → 400');
+  const clean = (await req('GET', '/api/banks/' + polluteBank.id + '/reviews')).body;
+  eq(Object.keys(clean.items).length, 0, 'A2 调度表未被 base_rev/revlog 污染');
+  eq(clean.rev, 0, 'A2 拒绝请求未递增 rev');
+
+  // A3 HTTP 路径：PATCH 改内容后服务端按合并结果重算
+  const q3 = (await req('POST', '/api/banks/' + polluteBank.id + '/questions', {
+    type: 'judge', question: '权威题', answer: '正确', content_hash: '2:fake'
+  })).body;
+  eq(q3.content_hash, ctx.QB.makeContentHash(q3), 'A3 HTTP create 的 hash 与客户端一致');
+  const patched = (await req('PATCH', '/api/questions/' + q3.id, { question: '权威题（改）' })).body;
+  eq(patched.content_hash, ctx.QB.makeContentHash(patched), 'A3 HTTP patch 后 hash 按合并结果重算');
+  ok(patched.content_hash !== q3.content_hash, 'A3 内容变更后 hash 随之变化');
 }
 
 section('跨布局整链 E2E：本地备份 → 真实后端（POST /api/backup）→ 读回 → 再恢复到本地');

@@ -20,6 +20,7 @@
     _pending: new Map(),
     _timer: null,
     _errorListeners: [],
+    _mergeHooks: [],
 
     /** 全键名 */
     _fullKey(key) {
@@ -119,7 +120,30 @@
     },
 
     /**
+     * 注册跨标签合并策略（公共抽象）：匹配键在 storage 事件时用 merge(local, incoming)
+     * 合并而非整值覆盖。返回取消函数。用于复习调度表等「按键合并才不丢进度」的数据。
+     */
+    registerMerge(match, merge) {
+      const hook = { match: match, merge: merge };
+      this._mergeHooks.push(hook);
+      return () => {
+        const i = this._mergeHooks.indexOf(hook);
+        if (i >= 0) this._mergeHooks.splice(i, 1);
+      };
+    },
+
+    /** 合并策略匹配（异常策略不影响其它键） */
+    _mergeHookFor(key) {
+      for (let i = 0; i < this._mergeHooks.length; i++) {
+        try { if (this._mergeHooks[i].match(key)) return this._mergeHooks[i]; } catch (e) { /* 忽略策略异常 */ }
+      }
+      return null;
+    },
+
+    /**
      * 跨标签页 storage 事件：其他标签改动时同步/失效本地缓存（供测试直接调用）。
+     * 注册了合并策略的键（如 user:review:<bankId>）不整值覆盖，而是与本地缓存合并；
+     * 若本地尚有未落盘快照，把待写值同步为合并结果，避免防抖 flush 用旧值覆盖远端。
      */
     _handleExternalChange(ev) {
       if (!ev || !ev.key || ev.key.indexOf(PREFIX + ':') !== 0) return;
@@ -129,8 +153,16 @@
         this._pending.delete(key);
       } else {
         try {
-          this._cache.set(key, JSON.parse(ev.newValue));
-          this._pending.delete(key);
+          const incoming = JSON.parse(ev.newValue);
+          const hook = this._mergeHookFor(key);
+          if (hook) {
+            const merged = hook.merge(this._cache.get(key), incoming);
+            this._cache.set(key, merged);
+            if (this._pending.has(key)) this._pending.set(key, merged);
+          } else {
+            this._cache.set(key, incoming);
+            this._pending.delete(key);
+          }
         } catch (e) {
           this._cache.delete(key);
         }
@@ -153,6 +185,25 @@
       }
       if (value === undefined) value = defaultValue;
       this._cache.set(key, value);
+      return value;
+    },
+
+    /**
+     * 绕过内存缓存直读 localStorage，并刷新缓存（供「写前重读最新快照」的合并写使用）。
+     * 注意：会丢弃同键的待写标记——调用方通常即将写入合并后的新快照。
+     */
+    getFresh(key, defaultValue) {
+      let value;
+      try {
+        const raw = global.localStorage.getItem(this._fullKey(key));
+        value = raw === null ? undefined : JSON.parse(raw);
+      } catch (e) {
+        this._cache.delete(key);
+        value = undefined;
+      }
+      if (value === undefined) value = defaultValue;
+      this._cache.set(key, value);
+      this._pending.delete(key);
       return value;
     },
 

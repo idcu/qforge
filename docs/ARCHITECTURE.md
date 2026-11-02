@@ -55,7 +55,7 @@
 | `utils/helpers.js` | `QB.Helpers` | `debounce`（返回函数带 **`.cancel()`**，可丢弃挂起调用）/`throttle/cloneDeep/uid/escapeHtml/formatDate/formatDuration/calculateAccuracy` |
 | `utils/time.js` | `QB.Time` | 自然日公共抽象：`dayStart/dayIndex/isSameDay/endOfDay`（唯一实现；SRS 到期、复习队列、学习热力图共用，禁止各自 `setHours(0,0,0,0)`） |
 | `utils/rich-text.js` | `QB.RichText` | 模型内容上屏统一入口：`render()`（转义 + `^{}`/`_{}` 上下标 + **轻量公式子集 `\frac{}{}`/`\sqrt{}`/`\sqrt[n]{}`（CSS 排版，参数组可嵌套、内部递归渲染）**）、`toPlain()`（去记号，不转义）、`questionAssetIds()`（收集题内图片 id，含材料正文 `material` 与递归小问 `children`，供 qbk 打包/备份孤儿清理的引用集） |
-| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存；visibility/beforeunload 落盘；`usageBytes()` |
+| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存，且支持 `registerMerge(match, merge)` 对指定键做按键合并（当前用于 `user:review:*` / `user:reviewRev:*`，复用 `QB.ReviewMerge`）；`getFresh()` 绕过缓存直读（写前重读）；visibility/beforeunload 落盘；`usageBytes()` |
 | `utils/fnv.js` | `QB.FNV` | FNV-1a 32 位散列唯一实现：`hashString`（UTF-16 码元）/`hashBytes`/`toHex`；question-id、assets、source 共用（serve-api 为 Node ESM 独立实现，等价性由 E2E 守护） |
 | `utils/random.js` | `QB.mulberry32` | 确定性 PRNG 唯一实现（`[0,1)`），供 `QB.shuffle`/`shuffleOptions` 与 FSRS fuzz 共用 |
 | `utils/answer-text.js` | `QB.AnswerText` | 填空答案拼接/回退与按题型答案行文本：`joinBlanks/blankAnswers/answerText`；exporter/share-page/question-editor/adapters/judge-answer 共用 |
@@ -70,7 +70,7 @@
 | `utils/xml-lite.js` | `QB.XmlLite.parse` | 自研极简 XML 解析器（OOXML 子集：标签/属性/命名空间/实体/注释/CDATA/DOCTYPE 跳过，深度先序查询；畸形 XML 抛错），替代 DOMParser，Node/浏览器/CI 同路径 |
 | `utils/assets.js` | `QB.Assets` | 图片资产存储（IndexedDB，内容寻址 id=`QB.FNV`-长度，同图去重）；驱动可注入（idbDriver/memoryDriver），与 Repository 双实现同构 |
 | `utils/weights.js` | `QB.Weights` | FSRS 权重仓归一（旧单组 `{w,...}` → global，非法/空 → `{global:null,banks:{}}`）；local-adapter 与 fsrs-opt 共用，数据层不反向依赖应用层 |
-| `utils/review-merge.js` | `QB.ReviewMerge` | 多端复习状态合并唯一实现：`mergeMaps(local, remote)` 同 contentHash 保留 `last` 更大者（缺失/非法 `last` 视为 0，相同保留远端），`lastOf(state)`；api-adapter 的 409 冲突重试与测试共用 |
+| `utils/review-merge.js` | `QB.ReviewMerge` | 多端/多标签复习状态合并唯一实现：`mergeMaps(local, remote)` 同 contentHash 保留 `last` 更大者（缺失/非法 `last` 视为 0，相同保留远端），`lastOf(state)`；api-adapter 的 409 冲突重试、local-adapter 写前合并与 storage 事件合并共用 |
 
 ### 3.3 数据访问层（data）
 | 文件 | 职责 |
@@ -202,10 +202,10 @@ Exporters.openFlow({kind, bank})
 | `QB.mulberry32` | 确定性 PRNG（种子化） | `QB.shuffle`/`shuffleOptions`、FSRS fuzz |
 | `QB.AnswerText` | 填空多空拼接/旧 answer 回退、按题型答案行 | 导出、分享页、编辑器预览、导入、判分反馈 |
 | `QB.Weights.normalizeStore` | FSRS 权重仓归一（旧单组→global） | local-adapter、api-adapter、fsrs-opt |
-| `QB.ReviewMerge.mergeMaps` | 多端复习状态合并（同键保留 `last` 更大者） | api-adapter 409 合并重试、smoke 测试 |
-| `reviews.record(bankId, map, logs)` | 调度状态 + 评分日志一次提交（api 模式 1 个 PUT） | srs-store.grade/gradeMany |
+| `QB.ReviewMerge.mergeMaps` | 多端/多标签复习状态合并（同键保留 `last` 更大者） | api-adapter 409 合并重试、local-adapter 写前合并、Storage 跨标签合并、smoke 测试 |
+| `reviews.record(bankId, map, logs)` | 调度状态 + 评分日志一次提交（api 模式 1 个 PUT；local 模式写前重读合并 + 状态/日志/版本快照提交，失败回滚） | srs-store.grade/gradeMany |
 | `shuffle(arr, seed?)` / `shuffleOptions(q, seed?)` | 随机/种子化洗牌；选项乱序+答案重映射的派生克隆 | 抽题、答题选项乱序 |
-| `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步 | local-adapter 及所有持久化 |
+| `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步/按键合并；`getFresh` 写前重读 | local-adapter 及所有持久化 |
 | `QB.DB` + Repo 接口 | 数据访问统一入口，屏蔽后端差异 | 全部业务模块 |
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
 | `Adapters.mergeAnalysisPieces/appendAnalysis/matchAnalysisMarker` | 解析类多列/多标记（解析/解题思路/考点/释义）合并为单一 `analysis`（唯一实现） | adapters（JSON/表格）、line-parser（DOCX/Markdown/粘贴） |

@@ -6,6 +6,51 @@
 
 ---
 
+## （待回填） · fix(api,storage): 服务端权威 content_hash、版本/复习体校验与本地多标签复习合并
+
+**核心改动（对应 EVALUATION-2026-11-02 的 A1–A5）**
+- A1 `scripts/serve-api.mjs`：题目 `updated_at` 只接受有限正数；显式 `base_updated_at` 非有限值 →
+  `400 BAD_REQUEST`；旧题缺/非法 `updated_at` 时补写为 `now()` 并写入 `repairs.json`
+  （`{at,kind,bank_id,question_id,before}`，最多 200 条）供回溯。
+- A2 `PUT /api/banks/{id}/reviews`：缺 `items` / `items` 非对象（含数组）→ `400 BAD_REQUEST`，
+  不落盘、不递增 `rev`；消除 `base_rev/revlog` 被当调度状态键写入的污染路径。
+- A3 新增 `scripts/lib/question-hash.mjs`：在 Node 中按依赖顺序加载 `fnv/answer-normalize/judge-answer/question-id`
+  （**复用客户端唯一实现**，不复制算法）；`stamp()`/`update()` 服务端重算 `content_hash`；
+  `insertMany` 对存量行「原 hash + 现算法重算」双读去重，旧版 v1/伪造 hash 不会导致重复插入。
+- A4 `js/utils/storage.js`：新增通用 `registerMerge(match, merge)` 与 `getFresh(key)`；`local-adapter`
+  为 `user:review:<bankId>` 注册 `QB.ReviewMerge.mergeMaps`、为 `user:reviewRev:<bankId>` 注册取最大值，
+  storage 事件不再整值覆盖；`reviews.record` 写前 `getFresh` 重读并合并，过期整表写不再丢另一标签的键。
+- A5 `local-adapter.reviews.record`：状态/日志/版本号三键按同一快照提交，任一步失败按调用前快照回滚；
+  `revlog.build` 提取为纯函数供 `append` 与 `record` 共用（不再两次独立 `setSync` 半写）。
+- 文档同步：`docs/API-CONTRACT.md`（reviews PUT 4xx 口径、content_hash 服务端权威与存量双读兼容）、
+  `docs/DATABASE.md`（`user:reviewRev` 本地键、`repairs.json` 审计文件）、`docs/ARCHITECTURE.md`
+  （Storage 合并策略与 local record 语义）。
+
+**验证数据（2026-11-02 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3765/3765 通过，0 失败，24.8s**
+  （新增 A1–A3 13 项、A4/A5 11 项；api-backend 284→297、storage 23→34）。
+- `node --expose-gc scripts/bench.mjs --assert`：**20/20 门禁通过**，heapUsed **+2.70MB**（5.51→8.21）；
+  3000 题按需单页 0.23ms、全量读取 3.46ms、单题 update 0.25ms、insertMany 6.15ms。
+- 新增回归锁死：非法 `base_updated_at`→400、缺 `items`→400 且 `rev` 不增、伪造 hash 被服务端覆盖、
+  旧版 hash 存量去重、缺 `updated_at` 补写审计、跨标签合并/同键 last 大者胜出、日志写失败回滚。
+
+**公共抽象/影响**
+- 新增 `scripts/lib/question-hash.mjs`（Node 侧 hash 入口，唯一实现仍是 `js/utils/question-id.js`）。
+- 新增 `QB.Storage.registerMerge(match, merge)` / `QB.Storage.getFresh(key, default)`（通用存储原语，向后兼容）。
+- 新增 `QB.KEYS.reviewRev(bankId)`（本地同步元数据，不进备份、不进服务端载荷）。
+- `local-adapter.reviews.save/remove/record` 返回值新增可选 `rev` 字段（调用方均忽略返回值，无破坏性影响）。
+- **API 兼容性**：`PUT /reviews` 由「缺 items 时退化为整表 body」收紧为必须 `items`。旧调用方若发送裸 map
+  将收到 400；仓库内所有调用方（api-adapter `save/record`）本就发送 `{items}`，无影响；第三方需同步。
+
+**TODO/风险**
+- 服务端 hash 权威化后，既有存量行不会自动重写；如需全量统一为 v2 hash，仍依赖客户端 `Migration.run`
+  或一次性维护脚本（本轮未做批量迁移）。
+- `reviews.record` 的合并窗口是「写前直读」；localStorage 无跨标签事务，极端重叠写仍可能出现一方 `last`
+  相同、按「保留远端」丢弃本地那次状态，但评分日志不丢，属可接受的最终一致语义。
+- 本地 `reviewRev` 不进备份，跨设备仍以服务端 `review_rev` 为准。
+
+---
+
 ## a47df06 · fix(backup): 明确合并恢复同名键语义并补管理器异步兜底
 
 **核心改动**

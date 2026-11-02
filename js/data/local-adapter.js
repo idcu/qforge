@@ -648,29 +648,15 @@
    * 领域模块（srs-store / fsrs-opt / backup）只做作用域过滤与算法，故上层调用面与行为不变；
    * api 适配器以同名方法对应 docs/API-CONTRACT.md §6–§8 端点。
    */
-  const reviews = {
-    /** 该库调度状态 map（contentHash → state）；无记录返回 {} */
-    list(bankId) { return Storage.get(K.review(bankId)) || {}; },
-    /** 整表落盘（一次评分/整卷结算后提交），失败即抛 */
-    save(bankId, map) { Storage.setSync(K.review(bankId), map || {}); },
-    remove(bankId) { Storage.remove(K.review(bankId)); },
-    /**
-     * 作答热路径：调度状态 + 评分日志一次提交（等价 save + revlog.append）。
-     * api 适配器对应 PUT /reviews（body 可携 revlog），把两次网络请求收敛为一次。
-     */
-    record(bankId, map, entries) {
-      reviews.save(bankId, map);
-      revlog.append(entries || []);
-      return { saved: Object.keys(map || {}).length, logged: Array.isArray(entries) ? entries.length : 0 };
-    }
-  };
-
   const REVLOG_MAX = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000; // revlog FIFO 上限
   const revlog = {
     list() { return Storage.get(K.revlog, []) || []; },
-    /** 追加条目（本层负责补 id/时间戳与 FIFO 裁剪），返回追加后的完整日志 */
-    append(entries) {
-      const list = revlog.list();
+    /**
+     * 构造追加后的新数组（纯函数，不落盘）：补 id/时间戳 + FIFO 裁剪。
+     * append 与 reviews.record 共用，避免「状态+日志」热路径各写一份实现。
+     */
+    build(base, entries) {
+      const list = Array.isArray(base) ? base.slice() : [];
       if (!entries || !entries.length) return list;
       const t0 = now();
       entries.forEach((e) => {
@@ -679,8 +665,71 @@
         list.push(entry);
       });
       if (list.length > REVLOG_MAX) list.splice(0, list.length - REVLOG_MAX);
+      return list;
+    },
+    /** 追加条目（本层负责补 id/时间戳与 FIFO 裁剪），返回追加后的完整日志 */
+    append(entries) {
+      if (!entries || !entries.length) return revlog.list();
+      const list = revlog.build(revlog.list(), entries);
       Storage.setSync(K.revlog, list);
       return list;
+    }
+  };
+
+  /** 本地复习版本号（服务端 review_rev 的本地对应物；仅同步元数据，不进备份） */
+  function reviewRevOf(bankId) {
+    return Number(Storage.getFresh(K.reviewRev(bankId), 0)) || 0;
+  }
+  function bumpReviewRev(bankId) {
+    const next = reviewRevOf(bankId) + 1;
+    Storage.setSync(K.reviewRev(bankId), next);
+    return next;
+  }
+
+  const reviews = {
+    /** 该库调度状态 map（contentHash → state）；无记录返回 {} */
+    list(bankId) { return Storage.get(K.review(bankId)) || {}; },
+    /** 整表落盘（一次评分/整卷结算后提交），失败即抛；本地版本号随之递增 */
+    save(bankId, map) {
+      Storage.setSync(K.review(bankId), map || {});
+      bumpReviewRev(bankId);
+    },
+    remove(bankId) {
+      Storage.remove(K.review(bankId));
+      bumpReviewRev(bankId);
+    },
+    /**
+     * 作答热路径：调度状态 + 评分日志一次提交（等价 save + revlog.append）。
+     * api 适配器对应 PUT /reviews（body 可携 revlog），把两次网络请求收敛为一次。
+     *
+     * 本地多标签安全：写前直读最新落盘快照，按 QB.ReviewMerge 语义合并（同键取 last 大者），
+     * 避免「先读后写」期间另一标签的评分被整表覆盖；状态/日志/版本号三键同快照提交，
+     * 任一步失败按调用前快照回滚（不留下「有状态无日志」的脏数据）。
+     */
+    record(bankId, map, entries) {
+      const key = K.review(bankId);
+      const keyRev = K.reviewRev(bankId);
+      const prevMap = Storage.getFresh(key, null);
+      const prevLog = Storage.getFresh(K.revlog, []);
+      const prevRev = Number(Storage.getFresh(keyRev, 0)) || 0;
+      const incoming = map || {};
+      const merged = (prevMap && typeof prevMap === 'object')
+        ? QB.ReviewMerge.mergeMaps(incoming, prevMap)
+        : incoming;
+      const nextLog = revlog.build(prevLog, entries || []);
+      const logged = Array.isArray(entries) ? entries.length : 0;
+      try {
+        Storage.setSync(key, merged);
+        Storage.setSync(K.revlog, nextLog);
+        Storage.setSync(keyRev, prevRev + 1);
+      } catch (e) {
+        // 回滚（尽力而为）：恢复到调用前快照，避免状态/日志半写
+        try { Storage.setSync(key, prevMap || {}); } catch (_) { /* lastError 已记录 */ }
+        try { Storage.setSync(K.revlog, prevLog); } catch (_) { /* lastError 已记录 */ }
+        try { Storage.setSync(keyRev, prevRev); } catch (_) { /* lastError 已记录 */ }
+        throw e;
+      }
+      return { saved: Object.keys(merged).length, logged: logged, rev: prevRev + 1 };
     }
   };
 
@@ -724,6 +773,7 @@
     Storage.remove(K.wrong(id));
     Storage.remove(K.favorite(id));
     reviews.remove(id); // 评估报告中优先级#6：旧实现残留 user:review:<bankId>
+    Storage.remove(K.reviewRev(id)); // 本地复习版本号随库删除一并清理
     weights.remove(id); // 该库 FSRS preset（meta:fsrsWeights.banks[bankId]）
     // 该库评分日志（revlog 条目 b=bankId，F4 起记录；旧无 b 日志保留）
     const log = revlog.list();
@@ -733,6 +783,22 @@
     Storage.setSync(K.history, hist);
     const cur = Storage.get(K.metaCurrentBank, null);
     if (cur === id) Storage.setSync(K.metaCurrentBank, null);
+  }
+
+  /* ---------------- 跨标签合并策略（多标签并发不丢评分进度） ----------------
+   * storage 事件的默认语义是「整值覆盖」，对 contentHash → state 的调度表会丢另一标签的新评分。
+   * 这里把 review 键与 reviewRev 键注册为合并策略，复用 QB.ReviewMerge（同键取 last 大者，
+   * 相同保留远端）；Storage 层保持通用，不硬编码复习语义。
+   */
+  if (typeof Storage.registerMerge === 'function') {
+    Storage.registerMerge(
+      (key) => key.indexOf(K.review('')) === 0,
+      (local, incoming) => QB.ReviewMerge.mergeMaps(local || {}, incoming || {})
+    );
+    Storage.registerMerge(
+      (key) => key.indexOf(K.reviewRev('')) === 0,
+      (local, incoming) => Math.max(Number(local) || 0, Number(incoming) || 0)
+    );
   }
 
   // REVLOG_MAX：revlog FIFO 上限的唯一常量定义源，fsrs-opt 的 LOG_LIMIT 再导出此处

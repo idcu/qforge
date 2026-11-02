@@ -142,6 +142,58 @@ section('会话清空压过挂起的防抖保存（交卷后不再提示「继�
   eq(QB.Storage.get(QB.KEYS.session, null), null, 'clear 后挂起保存被取消，会话未被写回');
 }
 
+section('跨标签合订（A4）：review 键按 ReviewMerge 合并而非覆盖');
+{
+  S.clearAll();
+  const bank = 'bank-tab';
+  const rk = QB.KEYS.review(bank);
+  S.setSync(rk, { h1: { last: 100, stability: 1 } });
+  // 另一标签写入 h2（模拟 storage 事件）
+  S._handleExternalChange({ key: 'qb:' + rk, newValue: JSON.stringify({ h2: { last: 200, stability: 2 } }) });
+  const merged = S.get(rk);
+  ok(merged.h1 && merged.h2, '合并保留双方键（不整值覆盖）');
+  // 同键：last 更大者胜出
+  S.setSync(rk, { h1: { last: 300, stability: 3 } });
+  S._handleExternalChange({ key: 'qb:' + rk, newValue: JSON.stringify({ h1: { last: 250, stability: 9 } }) });
+  eq(S.get(rk).h1.stability, 3, '同键 last 大者胜出（本地 300 > 远端 250）');
+  // reviewRev 取最大版本
+  S.setSync(QB.KEYS.reviewRev(bank), 5);
+  S._handleExternalChange({ key: 'qb:' + QB.KEYS.reviewRev(bank), newValue: '7' });
+  eq(S.get(QB.KEYS.reviewRev(bank), 0), 7, 'reviewRev 取最大版本');
+  S.clearAll();
+}
+
+section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
+{
+  S.clearAll();
+  const b = 'b-record';
+  const rk = QB.KEYS.review(b);
+  // 另一标签已落盘 h2；本标签手头是过期快照（只有 h1）
+  S.setSync(rk, { h2: { last: 200 } });
+  const r = QB.DB.reviews.record(b, { h1: { last: 100 } }, [{ t: 100, h: 'h1', r: 2, b: b }]);
+  const map = QB.DB.reviews.list(b);
+  ok(map.h1 && map.h2, '过期整表写不会覆盖另一标签的键');
+  eq(r.saved, 2, '回执 saved 为合并后的键数');
+  eq(r.logged, 1, '回执 logged 为本次追加条数');
+  eq(Number(S.get(QB.KEYS.reviewRev(b), 0)), 1, '写入后本地 review_rev=1');
+
+  // 失败回滚：日志写失败时调度状态恢复到调用前快照
+  const rawSet = ls.setItem.bind(ls);
+  ls.setItem = (k, v) => {
+    if (k === 'qb:' + QB.KEYS.revlog) { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+    return rawSet(k, v);
+  };
+  let threw = null;
+  try { QB.DB.reviews.record(b, { h3: { last: 300 } }, [{ t: 300, h: 'h3', r: 3, b: b }]); } catch (e) { threw = e; }
+  ls.setItem = rawSet;
+  ok(threw !== null, '日志写失败时 record 抛错（不假成功）');
+  const after = QB.DB.reviews.list(b);
+  ok(after.h1 && after.h2 && !after.h3, '调度状态回滚到调用前快照（h3 未半写）');
+  eq((S.get(QB.KEYS.revlog, []) || []).length, 1, '评分日志未被本次失败追加');
+  eq(Number(S.get(QB.KEYS.reviewRev(b), 0)), 1, 'review_rev 回滚到写入前版本');
+  S.clearAll();
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

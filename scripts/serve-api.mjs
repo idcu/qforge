@@ -31,6 +31,7 @@ import path from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveSafePath, sendFile } from './lib/static-server.mjs';
+import { makeContentHash } from './lib/question-hash.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -56,7 +57,9 @@ export function createStore(dataDir) {
     history: path.join(root, 'history.json'),
     session: path.join(root, 'session.json'),
     revlog: path.join(root, 'revlog.json'),
-    weights: path.join(root, 'weights.json')
+    weights: path.join(root, 'weights.json'),
+    // 版本号补写审计：旧题缺/非法 updated_at 时的修复记录（可回溯，不进备份载荷）
+    repairs: path.join(root, 'repairs.json')
   };
   const dirs = {
     questions: path.join(root, 'questions'),
@@ -90,6 +93,19 @@ export function createStore(dataDir) {
     return value;
   }
   function dropKey(file) { cache.delete(file); try { fs.unlinkSync(file); } catch (e) { /* 不存在 */ } }
+
+  /** 合法的版本时间戳：有限且 > 0；NaN/null/负数/字符串脏值一律视为非法 */
+  function validVersion(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  /** 补写审计（可回溯）：最多保留 200 条，供人工核对旧题版本号修复 */
+  function logRepair(kind, detail) {
+    const log = readJson(files.repairs, []);
+    log.unshift(Object.assign({ at: now(), kind: kind }, detail || {}));
+    writeJson(files.repairs, log.slice(0, 200));
+  }
   const bankFile = (bankId) => path.join(dirs.questions, bankId + '.json');
   const progressFile = (bankId) => path.join(dirs.progress, bankId + '.json');
   const now = () => Date.now();
@@ -193,6 +209,8 @@ export function createStore(dataDir) {
         updated_at: t
       });
       delete item.bankId; // 旧驼峰字段一律不落盘
+      // 服务端权威重算：不信任客户端传入的 content_hash（第三方直连可伪造去重键）
+      item.content_hash = makeContentHash(item);
       return item;
     },
     create(bankId, raw) {
@@ -209,15 +227,29 @@ export function createStore(dataDir) {
         const idx = list.findIndex((q) => q.id === qid);
         if (idx < 0) continue;
         const prev = list[idx];
-        // 乐观并发：调用方给出 base_updated_at 且与服务端版本不一致 → 409 冲突，不覆盖对方修改
-        if (opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== null &&
-            Number(prev.updated_at) !== Number(opts.baseUpdatedAt)) {
-          return { conflict: true, current: prev };
+        // 乐观并发：调用方给出 base_updated_at 且与服务端版本不一致 → 409 冲突，不覆盖对方修改。
+        // 显式给出但非有限数值（如 "abc"）→ 400，避免 NaN 比较静默通过/失败。
+        if (opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== null) {
+          const base = Number(opts.baseUpdatedAt);
+          if (!Number.isFinite(base)) return { invalid: true };
+          if (base !== Number(prev.updated_at)) return { conflict: true, current: prev };
         }
-        // updated_at 单调递增（同一毫秒内多次写也能区分版本）
-        const nextUpdated = Math.max(now(), Number(prev.updated_at) + 1);
+        // updated_at 单调递增（同一毫秒内多次写也能区分版本）。
+        // 旧数据缺字段/NaN/null 时：补写为 now() 并记入 repairs.json 审计（可回溯）。
+        const prevU = validVersion(prev.updated_at);
+        let nextUpdated;
+        if (prevU === null) {
+          nextUpdated = Math.max(now(), 1);
+          logRepair('updated_at_missing', {
+            bank_id: b.id, question_id: qid, before: prev.updated_at === undefined ? null : prev.updated_at
+          });
+        } else {
+          nextUpdated = Math.max(now(), prevU + 1);
+        }
         Object.assign(prev, patch, { id: qid, bank_id: b.id, updated_at: nextUpdated });
         delete prev.bankId;
+        // 内容可能被 patch 改动：以合并后的完整题目重算（客户端传来的 hash 不落盘）
+        prev.content_hash = makeContentHash(prev);
         writeJson(bankFile(b.id), list);
         return { conflict: false, question: prev };
       }
@@ -240,7 +272,14 @@ export function createStore(dataDir) {
       const dedupe = options.dedupe !== false;
       const mode = options.mode || 'merge';
       const existing = mode === 'overwrite' ? [] : questions.all(bankId);
-      const seen = new Set(existing.map((q) => q.content_hash).filter(Boolean));
+      // 双读去重：存量行可能是旧版/伪造 hash，除原值外再按现算法重算一份参与比对，
+      // 避免服务端权威重算上线后「同内容老题 + 再导入」被重复插入。
+      const seen = new Set();
+      existing.forEach((q) => {
+        if (!q) return;
+        if (q.content_hash) seen.add(q.content_hash);
+        seen.add(makeContentHash(q));
+      });
       let inserted = 0;
       let duplicates = 0;
       let skipped = 0;
@@ -683,6 +722,7 @@ export function createHandler(opts) {
         delete body.base_updated_at;
         const x = store.questions.update(qid, body, { baseUpdatedAt: base });
         if (!x) return fail(res, 404, 'NOT_FOUND', '题目不存在');
+        if (x.invalid) return fail(res, 400, 'BAD_REQUEST', 'base_updated_at 必须为有限数值');
         if (x.conflict) {
           return json(res, 409, {
             error: { code: 'CONFLICT', message: '题目已在其他设备修改，请刷新后重试' },
@@ -730,8 +770,14 @@ export function createHandler(opts) {
       if (m === 'GET') return json(res, 200, store.progress.reviewGet(bankId));
       if (m === 'PUT') {
         const body = await readJsonBody(req);
-        const map = (body && body.items) ? body.items : (body || {});
-        if (body && body.revlog !== undefined && !Array.isArray(body.revlog)) {
+        // 契约 §6：PUT 体必须是 { items:{...}, revlog?:[], base_rev? }。
+        // 缺 items 时旧实现把 body 本身当调度表，会把 base_rev/revlog 写成伪状态键污染 FSRS。
+        if (!body || typeof body !== 'object' || Array.isArray(body) ||
+            !body.items || typeof body.items !== 'object' || Array.isArray(body.items)) {
+          return fail(res, 400, 'BAD_REQUEST', 'items 必须为对象（content_hash → 调度状态）');
+        }
+        const map = body.items;
+        if (body.revlog !== undefined && !Array.isArray(body.revlog)) {
           return fail(res, 400, 'BAD_REQUEST', 'revlog 必须为数组');
         }
         const saved = store.progress.reviewSave(bankId, map, { baseRev: body && body.base_rev });

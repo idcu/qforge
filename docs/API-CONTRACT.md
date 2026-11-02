@@ -47,7 +47,7 @@
 | GET | `/api/banks/{id}/questions` | 分页查询 | — （query: `type`、`category`、`q`(关键词)、`page`、`size`） | `{ items, total, page, size }` |
 | POST | `/api/banks/{id}/questions` | 新增单题 | `Question`（不含 id/bankId） | `201` + `Question` |
 | GET | `/api/questions/{qid}` | 单题详情 | — | `Question` |
-| PATCH | `/api/questions/{qid}` | 修改单题；可选 `base_updated_at` 启用乐观并发 | `Question` 部分字段 + `base_updated_at?` | `Question`；版本过期 → `409 { error:{code:"CONFLICT"}, current }` |
+| PATCH | `/api/questions/{qid}` | 修改单题；可选 `base_updated_at` 启用乐观并发 | `Question` 部分字段 + `base_updated_at?` | `Question`；版本过期 → `409 { error:{code:"CONFLICT"}, current }`；`base_updated_at` 显式非有限数值 → `400 BAD_REQUEST`；响应 `content_hash` 由服务端按合并结果重算 |
 | DELETE | `/api/questions/{qid}` | 删除单题 | — | `204` |
 | POST | `/api/banks/{id}/questions/batch` | 批量增/删 | `{ "op": "add" \| "delete", "items"?: Question[], "ids"?: string[], "mode"?: "merge" \| "overwrite", "dedupe"?: true }` | `{ inserted?, duplicates?, skipped?, removed?, total }` |
 | POST | `/api/banks/{id}/import` | 导入（服务端解析或前端解析后提交） | `multipart/form-data`（file）或 `{ questions: Question[], mode }` | 同批量新增 |
@@ -67,12 +67,13 @@
   "reference_answer": "参考答案文本",
   "analysis": "解析", "category": "分类", "source": "来源/原题号",
   "difficulty": 0, "tags": ["标签1", "标签2"],
-  "content_hash": "a2cd0a87", "created_at": 0, "updated_at": 0
+  "content_hash": "2:a2cd0a87", "created_at": 0, "updated_at": 0
 }
 ```
 > `indefinite`（不定项）结构同 `multi`；判分语义为全对满分、少选半分（响应/历史中以 `partial: true` 标记）、错选 0 分，见 [ARCHITECTURE.md](ARCHITECTURE.md) §6。图片以 Markdown 占位 `![alt](asset:<id>)` 内嵌在文本字段，字节走 §8 资产接口。
 >
-> **content_hash 归属（2026-10-29 明确）**：`content_hash` 由「题型 + 规范化题干 + 选项文本集合 + 答案语义」计算（见 `js/utils/question-id.js`）。`PATCH` 若修改任一内容字段（type/question/options/answer/blanks/reference_answer/material/children），**必须携带由合并后完整题目重算的 `content_hash`**；仅改组织属性（analysis/category/source/difficulty/tags）时不得改写 hash。参考实现中 `api-adapter.update` 会先 GET 当前题、合并 patch 后重算；服务端应信任并按此存储（参考后端不做二次重算，若第三方客户端漏传，去重键会漂移）。
+> **content_hash 归属（2026-11-02 更新：服务端权威）**：`content_hash` 由「题型 + 规范化题干 + 选项文本集合 + 答案语义」计算（唯一实现 `js/utils/question-id.js`）。`PATCH` 若修改任一内容字段（type/question/options/answer/blanks/reference_answer/material/children），客户端仍应携带由合并后完整题目重算的值；仅改组织属性（analysis/category/source/difficulty/tags）时不得改写 hash。**参考后端不再信任客户端传入值**：`POST /questions`、`PATCH /questions/{id}`、`batch add`、`import` 均按合并后的完整题目重算并落盘（复用同一实现，见 `scripts/lib/question-hash.mjs`）。
+> **存量兼容**：既有行不批量重写；导入去重对老行采用「原 `content_hash` + 按现算法重算」双读比对，旧版裸 hash（v1）或历史伪造 hash 不会导致同内容题被重复插入；旧行在下次 `PATCH` 或重新导入时转为 v2 hash。
 
 **批量返回字段**
 - `op=add`：`{ inserted, duplicates, skipped, total }`（`mode=overwrite` 表示先清空该库再写入）
@@ -129,7 +130,7 @@
 | 方法 | 路径 | 说明 | 请求体 / 响应 |
 | --- | --- | --- | --- |
 | GET | `/api/banks/{id}/reviews` | 该库全部调度状态（content_hash → state 的**整表 map**） | `{ items: { hash: { algo, due, stability, difficulty, reps, lapses, last, learning } }, rev }`（`rev` 为该库复习版本号，服务端维护，单调递增） |
-| PUT | `/api/banks/{id}/reviews` | 整表 upsert；可选同请求追加评分日志（作答热路径，**一次网络请求**）；可选 `base_rev` 做乐观并发 | `{ items: {...}, revlog?: [{t,h,r,b}], base_rev? }` → `{ saved, logged, rev }`；`base_rev` 与服务端当前版本不符 → `409` + `{ error: { code: 'CONFLICT' }, current, rev }` 且**不落盘**；`revlog` 非数组 → `400 BAD_REQUEST` |
+| PUT | `/api/banks/{id}/reviews` | 整表 upsert；可选同请求追加评分日志（作答热路径，**一次网络请求**）；可选 `base_rev` 做乐观并发 | `{ items: {...}, revlog?: [{t,h,r,b}], base_rev? }` → `{ saved, logged, rev }`；**缺 `items` / `items` 非对象（含数组）→ `400 BAD_REQUEST`，不落盘、不递增 `rev`**；`base_rev` 与服务端当前版本不符 → `409` + `{ error: { code: 'CONFLICT' }, current, rev }` 且**不落盘**；`revlog` 非数组 → `400 BAD_REQUEST` |
 | DELETE | `/api/banks/{id}/reviews` | 清空该库调度状态（服务端 `rev` 同样 +1，使其他设备缓存的版本失效） | — | `204` |
 | GET | `/api/revlog` | 评分日志（全局，按人） | `{ items: [{id,h,r,t,b?}], total }` |
 | POST | `/api/revlog` | 追加评分日志（可批量；服务端补 id/时间戳并按上限 FIFO） | `{ items: [{h,r,t,b?}] }` → `{ saved, items }` |

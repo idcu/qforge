@@ -20,6 +20,8 @@
     wrong: (bankId) => 'user:wrong:' + bankId,
     favorite: (bankId) => 'user:fav:' + bankId,
     review: (bankId) => 'user:review:' + bankId,
+    // 本地复习版本号（多标签合并/写前重读的单调版本；服务端对应 review_rev，仅本机同步元数据，不进备份）
+    reviewRev: (bankId) => 'user:reviewRev:' + bankId,
     history: 'user:history',
     session: 'user:session',
     revlog: 'user:revlog',
