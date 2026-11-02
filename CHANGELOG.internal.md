@@ -6,6 +6,95 @@
 
 ---
 
+## bf101f0 · fix(pwa): SW 注册改为 boot 内直接 register，不再依赖已过期的 load 事件
+
+**核心改动**
+- `js/app.js`：`registerSW()` 去掉 `window.addEventListener('load', …)` 包裹，脚本就绪即
+  `navigator.serviceWorker.register('sw.js', { scope: './' })`；保留 waiting/installing 新版本提示。
+- `sw.js`：`CACHE` **v8 → v9**。
+- `scripts/pwa.test.mjs`：新增「app 不含 SW 的 load 监听 / registerSW 内直接 register / boot 内调用 registerSW /
+  F1 try-catch 与回退提示」静态断言；85 → **90**。
+- 文档：README PWA 特性、`docs/user-guide.md` §10 补充「首次注册后需刷新一次才接管」（SW 正常语义）。
+
+**验证数据（真机 Edge 151 / Chromium 151，CDP 真窗口，非无头；2026-11-02）**
+- 首次加载：`regCalls=[{url:'sw.js'}]`、`registrations=[{scope:'http://127.0.0.1:8777/', active:true}]`、`caches=['qforge-v9']`。
+- 第二次加载：`controller=true` 且 `scriptURL=http://127.0.0.1:8777/sw.js`；`/js/*` 资源
+  `transferSize=0` 且 `decodedBodySize>0`（命中 SW 缓存）；`uncaughtCount=0`。
+- Node：`pwa.test` **90 / 0**；test-all **25 运行项 / 0 失败**；docs-check 断言/门禁/首屏数字全部一致。
+- 证据：`.screenshots/storage-v6-fix/f3-first-load.png`、`f3-second-load.png`、`f3-result.json`。
+
+**TODO/风险**
+- `clients.claim()` 会在首次安装后接管当前页；若浏览器不执行 claim 或安装延迟，首次仍需刷新一次（已如实写入文档）。
+
+---
+
+## 0a318cb · fix(storage): 多标签迁移败者等待并补写，避免写 LS 后被清理丢数据
+
+**核心改动**
+- `js/utils/storage.js`：新增 `waitForMigrationSwitch`（200ms 轮询 + BroadcastChannel `backend` 广播），
+  等待期 `set/setSync/remove/clearAll/flush` 全部门控；`remove` 记 `_awaitDeletes`、`clearAll` 记 `_clearPending`；
+  切换后先水合 IDB 再回放 pending/deletes，超时**不落旧 LS**。
+- `js/app.js`：`Migration.run` 返回 `locked`（或 marker 已为 idb 但本标签仍在 ls）时进入等待，
+  状态栏/toast 明示「本页写入将暂存」。
+- `scripts/migrate.test.mjs`：F2 回归 9 项；151 → **172**。
+- 文档 `docs/ARCHITECTURE.md` §9.4 改为「等待切换 + 补写」语义。
+
+**验证数据（真机 Edge 151，双窗口同 profile；CPU 20× 仅作用于胜者标签以拉长持锁窗口，未改应用代码）**
+- A 持锁：`qb:meta:migrationLock` 在 boot 后 **3,965ms** 出现；B 于 **400ms** 进入等待
+  （`status=另一标签正在迁移存储，本页等待切换…`）。
+- B 等待期写第 21 条收藏：`lsFavLen=20`、`_pending=1`、内存 `favLen=21`——**未写 LS**。
+- B 切换后：`mode=idb`、`marker=idb`、`favLen=21`、`lsDomainKeys=0`、`lsBackupState=cleaned`；
+  胜者 A 侧 `favLen=21`（**21→21**）。
+- B 二次加载（重启口径）：`mode=idb`、`favLen=21`、题目 **5000**、`controller=true`、缓存 `qforge-v9`、`uncaughtCount=0`。
+- 两次独立重跑均 `pass=true`；证据：`.screenshots/storage-v6-fix/f2-*.png`、`f2-result.json`。
+- Node：migrate.test **172 / 0**；test-all **25 / 0**（28.0s）；bench `--assert` 门禁全部通过。
+
+**TODO/风险**
+- 等待超过 30s 时写入继续留在内存，关闭页面会丢（toast 已告知）；这是「不写 LS 避免被清理」的有意取舍，
+  未实现持久化队列。持有锁标签崩溃后锁 30s TTL 过期，下一标签自动接管（未在真机复验崩溃路径）。
+
+---
+
+## e36573f · fix(storage): IDB open 抛错时迁移中止不再白屏，回落 LS 并可见提示
+
+**核心改动**
+- `js/modules/backup.js`：`idbOpen()` 捕获 `indexedDB.open` 同步抛错并转为 Promise 拒绝，备份按失败处理
+  （`hasIdb()` 只判存在性，探活由 open 失败承担）。
+- `js/app.js`：`boot()` 捕获 `Migration.run` 失败 → `console.error` + toast
+  「当前环境不支持本地新版存储，已回退到兼容模式（数据未受影响）」，继续渲染首页/题库。
+- 迁移仍在写入前中止：业务数据逐字节不变、不留半写备份、锁正常释放；schema 停留 5，下次启动重探 IDB。
+- `scripts/migrate.test.mjs` F1 段（151 → 163，F2 后合计 172）、`scripts/pwa.test.mjs` 静态断言；文档 `docs/DATABASE.md` §9.3 同步。
+
+**验证数据（真机 Edge 151，CDP document-start 注入 `indexedDB.open()` 同步抛 SecurityError）**
+- boot **266ms** 就绪，状态栏 `修复复验库 · 共 5000 题`、`viewLen=308`，**无白屏**。
+- `mode=ls`、`marker=ls-fallback`、`schemaVersion=5`、`qcount=5000`、`favorites=20`、
+  `judgeAnswer(单选题,'A').isCorrect=true`、`Storage.setSync` 写读往返成功。
+- toast 捕获「当前环境不支持本地新版存储，已回退到兼容模式（数据未受影响）」；`lsBackupState=idb-unavailable`、`hasLock=false`。
+- `uncaughtCount=0`（仅预期 `console.error`「迁移已中止：自动备份失败（The operation is insecure.）」）；
+  第二次加载仍可用，`controller=true`。
+- 两次独立重跑 `pass=true`；证据：`.screenshots/storage-v6-fix/f1-first-load.png`、`f1-second-load.png`、`f1-result.json`。
+- Node：migrate.test F1 段 12 项断言通过（SecurityError 回落 + 快照逐字节不变 + 无锁/无半写备份）。
+
+**TODO/风险**
+- 强制 `open` 抛错是用 CDP 注入复现（真实隐私窗口在 CDP 下未能稳定复现 SecurityError），已如实标注。
+- 受限环境下每次启动都会重试 IDB 并 toast 一次（符合「下次启动仍尝试 IDB」要求，但提示会重复）。
+
+---
+
+## 9126278 · docs(db): 补真实浏览器验证口径（usage 不含 LS、20k 写不进 LS、Node 偏差）
+
+**核心改动**
+- `docs/DATABASE.md` §9.4：记录 Edge 151 / Chromium 151 实测口径——`estimate().usage` 仅统计 IndexedDB
+  （不含 localStorage）；20k 全量夹具写不进 LS；Node 与真机耗时偏差；IDB/字符比 0.10×~1.37×。
+- 原始数据：单键上限 5,242,871 字符、多键累计约 4,980,736 字符后 `QuotaExceededError`（第 102 键
+  `qb:user:review:bank_mvz7bzr3nowiia`）；`Migration.run` 5k 505.1ms vs 真机 163.04ms（3.10×）、
+  compact20k 496.7ms vs 218.86ms（2.27×）。
+
+**TODO/风险**
+- 真实隐私窗口、多标签浏览器事务差异、长期配额回收策略仍未验证（文档已标注，未写成通过）。
+
+---
+
 ## f9abba2 · test(bench): 迁移门禁改回原始峰值并新增旧 LS 自动清理门禁（H2/H3）
 
 **核心改动**
