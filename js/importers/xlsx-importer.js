@@ -1,119 +1,62 @@
 /**
  * XLSX 导入器（零依赖）
- * 通过原生 ZipReader 解压 + DOMParser 解析，读取全部工作表为二维表格（空表跳过、按工作簿顺序合并），复用表格适配器。
+ * 解析内核（共享字符串 / 工作表枚举 / 单元格读取）委托 @idcu/format-xlsx-read；
+ * 本文件只保留 qforge 特有的分表告警、表头适配与 QB.Adapters 装配语义。
  */
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  function colToIndex(ref) {
-    const m = String(ref || '').match(/^([A-Z]+)/i);
-    if (!m) return 0;
-    let n = 0;
-    const s = m[1].toUpperCase();
-    for (let i = 0; i < s.length; i++) n = n * 26 + (s.charCodeAt(i) - 64);
-    return n - 1;
-  }
+  let cached = null;
 
-  function parseXml(text, label) {
-    try {
-      return QB.XmlLite.parse(text);
-    } catch (e) {
-      throw new Error(label + ' XML 解析失败：' + e.message);
-    }
-  }
-
-  function readSharedStrings(xmlText) {
-    if (!xmlText) return [];
-    const doc = parseXml(xmlText, 'sharedStrings');
-    const sis = doc.getElementsByTagName('si');
-    const out = [];
-    for (let i = 0; i < sis.length; i++) {
-      const ts = sis[i].getElementsByTagName('t');
-      let s = '';
-      for (let j = 0; j < ts.length; j++) s += ts[j].textContent;
-      out.push(s);
-    }
-    return out;
-  }
-
-  /** 把 rels Target 归一为 zip 内路径 */
-  function normalizeTarget(t) {
-    t = (t || '').replace(/^\//, '');
-    return t.indexOf('xl/') === 0 ? t : 'xl/' + t;
-  }
-
-  /**
-   * 解析 workbook.xml + rels，按工作簿顺序返回全部工作表
-   * @returns {Array<{name:string,path:string}>}
-   */
-  function resolveAllSheets(entries) {
-    const wbText = entries['xl/workbook.xml'] ? QB.decodeUtf8(entries['xl/workbook.xml']) : null;
-    const relText = entries['xl/_rels/workbook.xml.rels'] ? QB.decodeUtf8(entries['xl/_rels/workbook.xml.rels']) : null;
-    // 退化情况：无清单时按约定路径读 sheet1
-    if (!wbText || !relText) {
-      return entries['xl/worksheets/sheet1.xml'] ? [{ name: 'Sheet1', path: 'xl/worksheets/sheet1.xml' }] : [];
-    }
-    const relMap = {};
-    const relDoc = parseXml(relText, 'rels');
-    const rels = relDoc.getElementsByTagName('Relationship');
-    for (let i = 0; i < rels.length; i++) {
-      relMap[rels[i].getAttribute('Id')] = normalizeTarget(rels[i].getAttribute('Target'));
-    }
-    const wbDoc = parseXml(wbText, 'workbook');
-    const sheets = wbDoc.getElementsByTagName('sheet');
-    const out = [];
-    for (let i = 0; i < sheets.length; i++) {
-      const rid = sheets[i].getAttribute('r:id') || sheets[i].getAttribute('id');
-      const path = rid && relMap[rid] ? relMap[rid] : ('xl/worksheets/sheet' + (i + 1) + '.xml');
-      if (entries[path]) out.push({ name: sheets[i].getAttribute('name') || ('Sheet' + (i + 1)), path: path });
-    }
-    return out;
-  }
-
-  /** 工作表 XML → 二维字符串数组 */
-  function sheetToRows(xmlText, shared) {
-    const doc = parseXml(xmlText, 'worksheet');
-    const rowsEls = doc.getElementsByTagName('row');
-    const rows = [];
-    for (let i = 0; i < rowsEls.length; i++) {
-      const cells = rowsEls[i].getElementsByTagName('c');
-      const row = [];
-      for (let j = 0; j < cells.length; j++) {
-        const c = cells[j];
-        const idx = c.getAttribute('r') ? colToIndex(c.getAttribute('r')) : row.length;
-        const t = c.getAttribute('t');
-        let value = '';
-        if (t === 'inlineStr') {
-          const ts = c.getElementsByTagName('t');
-          for (let k = 0; k < ts.length; k++) value += ts[k].textContent;
-        } else {
-          const vs = c.getElementsByTagName('v');
-          const raw = vs.length ? vs[0].textContent : '';
-          if (t === 's') value = shared[parseInt(raw, 10)] || '';
-          else value = raw;
-        }
-        row[idx] = value;
+  /* XML 解析错误前缀沿用 qforge 原有文案（模块不感知业务标签） */
+  const XmlLite = {
+    parse(text) {
+      try {
+        return QB.XmlLite.parse(text);
+      } catch (e) {
+        const t = String(text || '');
+        const label = t.indexOf('<sst') >= 0 ? 'sharedStrings'
+          : t.indexOf('<Relationships') >= 0 ? 'rels'
+          : t.indexOf('<workbook') >= 0 ? 'workbook'
+          : t.indexOf('<worksheet') >= 0 ? 'worksheet'
+          : 'XLSX';
+        throw new Error(label + ' XML 解析失败：' + e.message);
       }
-      for (let k = 0; k < row.length; k++) if (row[k] === undefined) row[k] = '';
-      rows.push(row);
     }
-    return rows;
+  };
+
+  function reader() {
+    if (cached) return cached;
+    const X = global.__idcuXlsx;
+    if (!X || typeof X.createXlsxReader !== 'function') {
+      throw new Error('缺少 @idcu/format-xlsx-read（请检查 index.html 脚本顺序）');
+    }
+    cached = X.createXlsxReader({
+      Zip: { readEntries: QB.ZipReader.readEntries, decodeUtf8: QB.decodeUtf8 },
+      XmlLite
+    });
+    return cached;
   }
+
+  /* 兼容导出：仍按原来的入参形态暴露解析原语 */
+  function resolveAllSheets(entries) { return reader().listSheets(entries); }
+  function sheetToRows(xmlText, shared) { return reader().parseSheetRows(xmlText, shared); }
 
   async function parse(input) {
     const buf = input.arrayBuffer;
     if (!buf) throw new Error('未读取到文件内容');
-    const entries = await QB.ZipReader.readEntries(buf);
-    const shared = readSharedStrings(entries['xl/sharedStrings.xml'] ? QB.decodeUtf8(entries['xl/sharedStrings.xml']) : null);
-    const sheets = resolveAllSheets(entries);
+    /* qforge 历史上不限制表数/行列数（zip 层已有 10000 条 / 64MB 上限），这里显式放开模块默认值 */
+    const sheets = await reader().readSheets(buf, {
+      allowEmpty: true, maxSheets: Infinity, maxRows: Infinity, maxCols: Infinity
+    });
     if (!sheets.length) throw new Error('未找到工作表');
     // 逐工作表解析（每张表首行须为同一套表头；空表自动跳过），按工作簿顺序合并
     const questions = [];
     const warnings = [];
     let used = 0;
     sheets.forEach((sheet) => {
-      const rows = sheetToRows(QB.decodeUtf8(entries[sheet.path]), shared);
+      const rows = sheet.rows;
       if (!rows.length) return;
       const res = QB.Adapters.tableToQuestions(rows);
       if (res.questions.length) {

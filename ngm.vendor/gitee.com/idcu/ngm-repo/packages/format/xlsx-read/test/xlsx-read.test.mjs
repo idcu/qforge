@@ -102,6 +102,36 @@ test('sheetFilter falls back to the first sheet when none match', async () => {
   assert.deepEqual(await X.readRows(buf), [['a']]);
 });
 
+test('readSheets keeps per-sheet name/path/rows, including empty sheets', async () => {
+  const X = createXlsxReader({ Zip, XmlLite });
+  const buf = buildWorkbook([
+    { name: '说明', rows: [] },
+    { name: '台账', rows: [['编号', 'X'], ['O0001', '1']] }
+  ]);
+  const sheets = await X.readSheets(buf);
+  assert.equal(sheets.length, 2);
+  assert.equal(sheets[0].name, '说明');
+  assert.deepEqual(sheets[0].rows, []);
+  assert.equal(sheets[1].path, 'xl/worksheets/sheet2.xml');
+  assert.deepEqual(sheets[1].rows, [['编号', 'X'], ['O0001', '1']]);
+});
+
+test('readSheets handles workbooks without worksheets', async () => {
+  const X = createXlsxReader({ Zip, XmlLite });
+  const buf = Zip.build([{ name: 'x.txt', text: 'x' }]);
+  await assert.rejects(() => X.readSheets(buf), /未找到工作表/);
+  assert.deepEqual(await X.readSheets(buf, { allowEmpty: true }), []);
+});
+
+test('listSheets / parseSheetRows are the shared parsing primitives', async () => {
+  const X = createXlsxReader({ Zip, XmlLite });
+  const buf = buildWorkbook([{ name: 'S1', rows: [['a']] }]);
+  const entries = await Zip.readEntries(buf);
+  assert.deepEqual(X.listSheets(entries), [{ name: 'S1', path: 'xl/worksheets/sheet1.xml' }]);
+  const xml = Zip.decodeUtf8(entries['xl/worksheets/sheet1.xml']);
+  assert.deepEqual(X.parseSheetRows(xml, []), [['a']]);
+});
+
 test('cjs entry loads and round trips', async () => {
   const cjs = require('../src/index.cjs');
   const X = cjs.createXlsxReader({ Zip, XmlLite });

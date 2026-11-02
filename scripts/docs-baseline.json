@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-02T19:18:05.186Z",
+  "generatedAt": "2026-11-02T19:20:11.136Z",
   "runItems": 25,
   "suiteFiles": 24,
   "totalAssertions": 4162,
@@ -32,9 +32,9 @@
     "xml-lite.test.mjs": 39
   },
   "firstScreen": {
-    "scripts": 75,
-    "files": 83,
-    "rawKB": "823.4",
-    "gzipKB": "292.6"
+    "scripts": 76,
+    "files": 84,
+    "rawKB": "831.2",
+    "gzipKB": "295.5"
   }
 }

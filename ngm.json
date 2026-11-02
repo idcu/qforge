@@ -25,7 +25,7 @@
     },
     {
       "name": "gitee:idcu/ngm-repo",
-      "ref": "packages/format/xlsx-read/v0.2.0",
+      "ref": "packages/format/xlsx-read/v0.3.0",
       "refType": "tag",
       "path": "packages/format/xlsx-read"
     },

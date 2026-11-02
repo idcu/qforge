@@ -21,6 +21,13 @@ const buf = X.build([['姓名', '工时'], ['张三', 8]], '工资');
 - `allowEmpty`：空工作簿返回 `[]` 而不是抛错。
 - `maxRows` / `maxCols` / `maxSheets`：覆盖默认上限。
 
+0.3.0 新增逐表读取（供调用方做分表告警/业务表头适配，`readRows` 行为不变）：
+
+- `readSheets(arrayBuffer, opt)` → `[{ name, path, rows }]`，包含空表，顺序与工作簿一致；
+  `allowEmpty=true` 且工作簿无工作表时返回 `[]`。
+- `listSheets(entries)` → `[{ name, path }]`（同步，输入为 zip 条目表）。
+- `parseSheetRows(xmlText, sharedStrings)` → 单表二维字符串数组（同步）。
+
 为什么是工厂而不是直接 import 依赖：ngm 的 vendor 目录是
 `ngm.vendor/<host>/<org>/<repo>/<subPath>`，没有按模块名的 Node 解析；
 工厂注入让消费方显式装配，模块之间零隐式路径依赖。

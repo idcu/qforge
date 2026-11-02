@@ -27,6 +27,7 @@ const MODULES = [
   'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/zip/src/vendor/zip.js',
   'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xml-lite/src/vendor/xml-lite.js',
   'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js',
+  'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js',
   'ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/assets/src/core.js',
   'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/dsv/src/vendor/dsv.js',
   'js/utils/crc32.js',

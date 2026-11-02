@@ -134,27 +134,21 @@
       return buildXlsx(table, sheetName, Zip);
     }
 
-    async function readRows(arrayBuffer, callOpt) {
-      const co = callOpt || {};
-      const L = Object.assign({}, XLSX_LIMITS, co);
-      const sheetFilter = typeof co.sheetFilter === 'function'
-        ? co.sheetFilter
-        : (typeof o.sheetFilter === 'function' ? o.sheetFilter : null);
-      const allowEmpty = co.allowEmpty != null ? !!co.allowEmpty : !!o.allowEmpty;
+    /** sharedStrings.xml → 共享字符串表 */
+    function readSharedStrings(entries) {
+      if (!entries['xl/sharedStrings.xml']) return [];
+      const doc = XmlLite.parse(decodeUtf8(entries['xl/sharedStrings.xml']));
+      const sis = doc.getElementsByTagName('si');
+      return sis.map((si) => {
+        const ts = si.getElementsByTagName('t');
+        let s = '';
+        for (let i = 0; i < ts.length; i++) s += ts[i].textContent;
+        return s;
+      });
+    }
 
-      const entries = await Zip.readEntries(arrayBuffer, co);
-      let shared = [];
-      if (entries['xl/sharedStrings.xml']) {
-        const doc = XmlLite.parse(decodeUtf8(entries['xl/sharedStrings.xml']));
-        const sis = doc.getElementsByTagName('si');
-        shared = sis.map((si) => {
-          const ts = si.getElementsByTagName('t');
-          let s = '';
-          for (let i = 0; i < ts.length; i++) s += ts[i].textContent;
-          return s;
-        });
-      }
-      // 按 workbook.xml + rels 顺序枚举工作表；缺清单时退回约定 sheet1
+    /** 按 workbook.xml + rels 顺序枚举工作表（只含 zip 中真实存在的工作表） */
+    function listSheets(entries) {
       const sheets = [];
       if (entries['xl/workbook.xml'] && entries['xl/_rels/workbook.xml.rels']) {
         const relDoc = XmlLite.parse(decodeUtf8(entries['xl/_rels/workbook.xml.rels']));
@@ -168,24 +162,62 @@
         wbDoc.getElementsByTagName('sheet').forEach((s, i) => {
           const rid = s.getAttribute('r:id') || s.getAttribute('id');
           const path = (rid && relMap[rid]) ? relMap[rid] : ('xl/worksheets/sheet' + (i + 1) + '.xml');
-          if (entries[path]) sheets.push(path);
+          if (entries[path]) {
+            sheets.push({ name: s.getAttribute('name') || ('Sheet' + (i + 1)), path });
+          }
         });
       } else if (entries['xl/worksheets/sheet1.xml']) {
-        sheets.push('xl/worksheets/sheet1.xml');
+        sheets.push({ name: 'Sheet1', path: 'xl/worksheets/sheet1.xml' });
       }
-      if (!sheets.length) throw new Error('XLSX 中未找到工作表');
-      if (sheets.length > L.maxSheets) throw new Error('工作表数量超过上限 ' + L.maxSheets + ' 个，请拆分后导入');
+      return sheets;
+    }
 
+    /** 单张工作表 XML → 二维字符串表（不合并、不判业务表头） */
+    function parseSheetRows(xmlText, shared) {
+      return xlsxSheetToRows(xmlText, shared, XmlLite, o);
+    }
+
+    /**
+     * 逐工作表读取（保留表名与路径，含空表），供调用方做分表告警/业务过滤。
+     * 返回 [{name, path, rows}]，顺序与工作簿一致。
+     */
+    async function readSheets(arrayBuffer, callOpt) {
+      const co = callOpt || {};
+      const L = Object.assign({}, XLSX_LIMITS, co);
+      const allowEmpty = co.allowEmpty != null ? !!co.allowEmpty : !!o.allowEmpty;
+      const entries = await Zip.readEntries(arrayBuffer, co);
+      const sheets = listSheets(entries);
+      if (!sheets.length) {
+        if (allowEmpty) return [];
+        throw new Error('XLSX 中未找到工作表');
+      }
+      if (sheets.length > L.maxSheets) throw new Error('工作表数量超过上限 ' + L.maxSheets + ' 个，请拆分后导入');
+      const shared = readSharedStrings(entries);
+      return sheets.map((s) => ({
+        name: s.name,
+        path: s.path,
+        rows: xlsxSheetToRows(decodeUtf8(entries[s.path]), shared, XmlLite, co)
+      }));
+    }
+
+    async function readRows(arrayBuffer, callOpt) {
+      const co = callOpt || {};
+      const L = Object.assign({}, XLSX_LIMITS, co);
+      const sheetFilter = typeof co.sheetFilter === 'function'
+        ? co.sheetFilter
+        : (typeof o.sheetFilter === 'function' ? o.sheetFilter : null);
+      const allowEmpty = co.allowEmpty != null ? !!co.allowEmpty : !!o.allowEmpty;
+
+      const all = await readSheets(arrayBuffer, callOpt);
       const merged = [];
-      sheets.forEach((path) => {
-        const rows = xlsxSheetToRows(decodeUtf8(entries[path]), shared, XmlLite, co);
+      all.forEach(({ rows, path }) => {
         if (!rows.length) return;
         if (sheetFilter && !sheetFilter(rows, path)) return;
         rows.forEach((r) => merged.push(r));
       });
       // plotpin 语义：全部被过滤时回退第一张工作表
-      if (!merged.length && sheetFilter && sheets.length) {
-        xlsxSheetToRows(decodeUtf8(entries[sheets[0]]), shared, XmlLite, co).forEach((r) => merged.push(r));
+      if (!merged.length && sheetFilter && all.length) {
+        all[0].rows.forEach((r) => merged.push(r));
       }
       if (merged.length > L.maxRows) throw new Error('合并后表格行数超过上限 ' + L.maxRows + ' 行，请拆分后导入');
       if (!merged.length) {
@@ -195,7 +227,7 @@
       return merged;
     }
 
-    return { build, readRows, colLetter: xlsxColLetter, LIMITS: XLSX_LIMITS };
+    return { build, readRows, readSheets, listSheets, parseSheetRows, colLetter: xlsxColLetter, LIMITS: XLSX_LIMITS };
   }
 
   return { createXlsxReader };
