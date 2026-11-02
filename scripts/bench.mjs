@@ -15,9 +15,11 @@
  *   - heapUsed 增量 / localStorage 载荷字节
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createServer } from './serve-api.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
@@ -185,7 +187,8 @@ const sizeOf = (c) => (typeof c === 'string' ? Buffer.byteLength(c, 'utf8') : c.
 let expBytes = 0;
 row('导出构建（JSON+CSV+MD+TXT，540 题）', await timed(() => {
   expBytes = 0;
-  QB.Exporters.FORMATS.filter((f) => !f.binary).forEach((f) => { expBytes += sizeOf(f.build(exportPayload)); });
+  // 过滤 async 格式（分享页 build 返回 Promise，算入 sizeOf 会得到 NaN）与二进制格式（单独计量）
+  QB.Exporters.FORMATS.filter((f) => !f.binary && !f.async).forEach((f) => { expBytes += sizeOf(f.build(exportPayload)); });
 }, 10), '单次合计 ' + (expBytes / 1024).toFixed(1) + ' KB');
 let xlsxBytes = 0;
 row('XLSX 导出构建（stored ZIP，540 题）', await timed(() => {
@@ -391,6 +394,70 @@ row('错题本 移除一条 区域对账（plan）', await timed(() => {
 
 const uiPatchHeap = (bestEffortGc(), process.memoryUsage().heapUsed);
 
+/* ---------- 11e. 门禁补齐（C1）：SRS 写载荷/本地落盘、导出体积、API P95 ---------- */
+/** 分位值（已排序数组） */
+function pctile(sorted, p) { return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]; }
+
+const srsBank = 'bank-srs-bench';
+const srsFull = {};
+bigAll.forEach((q, i) => {
+  srsFull[q.contentHash || QB.makeContentHash(q)] = {
+    algo: 'fsrs6', due: qNow + i * 86400000, stability: 8 + (i % 50) * 0.5,
+    difficulty: 4.5 + (i % 40) * 0.1, reps: 2 + (i % 7), lapses: i % 3,
+    last: qNow - i, learning: 0
+  };
+});
+const srsKeys = Object.keys(srsFull);
+const srsKey = srsKeys[srsKeys.length - 1];
+const srsDelta = {};
+srsDelta[srsKey] = srsFull[srsKey];
+const srsEntry = { t: qNow, h: srsKey, r: 3, b: srsBank };
+
+let srsFullBytes = 0;
+let srsDeltaBytes = 0;
+row('SRS 写载荷（3000 状态：整表 vs 单键增量）', await timed(() => {
+  srsFullBytes = Buffer.byteLength(JSON.stringify({ items: srsFull, revlog: [srsEntry], base_rev: 7 }), 'utf8');
+  srsDeltaBytes = Buffer.byteLength(JSON.stringify({ items: srsDelta, revlog: [srsEntry], base_rev: 7 }), 'utf8');
+}, 20), '整表 ' + (srsFullBytes / 1024).toFixed(1) + ' KB → 增量 ' + srsDeltaBytes + ' B（'
+  + (srsFullBytes / srsDeltaBytes).toFixed(1) + '×）');
+
+QB.Storage.setSync(QB.KEYS.review(srsBank), srsFull); // 预置 3000 状态，确保量到的是整表落盘成本
+row('SRS 本地评分落盘（3000 状态，整表；B1 本地布局遗留）', await timed(async (i) => {
+  const d = {}; d[srsKey] = srsFull[srsKey];
+  await QB.DB.reviews.patch(srsBank, d, [{ t: qNow + i, h: srsKey, r: 3, b: srsBank }]);
+  QB.Storage.forceSync();
+}, 20), '服务端/上行已 O(改动数)，本地仍整表 O(n)');
+
+// API P95：起真实参考后端，用增量载荷打 PATCH /reviews（含 HTTP 与落盘）
+const apiTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qforge-bench-'));
+const apiSrv = await createServer({ port: 0, dataDir: apiTmp });
+const apiBase = 'http://127.0.0.1:' + apiSrv.port;
+let apiP50 = 0;
+let apiP95 = 0;
+try {
+  const made = await (await fetch(apiBase + '/api/banks', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'bench-api' })
+  })).json();
+  const lat = [];
+  for (let i = 0; i < 50; i++) {
+    const t0 = process.hrtime.bigint();
+    const res = await fetch(apiBase + '/api/banks/' + encodeURIComponent(made.id) + '/reviews', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: srsDelta, revlog: [srsEntry] })
+    });
+    await res.json();
+    lat.push(Number(process.hrtime.bigint() - t0) / 1e6);
+  }
+  lat.sort((a, b) => a - b);
+  apiP50 = pctile(lat, 0.5);
+  apiP95 = pctile(lat, 0.95);
+  row('API PATCH /reviews P95（本地参考后端，50 次）', { median: apiP50, min: lat[0], max: lat[lat.length - 1] },
+    'P95 ' + apiP95.toFixed(2) + ' ms，P50 ' + apiP50.toFixed(2) + ' ms，载荷 ' + srsDeltaBytes + ' B/次');
+} finally {
+  await apiSrv.close();
+  fs.rmSync(apiTmp, { recursive: true, force: true });
+}
+
 /* ---------- 4b. 富文本公式子集渲染（阶段 B · P2，零依赖） ---------- */
 row('富文本公式子集渲染（\\frac / \\sqrt 混排）', await timed(() => {
   QB.RichText.render('解方程 \\frac{-b+\\sqrt{b^{2}-4ac}}{2a}，求根 \\sqrt[3]{x_{1}} 的值');
@@ -510,7 +577,9 @@ if (process.argv.indexOf('--assert') >= 0) {
     ['XLSX 导出构建', 60],
     ['DOCX 导出构建', 40],
     ['FSRS.review 单次调度', 2],
-    ['FSRS 优化器 computeTrain（4000', 20000]
+    ['FSRS 优化器 computeTrain（4000', 20000],
+    ['SRS 本地评分落盘', 20],
+    ['导出构建（JSON+CSV+MD+TXT', 60]
   ];
   const fails = [];
   console.log('================ 性能门禁 ================');
@@ -525,6 +594,26 @@ if (process.argv.indexOf('--assert') >= 0) {
   const heapOk = heapDeltaMb <= 40;
   console.log((heapOk ? '  ✓ ' : '  ✗ ') + 'heapUsed 增量：' + heapDeltaMb.toFixed(2) + 'MB ≤ 40.00MB');
   if (!heapOk) fails.push('heapUsed 增量 ' + heapDeltaMb.toFixed(2) + 'MB > 40MB');
+
+  // C1 补齐三类门禁：SRS 写放大（载荷字节/缩减比）、API P95、导出体积（KB）
+  const SRS_DELTA_MAX_B = 2048;
+  const SRS_RATIO_MIN = 100;
+  const srsPayloadOk = isFinite(srsDeltaBytes) && srsDeltaBytes <= SRS_DELTA_MAX_B
+    && srsFullBytes >= srsDeltaBytes * SRS_RATIO_MIN;
+  console.log((srsPayloadOk ? '  ✓ ' : '  ✗ ') + 'SRS 增量写载荷：' + srsDeltaBytes + ' B ≤ '
+    + SRS_DELTA_MAX_B + ' B，整表/增量 ' + (srsFullBytes / srsDeltaBytes).toFixed(1) + '× ≥ ' + SRS_RATIO_MIN + '×');
+  if (!srsPayloadOk) fails.push('SRS 增量写载荷 ' + srsDeltaBytes + ' B / 缩减 ' + (srsFullBytes / srsDeltaBytes).toFixed(1) + '×');
+
+  const API_P95_MAX = 50;
+  const apiOk = apiP95 <= API_P95_MAX;
+  console.log((apiOk ? '  ✓ ' : '  ✗ ') + 'API PATCH /reviews P95：' + apiP95.toFixed(2) + ' ms ≤ ' + API_P95_MAX + '.00 ms');
+  if (!apiOk) fails.push('API P95 ' + apiP95.toFixed(2) + 'ms > ' + API_P95_MAX + 'ms');
+
+  const EXPORT_MAX_KB = 800;
+  const expKB = expBytes / 1024;
+  const expOk = isFinite(expKB) && expKB <= EXPORT_MAX_KB;
+  console.log((expOk ? '  ✓ ' : '  ✗ ') + '导出体积（JSON+CSV+MD+TXT）：' + expKB.toFixed(1) + ' KB ≤ ' + EXPORT_MAX_KB + ' KB');
+  if (!expOk) fails.push('导出体积 ' + expKB.toFixed(1) + 'KB > ' + EXPORT_MAX_KB + 'KB');
   console.log('-------------------------------------------');
   if (fails.length) {
     fails.forEach((f) => console.log('  - ' + f));

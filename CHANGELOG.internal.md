@@ -6,7 +6,46 @@
 
 ---
 
-## （待回填） · feat(srs): 增量复习写入（PATCH）、题面 hash 去 GET 与 revlog 写修订号
+## （待回填） · fix(bench,docs): 补齐性能门禁（SRS 写放大/API P95/导出体积）并对齐文档数字
+
+**核心改动（对应 EVALUATION-2026-11-02 的 C1–C4）**
+- C1 `scripts/bench.mjs`：
+  - 修复导出体积恒为 `NaN KB`：同步累加排除 `binary` 与 `async` 格式（分享页 `html` 的 `build()`
+    返回 Promise，`sizeOf(Promise)=undefined` 导致 NaN）。
+  - 新增 5 项门禁（20 → 25）：`SRS 本地评分落盘 ≤ 20ms`、`导出构建 ≤ 60ms`、
+    `SRS 增量写载荷 ≤ 2048B 且整表/增量 ≥ 100×`、`API PATCH /reviews P95 ≤ 50ms`（起参考后端实测 50 次）、
+    `导出体积 ≤ 800KB`；同时补齐对应打点行。
+- C2 新增 `scripts/docs-check.mjs`：实测复算 README/DEVELOPMENT 中的断言数、运行项数、门禁数、
+  首屏文件数/脚本数/gzip 体积并逐项比对（0 漂移才退出 0），README 与 DEVELOPMENT 的可核对数字全部对齐。
+- C3 `js/modules/srs-store.js` 文件头注释由 FSRS-4.5 更正为 **FSRS-6（21 权重）**，并写明
+  旧 17 维 4.5 权重由优化器按长度拒绝、回落官方默认（与 `docs/SRS.md` 一致）。
+- C4 `docs/EVALUATION-2026-11-02.md` 增加「修复回填」段：A1–A5/B1–B3/C1–C3 标记已修复并回填 commit hash，
+  未完成项（P2-3/4/5/7/8/9/12、B1 本地整表布局）保留并注明原因。
+- 文档同步：`README.md`、`docs/DEVELOPMENT.md`（断言数/门禁数/首屏体积/关键耗时）、本文件。
+
+**验证数据（2026-11-02 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3782/3782 通过，0 失败，24.5s**。
+- `node --expose-gc scripts/bench.mjs --assert`：**25/25 门禁通过**，heapUsed **+2.62MB**（8.00→10.63）；
+  SRS 增量写载荷 **237B**（整表 3000 状态 403.7KB → 增量 237B，**1744.3×**，门限 2048B / 100×）；
+  API `PATCH /reviews` **P95 10.00ms / P50 3.82ms**（50 次，门限 50ms）；导出四格式 **675.6KB**（门限 800KB）；
+  SRS 本地评分落盘 **4.07ms**（3000 状态整表，门限 20ms）；导出构建 **4.52ms**（门限 60ms）。
+- `node scripts/docs-check.mjs`：**24 个运行项 / 3782 项断言 / 25 项门禁 / 75 文件（67 内联 js）/
+  237.4 KB gzip · 650.6 KB raw**，文档比对 **0 处漂移（全部一致 ✅）**。
+
+**公共抽象/影响**
+- 新增开发工具 `scripts/docs-check.mjs`（只读校验，不进入运行时、不改变任何 API）。
+- bench 新增局部辅助 `pctile(sorted, p)` 与 `sizeOf`/`async` 过滤口径；无公开 API 变更。
+- 文档中的历史耗时条目改为本轮实测值并标注日期，避免“旧快照冒充当前基线”。
+
+**TODO/风险**
+- `docs-check.mjs` 目前为**手动/可选的**一致性校验（未接入 CI；接入会让单条 CI 腿重复跑全部套件与 bench）。
+- 首屏体积/断言数仍由脚本复算，但门禁阈值（如导出 800KB、API P95 50ms）以本机基线 × 数倍设定，
+  只拦量级回归，不拦小幅退化。
+- bench 的 `API P95` 跑本机参考后端（回环），不代表真实网络；真实部署延迟仍未验证。
+
+---
+
+## 5deadbc · feat(srs): 增量复习写入（PATCH）、题面 hash 去 GET 与 revlog 写修订号
 
 **核心改动（对应 EVALUATION-2026-11-02 的 B1–B3）**
 - B1 服务端 `scripts/serve-api.mjs`：`PUT /api/banks/{id}/reviews` 保持整表语义；新增

@@ -1,8 +1,9 @@
 /**
  * SRS 学习进度存储（按题库隔离，键 qb:review:<bankId>，值为 contentHash → FSRS 状态）
  * 与错题/收藏一致使用 contentHash，题目元数据被编辑不影响复习进度。
- * 调度算法 QB.FSRS（FSRS-4.5）；旧 SM-2 状态（无 algo/stability）在首次评分时
- * 自动按 FSRS 新卡初始化（见 fsrs.review）。
+ * 调度算法 QB.FSRS（FSRS-6，21 权重，与 docs/SRS.md 对齐）；旧 SM-2 状态（无 algo/stability）
+ * 在首次评分时自动按 FSRS 新卡初始化（见 fsrs.review）；旧 17 维 FSRS-4.5 权重由优化器
+ * 按长度拒绝并回落官方默认（见 fsrs-opt 的 validMeta）。
  *
  * 存储读写一律经 QB.DB.reviews 契约层（local-adapter 直写 LocalStorage / api-adapter 走 REST），
  * 故触碰存储的方法均为异步（await）；评分映射与到期桶计算保持同步纯函数。
