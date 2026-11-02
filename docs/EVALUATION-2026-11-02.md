@@ -10,7 +10,7 @@
 ## 0.0 修复回填（2026-11-02 后续实施轮）
 
 > 本段由实施轮追加。§0–§12 为审计当时的原始快照，**不回改历史实测数据**；本段只登记闭环状态与 commit。
-> C 阶段（C1–C4）在本次提交中完成，其 commit hash 见 `CHANGELOG.internal.md` 顶部同名条目。
+> C 阶段（C1–C4）提交为 `3e6af9b`，明细见 `CHANGELOG.internal.md` 顶部同名条目。
 
 | 条目 | 状态 | Commit |
 | --- | --- | --- |
@@ -22,10 +22,10 @@
 | B1 SRS 增量写（服务端 PATCH + 本地 `reviews.patch`） | ✅ 已修复（服务端/上行 O(改动数)；**本地布局仍整表 O(n)**） | `5deadbc` |
 | B2 `questions.update` 去掉多余内容 GET | ✅ 已修复 | `5deadbc` |
 | B3 `revlog.revision()` + 统计页派生缓存 | ✅ 已修复 | `5deadbc` |
-| C1 bench `NaN KB` 修复；SRS 写放大/API P95/导出体积入门禁 | ✅ 已修复 | 见 `CHANGELOG.internal.md` C 条目 |
-| C2 README/DEVELOPMENT 数字改脚本实测校验（`scripts/docs-check.mjs`） | ✅ 已修复 | 同上 |
-| C3 `srs-store.js` 注释对齐 FSRS-6（旧 17 维 4.5 权重拒绝回落） | ✅ 已修复 | 同上 |
-| C4 本回填段 | ✅ 已完成 | 同上 |
+| C1 bench `NaN KB` 修复；SRS 写放大/API P95/导出体积入门禁 | ✅ 已修复 | `3e6af9b` |
+| C2 README/DEVELOPMENT 数字改脚本实测校验（`scripts/docs-check.mjs`） | ✅ 已修复 | `3e6af9b` |
+| C3 `srs-store.js` 注释对齐 FSRS-6（旧 17 维 4.5 权重拒绝回落） | ✅ 已修复 | `3e6af9b` |
+| C4 本回填段 | ✅ 已完成 | `3e6af9b` |
 | P2-3 错题/收藏整库读 | ⏳ 未做 | — |
 | P2-4 解析阶段写资产（取消留孤儿） | ⏳ 未做 | — |
 | P2-5 merge 导入整键覆盖 | ⏳ 未做 | — |

@@ -6,7 +6,7 @@
 
 ---
 
-## （待回填） · fix(bench,docs): 补齐性能门禁（SRS 写放大/API P95/导出体积）并对齐文档数字
+## 3e6af9b · fix(bench,docs): 补齐性能门禁（SRS 写放大/API P95/导出体积）并对齐文档数字
 
 **核心改动（对应 EVALUATION-2026-11-02 的 C1–C4）**
 - C1 `scripts/bench.mjs`：
