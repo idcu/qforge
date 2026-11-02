@@ -700,6 +700,138 @@ section('F2c 胜者仍存活（只是慢）：锁心跳续租，等待者不误�
   B.QB.Store.migrateToIdb = origB;
 }
 
+section('P1 迁移期不向 LocalStorage 写业务键（旧整表布局 → IDB）');
+{
+  const raw = new Map();
+  const opts = { raw: raw, indexedDB: createMemoryIDB(), BroadcastChannel: globalThis.BroadcastChannel };
+  const H = await createHarness(ROOT, opts);
+  H.QB.DB.init();
+  const bank = await H.QB.DB.banks.create({ name: '缓冲库' });
+  const a = q1();
+  const b = q2();
+  const h1old = v1hash(a);
+  const h2old = v1hash(b);
+  H.QB.Storage.setSync(H.QB.KEYS.questions(bank.id), [
+    Object.assign({ bankId: bank.id, contentHash: h1old, category: '' }, a),
+    Object.assign({ bankId: bank.id, contentHash: h2old, category: '' }, b)
+  ]);
+  H.QB.Storage.setSync(H.QB.KEYS.review(bank.id), {
+    [h1old]: { algo: 'fsrs', stability: 2.4, difficulty: 4.93, reps: 1, lapses: 0, last: T0 - DAY, due: T0 },
+    [h2old]: { algo: 'fsrs', stability: 5.8, difficulty: 3.99, reps: 2, lapses: 0, last: T0 - 2 * DAY, due: T0 + DAY }
+  });
+  H.QB.Storage.setSync(H.QB.KEYS.revlog, [
+    { id: 'rl1', t: T0 - DAY, h: h1old, r: 3 },
+    { id: 'rl2', t: T0 - 2 * DAY, h: h2old, r: 1 }
+  ]);
+  H.QB.Storage.setSync(H.QB.KEYS.metaSchema, 4);
+  await H.QB.Storage.initStore();
+  eq(H.QB.Storage.mode, 'ls', '启动时仍是 LS（schema 4）');
+
+  // 记录迁移期间真正落到 LS 的键（底层 Map 写入）
+  const writes = [];
+  const realSet = raw.set.bind(raw);
+  raw.set = function (k, v) { writes.push(k); return realSet(k, v); };
+
+  const r = await H.QB.Migration.run();
+  const businessWrites = writes.filter((k) => !H.QB.Store.isBootstrap(k.replace(/^qb:/, '')));
+  eq(businessWrites.length, 0, '迁移期间不向 LS 写业务键（实际 ' + businessWrites.length + ' 个）');
+  eq(r.backend.backend, 'idb', 'v5→v6 落到 IDB（backend=idb）');
+  eq(H.QB.Storage.mode, 'idb', '门面切到 idb');
+  eq(H.QB.Storage.get(H.QB.KEYS.metaSchema), 6, 'schema 推到 6');
+  ok(raw.has('qb:' + H.QB.KEYS.review(bank.id)), 'LS 旧整表保留为回退快照（迁移未改写业务键）');
+  ok(raw.has('qb:' + H.QB.KEYS.revlog), 'LS 旧日志整表同样保留');
+
+  const items = (await H.QB.DB.questions.list(bank.id, {})).items;
+  eq(items.length, 2, 'IDB 题目 2 道');
+  eq(items.filter((q) => H.QB.isCurrentHash(q.contentHash)).length, 2, 'IDB 内 hash 已升到当前版本');
+  eq(Object.keys(H.QB.DB.reviews.list(bank.id)).length, 2, 'IDB 复习状态 2 条');
+  eq(H.QB.DB.reviews.get(bank.id, H.QB.makeContentHash(a)).stability, 2.4, 'per-hash 状态值一致');
+  eq(H.QB.DB.revlog.list().length, 2, 'IDB 日志 2 条');
+  ok(!H.QB.Storage.keys().includes(H.QB.KEYS.review(bank.id)), 'IDB 门面的逻辑视图看不到旧整表键');
+  ok(!H.QB.Storage.keys().includes(H.QB.KEYS.revlog), 'IDB 门面的逻辑视图看不到旧日志键');
+  ok(!raw.has('qb:' + H.QB.KEYS.metaMigrationLock), '迁移锁已释放');
+}
+
+section('P2 容量预检正例：空间充足 → 静默通过，迁移结果带预检数据');
+{
+  const raw = new Map();
+  const opts = { raw: raw, indexedDB: createMemoryIDB(), BroadcastChannel: globalThis.BroadcastChannel };
+  const H = await createHarness(ROOT, opts);
+  H.QB.DB.init();
+  const bank = await H.QB.DB.banks.create({ name: '预检正例库' });
+  await H.QB.DB.questions.insertMany(bank.id, [q1()], { dedupe: false });
+  H.QB.Storage.setSync(H.QB.KEYS.metaSchema, 5);
+  await H.QB.Storage.initStore();
+
+  const pf = H.QB.Store.preflightMigration({ idbUsable: true });
+  eq(pf.ok, true, '预检通过（ok=true）');
+  eq(pf.nearLimit, false, '未接近上限（nearLimit=false）');
+  ok(pf.freeChars > pf.neededChars, '剩余空间大于所需（' + pf.freeChars + ' > ' + pf.neededChars + '）');
+
+  const r = await H.QB.Migration.run();
+  eq(r.version, 6, '迁移正常完成');
+  eq(r.preflight && r.preflight.ok, true, '迁移结果携带通过状态的预检数据');
+}
+
+section('P3 容量预检反例：IDB 不可用 + 空间不足 → 写入前中止、不产生残留');
+{
+  // 没有 indexedDB：LS 就是迁移目标，必须整份写进 LS —— 这才是「迁移无法完成」的真实场景。
+  const raw = new Map();
+  const opts = { raw: raw, BroadcastChannel: globalThis.BroadcastChannel };
+  const H = await createHarness(ROOT, opts);
+  H.QB.DB.init();
+  const bank = await H.QB.DB.banks.create({ name: '预检反例库' });
+  const big = 'x'.repeat(20000);
+  H.QB.Storage.setSync('filler-a', big);
+  H.QB.Storage.setSync('filler-b', big);
+  H.QB.Storage.setSync(H.QB.KEYS.metaSchema, 4);
+  await H.QB.Storage.initStore();
+  eq(H.QB.Storage.mode, 'ls', 'IDB 不可用时初始化为 LS');
+
+  // 把名义配额压到「已用量 + 64KB」：预算 = 配额 − 32KB < 已用 + 128KB 预留 → 必然不足
+  const used = H.QB.Store.lsUsedChars(true);
+  const prevQuota = H.QB.CONFIG.STORAGE_QUOTA_BYTES;
+  H.QB.CONFIG.STORAGE_QUOTA_BYTES = used + 64 * 1024;
+  const before = new Map(raw);
+  let err = null;
+  try { await H.QB.Migration.run(); } catch (e) { err = e; }
+  H.QB.CONFIG.STORAGE_QUOTA_BYTES = prevQuota;
+
+  ok(!!err, '容量不足时迁移明确失败（不静默继续）');
+  eq(err && err.code, 'LS_CAPACITY', '错误码为 LS_CAPACITY');
+  eq(err && err.preflight && err.preflight.idbUsable, false, '预检按「IDB 不可用」口径拦截');
+  ok(err && /LocalStorage/.test(err.message), '错误信息可读并指明 LocalStorage 空间不足');
+  eq(raw.size, before.size, '失败前后 LS 键数量不变（无残留键）');
+  eq(raw.get('qb:' + H.QB.KEYS.metaSchema), before.get('qb:' + H.QB.KEYS.metaSchema), 'schema 版本未被推进');
+  ok(!raw.has('qb:' + H.QB.KEYS.metaMigrationLock), '迁移锁已释放（无锁残留）');
+  ok(H.QB.Store.readMarker() !== 'idb', '未写入 idb 后端标记（未开始迁移）');
+  eq(H.QB.Storage.keys().filter((k) => k.indexOf('questions:' + bank.id) === 0).length, 0,
+    '未产生题目分片键（业务数据未动）');
+}
+
+section('P4 容量预检接近上限：仍放行但标记 nearLimit（供 UI 提示）');
+{
+  const raw = new Map();
+  const opts = { raw: raw, indexedDB: createMemoryIDB(), BroadcastChannel: globalThis.BroadcastChannel };
+  const H = await createHarness(ROOT, opts);
+  H.QB.DB.init();
+  // 4.9M 字符 ≈ 默认预算 5.21M 的 94%，剩余约 310K > 128KiB 预留：接近上限但仍可完成
+  H.QB.Storage.setSync('near', 'y'.repeat(4900000));
+  const pf = H.QB.Store.preflightMigration({ idbUsable: true });
+  eq(pf.ok, true, '接近上限但仍可迁移（ok=true）');
+  eq(pf.nearLimit, true, '标记 nearLimit=true（UI 提示清理空间）');
+  ok(pf.reason === 'near-limit', 'reason=near-limit');
+
+  // IDB 可用时，即使已用超出名义预算也不阻断（迁移不写 LS 业务键，且是近满用户的唯一减压手段）
+  const used = H.QB.Store.lsUsedChars(true);
+  const prevQuota = H.QB.CONFIG.STORAGE_QUOTA_BYTES;
+  H.QB.CONFIG.STORAGE_QUOTA_BYTES = Math.round(used / 2);
+  const over = H.QB.Store.preflightMigration({ idbUsable: true });
+  H.QB.CONFIG.STORAGE_QUOTA_BYTES = prevQuota;
+  eq(over.ok, true, '超出名义预算仍放行（IDB 可用）');
+  ok(over.percent > 100, 'percent 如实反映超限（' + over.percent + '%）');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

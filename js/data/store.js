@@ -781,15 +781,69 @@
       return { removed: removed.length, bytes: bytes, ms: Date.now() - started };
     },
 
-    /** 保留的 LS 旧数据占用（清理入口展示用） */
-    legacyLSUsedBytes() {
-      let bytes = 0;
+    /** LS 序列化字符数（key + JSON + 2）；迁移预检与占用展示共用同一份口径 */
+    lsUsedChars(includeBootstrap) {
+      let chars = 0;
       lsKeys().forEach((k) => {
-        if (isBootstrap(k)) return;
+        if (!includeBootstrap && isBootstrap(k)) return;
         const raw = global.localStorage.getItem(fullKey(k)) || '';
-        bytes += (raw.length + k.length + 2) * 2;
+        chars += raw.length + k.length + 2;
       });
-      return bytes;
+      return chars;
+    },
+
+    /** 保留的 LS 旧数据占用（清理入口展示用；按 UTF-16 近似 2 字节/字符） */
+    legacyLSUsedBytes() {
+      return Store.lsUsedChars(false) * 2;
+    },
+
+    /**
+     * 迁移前容量预检（只读，不写任何键；调用方 `js/modules/migrate.js::doRun`）。
+     *
+     * 口径（与 `docs/DATABASE.md`「迁移前容量预检」一致）：
+     *   - 计量单位 = 序列化字符数（key + JSON 串 + 2 个分隔符），不是字节；
+     *   - 预算 = `QB.CONFIG.STORAGE_QUOTA_BYTES`（名义 5MiB）− 32KiB 记账余量 = 5,210,112 字符；
+     *   - 实测 Edge 上限 5,222,564 字符 → 预算比实测保守约 0.24%（宁可提前提示，不中途炸）；
+     *   - IDB 可用：迁移期只写引导键（锁/进度/标记，几十~几百字节），**不写业务键**，
+     *     因此即使已用超出名义预算也放行——迁移恰是近满用户的唯一减压手段；只在
+     *     `nearLimit` 时提示清理。引导键若真写不进，失败发生在任何业务写入之前，语义不变；
+     *   - IDB 不可用：迁移前自动备份会回落 LS（整份副本），v4→v5 布局改写期间新旧键并存，
+     *     因此保守按「再装一整份」估算所需空间，不足则写入前中止。
+     *
+     * 误差与误判：
+     *   - 浏览器配额各家不同（Safari/Firefox/移动端均未实测）；无痕模式可能为 0 → 会误报「空间不足」，
+     *     但这同样是真实约束，属安全方向的误判；
+     *   - 只统计 `qb:` 前缀键；同源其他应用的数据不占用本应用配额，故不计入；
+     *   - 字符数不是浏览器的实际字节记账，Chromium 实测偏差 < 0.4%，其他引擎可能更大；
+     *   - 预检通过也不保证写入一定成功（并发写入/浏览器临时限制），失败仍按既有安全回退处理。
+     *
+     * @param {{idbUsable?:boolean}} [opts] idbUsable 由调用方按 `Store.available` 传入
+     * @returns {{ok:boolean, reason:string, idbUsable:boolean, usedChars:number, budgetChars:number,
+     *   neededChars:number, freeChars:number, percent:number, nearLimit:boolean}}
+     */
+    preflightMigration(opts) {
+      opts = opts || {};
+      const idbUsable = !!opts.idbUsable;
+      const used = Store.lsUsedChars(true);
+      const budget = ((QB.CONFIG && QB.CONFIG.STORAGE_QUOTA_BYTES) || 5 * 1024 * 1024) - 32 * 1024;
+      const reserve = 128 * 1024;
+      const free = budget - used;
+      const ratio = budget > 0 ? used / budget : 1;
+      const nearLimit = ratio >= ((QB.CONFIG && QB.CONFIG.STORAGE_DANGER_RATIO) || 0.85) || free < reserve;
+      // IDB 可用：所需 LS 空间只是引导键预留（业务数据全部走 IDB）；IDB 不可用：按整份副本估算。
+      const needed = idbUsable ? reserve : used + reserve;
+      const ok = idbUsable ? true : free >= needed;
+      return {
+        ok: ok,
+        reason: ok ? (nearLimit ? 'near-limit' : 'ok') : 'ls-capacity',
+        idbUsable: idbUsable,
+        usedChars: used,
+        budgetChars: budget,
+        neededChars: needed,
+        freeChars: free > 0 ? free : 0,
+        percent: Math.round(ratio * 1000) / 10,
+        nearLimit: nearLimit
+      };
     },
 
     /**

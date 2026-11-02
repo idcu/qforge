@@ -18,7 +18,12 @@
  * 可靠性设计：
  *   - **幂等/可重入**：每库先把 oldHash→newHash 映射写入 meta:hashMap:<bankId>，再改题目与
  *     用户数据；中断重跑复用已存映射，不会二次改写或重复数据。布局转换先写新键再删旧键。
- *   - **失败回滚**：run() 进入前对全部逻辑键做内存快照，任一步抛错即恢复快照后重新抛出。
+ *   - **迁移期不写 LS 业务键**：进入迁移后业务写入只进内存缓冲（`Storage.beginMigrationBuffer`），
+ *     LS 只允许引导键；v4→v5 生成的 per-hash/分段键由 v5→v6 统一复制进 IDB，因此迁移不再
+ *     消耗 LocalStorage 空间（近满旧库也能完成）。失败时 LS 仍是迁移前快照，丢弃内存缓冲即可。
+ *   - **容量预检**：写入前按序列化字符数估算（见 QB.Store.preflightMigration）。IDB 可用时迁移
+ *     不写 LS 业务键，恒放行（仅在接近上限时提示）；IDB 不可用时按整份副本估算，不足则
+ *     写入前中止，绝不在写到一半时爆 QuotaExceededError。
  *   - **多标签并发**：meta:migrationLock 版本戳（owner + at，30s 过期视为陈旧锁），只有
  *     抢到锁的标签执行；同标签内以模块级单飞 Promise 去重。
  */
@@ -69,13 +74,14 @@
     return timer;
   }
 
-  /* ---------------- 失败回滚快照 ---------------- */
+  /* ---------------- 失败回滚快照（仅 LS 作为迁移目标时使用） ---------------- */
 
   /**
    * 失败回滚快照：保存**原始 JSON 串**而非对象引用。
    * - 迁移会就地改写复习整表（remap），持引用会拿到改写后的值，回滚不完整；
    * - 串取自已落盘的 LocalStorage（迁移前 saveAutoBackup 已 forceSync），与缓存共享同一份
    *   不可变字符串，快照本身几乎不增加堆占用（H1：不把全库再复制一遍到内存）。
+   * - 迁移写入缓冲生效（目标为 IDB）时不需要快照：LS 业务键全程未改写，失败丢弃内存缓冲即可。
    */
   function snapshotAll() {
     const keys = QB.Storage.keys();
@@ -451,11 +457,11 @@
       return { backend: 'ls', fallback: det.reason };
     }
     const src = Store.lsSource();
-    // 读源：键/原始串仍来自 LocalStorage；值优先复用已解析的内存缓存。
-    // 迁移前 saveAutoBackup 已 forceSync 且全量读过一次，此缓存即 LS 权威值；
-    // 逐批再 JSON.parse 同一份 20k 题会白造约 20MB 瞬时对象，是迁移原始峰值的主要来源之一。
+    // 读源：键取**逻辑视图**（LS ∪ 迁移内存缓冲），因为 v4→v5 生成的 per-hash 复习键与
+    // revlog 分段键从未写入 LS（迁移期只允许引导键写 LS），只存在于缓存/待写队列；
+    // 值优先复用已解析的缓存，原始串仍取 LS（供字节统计；缓冲键退回 JSON.stringify）。
     const source = {
-      keys: function () { return src.keys(); },
+      keys: function () { return QB.Storage.keys(); },
       raw: function (k) { return src.raw(k); },
       get: function (k) {
         const cached = QB.Storage.peek(k);
@@ -466,7 +472,7 @@
     // 复用现有缓存水合（只补读缺失键），不再整库重建 records：
     // 迁移按批次读写、逐批深比对已通过，此刻缓存里的值与已落盘 IDB 一致；多建一份全量 Map
     // 只会多一次整库克隆（抬高峰值）。QB.Storage.get 会把尚未读过的键按需解析进缓存。
-    src.keys().forEach((k) => { QB.Storage.get(k); });
+    source.keys().forEach((k) => { QB.Storage.get(k); });
     QB.Storage.adoptStore({ mode: 'idb' });
     return { backend: 'idb', migrated: migrated };
   }
@@ -503,6 +509,26 @@
     // 持锁即续租：迁移再慢，锁也不会因 30s TTL 被等待者误抢（胜者崩溃时心跳停止，锁自然过期）
     const heartbeat = startLockHeartbeat(owner);
     try {
+      // 迁移目标：IDB 可用且用户未显式回退 LS。只有这种情况才会「只写引导键」；
+      // 否则 LS 就是目标，v1→v5 仍要在 LS 上写业务键（预检也必须按整份副本估算）。
+      let idbUsable = false;
+      if (QB.Store && typeof QB.Store.detect === 'function' && QB.Store.marker !== 'ls') {
+        try { idbUsable = !!(await QB.Store.detect()).ok; } catch (_) { idbUsable = false; }
+      }
+      // 容量预检：只读估算，写入前决定是否继续；不足则中止（释放锁、不留业务残留）
+      const preflight = QB.Store && typeof QB.Store.preflightMigration === 'function'
+        ? QB.Store.preflightMigration({ idbUsable: idbUsable })
+        : null;
+      if (preflight && !preflight.ok) {
+        releaseLock(owner);
+        // 预检只在「IDB 不可用（LS 是迁移目标）」时拦截；IDB 可用时迁移不写 LS 业务键，恒放行。
+        const e = new Error('存储升级已跳过：IndexedDB 不可用，且 LocalStorage 空间不足以在本机完成升级（已用 ' +
+          preflight.usedChars + ' / 上限 ' + preflight.budgetChars + ' 字符）。现有数据未改动。');
+        e.code = 'LS_CAPACITY';
+        e.preflight = preflight;
+        throw e;
+      }
+
       // F1：迁移写入前先落全量自动备份；备份失败即中止（不进入任何数据改写）
       const backup = QB.Backup;
       if (!backup || typeof backup.saveAutoBackup !== 'function') {
@@ -519,8 +545,14 @@
         throw e;
       }
 
-      const snap = snapshotAll();
-      const result = { fromVersion: fromVersion, version: SCHEMA_VERSION, autoBackup: !!autoBackup };
+      // 迁移写入缓冲：业务键只进内存（LS 只写引导键），v5→v6 统一复制进 IDB。
+      // IDB 不可用或用户回退 LS 时缓冲无意义（LS 就是目标），保持旧路径直接写 LS。
+      const snap = idbUsable ? null : snapshotAll();
+      const buffer = idbUsable ? QB.Storage.beginMigrationBuffer() : null;
+      const result = {
+        fromVersion: fromVersion, version: SCHEMA_VERSION,
+        autoBackup: !!autoBackup, preflight: preflight
+      };
       try {
         if (fromVersion < 2) result.migrated = await migrateV1ToV2();
         if (fromVersion < 3) result.sharded = await migrateV2ToV3();
@@ -529,11 +561,17 @@
         result.backend = await migrateV5ToV6();
         QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
         await QB.Storage.flush();
+        QB.Storage.endMigrationBuffer(buffer, true);
         try { await backup.markAutoBackupDone(); } catch (_) { /* 进度标记失败不影响迁移结果 */ }
         releaseLock(owner);
         return result;
       } catch (e) {
-        try { restoreAll(snap); } catch (rollbackErr) { e.rollbackError = rollbackErr; }
+        // 目标为 IDB：LS 业务数据未被迁移改写，丢弃内存缓冲即可回到迁移前视图；
+        // 目标为 LS（无 IDB / 用户回退）：迁移已写过 LS，按快照逐键回滚（不半写、不丢数据）。
+        try {
+          if (buffer) QB.Storage.endMigrationBuffer(buffer, false);
+          else restoreAll(snap);
+        } catch (rollbackErr) { e.rollbackError = rollbackErr; }
         try { releaseLock(owner); } catch (_) { /* ignore */ }
         throw e;
       }

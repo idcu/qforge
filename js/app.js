@@ -1442,8 +1442,14 @@
       // F1：迁移中任何失败（典型：隐私模式/策略禁用导致 IndexedDB open 抛 SecurityError，
       // 进而自动备份失败）都必须**可见但不打断**：记录错误、提示已回退，继续启动。
       // 数据仍完整保留在 LocalStorage（迁移写入前即中止），版本号不推进，下次启动会再次尝试 IDB。
-      console.error('[Migration] 存储迁移未完成，保持兼容模式：', e);
-      UI.toast('当前环境不支持本地新版存储，已回退到兼容模式（数据未受影响）', 'err');
+      if (e && e.code === 'LS_CAPACITY') {
+        // 容量预检在写入前中止：给出已用/上限/所需的具体数字，而不是「写到一半失败」
+        console.warn('[Migration] 容量预检未通过，跳过本次存储升级：', e.preflight);
+        UI.toast(e.message, 'err');
+      } else {
+        console.error('[Migration] 存储迁移未完成，保持兼容模式：', e);
+        UI.toast('当前环境不支持本地新版存储，已回退到兼容模式（数据未受影响）', 'err');
+      }
     } finally {
       if (offProgress) offProgress();
     }
@@ -1486,6 +1492,11 @@
       const el = document.getElementById('status-text');
       if (el) el.textContent = '本页写入尚未落盘（迁移未完成），请勿关闭或刷新本页';
       UI.toast('存储迁移仍未完成：本页写入未落盘，关闭或刷新本页会丢失这些修改', 'err');
+    }
+    // 迁移成功但 LS 已接近上限：升级本身不再追加 LS 业务键，但后续导入/编辑仍可能失败，提示清理
+    if (runRes && !runRes.locked && runRes.preflight && runRes.preflight.nearLimit) {
+      UI.toast('本地存储已接近上限（已用约 ' + runRes.preflight.percent +
+        '%），本次存储升级已完成；建议在「备份与恢复」导出备份并清理空间', 'err');
     }
     // 本地存储落盘失败（如配额已满）全局可见，不静默吞掉
     QB.Storage.onError(() => {

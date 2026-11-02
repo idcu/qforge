@@ -583,6 +583,12 @@ async function buildLegacyBank(n, tier) {
 }
 
 const migrationRows = [];
+/* harness 的 localStorage 是无配额内存 Map：本段量的是「LS 是迁移目标」（无 IDB）的性能，
+   20000 题夹具约 7.8M 字符，已超出真实浏览器 5MiB 配额（真机不可达，Phase 5 已记录）。
+   预检按真实配额会把替身误判为「空间不足」，因此本段把名义配额抬到夹具规模之上；
+   预检的正例/反例由 migrate.test P2–P4 与真机 CDP 覆盖，不在此处重复。 */
+const benchLSScopeQuota = QB.CONFIG.STORAGE_QUOTA_BYTES;
+QB.CONFIG.STORAGE_QUOTA_BYTES = 64 * 1024 * 1024;
 for (const tier of [1000, 3000, 20000]) {
   const legacy = await buildLegacyBank(tier, tier);
   const heap0 = (bestEffortGc(), process.memoryUsage().heapUsed);
@@ -703,6 +709,7 @@ if (scaleArg) {
   });
   QB.Storage.clearAll();
 }
+QB.CONFIG.STORAGE_QUOTA_BYTES = benchLSScopeQuota; // 恢复真实口径，后续段落按默认配额展示占用
 
 /* ---------- 12c. IndexedDB 存储底座（Phase G / G4）：三档容量 + 迁移 + 写入 ----------
  * 口径：Node 无原生 IndexedDB，使用 scripts/lib/idb-memory.mjs 的内存实现。

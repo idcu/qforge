@@ -6,6 +6,59 @@
 
 ---
 
+## <hash 待回填> · fix(migrate): 迁移期间不再向 LocalStorage 追加业务写入
+
+**根因（先证后改）**
+- 12k bench 形态旧库（种入 65 键 / 4,849,330 字符）真机迁移在 `qb:user:revlog:47` 抛
+  `QuotaExceededError`，回退 `ls` 兼容模式（mode=ls、schema=0）。根因：v4→v5 的
+  `ReviewStore.convertLegacy` / `RevlogStore.convertLegacy` 在模式仍为 LS 时把 **per-hash 复习键**
+  与 **revlog 分段键**直接写进 LocalStorage；12k 段约 60 个，第 48 段越界。种子装得下、迁移完不成，
+  这类用户会永久卡在 LS。
+- `js/utils/storage.js` 新增迁移写入缓冲：`beginMigrationBuffer()` / `endMigrationBuffer(handle,success)`
+  （调用方只有 `js/modules/migrate.js::doRun`）。进入后 `_awaiting=true`，业务键只进 `_cache`/`_pending`，
+  **LS 只允许写引导键**（锁/进度/标记）；成功后 `adoptStore` 切 idb 并丢弃内存产物；失败丢弃内存产物，
+  LS 业务数据从未改写。`keys()` LS 分支剔除 `_awaitDeletes` 墓碑，避免已删除旧布局键被 v5→v6 复制回 IDB。
+- `js/data/store.js` 新增唯一容量口径：`lsUsedChars(includeBootstrap)`（逐键 `key+raw+2` 字符）、
+  `preflightMigration({idbUsable})`（只读）。预算 = 5MiB − 32KiB = 5,210,112 字符，比 Edge 实测
+  5,222,564 保守 0.24%。IDB 可用恒放行（迁移只写引导键；≥85% 置 `nearLimit`）；IDB 不可用按
+  「整份副本」`used + 128KiB` 估算，不足即 `LS_CAPACITY`。
+- `js/modules/migrate.js`：抢锁后、备份/写入前预检；v5→v6 读源从 `Store.lsSource().keys()` 改为
+  **逻辑键视图** `QB.Storage.keys()`（LS ∪ 内存缓冲），否则只存在于缓冲的 per-hash/分段键会漏迁；
+  IDB 目标失败丢弃缓冲（LS 未动），LS 目标失败仍用 `snapshotAll/restoreAll`。
+- `js/app.js`：`LS_CAPACITY` 显示可读原因（已用/上限字符数）；成功但 `nearLimit` 时提示清理空间。
+- 断点续传、锁心跳（2s）、D1 等待/接管/回放路径未改动。
+
+**验证数据（真机 Edge 151，CDP 真窗口，25ms 采样，2026-11-03）**
+- 12k bench 旧库（修复前 → 修复后）：`mode ls/schema 0` + `revlog:47 QuotaExceededError`、
+  239.2ms 中止 → **`mode idb` / `schema 6` / 1829ms 完成**（`migrateToIdb` 1637ms）；
+  12,124 键复制并逐键校验；12000 题 hash 全 v3；复习状态抽样 **201/201** 一致（期望值用应用同一
+  `makeContentHash` 在 Node 侧预计算）；12000 条日志 h 全部指向现存题目；`lsBackupState='retained'`；
+  旧 LS 业务键保留。迁移窗口内 **255 次 LS 写入全部为引导键，业务键 0**；JS 堆峰值 +30.20MB。
+- 回归（Phase 5 基线 → 本次）：5k bench 814.4ms/+21.27MB → **677ms/+15.06MB**（改善）；
+  20k 最小字段 171.7ms/+21.28MB → **170ms/+20.70MB**（持平）；两者 201/201 状态、收藏 20 完整，
+  业务 LS 写入 0。
+- 容量预检正例：12k（4,849,345 字符，**93.1%**，`nearLimit`）→ 静默通过迁移 + 成功后提示。
+  反例：同夹具 + 300,000 字符 filler（**5,149,481 字符，98.8%**）+ 禁用 IndexedDB →
+  写入前 `LS_CAPACITY` 中止，toast「已用 5149362 / 上限 5210112 字符」；键集合无增删、schema 0、
+  无新增 revlog/review 键、锁已释放、迁移窗口仅 1 次引导键（锁，已删除）、无未捕获错误。
+- Node：`node scripts/migrate.test.mjs` **235/0**（新增 P1 零业务写入、P2 正例、P3 IDB 不可用反例、
+  P4 nearLimit/超预算放行）；`node scripts/test-all.mjs` **25 项 / 0 失败**；
+  `node --expose-gc scripts/bench.mjs --assert` **门禁全部通过**（12k LS 迁移 491.95ms/+103.65MB；
+  IDB 迁移 20k 原始峰值 +82.94MB ≤ 110MB）。
+- bench 口径说明：harness 的 LS 是无配额内存 Map，LS 目标路径段显式把名义配额抬到 64MiB，
+  避免预检把替身误判为空间不足（真实配额行为由 migrate.test P3/P4 与真机 CDP 覆盖）。
+
+**遗留 TODO / 风险**
+- IDB 可用但 LS 已超名义预算时选择**放行**（迁移不写业务键，且是近满用户唯一减压手段）；
+  若引导键真的写不进，失败发生在任何业务写入前，安全回退 —— 但用户会看到通用失败提示而非
+  容量提示（未在真机复现「引导键写不进」的极端场景）。
+- 预检按字符数估算，Safari/Firefox/移动端配额未实测；无痕/受限环境可能误报「空间不足」（安全方向）。
+- 迁移期内存缓冲会把 v1→v5 产物的全部新布局键驻留内存直到 v5→v6 完成（12k 峰值 +30.20MB），
+  比旧实现多一份内存占用；这是换取「不写 LS」的必要代价，超大库（>50k）需继续观察。
+- 真实无痕窗口与多标签 IDB 事务语义仍未实机验证（与本条修复无关的既有风险）。
+
+---
+
 ## d361a92 · perf(migrate): 校验统一为 QB.deepEqual，逐批回读不整库物化
 
 **核心改动**

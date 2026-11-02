@@ -51,6 +51,8 @@
     _awaitDeletes: new Set(),
     _awaitWaiters: [],
     _awaitTimer: null,
+    /** 迁移写入缓冲句柄（见 beginMigrationBuffer；同一时刻只允许一个迁移） */
+    _migration: null,
 
     _fullKey(key) {
       return fullKeyOf(key);
@@ -144,6 +146,50 @@
       this._awaiting = true;
       this._cancelSchedule();
       this._subscribeBroadcast(); // LS 模式也需要接收赢家的 backend 广播
+    },
+
+    /**
+     * 进入「迁移写入缓冲」（迁移赢家使用；唯一调用方 `js/modules/migrate.js::doRun`）。
+     * 迁移期间业务键只写内存缓存/待写队列，**不写 LocalStorage**——LS 只允许引导键
+     * （锁/进度/标记），因此迁移不再消耗 LS 空间；转换后的新布局由 v5→v6 统一复制进 IDB。
+     * 进入前先把既有防抖待写落盘（失败即抛），保证 LS 是迁移前的权威快照。
+     * @returns {{prevAwaiting:boolean}}
+     */
+    beginMigrationBuffer() {
+      if (this._migration) return this._migration;
+      this._cancelSchedule();
+      if (!this._isIdb() && !this._awaiting && this._pending.size) this._writeNow();
+      const handle = { prevAwaiting: this._awaiting };
+      this._awaiting = true;
+      this._migration = handle;
+      return handle;
+    },
+
+    /**
+     * 退出迁移写入缓冲（唯一调用方 `js/modules/migrate.js::doRun`）。
+     * - success=true 且已切到 IDB：迁移产物已被 v5→v6 复制并逐键校验，丢弃内存待写即可；
+     * - success=true 但 IDB 在迁移途中不可用（回落 LS）：迁移产物必须写回 LS，否则只存在内存；
+     * - success=false：LS 业务数据从未被迁移改写，丢弃内存产物，回到磁盘权威；
+     *   等待中的标签（prevAwaiting=true）保持等待态，由 D1 流程回放自己的待写快照。
+     * @param {{prevAwaiting:boolean}} handle
+     * @param {boolean} success
+     */
+    endMigrationBuffer(handle, success) {
+      if (!handle || this._migration !== handle) return;
+      this._migration = null;
+      const switched = !!success && this._isIdb();
+      this._awaiting = switched ? false : handle.prevAwaiting;
+      if (!(success && !switched)) {
+        // 已切换：迁移产物已在 IDB 并逐键校验，丢弃内存待写；
+        // 失败：丢弃迁移产物，由 LS 磁盘（未改写）或调用方的待写快照恢复权威视图。
+        this._pending.clear();
+        this._ops = new Map();
+        this._clearPending = false;
+        this._awaitDeletes.clear();
+        if (!success && !this._isIdb()) this._cache.clear();
+      }
+      // success 但未切换（IDB 中途不可用 → 回落 LS）：保留待写，由调用方 flush 按 LS
+      // 既有语义落盘；失败则待写保留重试，本页不丢数据。
     },
 
     _wakeAwaiters() {
@@ -726,6 +772,9 @@
       }
       this._cache.forEach((v, k) => { if (v !== undefined) out.add(k); });
       this._pending.forEach((v, k) => { if (v !== undefined) out.add(k); });
+      // 等待/迁移期的删除只作用于内存（LS 尚未改写），逻辑键视图必须剔除，否则
+      // v5→v6 复制会把已删除的旧布局键重新写进 IDB。
+      this._awaitDeletes.forEach((k) => out.delete(k));
       return Array.from(out);
     },
 

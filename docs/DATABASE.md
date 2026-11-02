@@ -217,8 +217,8 @@ CREATE TABLE assets (
 - **v1→v2 存量迁移**：`js/modules/migrate.js` 在启动时按 `meta:schemaVersion` 幂等执行：题目 hash 重算后，`review/wrong/fav/revlog` 中以 contentHash 为键/字段的数据同步重映射（冲突时复习状态取最近、错题计数相加）；旧 `.qbk`/手工数据携带的裸 hash 落库时强制重算。
 - **v2→v3 题目分片（阶段 A）**：单库题目由「单 blob 数组」改为「分片 + 清单」——写放大 O(全库)→O(分片)，读按需只解析覆盖区间分片。迁移由同一 `Migration.run` 幂等完成：遍历形如 `questions:<bankId>`（不含后续冒号段）的旧 blob，用公共抽象 `QB.QuestionShards.writeAll` 切片；已存在清单则跳过（幂等，大库 450 题切 200/200/50 二次运行逐字节不变）。运行时另有**双重读兼容**：旧单 blob 在 `readAll/readRange/count/locate` 中回退读取，任一写操作（create/update/remove/insertMany）触发一次性写时迁移并删除旧键。
 - **v3→v4 分片一致修复（2026-10-29）**：v3 的删除路径在「中间分片被清空」时只移除分片键并收缩 `sizes`，未对后续分片重编号，导致清单索引与物理分片错位——`count` 有数、`list` 为空，余题成为不可达孤儿（导出亦随之丢失）。v4 在启动时逐库调用 `QB.QuestionShards.invariant` 自检；不通过则用 `QB.QuestionShards.compact` 按**物理分片键升序**拼接后重新切片（可恢复已产生的孤儿题），满足不变量则跳过 → 幂等。此后单题删除/批删在清空任一分片时统一走 `compact` 重编号，禁止各自 `sizes.splice`。
-- **v4→v5 一次性迁移（hash 64 + per-hash 复习 + 分段日志）**：同一版本内完成三件事，只留一条兼容线——① 题目 `contentHash` 由 `2:`+8hex 升级为 `3:`+16hex，按 `meta:hashMap:<bankId>` 重映射 `review/wrong/fav/revlog`；② 复习状态整表拆为 `user:review:<bankId>:<hash>` + `user:reviewMeta:<bankId>`；③ 评分日志整表拆为 `user:revlogMeta` + `user:revlog:<i>`（200/段）。可靠性：每库先持久化哈希映射再改数据（中断重入复用映射，不二次改写/不重复）；布局转换**先写新键再删旧键**；进入前对全部逻辑键做内存快照，任一步抛错 `restoreAll` 回滚；`meta:migrationLock`（owner + 30s TTL）保证多标签只跑一次，同标签模块级单飞；已是 v5 时 `ensureLayout` 只做归一（补清单/折叠残留），不重写数据。旧整表布局保留**双读**（迁移前/中断/旧备份导入），对外读语义（分数、到期、历史）与旧实现逐位一致（`scripts/migrate.test.mjs` 对照断言）。
-- **v5→v6 存储底座（LocalStorage → IndexedDB，Phase G/H1）**：**不转换数据形状**，只换承载后端——沿用同一 `Migration.run`：持 `meta:migrationLock` → `saveAutoBackup` 全量备份（**分块存原始 JSON 串**，100 键/条，失败即中止）→ 探测 IDB（不可用写 `ls-fallback` 并继续 LS）→ **流式分批复写**：题目 200 题/片（与存储分片对齐）、其余前缀键 64 键/批，每批「读 LS → 单事务写 IDB → **回读本批**逐键深比对（`QB.deepEqual`，全工程唯一比较实现）→ 写断点 → 释放中间引用」，任何时刻只保留在途批次，**不整库 `getAll`/`readAll` 物化** → 全部一致才写 `meta:storageBackend='idb'`。**断点续传**：每批完成写 `meta:migrationProgress`，中断后从 `done` 继续；**进度可订阅** `Store.onMigrationProgress` / `Store.migrationProgress()`。**自动清理**：迁移完成后的下一次启动，`Store.init()` 校验 IDB 题目数与清单一致后自动 `cleanupLegacyLS()`（只留 BOOTSTRAP_KEYS，写 `meta:lsCleanupAt` + `lsBackupState='cleaned'`），失败不动任何一侧、下次可重试。索引：`by_bank`（按库取分片）、`by_bank_kind` + `by_kind_seq`（按 hash 取复习状态 / 按库取日志尾 N 条）、`by_kind`。写入仍为 O(改动数)（1 状态键 + 尾段日志聚合 1 个事务）。
+- **v4→v5 一次性迁移（hash 64 + per-hash 复习 + 分段日志）**：同一版本内完成三件事，只留一条兼容线——① 题目 `contentHash` 由 `2:`+8hex 升级为 `3:`+16hex，按 `meta:hashMap:<bankId>` 重映射 `review/wrong/fav/revlog`；② 复习状态整表拆为 `user:review:<bankId>:<hash>` + `user:reviewMeta:<bankId>`；③ 评分日志整表拆为 `user:revlogMeta` + `user:revlog:<i>`（200/段）。可靠性：每库先持久化哈希映射再改数据（中断重入复用映射，不二次改写/不重复）；布局转换**先写新键再删旧键**；**迁移期写入统一走写入缓冲**（目标为 IDB 时业务键只进内存，LS 只写引导键；目标为 LS 时进入前对全部逻辑键做内存快照，任一步抛错 `restoreAll` 回滚）；`meta:migrationLock`（owner + 30s TTL）保证多标签只跑一次，同标签模块级单飞；已是 v5 时 `ensureLayout` 只做归一（补清单/折叠残留），不重写数据。旧整表布局保留**双读**（迁移前/中断/旧备份导入），对外读语义（分数、到期、历史）与旧实现逐位一致（`scripts/migrate.test.mjs` 对照断言）。
+- **v5→v6 存储底座（LocalStorage → IndexedDB，Phase G/H1；2026-11-03 修订）**：**不转换数据形状**，只换承载后端——沿用同一 `Migration.run`：持 `meta:migrationLock` → **容量预检**（见 §9.5，写任何业务数据前完成）→ `saveAutoBackup` 全量备份（**分块存原始 JSON 串**，100 键/条，失败即中止）→ 探测 IDB（不可用写 `ls-fallback` 并继续 LS；此时迁移目标就是 LS，走快照回滚）→ **进入迁移写入缓冲**（`QB.Storage.beginMigrationBuffer()`）：v1→v5 各步骤产生的 per-hash/分段键、hash 重映射只进内存缓存/待写队列，**LS 只允许写引导键**（锁/进度/标记），迁移不再消耗 LS 空间 → 以**逻辑键视图**（LS ∪ 内存缓冲，剔除墓碑）**流式分批复写** IDB：题目 200 题/片（与存储分片对齐）、其余前缀键 64 键/批，每批「单事务写 IDB → **回读本批**逐键深比对（`QB.deepEqual`，全工程唯一比较实现）→ 写断点 → 释放中间引用」，任何时刻只保留在途批次，**不整库 `getAll`/`readAll` 物化** → 全部一致才写 `meta:storageBackend='idb'`、退出缓冲并丢弃内存产物。**失败**：目标为 IDB 时 LS 业务数据全程未被改写，丢弃内存缓冲即回到迁移前快照（`lsBackupState`/回滚路径不变）；目标为 LS 时仍用快照回滚。**断点续传**：每批完成写 `meta:migrationProgress`，中断后从 `done` 继续；**进度可订阅** `Store.onMigrationProgress` / `Store.migrationProgress()`。**自动清理**：迁移完成后的下一次启动，`Store.init()` 校验 IDB 题目数与清单一致后自动 `cleanupLegacyLS()`（只留 BOOTSTRAP_KEYS，写 `meta:lsCleanupAt` + `lsBackupState='cleaned'`），失败不动任何一侧、下次可重试。索引：`by_bank`（按库取分片）、`by_bank_kind` + `by_kind_seq`（按 hash 取复习状态 / 按库取日志尾 N 条）、`by_kind`。写入仍为 O(改动数)（1 状态键 + 尾段日志聚合 1 个事务）。
 - **查询索引**：`(bank_id, type)`、`(bank_id, category)` 支撑列表筛选；`attempts(bank_id, created_at)` 支撑历史分页。
 - **UI 级按需装载（阶段 A）**：`Questions.count(bankId)` 直读清单 `count` 字段（O(1)，不解析分片）；`Questions.revision()` 为全库写修订号，任一题目写操作 +1，供门面 `QB.DB.loadQuestions(bankId)` 的整库读缓存做失效判定（机制上避免"忘记手动失效"读到旧数据）。`app.js` 依视图按需装载，`question-editor`/`buildIndex` 复用同一缓存。
 - **导入幂等**：`insertMany` 的 `mode=merge` 依赖上述唯一键跳过重复；`mode=overwrite` 先清库再写。更新来源题库时同题干的**答案修正**因 hash 变化会作为新题插入（旧题保留），不做静默覆盖。
@@ -349,6 +349,7 @@ LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务
 - **IDB 不可用（隐私模式/配额拒绝/版本冲突）→ 回落 LocalStorage**：回到 §9.1 口径，保守建议上限约 **2,900 题**（5MB/1.72KB），70% 告警线约 **2,000 题**；超过即应导出备份、改用 API 后端（`DATA_BACKEND='api'`）或分机存放。
 - UI 已有「本地存储」健康卡（`QB.UIRenderer.renderStorageHealth`）：≥70% 警告、≥85% 危险；写盘失败经 `Storage.onError` 全局提示。IDB 模式下该卡显示 `QB.Store.estimate()` 的估算值。
 - **双份占用自动收敛（H3）**：迁移完成当次保留 LS 旧数据（`lsBackupState='retained'`）作为退路；**下一次启动** `Store.init()` 先校验 IDB 可读（题目数 >0 且与分片清单一致），通过后自动清理 LS（只保留 `BOOTSTRAP_KEYS`）并写 `meta:lsCleanupAt` + `lsBackupState='cleaned'`。实测回收：5k **5,054 键 / 4.80 MB**（5ms）、20k **20,204 键 / 19.36 MB**（22ms）、50k **50,354 键 / 43.81 MB**（76ms）；清理后 LS 业务占用为 0、IDB 题目数不变。清理失败不删除任何一侧（IDB 完好，下次启动可重试），此后回退只能依赖全量备份；备份弹窗仍保留手动入口。
+- **迁移前空间预检（2026-11-03）**：迁移开始前只读估算 LocalStorage 占用（口径见 §9.5）。IDB 可用时不阻断（迁移不写 LS 业务键），仅在 ≥85% 时于迁移成功后提示「已接近上限，建议导出备份并清理空间」；IDB 不可用且按「整份副本」估算装不下时，**在写入任何业务数据前中止**并提示具体「已用/上限」字符数，用户数据保持原样、可继续以兼容模式使用。详见 [user-guide.md](user-guide.md#存储升级与空间不足提示)。
 - **浏览器的剩余未验证项**：真实隐私模式下的具体失败形态（2026-11-02 的复现是用 CDP 注入 `indexedDB.open` 抛 `SecurityError`，不是真实无痕窗口）、多标签 IDB 事务的浏览器实现差异、长期使用后的配额回收策略。
 
 ### 9.4 真实浏览器验证口径（Edge 151 / Chromium 151，2026-11-02）
@@ -357,3 +358,30 @@ LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务
 - **20k 全量夹具写不进真实 LocalStorage**：bench20k 全量载荷 8,130,165 字符 / 16,260,330B，写入第 **102** 个键 `qb:user:review:bank_mvz7bzr3nowiia`（2,176,585 字符，写入前 4,971,931 字符）时抛 `QuotaExceededError`。实测上限：单键 5,242,871 字符（10,485,742B UTF-16）、多键累计约 4,980,736 字符后失败；因此 v6 的 20k 浏览器验收使用精简夹具（4,153,248 字符）完成，真实 LS 无法承载 20k 全量是**预期结论**，不是迁移缺陷。
 - **Node 与真机偏差**：真机 `Migration.run` 完整耗时 bench5k **505.1ms**（Node 侧迁移打点 163.04ms，约 **3.10×**）、compact20k **496.7ms**（Node 218.86ms，约 **2.27×**）；仅 `migrateToIdb` 阶段为 358.9ms / 315.7ms（Node 163.04ms / 218.86ms）。差异来自浏览器结构化克隆、LevelDB 落盘与 CDP 插桩开销，Node 内存 IDB 只用于语义回归，不用于宣称真机性能。
 - **IDB usage 是压缩后磁盘占用**：IDB usage 与同数据字符数的比值实测约 **0.10×~1.37×**（如 5k 随机数据 5,043,018B 载荷对应 usage 6,905,856，20k 精简 9,049,574B 对应 4,972,544），不能按 UTF-16 字符数线性换算。
+
+### 9.5 迁移前容量预检（2026-11-03）
+
+**背景（修复的真实缺陷）**：v4→v5 布局改写原本会在迁移期间直接往 LocalStorage 追加 per-hash 复习键与 revlog 分段键。12k bench 形态旧库（种入 4,849,330 字符）在真机上迁移到 `qb:user:revlog:47` 时抛 `QuotaExceededError`，应用回退 `ls` 兼容模式——种子装得下、迁移完不成，这类用户会永久卡在 LocalStorage。
+
+**实现（唯一口径）**：`QB.Store.lsUsedChars(includeBootstrap)` 计量 + `QB.Store.preflightMigration({idbUsable})` 判定；调用方只有 `js/modules/migrate.js::doRun`，位置在抢锁之后、**任何业务写入/备份之前**。`QB.Storage.beginMigrationBuffer()/endMigrationBuffer()` 是迁移期写入门控，调用方只有 `doRun`。
+
+**怎么估**：
+- 逐键累加 `key.length + raw.length + 2`（含 `qb:` 前缀），单位是**序列化字符数**，不是字节；
+- 名义预算 = `QB.CONFIG.STORAGE_QUOTA_BYTES`（5MiB）− 32KiB = **5,210,112 字符**；
+- 2026-11-02 实测 Edge 151 上限 **5,222,564 字符**，预算比实测保守约 **0.24%**；
+- `idbUsable=true`：needed = 128KiB（引导键预留），**恒放行**；`used/budget ≥ 0.85` 或剩余 < 128KiB 时置 `nearLimit`；
+- `idbUsable=false`：needed = `used + 128KiB`（迁移前自动备份会回落 LS，布局改写期间新旧键并存，按「再装一整份」保守估），`budget − used ≥ needed` 才放行。
+
+**误差范围与误判**：
+- 只统计 `qb:` 前缀键；同源其他站点数据不占本应用配额，不计入；
+- 字符数 ≠ 浏览器实际字节记账；Chromium 实测偏差 < 0.4%，Safari/Firefox/移动端**未实测**；
+- 无痕/受限环境配额可能近 0 → 预检会误报「空间不足」，方向是安全侧（宁可提前提示）；
+- `idbUsable=true` 且已超名义预算仍放行是**刻意设计**：迁移不写 LS 业务键，且这是近满用户唯一的减压手段；若引导键真的写不进，失败发生在任何业务写入之前，仍按既有安全回退处理；
+- 预检通过不保证写入一定成功（并发写入/浏览器临时限制）；失败语义不变（见 §9.3、§9.4 与 CHANGELOG.internal 风险区）。
+
+**失败语义（不变）**：`LS_CAPACITY` 在写入前中止 → 释放迁移锁、不写后端标记、schema 版本不推进、LS 键集合不增不减；目标为 IDB 的迁移失败 → LS 业务数据全程未改写，丢弃内存缓冲即回到迁移前快照；`lsBackupState` 的 `retained/cleaned/rollback-*` 与自动清理/回滚路径保持原样。
+
+**真机实测（Edge 151，CDP 真窗口，2026-11-03）**：
+- 正例：12k bench 旧库 4,849,345 字符（**93.1%**，`nearLimit`）→ 迁移 **1829ms** 完成（`migrateToIdb` 1637ms），12,124 键复制并逐键校验，`mode=idb`、`schema=6`、12000 题 hash 全 v3、201/201 复习状态抽样一致、12000 条日志全部映射、`lsBackupState=retained`；迁移窗口内 255 次 LS 写入**全部为引导键、业务键 0**；成功后提示「已接近上限…建议导出备份」。
+- 反例：同一夹具 + 300,000 字符 filler（**5,149,481 字符，98.8%**）+ 禁用 IndexedDB → `code=LS_CAPACITY` 于写入前中止，提示「已用 5149362 / 上限 5210112 字符」；键集合无增删、schema 仍为 0、无新增 revlog/review 键、锁已释放、迁移窗口仅 1 次引导键写入（锁，已删除）。
+- 静默正例：5k bench 形态 38.6%、20k 最小字段 64.6%，均无提示、无额外 LS 写入。
