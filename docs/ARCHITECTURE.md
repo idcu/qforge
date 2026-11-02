@@ -152,6 +152,24 @@
 - **只对未来的卡生效**：参数不重排已有到期时间、不批量改写 learning 状态；读取 `learning.step` 时钳到 `[0, len-1]`。
 - **明确不做**：fuzz、easyDays、leech 动作（suspend/tag）、独立 relearning steps。不新增「可配但不起作用」的字段。
 
+### 3.7 无障碍与焦点管理约定（门禁化）
+
+无障碍不是一次性改造，而是**可重复执行的门禁**：能在 Node 里静态断言的进 CI，需要真实布局/命中的走 Edge + CDP 手动门禁。
+
+**静态门禁（`scripts/a11y.test.mjs`，71 断言，进 `test-all` 与 CI）**
+- **对比度（唯一色板事实源）**：直接解析 `css/style.css` 的 `:root` 与 `html[data-theme='dark']` token，按 WCAG 相对亮度公式计算 20 组「前景/背景」色对。正文/次要文字/按钮文字 ≥4.5:1，大字（≥18.66px 粗体或 ≥24px）≥3:1。**不达标时改 token 本身，不在组件里临时覆盖颜色**；颜色语义统一为 `--text/--text-muted/--on-solid/--on-warning/--primary-text/--warning-text/--success/--danger`。
+- **ARIA 与键盘可达**：对 14 份渲染快照（首页、题库列表、六种题型答题页、已作答、结果页、组卷/开始弹窗、搜索页）做 HTML 扫描——禁止 `tabindex>0`；空文本按钮必须有 `aria-label`/`aria-labelledby`；`role="button"` 必须自身可聚焦且具备键盘操作路径；`role="radio"`/`role="checkbox"` 必须有 `aria-checked` 与 `tabindex`；非原生 `data-action` 容器要么自身可聚焦，要么内含原生控件；表单控件必须有关联 label（`aria-label`/`aria-labelledby`/`<label for>`）。
+- **焦点可管理**：`UIRenderer.openModal` 统一为 `role="dialog"` + `aria-modal="true"` + `aria-labelledby`（标题无 id 时补 `modal-title`；无标题回退 `aria-label`），打开后记录 `lastFocus = document.activeElement` 并把焦点移到弹窗内首个可聚焦元素；`closeModal` 统一把焦点还给触发元素。Tab/Shift+Tab 在弹窗内循环；`Esc` 复用 `app.js` 既有全局处理器调用 `UI.closeModal()`。**新增弹窗不得绕过 `openModal/closeModal` 自成一套焦点逻辑**，否则静态断言与真机门禁都会失败。
+- **动效**：`css/style.css` 必须存在 `@media (prefers-reduced-motion: reduce)` 分支，使用 `*, *::before, *::after` 全覆盖，将 `animation-duration`/`transition-duration` 压到 `0.01ms !important`，并关闭 `scroll-behavior: smooth`。
+
+**真机门禁（`scripts/a11y-browser.mjs`，142 断言，非 CI 门禁）**
+- 原因：依赖本机 Edge 的 `--remote-debugging-port` 真实布局与命中测试，CI 无浏览器环境，故**不并入 CI**，按需手动执行。
+- 三档视口 `360 / 768 / 1280`（可用 `A11Y_WIDTHS` 覆盖），页面覆盖首页、答题页、结果页、导入预览、三选一弹窗、设置页。
+- 断言：`document.scrollWidth <= clientWidth + 1` 无横向溢出；无元素超出视口（被 `overflow` 裁剪的容器内元素豁免）；关键按钮与答题卡格 ≥44×44 CSS px；弹窗落在视口内、内容超出时 `overflowY` 可滚动、焦点在弹窗内；控件可访问名称与 `role` 状态；`prefers-reduced-motion` 下动画/过渡时长 ≤0.02ms。
+- 输出 `.screenshots/a11y-browser/result.json` 与逐档截图（gitignored）。
+
+**约束**：不得为过门禁删功能或隐藏控件；不改既有公开签名；不引入 axe-core 等第三方依赖；修 UI 不得回退模态焦点/`Esc`/键盘行为。每处修复都应有对应断言，并先用旧代码（`git archive` 临时 worktree）证明该断言会失败。
+
 ## 4. 关键数据流
 
 ### 4.1 导入落库

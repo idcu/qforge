@@ -108,7 +108,7 @@ ok(/prefers-reduced-motion:\s*reduce/.test(css), 'CSS 尊重系统「减少动�
 ok(/env\(safe-area-inset-(top|bottom)\)/.test(css), 'CSS 处理刘海屏安全区');
 ok(/@media\s*\(min-width:\s*1100px\)/.test(css), 'CSS 提供 ≥1100px 加宽断点');
 ok(/@media\s*\(max-width:\s*560px\)[\s\S]*\.option\s*\{[^}]*min-height:\s*44px/.test(css), '窄屏选项可点高度 ≥44px');
-ok(app.indexOf("closest('.option[data-action]')") >= 0, 'app.js 为选项提供 Enter/Space 键盘激活');
+ok(/closest\('.option\[data-action\], \[role="button"\]\[data-action\]'\)/.test(app), 'app.js 为选项与 role=button 容器提供 Enter/Space 键盘激活');
 ok(/\.quiz-actions-end[^}]*border-left:\s*1px solid/.test(css), '交卷/结束练习独立末栏（桌面分隔线）');
 ok(/@media\s*\(max-width:\s*560px\)[\s\S]*\.quiz-actions-end[^}]*width:\s*100%/.test(css), '窄屏交卷整行独占（不再与下一题相邻）');
 

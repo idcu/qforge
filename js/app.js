@@ -1091,20 +1091,20 @@
       '设为 0 表示该组本轮不排。</p>' +
       '<div class="qe-grid">' +
       '<div><label class="qe-label">每日新题上限</label>' +
-      '<input type="number" min="0" max="9999" id="sched-new" value="' + s.newPerDay + '" /></div>' +
+      '<input type="number" min="0" max="9999" id="sched-new" aria-label="每日新题上限" value="' + s.newPerDay + '" /></div>' +
       '<div><label class="qe-label">每日复习上限</label>' +
-      '<input type="number" min="0" max="9999" id="sched-rev" value="' + s.reviewPerDay + '" /></div>' +
+      '<input type="number" min="0" max="9999" id="sched-rev" aria-label="每日复习上限" value="' + s.reviewPerDay + '" /></div>' +
       '<div><label class="qe-label">目标保留率（' + QB.SchedSettings.RETENTION_MIN + '–' +
       QB.SchedSettings.RETENTION_MAX + '）</label>' +
       '<input type="number" min="' + QB.SchedSettings.RETENTION_MIN + '" max="' +
-      QB.SchedSettings.RETENTION_MAX + '" step="0.01" id="sched-rr" value="' + s.requestRetention + '" /></div>' +
+      QB.SchedSettings.RETENTION_MAX + '" step="0.01" id="sched-rr" aria-label="目标保留率" value="' + s.requestRetention + '" /></div>' +
       '<div><label class="qe-label">最大间隔（天）</label>' +
       '<input type="number" min="' + QB.SchedSettings.MAX_INTERVAL_MIN + '" max="' +
-      QB.SchedSettings.MAX_INTERVAL_MAX + '" id="sched-max" value="' + s.maximumIntervalDays + '" /></div>' +
+      QB.SchedSettings.MAX_INTERVAL_MAX + '" id="sched-max" aria-label="最大间隔（天）" value="' + s.maximumIntervalDays + '" /></div>' +
       '<div><label class="qe-label">学习步骤（秒，逗号分隔 1–4 个）</label>' +
-      '<input type="text" id="sched-steps" value="' + s.learningSteps.join(',') + '" /></div>' +
+      '<input type="text" id="sched-steps" aria-label="学习步骤（秒）" value="' + s.learningSteps.join(',') + '" /></div>' +
       '<div><label class="qe-label">难卡阈值（0=关闭）</label>' +
-      '<input type="number" min="0" max="9999" id="sched-leech" value="' + s.leechThreshold + '" /></div>' +
+      '<input type="number" min="0" max="9999" id="sched-leech" aria-label="难卡阈值" value="' + s.leechThreshold + '" /></div>' +
       '</div>' +
       '<p class="li-meta">默认：新题 ' + D.newPerDay + ' / 复习 ' + D.reviewPerDay + ' / 保留率 ' +
       D.requestRetention + ' / 最大 ' + D.maximumIntervalDays + ' 天 / 步骤 ' + D.learningSteps.join(',') +
@@ -1168,7 +1168,8 @@
 
     v.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-      const el = e.target.closest('.option[data-action]');
+      // 覆盖自定义单选项与 role=button 的点击容器（如首页功能入口），原生 button/a 自行处理
+      const el = e.target.closest('.option[data-action], [role="button"][data-action]');
       if (!el || !v.contains(el)) return;
       e.preventDefault();
       e.stopPropagation(); // 避免 Enter 再触发全局「提交/下一题」

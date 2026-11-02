@@ -64,21 +64,31 @@ async function timed(fn, n) {
     const t1 = process.hrtime.bigint();
     samples.push(Number(t1 - t0) / 1e6);
   }
-  return { median: median(samples), min: Math.min.apply(null, samples), max: Math.max.apply(null, samples) };
+  return { median: median(samples), min: Math.min.apply(null, samples), max: Math.max.apply(null, samples), samples };
 }
-/** 多次重复取「各轮中位数的中位数」，并记录最好一轮中位数（best）：微秒级操作受 OS 调度噪声影响，
- *  门禁用 best 过滤环境毛刺（真实回归会同时抬高 best，不会漏报） */
+function percentile(arr, p) {
+  const s = arr.slice().sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.max(0, Math.floor(s.length * p) - 1))];
+}
+/** 多次重复：返回各轮中位数的中位数（median）、全部样本的 p50 与 p95、以及最好一轮中位数（best）。
+ *  微秒级操作受 OS 调度噪声影响，门禁改用全样本 p50（比 best 更保守），p95 仅作「同机参考」展示。 */
 async function stableTimed(fn, n, runs) {
   const meds = [];
+  const all = [];
   let min = Infinity;
   let max = 0;
   for (let r = 0; r < (runs || 3); r++) {
     const t = await timed(fn, n);
     meds.push(t.median);
+    all.push.apply(all, t.samples);
     min = Math.min(min, t.min);
     max = Math.max(max, t.max);
   }
-  return { median: median(meds), best: Math.min.apply(null, meds), min: min, max: max };
+  return {
+    median: median(meds), best: Math.min.apply(null, meds),
+    p50: percentile(all, 0.5), p95: percentile(all, 0.95),
+    runs: runs || 3, samples: all.length, min: min, max: max
+  };
 }
 function mb(bytes) { return (bytes / 1024 / 1024).toFixed(2) + ' MB'; }
 function ms(v) { return v.toFixed(2) + ' ms'; }
@@ -90,7 +100,11 @@ const HAS_GC = typeof global.gc === 'function';
 
 const report = [];
 function row(name, timeTriple, extra) {
-  report.push({ name, median: timeTriple.median, best: timeTriple.best, min: timeTriple.min, max: timeTriple.max, extra: extra || '' });
+  report.push({
+    name, median: timeTriple.median, best: timeTriple.best,
+    p50: timeTriple.p50, p95: timeTriple.p95, runs: timeTriple.runs, samples: timeTriple.samples,
+    min: timeTriple.min, max: timeTriple.max, extra: extra || ''
+  });
 }
 
 const heapBefore = (bestEffortGc(), process.memoryUsage().heapUsed);
@@ -511,11 +525,11 @@ await QB.DB.questions.insertMany(gradeBank.id, bigAll.slice(0, 20), { dedupe: fa
 const gradeQs = (await QB.DB.questions.list(gradeBank.id, {})).items;
 row('SRSStore.grade 单次评分（本地适配器）', await stableTimed(async (i) => {
   await QB.SRSStore.grade(gradeBank.id, gradeQs[i % gradeQs.length], QB.SRS.RATINGS.good, qNow + i * 1000);
-}, 1000, 5), '存储层 stateFor + 一次 patch（状态 + revlog）；5 轮×1000 取中位数');
+}, 1000, 9), '存储层 stateFor + 一次 patch（状态 + revlog）；9 轮×1000，门禁取全样本 p50');
 row('SRSStore.gradeMany 批量 20 题（本地适配器）', await stableTimed(async (i) => {
   await QB.SRSStore.gradeMany(gradeBank.id,
     gradeQs.map((q) => ({ question: q, rating: QB.SRS.RATINGS.good })), qNow + i * 1000);
-}, 200, 5), '批量读 20 状态 + 一次 patch；5 轮×200 取中位数');
+}, 200, 9), '批量读 20 状态 + 一次 patch；9 轮×200，门禁取全样本 p50');
 
 // 合成评分日志（可解释的显著偏离真权重，与 fsrs-opt.test 同一夹具口径）
 const fsSynth = [];
@@ -1068,21 +1082,25 @@ if (process.argv.indexOf('--assert') >= 0) {
     console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：' + ms(r.median) + ' ≤ ' + ms(max));
     if (!ok) fails.push(needle + ' ' + ms(r.median) + ' > ' + ms(max));
   });
-  // P1-B 参数化相对门禁：基线为 bc0e960（改造前）同一 bench 口径（5 轮×1000/5 轮×200，取最好一轮中位数）实测
-  // 连跑 4 次取「最差的一次」作为基线（避免抖动误伤；真实回归会显著抬高该值）：
-  //   grade 0.0789/0.0740/0.0825/0.0780 → 0.0825；gradeMany 0.2064/0.2084/0.2218/0.2005 → 0.2218
-  const GRADE_BASELINE_MS = 0.0825;
-  const GRADE_MANY_BASELINE_MS = 0.2218;
+  // P1-B 参数化相对门禁：规则不变（≤ 基线 +5%）。
+  // 采样口径升级：5 轮×1000/5 轮×200 取「最好一轮中位数」→ 9 轮×1000/9 轮×200 取「全样本 p50」。
+  // 旧口径（best-of-5）基线：grade 0.0825 / gradeMany 0.2218。
+  // 新口径必须在**同一口径**下取基线（best 与 p50 不可直接比较）：在未改动的 HEAD 代码上重测 9 轮×1000/9 轮×200：
+  //   grade p50 0.0771、gradeMany p50 0.2480（旧代码）；改造后实测 0.0767 / 0.2481（+0.04%，属噪声）。
+  // 因此新基线取旧代码同口径值，门禁仍为 +5%，不做任何额外放宽。
+  const GRADE_BASELINE_MS = 0.0771;
+  const GRADE_MANY_BASELINE_MS = 0.2480;
   [['SRSStore.grade 单次评分', GRADE_BASELINE_MS], ['SRSStore.gradeMany 批量 20 题', GRADE_MANY_BASELINE_MS]]
     .forEach(([needle, base]) => {
       const r = report.find((x) => x.name.indexOf(needle) === 0);
       if (!r) { fails.push(needle + ' 缺失'); return; }
       const max = base * 1.05;
-      const val = r.best == null ? r.median : r.best;
+      const val = r.p50 == null ? r.median : r.p50;
       const ok = val <= max;
-      console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：' + val.toFixed(4) + ' ms ≤ ' + max.toFixed(4) + ' ms'
-        + '（基线 ' + base.toFixed(4) + ' ms +5%，取最好一轮中位数）');
-      if (!ok) fails.push(needle + ' ' + ms(val) + ' > 基线+5% ' + ms(max));
+      console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：p50 ' + val.toFixed(4) + ' ms ≤ ' + max.toFixed(4) + ' ms'
+        + '（基线 ' + base.toFixed(4) + ' ms +5%；p95 ' + (r.p95 == null ? NaN : r.p95).toFixed(4) + ' ms，同机参考；'
+        + (r.runs || '?') + ' 轮×' + (r.samples && r.runs ? (r.samples / r.runs) : '?') + ' 样本）');
+      if (!ok) fails.push(needle + ' p50 ' + ms(val) + ' > 基线+5% ' + ms(max));
     });
   const heapDeltaMb = (heapAfter - heapBefore) / 1024 / 1024;
   const heapOk = heapDeltaMb <= 40;

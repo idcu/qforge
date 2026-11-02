@@ -39,11 +39,11 @@ const cats = ['分类A', '分类B', '含<b>标签'];
 section('组卷弹窗：属性可查询（回归 data-bp-min/max 多引号）');
 {
   const html = UI.renderMixDialog(avail, cats);
-  ok(html.indexOf('<select data-bp-min>') >= 0, '难度下限属性为 data-bp-min（无多余引号）');
-  ok(html.indexOf('<select data-bp-max>') >= 0, '难度上限属性为 data-bp-max（无多余引号）');
+  ok(html.indexOf('<select data-bp-min aria-label="难度下限">') >= 0, '难度下限属性为 data-bp-min（无多余引号，且有可访问名称）');
+  ok(html.indexOf('<select data-bp-max aria-label="难度上限">') >= 0, '难度上限属性为 data-bp-max（无多余引号，且有可访问名称）');
   ok(html.indexOf('data-bp-min"') < 0, '无 `data-bp-min"` 畸形属性');
   ok(html.indexOf('data-bp-max"') < 0, '无 `data-bp-max"` 畸形属性');
-  ok(html.indexOf('<select data-bp-cat>') >= 0, '分类下拉为 data-bp-cat');
+  ok(html.indexOf('<select data-bp-cat aria-label="组卷分类">') >= 0, '分类下拉为 data-bp-cat 且有可访问名称');
   const n = (html.match(/data-bp-type=/g) || []).length;
   eq(n, NTYPES, '每题型一行（data-bp-type 个数 = 题型数）');
   ok(html.indexOf('data-bp-pts') < 0, '组卷弹窗不含每题分值列（保持现状）');
@@ -64,7 +64,7 @@ section('练习/考试开始弹窗：每题型数量+分值、考试时长、练
   ok(p.indexOf('class="bp-pts"') >= 0, '分值列使用 .bp-pts');
   ok(p.indexOf('placeholder="默认"') >= 0, '每题分值留空=默认（M4 显式覆盖语义）');
   ok(p.indexOf('id="st-shuffle-child"') >= 0, '练习弹窗含材料题小问乱序开关（M4）');
-  ok(p.indexOf('<select data-st-cat>') >= 0, '分类下拉为 data-st-cat');
+  ok(p.indexOf('<select data-st-cat aria-label="练习/考试分类">') >= 0, '分类下拉为 data-st-cat 且有可访问名称');
   ok(p.indexOf('id="st-duration"') < 0, '练习弹窗不含考试时长');
   ok(p.indexOf('id="st-timer"') >= 0, '练习弹窗含「显示计时」开关');
   ok(p.indexOf('data-action="modal-cancel">取消') >= 0, '含取消按钮');

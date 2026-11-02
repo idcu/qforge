@@ -153,7 +153,7 @@
     ];
     html += '<div class="menu-grid">';
     menu.forEach((m) => {
-      html += '<div class="menu-item' + (m.hot ? ' hot' : '') + '" data-action="' + m.action + '">' +
+      html += '<div class="menu-item' + (m.hot ? ' hot' : '') + '" role="button" tabindex="0" data-action="' + m.action + '">' +
         '<span class="menu-ico">' + m.ico + '</span>' +
         (m.hot ? '<span class="hot-dot"></span>' : '') +
         '<div class="menu-label">' + esc(m.label) + '</div>' +
@@ -282,7 +282,8 @@
         const cls = d ? (d.isCorrect ? ' correct' : ' wrong') : '';
         html += '<div class="blank-row' + cls + '">' +
           '<label>第 ' + (i + 1) + ' 空</label>' +
-          '<input type="text" data-fill-index="' + i + '"' + childAttr(childIndex) + ' value="' + esc(vals[i] || '') + '"' +
+          '<input type="text" data-fill-index="' + i + '"' + childAttr(childIndex) + ' aria-label="第 ' + (i + 1) + ' 空"' +
+          ' value="' + esc(vals[i] || '') + '"' +
           (answeredLocked ? ' disabled' : '') +
           ' placeholder="' + esc(b.hint || '') + '" />' +
           (d && !d.isCorrect ? '<span class="li-meta">正确答案：' + esc(d.expected) + '</span>' : '') +
@@ -293,7 +294,7 @@
     }
 
     // essay
-    html += '<textarea class="essay-area" data-essay placeholder="请作答…"' + childAttr(childIndex) +
+    html += '<textarea class="essay-area" data-essay aria-label="简答作答内容" placeholder="请作答…"' + childAttr(childIndex) +
       (answeredLocked ? ' disabled' : '') + '>' + esc(userAns || '') + '</textarea>';
     return html;
   }
@@ -819,7 +820,8 @@
       const fcBars = forecastData.days.map((d) =>
         '<div class="fc-col"><span class="fc-bar" style="height:' + Math.max(2, Math.round(d.count / max * 52)) + 'px" title="' + d.label + ' ' + d.count + ' 题"></span>' +
         '<span class="fc-n">' + d.count + '</span><span class="fc-l">' + shortLabel(d.label) + '</span></div>').join('');
-      prefix =
+      // 不能直接覆盖 prefix：否则有预测数据时「今日复习计划 / 调整复习设置」入口被吞掉
+      prefix = renderReviewPlan(reviewPlan) +
         '<div class="card"><h3 class="card-title">复习调度（FSRS）</h3>' +
         '<div class="li-meta">已学 ' + forecastData.learned + ' / ' + forecastData.tracked +
         ' 题有调度记录，未学新题 ' + forecastData.newCount + ' 道</div>' +
@@ -972,8 +974,10 @@
       const pv = pointsValues && pointsValues[t] !== undefined ? pointsValues[t] : pDef;
       return '<div class="bp-row"><label class="bp-name">' + esc(QB.typeLabel(t)) +
         ' <span class="li-meta">（可选 ' + ((avail && avail[t]) || 0) + '）</span></label>' +
-        '<input type="number" min="0" class="' + esc(countClass) + '" data-bp-type="' + esc(t) + '" value="' + cv + '" />' +
-        (showPoints ? '<span class="bp-pts-label">每题</span><input type="number" min="0" class="bp-pts" placeholder="默认" data-bp-pts="' +
+        '<input type="number" min="0" class="' + esc(countClass) + '" data-bp-type="' + esc(t) + '"' +
+        ' aria-label="' + esc(QB.typeLabel(t)) + ' 抽取数量" value="' + cv + '" />' +
+        (showPoints ? '<span class="bp-pts-label">每题</span><input type="number" min="0" class="bp-pts" placeholder="默认"' +
+          ' aria-label="' + esc(QB.typeLabel(t)) + ' 每题分值" data-bp-pts="' +
           esc(t) + '" value="' + pv + '" />' : '') +
         '</div>';
     }).join('');
@@ -989,9 +993,9 @@
       '<p class="li-meta">按题型设置题量（0=不选），可再按分类与难度区间抽题。题量不足时按实际数量组卷并提示。</p>' +
       typeCountRows(avail) +
       '<div class="qe-grid">' +
-      '<div><label class="qe-label">分类</label><select data-bp-cat>' + categoryOptions(cats, '全部分类') + '</select></div>' +
-      '<div><label class="qe-label">难度下限</label><select data-bp-min>' + difficultyOptions(false) + '</select></div>' +
-      '<div><label class="qe-label">难度上限</label><select data-bp-max>' + difficultyOptions(true) + '</select></div></div>' +
+      '<div><label class="qe-label">分类</label><select data-bp-cat aria-label="组卷分类">' + categoryOptions(cats, '全部分类') + '</select></div>' +
+      '<div><label class="qe-label">难度下限</label><select data-bp-min aria-label="难度下限">' + difficultyOptions(false) + '</select></div>' +
+      '<div><label class="qe-label">难度上限</label><select data-bp-max aria-label="难度上限">' + difficultyOptions(true) + '</select></div></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-ordshuf" checked /><label for="bp-ordshuf">题目顺序乱序（取消则按题型分组的原始顺序）</label></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-shuffle"' + (QB.CONFIG.SHUFFLE_OPTIONS ? ' checked' : '') + ' /><label for="bp-shuffle">选项乱序（单选/多选/不定项，答案自动重映射，仅影响本场）</label></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="bp-shuffle-child" /><label for="bp-shuffle-child">材料题小问乱序（仅影响本场，整题去重键不变）</label></div>' +
@@ -1020,7 +1024,7 @@
     const timerOn = prefs ? !!prefs.showTimer : false;
     const durField = isExam
       ? '<div><label class="qe-label">考试时长（分钟，0=不限时）</label>' +
-        '<input type="number" min="0" class="st-count" id="st-duration" value="' + durDef + '" /></div>'
+        '<input type="number" min="0" class="st-count" id="st-duration" aria-label="考试时长（分钟）" value="' + durDef + '" /></div>'
       : '';
     const timerRow = isExam ? '' :
       '<div class="checkbox-row"><input type="checkbox" id="st-timer"' + (timerOn ? ' checked' : '') +
@@ -1035,7 +1039,7 @@
         pointsValues: prefs ? prefs.points : null
       }) +
       '<div class="qe-grid">' +
-      '<div><label class="qe-label">分类</label><select data-st-cat>' + categoryOptions(cats, '全部分类', catSelected) + '</select></div>' +
+      '<div><label class="qe-label">分类</label><select data-st-cat aria-label="练习/考试分类">' + categoryOptions(cats, '全部分类', catSelected) + '</select></div>' +
       durField +
       '</div>' +
       '<div class="checkbox-row"><input type="checkbox" id="st-shuffle-opt"' + (shuffleOpt ? ' checked' : '') + ' /><label for="st-shuffle-opt">选项乱序（单选/多选/不定项，仅影响本场）</label></div>' +
@@ -1070,8 +1074,17 @@
     root.hidden = false;
     root.setAttribute('role', 'dialog');
     root.setAttribute('aria-modal', 'true');
-    root.setAttribute('aria-label', '对话框');
     const modal = root.querySelector('.modal');
+    // 可访问名称优先取弹窗标题（aria-labelledby），无标题时回退固定名称
+    const heading = modal.querySelector('h3');
+    if (heading) {
+      if (!heading.id) heading.id = 'modal-title';
+      root.setAttribute('aria-labelledby', heading.id);
+      root.removeAttribute('aria-label');
+    } else {
+      root.removeAttribute('aria-labelledby');
+      root.setAttribute('aria-label', '对话框');
+    }
     if (onMount) onMount(modal);
     // 焦点进入弹窗首个可操作元素（无则聚焦弹窗本体）
     const list = focusablesIn(modal);
@@ -1099,6 +1112,7 @@
     root.removeAttribute('role');
     root.removeAttribute('aria-modal');
     root.removeAttribute('aria-label');
+    root.removeAttribute('aria-labelledby');
     if (lastFocus && typeof lastFocus.focus === 'function' && document.body.contains(lastFocus)) {
       try { lastFocus.focus(); } catch (e) { /* 元素已移除时忽略 */ }
     }
