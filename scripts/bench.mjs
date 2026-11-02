@@ -1,7 +1,10 @@
 /**
  * 性能打点（Node，无浏览器）
  * 用真实 541 题数据测量核心链路的耗时与内存占用，输出可复核的数据。
- * 运行：node scripts/bench.mjs
+ * 运行：node --expose-gc scripts/bench.mjs
+ *       node --expose-gc scripts/bench.mjs --assert（性能门禁）
+ *   **门禁必须以 --expose-gc 运行**：否则 heapUsed 增量含未回收垃圾，40MB 门禁不可信
+ *   （同一基线 740512e 的独立 worktree 实测 91.07MB，亦超限）。CI 与 docs-check 均带该参数。
  *
  * 打点项：
  *   - JSON.parse + 适配（541 → 唯一 540 去重）/ Markdown 解析

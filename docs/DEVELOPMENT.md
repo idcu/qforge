@@ -124,6 +124,10 @@ node --expose-gc scripts/bench.mjs --assert   # 性能门禁：53 项阈值 + he
 node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
 
+> **`--expose-gc` 是门禁前提**：不带该参数时 `heapUsed` 增量含未回收垃圾，`heapUsed ≤ 40MB` 门禁不可信——
+> 同一基线 `740512e` 的独立 worktree 实测 **91.07MB**（同样超限），并非代码回归。CI（`.github/workflows/test.yml`）
+> 与 `scripts/docs-check.mjs` 均以 `--expose-gc` 运行。
+
 2026-10-19（Node v24.14.0，Windows，`--expose-gc`）实测中位数：
 
 | 打点项 | 中位数 | min / max |
