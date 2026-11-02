@@ -199,6 +199,7 @@ Exporters.openFlow({kind, bank})
 | `normalizeAnswer(str, opts)` | 全角转半角、去空白、去标点、大小写 | 判分、去重、搜索 |
 | `judgeAnswer(question, userAnswer, opts?)` | 按 `type` 策略表统一判分；essay 返回 `null`；`opts.pointOf(type)` 指定本场按题型分值（材料题小问按此累加） | quiz-engine、statistics |
 | `QB.ResultPolicy.kind/isDecided/isWrong` | 结果语义唯一入口（empty/pending/partial/correct/wrong）；partial 优先于 isCorrect | quiz-engine、srs-store、wrong-book、ui-renderer |
+| `QB.deepEqual(a, b)` | 结构深比较（一致性校验**唯一实现**，不产生 `JSON.stringify` 整串副本） | 迁移逐批回读、`verifyAgainstLS`、`rollbackToLS`、v4→v5 状态比对、`ReviewStore.convertLegacy` |
 | `makeContentHash(q)` | v3：`'3:'+FNV1a64(题型+题干+选项集合+答案语义)` 去重键（64 位，16 hex） | 导入去重、Repo、错题/收藏索引、迁移重映射 |
 | `QB.FNV` | FNV-1a 32 位（字符串/字节，资产 id、URL checksum）与 **64 位 `hashString64/hashBytes64`（contentHash v3、导出 checksum）** | contentHash、资产 id、来源/导入校验和 |
 | `QB.mulberry32` | 确定性 PRNG（种子化） | `QB.shuffle`/`shuffleOptions`、FSRS fuzz |
@@ -320,10 +321,11 @@ Exporters.openFlow({kind, bank})
    - 引导标记（后端标记/迁移标记/schema 版本/迁移锁）在等待期**不被门控**、始终同步写 LocalStorage：否则接管方 `tryLock` 写的锁只留在本页内存，其他标签看不到。业务键的等待期门控保持不变。
 2. `saveAutoBackup` 迁移前全量备份：分块保存**原始 JSON 串**（100 键/条，不解析成对象）；优先独立 IDB `qforge-backup/snapshots`，不可用时回落 `meta:migrationBackup`；写后回读逐串校验，失败即中止、不写任何数据。
 3. `Store.detect()`：IDB 不可用 → 写 `ls-fallback`，本次迁移按 LS 结束（业务可用）。
-4. `Store.migrateToIdb(lsSource())`：按分片流式复制非引导键——题目 **200 题/片**（与存储分片对齐），其余前缀键 **64 键/批**；每批「读 LS → 单事务写 IDB → 分块回读深比对 → 释放中间引用」，不把全库物化到内存。
+4. `Store.migrateToIdb(lsSource())`：按分片流式复制非引导键——题目 **200 题/片**（与存储分片对齐），其余前缀键 **64 键/批**；每批「读 LS → 单事务写 IDB → **回读本批**逐键深比对（`QB.deepEqual`，全工程唯一比较实现）→ 写断点 → 释放」。回读只针对本批键（单事务多请求），**不整库 `getAll`、不物化整库**；校验在批内即时完成，通过即释放该批，不再单独做一次整库回读。
 5. **断点续传**：每批完成即写 `meta:migrationProgress`（`{v,done,total,bytes,at}`，始终同落 LocalStorage）；中断后下次启动从 `done` 继续，已完成批次不从头重跑；重入幂等（同名 key 覆盖写，最终逐键一致）。
 6. **进度可订阅**：`Store.onMigrationProgress(fn)`（返回取消订阅函数）与 `Store.migrationProgress()` 提供 `{done,total,percent,bytes}`；`app.js::boot` 订阅并在状态栏显示「正在迁移存储到 IndexedDB X%（done/total）」，完成后取消订阅，避免长时间无声阻塞。
-7. 逐键完整性校验：分块回读 IDB，与 LS 源做深比对（题库/题目/复习/错题/收藏/日志全覆盖）；任一不一致即抛错，标记保持未迁移。
+7. 逐键完整性校验：已并入步骤 4 的批内即时校验（覆盖题库/题目/复习/错题/收藏/日志），任一不一致即抛错、标记保持未迁移；迁移路径不调用 `verifyAgainstLS`（该接口只用于启动/清理前的独立体检，分块回读且不整库物化）。
+   - **校验粒度实测结论（2026-11-02）**：20k 分阶段采样中，v5→v6 阶段峰值 +70.00MB 与写路径回读采样同步出现；`MIG_SKIP_VERIFY=1` 隔离实验仅把该阶段峰值降到 +58.13MB（校验约占 12MB / 84ms），`MIG_SKIP_WRITE=1` 则 +0.00MB——**瓶颈是 IDB 单条 put 的结构化克隆与回读克隆本身（O(data)），不是校验批次大小**。改用 range `getAll` 每批一次回读的尝试实测峰值/耗时双双变差（20k 70.05→92.54MB、250.38→437.01ms），已按数据回退，保留逐键 `get` 回读。因此原始峰值仍随题量线性，本阶段只收紧门禁、不宣称线性已消除（数据见 [DATABASE.md](DATABASE.md) §9.2）。
 8. 全部一致 → 写 `meta:storageBackend='idb'` + `lsMigratedAt`，`lsBackupState='retained'`；`QB.Storage.adoptStore({mode:'idb', records})` 切换门面（`records` 直接从 LS 源构建，避免额外整库回读克隆）。
 9. 版本戳 `meta:schemaVersion=6`，`await flush()` 确认落盘；释放锁。
 10. **自动清理窗口**：下一次启动 `Store.init()` 检测 `lsBackupState==='retained'` → 先校验 IDB 可读（题目数 >0 且与分片清单一致）→ 自动 `cleanupLegacyLS()`：只保留 BOOTSTRAP_KEYS，写 `meta:lsCleanupAt` 并把 `lsBackupState` 置为 `'cleaned'`；清理后按 BOOTSTRAP_KEYS 重读 LS 刷新缓存。清理失败不删除任何一侧（IDB 数据完好，下次启动可重试），回退仍可走全量备份；备份弹窗仍保留手动「清理旧 LocalStorage」入口。

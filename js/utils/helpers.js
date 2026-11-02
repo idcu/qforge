@@ -100,6 +100,35 @@
       return Math.round((correct / total) * 100);
     },
 
+    /**
+     * 结构深比较（**一致性校验的唯一实现**；迁移逐批回读、schema 迁移、回退校验共用）。
+     * 不复制字符串：旧实现 `JSON.stringify(a) === JSON.stringify(b)` 会为两侧各造一份整串，
+     * 20000 条状态逐条校验时是数 MB 的瞬时分配（迁移原始峰值的主要噪声之一）。
+     * 入参均为 JSON 型数据（JSON.parse / structuredClone / IndexedDB 回读），无 undefined 属性，
+     * 因此与序列化比较语义一致。
+     */
+    deepEqual(a, b) {
+      if (a === b) return true;
+      if (typeof a !== typeof b) return false;
+      if (a === null || b === null || typeof a !== 'object') return false;
+      if (Array.isArray(a) !== Array.isArray(b)) return false;
+      if (Array.isArray(a)) {
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) if (!Helpers.deepEqual(a[i], b[i])) return false;
+        return true;
+      }
+      let countA = 0;
+      for (const k in a) if (Object.prototype.hasOwnProperty.call(a, k)) countA++;
+      let countB = 0;
+      for (const k in b) {
+        if (!Object.prototype.hasOwnProperty.call(b, k)) continue;
+        if (!Object.prototype.hasOwnProperty.call(a, k)) return false;
+        if (!Helpers.deepEqual(a[k], b[k])) return false;
+        countB++;
+      }
+      return countA === countB;
+    },
+
     /** 延迟 */
     sleep(ms) {
       return new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,4 +139,5 @@
   // 便捷别名
   QB.escapeHtml = Helpers.escapeHtml;
   QB.uid = Helpers.uid;
+  QB.deepEqual = Helpers.deepEqual;
 })(window);

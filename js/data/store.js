@@ -138,31 +138,19 @@
   }
 
   /**
-   * 深比对（不分配大字符串）：用于迁移逐批回读校验。
-   * 旧实现 JSON.stringify 两侧会为每批（200 题）复制出两份 MB 级字符串，
-   * 迁移全程的瞬时分配因此翻倍；结构化递归比较只分配栈帧/键数组。
-   * 值来自 JSON.parse / structuredClone，无 undefined 属性，语义与字符串比较一致。
+   * 逐键一致性判定（**校验逻辑唯一实现**）：迁移逐批回读与 `verifyAgainstLS` 共用。
+   * 比较走 `QB.deepEqual`（结构比较，不产生序列化副本；定义见 js/utils/helpers.js）。
+   * @param {string[]} keys 本批键
+   * @param {Object} got 回读结果（键 → 值）
+   * @param {Function} valueOf 期望值取值器 (i) => value
+   * @returns {null|{key:string}} 首个不一致键（全部一致返回 null）
    */
-  function deepEqual(a, b) {
-    if (a === b) return true;
-    if (typeof a !== typeof b) return false;
-    if (a === null || b === null || typeof a !== 'object') return false;
-    if (Array.isArray(a) !== Array.isArray(b)) return false;
-    if (Array.isArray(a)) {
-      if (a.length !== b.length) return false;
-      for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
-      return true;
+  function firstMismatch(keys, got, valueOf) {
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      if (!QB.deepEqual(valueOf(i), got[k])) return { key: k };
     }
-    let countA = 0;
-    for (const k in a) if (Object.prototype.hasOwnProperty.call(a, k)) countA++;
-    let countB = 0;
-    for (const k in b) {
-      if (!Object.prototype.hasOwnProperty.call(b, k)) continue;
-      if (!Object.prototype.hasOwnProperty.call(a, k)) return false;
-      if (!deepEqual(a[k], b[k])) return false;
-      countB++;
-    }
-    return countA === countB;
+    return null;
   }
 
   /* ---------------- LS → IDB 流式迁移：确定性顺序、分片批次、进度订阅 ---------------- */
@@ -677,7 +665,8 @@
     /**
      * LocalStorage → IndexedDB **流式**迁移（幂等、可中断续传、逐批深比对）。
      * - 分片（200 题/键）单独成批，其余小键 64 个一批；任何时刻只保留在途批次；
-     * - 每批「读 LS → 写 IDB（单事务）→ 回读逐键深比对 → 记断点 → 释放」；
+     * - 每批「读 LS → 写 IDB（单事务）→ 回读本批 → 逐键深比对 → 记断点 → 释放」；
+     *   回读只针对本批键（单事务多请求），**不整库 `getAll`、不物化整库**；
      * - 断点 `meta:migrationProgress` 存已完成键数，中断后从断点继续（键集合变化则保守重跑）；
      * - 进度经 `QB.Store.onMigrationProgress(fn)` 订阅（`{done,total,percent,shardsDone,...}`）；
      * - 全部一致才写 'idb' 标记；**迁移当次不删除 LS 旧数据**（退路），下次启动自动清理（见 init）。
@@ -714,12 +703,12 @@
       let verified = 0;
       let bytes = 0;
       let done = startAt;
-      let mismatched = null;
+      let mismatch = null;
 
       const chunks = migrationChunks(allKeys.slice(startAt));
       for (let ci = 0; ci < chunks.length; ci++) {
         const chunk = chunks[ci];
-        // 只保留在途批次：解析一次 → 写 → 回读比对 → 丢弃
+        // 只保留在途批次：解析一次 → 写 → 回读本批 → 逐键比对 → 丢弃
         const values = new Array(chunk.length);
         const ops = chunk.map((k, i) => {
           const v = src.get(k);
@@ -731,14 +720,9 @@
         });
         await idbBackend.batch(ops);
         const got = await idbGetMany(chunk);
-        for (let i = 0; i < chunk.length; i++) {
-          if (!deepEqual(values[i], got[chunk[i]])) {
-            mismatched = { key: chunk[i] };
-            break;
-          }
-          verified++;
-        }
-        if (mismatched) break;
+        mismatch = firstMismatch(chunk, got, (i) => values[i]);
+        if (mismatch) break;
+        verified += chunk.length;
         copied += chunk.length;
         done += chunk.length;
         shardsDone += chunk.filter((k) => tagOf(k).kind === 'questionShard').length;
@@ -746,10 +730,10 @@
         // 释放在途批次引用（values/ops/got 随迭代结束出作用域）
         values.length = 0;
       }
-      if (mismatched) {
+      if (mismatch) {
         // 断点保留在失败批次之前；下次启动从这里续传（已校验批次不重跑）
-        const e = new Error('迁移完整性校验失败：键不一致（首个 ' + mismatched.key + '）');
-        e.mismatches = [mismatched];
+        const e = new Error('迁移完整性校验失败：键不一致（首个 ' + mismatch.key + '）');
+        e.mismatches = [mismatch];
         e.resumeFrom = done;
         throw e;
       }
@@ -779,10 +763,9 @@
       for (let i = 0; i < keys.length; i += CHUNK) {
         const part = keys.slice(i, i + CHUNK);
         const got = await idbGetMany(part);
-        part.forEach((k) => {
-          if (deepEqual(src.get(k), got[k])) same++;
-          else if (mismatched.length < 5) mismatched.push({ key: k });
-        });
+        const bad = firstMismatch(part, got, (j) => src.get(part[j]));
+        if (bad) { if (mismatched.length < 5) mismatched.push(bad); }
+        else same += part.length;
       }
       return { checked: keys.length, same: same, mismatched: mismatched.length, samples: mismatched };
     },
@@ -830,7 +813,7 @@
         keys.forEach((r) => { lsSet(r.key, r.value); written++; });
         // 逐键回读校验
         for (let i = 0; i < keys.length; i++) {
-          if (!deepEqual(lsGet(keys[i].key, undefined), keys[i].value)) {
+          if (!QB.deepEqual(lsGet(keys[i].key, undefined), keys[i].value)) {
             throw new Error('回退校验失败：' + keys[i].key);
           }
         }

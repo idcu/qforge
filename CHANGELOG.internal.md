@@ -6,6 +6,67 @@
 
 ---
 
+## <hash 待回填> · perf(migrate): 校验统一为 QB.deepEqual，逐批回读不整库物化
+
+**核心改动**
+- 根因先证后改（`node --expose-gc`，阶段间强制 GC，20k）：backup +0.14MB/2.47ms；v1→v2 峰值
+  +42.51MB（驻留 +20.19MB/197ms）；v2→v3、v3→v4 ≈0；v4→v5 峰值 +50.86MB（驻留 +5.56MB/193ms）；
+  **v5→v6 峰值 +70.00MB**（写/回读采样同步）、驻留 +18.30MB/~250ms；flush ≈0。
+  隔离实验：`MIG_SKIP_VERIFY=1` → v5→v6 +58.13MB/153.65ms（校验约占 12MB/84ms）；
+  `MIG_SKIP_WRITE=1` → +0.00MB/75.81ms。LS I/O（20k）：v5→v6 读 8.68MB/20,208 次、
+  写 0.07MB/419 次（业务数据写 IDB）。
+- 结论：迁移**从未整库 `getAll`/`readAll` 物化**，`verifyAgainstLS` 不在迁移路径；每批写完立即回读
+  本批逐键比对、通过即释放已是现状。峰值线性来自 IDB 单条 put 的结构化克隆（内存替身驻留约 data 体积）
+  + 回读克隆 + 各阶段累计分配（Node 大堆下 major GC 稀少），属 O(data) 结构性成本。
+- `js/utils/helpers.js`：新增 `QB.deepEqual(a,b)` 作为一致性比较**唯一实现**（结构递归比较，
+  不复制字符串；旧 `JSON.stringify(a)===JSON.stringify(b)` 会为两侧各造整串）。导出 `QB.deepEqual`。
+- `js/data/store.js`：迁移回读改为统一 `firstMismatch(keys, got, valueOf)` —— 迁移主循环与
+  `verifyAgainstLS` 共用一份比较逻辑；删除本地 `deepEqual` 实现；`rollbackToLS` 回读校验改用
+  `QB.deepEqual`。迁移仍是「读 LS → 单事务写 → 回读本批 → 逐键比对 → 记断点 → 释放」。
+- `js/modules/migrate.js`：v4→v5 状态一致性比对由 `JSON.stringify` 两侧改为 `QB.deepEqual`。
+- `js/data/local-adapter.js`：`ReviewStore.convertLegacy` 的逐键比对改用 `QB.deepEqual`。
+- `scripts/lib/idb-memory.mjs`：`compareKeys` 增加标量无分配快路径（避免全量扫描/排序时每比较分配
+  两个临时数组，压测口径失真）；**未保留**曾试验的 `IDBKeyRange`/range `getAll`/`onOp` 代码（已按数据回退）。
+- 方案否决记录：range `getAll` 每批一次回读在内存替身下把 20k v5→v6 峰值 70.05 → **92.54MB**、
+  耗时 250.38 → **437.01ms**（`compareKeys` 修临时数组后仍 69.30MB/413.87ms），峰值无改善、耗时 +66%，
+  已回退为逐键 `get` 回读。`setTimeout(0)` 每 25/5 批让出：峰值 70.00 → 58.3/58.37MB，但末段回涨、
+  不可控，未采纳。
+
+**验证数据（Node v24.14.0，`--expose-gc`；同日 A/B，各 3 次中位数）**
+- A/B 口径：改动前 = `HEAD f39cddaf` 的 `git archive` 快照；改动后 = 当前工作树；同机连续运行
+  `node --expose-gc scripts/bench.mjs --assert`。
+- 三档（前 → 后）：
+  - 5000：耗时 131.20 → **131.57ms**；原始峰值 +65.70 → **+65.70MB**；驻留 +65.49MB；清理 5,054 键/4.80MB/5ms
+  - 20000：耗时 535.58 → **510.09ms**；原始峰值 +105.30 → **+102.75MB（−2.4%）**；驻留 +99.65MB；清理 20,204/19.36MB/15ms
+  - 50000：耗时 1,376.23 → **1,370.93ms**；原始峰值 +239.43 → **+238.34MB（−0.5%）**；驻留 +154.31MB；清理 50,354/43.81MB/56ms
+- 斜率**未压平（如实）**：边际 (238.34−65.70)/45,000 = **3.83KB/题**（前 3.86，−0.9%）；
+  50k/20k 比值 **2.32×**（前 2.27×）。隔离测量 v4→v5 峰值 50.88 → **47.84MB（−6.0%）**、
+  耗时 174.07 → 144.85ms。权衡：内存小幅改善、耗时未变差 → 接受；不再为压平斜率牺牲校验或改用 range。
+- 完整性：三档逐键一致 5000/5000、20000/20000、50000/50000；题目 hash 全 v3；日志按设计保留 20,000 条。
+- 断点续传：`scripts/idb.test.mjs` 注入第 40 次写失败中断后重入 → `resumed=true`、`startAt>0`、
+  `verified=keys−startAt`、逐键一致、题目数正确。
+- 门禁：`node scripts/test-all.mjs` **25 运行项 / 0 失败 / 28.1s**（idb **106/0**、migrate **200/0**）；
+  `node --expose-gc scripts/bench.mjs --assert` **门禁全部通过**（53 项；heapUsed 增量 +2.67MB）。
+- 门禁阈值收紧：`IDB_RAW_HEAP_MAX_MB` 20000 **120 → 110MB**（最差采样 104.28，余量 5.5%）、
+  50000 **270 → 250MB**（最差采样 238.66，余量 4.7%；仍低于旧 G4 基线 294.82MB）。
+
+**公共抽象清单（新增/调整）**
+- 新增 `QB.deepEqual`（`js/utils/helpers.js`）：一致性比较唯一实现；影响范围——store.js 迁移/校验/回退、
+  migrate.js v4→v5、local-adapter.js convertLegacy。公开 API 新增一个纯函数，未改 `QB.Store`/`QB.Storage` 签名。
+- 调整（内部）`firstMismatch(keys, got, valueOf)`（`js/data/store.js`）：迁移与 `verifyAgainstLS` 共用；
+  无外部调用方。
+- 调整（测试替身）`compareKeys` 标量快路径（`scripts/lib/idb-memory.mjs`）：仅测试/bench 使用，不随应用发布。
+
+**TODO/风险**
+- **原始峰值仍随题量线性**（Node 内存 IDB 口径）；浏览器真实堆中 IDB 数据不在 JS 堆，预期峰值更低，
+  但本轮**未做真机内存复测**，不得外推为浏览器结论。
+- 未验证：真机 IndexedDB 逐键 `get` 的往返开销是否放大（Node 替身无真实 B-Tree/磁盘延迟）；
+  迁移总耗时在真机上仍以 `Migration.run` 端到端为准（历史 3.10× / 2.27× 偏差未更新）。
+- `QB.deepEqual` 语义依赖入参为 JSON 型数据（无 `undefined` 属性）；若未来对非 JSON 值（Map/Set/Date）
+  做一致性比较，需要显式扩展，不能默认沿用。
+
+---
+
 ## 25f686b · fix(storage): 等待标签在锁超时后接管迁移（D1 中断自愈）
 
 **核心改动**

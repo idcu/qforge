@@ -281,10 +281,6 @@
     QB.Storage.remove(QB.KEYS.metaHashMap(bankId));
   }
 
-  function deepEqual(a, b) {
-    return JSON.stringify(a) === JSON.stringify(b);
-  }
-
   /**
    * 单库哈希升级 + 用户数据重映射 + 完整性逐条校验。
    *
@@ -364,7 +360,7 @@
       const target = mapping && mapping.has(oldHash) ? mapping.get(oldHash) : oldHash;
       const got = QB.ReviewStore.get(bankId, target);
       if (!got) { mismatch = mismatch || ('状态丢失：' + oldHash + ' → ' + target); return; }
-      if (!deepEqual(got, before[oldHash])) { mismatch = mismatch || ('状态不一致：' + oldHash + ' → ' + target); return; }
+      if (!QB.deepEqual(got, before[oldHash])) { mismatch = mismatch || ('状态不一致：' + oldHash + ' → ' + target); return; }
       verified++;
     });
     if (mismatch) throw new Error('迁移完整性校验失败（' + bankId + '）：' + mismatch);

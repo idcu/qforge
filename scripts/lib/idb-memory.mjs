@@ -69,6 +69,15 @@ function domError(name, message) {
 }
 
 function compareKeys(a, b) {
+  // 标量键（本工程全部键都是字符串）走无分配分支：getAll/索引扫描的排序按键两两比较，
+  // 若无条件包成数组，一次全量扫描会分配大量临时数组，压测口径失真（内存替身自身的噪声）。
+  if (!Array.isArray(a) && !Array.isArray(b)) {
+    if (a === b) return 0;
+    if (a === undefined) return -1;
+    if (b === undefined) return 1;
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    return String(a) < String(b) ? -1 : 1;
+  }
   const aa = Array.isArray(a) ? a : [a];
   const bb = Array.isArray(b) ? b : [b];
   for (let i = 0; i < Math.max(aa.length, bb.length); i++) {
@@ -231,8 +240,16 @@ function createTransaction(db, names, mode) {
           fireSuccess(req, k);
         });
       },
-      get(key) { const req = makeRequest(); lastRequest = req; fireSuccess(req, meta.records.has(key) ? cloneValue(meta.records.get(key)) : undefined); return req; },
-      getAll(query) { const req = makeRequest(); lastRequest = req; fireSuccess(req, readAll(query)); return req; },
+      get(key) {
+        const req = makeRequest(); lastRequest = req;
+        fireSuccess(req, meta.records.has(key) ? cloneValue(meta.records.get(key)) : undefined);
+        return req;
+      },
+      getAll(query) {
+        const req = makeRequest(); lastRequest = req;
+        fireSuccess(req, readAll(query));
+        return req;
+      },
       getAllKeys() { const req = makeRequest(); lastRequest = req; fireSuccess(req, Array.from(meta.records.keys()).sort(compareKeys)); return req; },
       count() { const req = makeRequest(); lastRequest = req; fireSuccess(req, meta.records.size); return req; },
       delete(key) {
@@ -305,10 +322,10 @@ function createTransaction(db, names, mode) {
     function readAll(query) {
       const out = [];
       meta.records.forEach((v, k) => {
-        if (query === undefined || query === null || compareKeys(k, query) === 0) out.push(cloneValue(v));
+        if (query === undefined || query === null || compareKeys(k, query) === 0) out.push([k, cloneValue(v)]);
       });
-      out.sort((a, b) => compareKeys(keyOf(a, undefined), keyOf(b, undefined)));
-      return out;
+      out.sort((a, b) => compareKeys(a[0], b[0]));
+      return out.map((p) => p[1]);
     }
     return store;
   };

@@ -804,7 +804,7 @@
         const val = (own && typeof own === 'object')
           ? QB.ReviewMerge.mergeMaps({ s: legacy[h] }, { s: own }).s
           : legacy[h];
-        if (!own || JSON.stringify(own) !== JSON.stringify(val)) {
+        if (!own || !QB.deepEqual(own, val)) {
           Storage.setSync(reviewStateKey(bankId, h), val);
           converted++;
         }
