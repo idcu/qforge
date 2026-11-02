@@ -112,8 +112,9 @@
 
   /* ---------------- 格式构建器 ---------------- */
 
-  function buildJSON(payload) {
-    if (payload.kind === 'history') return buildHistoryJSON(payload);
+  /** JSON 导出对象（JSON 文本与分发题包 manifest 共用，checksum 只算一次） */
+  function jsonPayload(payload) {
+    if (payload.kind === 'history') return null;
     const out = {
       app: QB.CONFIG.APP_NAME,
       version: QB.CONFIG.VERSION,
@@ -125,7 +126,12 @@
     // 内容校验和（P4）：对 questions 规范化 JSON 计算 FNV-1a 64 位（v3 前缀）；导入端复核，
     // 发现修改/损坏时警告。这是完整性校验，不是密码学签名；可检测传输损坏/手工误改，不防恶意重算。
     if (QB.Source && QB.Source.checksumContent) out.checksum = QB.Source.checksumContent(JSON.stringify(out.questions));
-    return JSON.stringify(out, null, 2);
+    return out;
+  }
+
+  function buildJSON(payload) {
+    if (payload.kind === 'history') return buildHistoryJSON(payload);
+    return JSON.stringify(jsonPayload(payload), null, 2);
   }
 
   const TABLE_HEADER = ['题型', '题目', '选项A', '选项B', '选项C', '选项D', '选项E', '选项F', '选项G', '选项H', '答案', '解析', '分类', '难度', '标签', '来源'];
@@ -434,19 +440,41 @@
     return L.join('\r\n');
   }
 
-  /** 题库包 .qbk（stored ZIP：bank.json + assets/*），需异步读取 IndexedDB */
-  async function buildQBK(payload) {
+  /**
+   * 题库包 .qbk（stored ZIP：bank.json + assets/*），需异步读取 IndexedDB
+   * @param {Object} [opts] 仅分发题包传 { distribute:true, version, author, description, title, packageId }：
+   *   在包内追加 manifest.json（QB.Package 唯一实现），普通导出不传 → 包结构与此前逐字节同构
+   */
+  async function buildQBK(payload, opts) {
     if (payload.kind === 'history') throw new Error('历史记录不支持题库包导出（支持 JSON/CSV/XLSX/TXT）');
+    const obj = jsonPayload(payload);
+    const jsonText = JSON.stringify(obj, null, 2);
     const ids = QB.Qbk.referencedIds(payload.entries.map((e) => e.question));
     const map = await QB.Assets.getMap(ids);
     const assets = ids.filter((id) => map.has(id)).map((id) => {
       const rec = map.get(id);
       return { id: id, bytes: rec.bytes, mime: rec.mime };
     });
+    let manifest = null;
+    const extra = [];
+    if (opts && opts.distribute) {
+      manifest = QB.Package.makeManifest({
+        bank: payload.bank,
+        title: opts.title,
+        description: opts.description,
+        author: opts.author,
+        version: opts.version,
+        packageId: opts.packageId,
+        questionCount: obj.questions.length,
+        checksum: obj.checksum || ''
+      });
+      extra.push({ name: QB.Package.MANIFEST_NAME, text: JSON.stringify(manifest, null, 2) });
+    }
     return {
-      content: QB.Qbk.buildBundle('bank.json', buildJSON(payload), assets),
+      content: QB.Qbk.buildBundle('bank.json', jsonText, assets, extra),
       assetCount: assets.length,
-      missing: ids.length - assets.length
+      missing: ids.length - assets.length,
+      manifest: manifest
     };
   }
 
@@ -488,17 +516,21 @@
     return { content: fmt.build(payload), ext: fmt.ext, mime: fmt.mime };
   }
 
-  /** 同步/异步格式统一入口（qbk 需读 IndexedDB） */
-  async function buildAsync(formatId, payload) {
+  /**
+   * 同步/异步格式统一入口（qbk 需读 IndexedDB）
+   * @param {Object} [opts] 透传给格式构建器；仅 buildQBK 识别 opts.distribute（分发题包）
+   */
+  async function buildAsync(formatId, payload, opts) {
     const fmt = FORMATS.find((f) => f.id === formatId);
     if (!fmt) throw new Error('不支持的导出格式：' + formatId);
-    const r = await fmt.build(payload);
+    const r = await fmt.build(payload, opts);
     return {
       content: r && r.content != null ? r.content : r,
       ext: (r && r.ext) || fmt.ext,
       mime: (r && r.mime) || fmt.mime,
       assetCount: (r && r.assetCount) || 0,
-      missing: (r && r.missing) || 0
+      missing: (r && r.missing) || 0,
+      manifest: (r && r.manifest) || null
     };
   }
 
@@ -580,8 +612,111 @@
     return { kind: opts.kind, format: formatId, count: payload.entries.length, filename: filename, assetCount: built.assetCount };
   }
 
+  /** 分发题包信息弹窗：版本/作者/描述；返回 null（取消）或 {preview:true} 或 {version, author, description} */
+  function askPackageInfo(bank, count) {
+    return new Promise((resolve) => {
+      QB.UIRenderer.openModal(
+        '<h3>导出分发题包 · ' + QB.escapeHtml(bank.name) + '</h3>' +
+        '<p class="li-meta">分发包在 .qbk 内附加 manifest.json（题包 id / 版本 / 题数 / 内容校验和），' +
+        '对方导入时会核对清单与校验和。共 ' + count + ' 题，含图片一并打包。</p>' +
+        '<div class="qe-grid"><div><label class="qe-label">版本</label>' +
+        '<input id="pkg-version" value="1.0.0" placeholder="如 1.0.0" /></div>' +
+        '<div><label class="qe-label">作者（可选）</label><input id="pkg-author" placeholder="留空则不署名" /></div></div>' +
+        '<label class="qe-label">描述（可选）</label>' +
+        '<input id="pkg-desc" value="' + QB.escapeHtml(bank.description || '') + '" />' +
+        '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
+        '<button class="btn btn-ghost" data-action="pkg-preview">只读预览</button>' +
+        '<button class="btn" data-action="modal-ok">导出题包</button></div>',
+        (modal) => {
+          const readInfo = () => ({
+            version: (modal.querySelector('#pkg-version').value || '').trim() || '1.0.0',
+            author: (modal.querySelector('#pkg-author').value || '').trim(),
+            description: (modal.querySelector('#pkg-desc').value || '').trim()
+          });
+          modal.querySelector('[data-action="modal-cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
+          modal.querySelector('[data-action="pkg-preview"]').onclick = () => { QB.UIRenderer.closeModal(); resolve({ preview: true }); };
+          modal.querySelector('[data-action="modal-ok"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(readInfo()); };
+        }
+      );
+    });
+  }
+
+  /** 只读预览：复用分享页（自包含 HTML，不联网、不上传），在新标签页打开 */
+  async function openPreview(payload) {
+    if (!QB.SharePage) { QB.UIRenderer.toast('分享页模块未加载', 'err'); return false; }
+    let html;
+    try {
+      html = await QB.SharePage.build(payload);
+    } catch (e) {
+      QB.UIRenderer.toast('预览生成失败：' + e.message, 'err');
+      return false;
+    }
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    const win = window.open(url, '_blank');
+    if (!win) {
+      URL.revokeObjectURL(url);
+      QB.UIRenderer.toast('浏览器拦截了新窗口，请允许本站弹窗后重试', 'err');
+      return false;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return true;
+  }
+
+  /**
+   * 分发题包流程：收集 → 填题包信息 → 构建（含 manifest.json）→ 下载；也可只生成只读预览
+   * @param {{bank:Object, kind?:string}} opts
+   */
+  async function distributeFlow(opts) {
+    const kind = (opts && opts.kind) || 'bank';
+    const def = KINDS[kind];
+    if (!def) { QB.UIRenderer.toast('不支持的导出对象', 'err'); return null; }
+    if (!opts.bank) { QB.UIRenderer.toast('请先选择题库', 'err'); return null; }
+
+    let payload;
+    try {
+      payload = await collect(kind, opts.bank);
+    } catch (e) {
+      QB.UIRenderer.toast('导出失败：' + e.message, 'err');
+      return null;
+    }
+    if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
+
+    const info = await askPackageInfo(opts.bank, payload.entries.length);
+    if (!info) return null;
+    if (info.preview) {
+      await openPreview(payload);
+      return { preview: true };
+    }
+
+    let built;
+    try {
+      built = await buildAsync('qbk', payload, {
+        distribute: true,
+        version: info.version,
+        author: info.author,
+        description: info.description
+      });
+    } catch (e) {
+      QB.UIRenderer.toast('导出失败：' + e.message, 'err');
+      return null;
+    }
+    const filename = safeName(opts.bank.name) + '-分发题包-v' + safeName(info.version) + '-' +
+      payload.entries.length + '题-' + stamp() + '.qbk';
+    download(filename, built.mime, built.content);
+    const kb = (built.content.byteLength / 1024).toFixed(1);
+    const imgNote = built.assetCount ? '，含图片 ' + built.assetCount + ' 张' : '';
+    QB.UIRenderer.toast('已导出分发题包 v' + info.version + '（' + payload.entries.length + ' 题' + imgNote + '，' + kb + ' KB）',
+      built.missing ? 'err' : 'ok');
+    if (built.missing) QB.UIRenderer.toast('有 ' + built.missing + ' 张引用图片缺失（未找到本地资产），仅导出占位标记', 'err');
+    return {
+      kind: 'package', format: 'qbk', count: payload.entries.length, filename: filename,
+      bytes: built.content.byteLength, assetCount: built.assetCount, manifest: built.manifest
+    };
+  }
+
   QB.Exporters = {
     KINDS, FORMATS, collect, buildContent, buildAsync, openFlow, download,
+    distributeFlow, openPreview,
     _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines, _historyToTable: historyToTable
   };
 })(window);

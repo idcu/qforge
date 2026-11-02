@@ -895,6 +895,55 @@ for (const tier of [5000, 20000, 50000]) {
   });
 }
 
+/* ---------- 13. 分发题包（.qbk + manifest.json）：5000 题构建/导入观测 ----------
+ * 纳入 bench 观测（**不设门禁**）：manifest 文本仅数百字节，构建耗时由 JSON 序列化 + stored ZIP 打包主导，
+ * 导入耗时由 ZIP 解包 + JSON.parse + 适配器校验主导。门禁阈值需跨机器稳定，故只报告不断言。 */
+{
+  const PKG_N = 3;
+  const PKG_Q = 5000;
+  const qs = [];
+  for (let i = 0; i < PKG_Q; i++) {
+    qs.push({
+      type: 'single', question: '第 ' + (i + 1) + ' 题：分发题包压测题干',
+      options: [{ letter: 'A', text: '选项甲' }, { letter: 'B', text: '选项乙' },
+        { letter: 'C', text: '选项丙' }, { letter: 'D', text: '选项丁' }],
+      answer: 'A', analysis: '解析文本', category: '分类' + (i % 10), difficulty: (i % 5) + 1, tags: ['标签']
+    });
+  }
+  const payload = {
+    kind: 'bank', bank: { name: '分发题包 5k', description: '压测' },
+    entries: qs.map((q) => ({ question: q, meta: {} }))
+  };
+  const plain = await QB.Exporters.buildAsync('qbk', payload);
+  const dist = await QB.Exporters.buildAsync('qbk', payload, { distribute: true, version: '1.0.0', author: 'bench' });
+  const tPlain = await timed(async () => { await QB.Exporters.buildAsync('qbk', payload); }, PKG_N);
+  const tDist = await timed(async () => {
+    await QB.Exporters.buildAsync('qbk', payload, { distribute: true, version: '1.0.0', author: 'bench' });
+  }, PKG_N);
+  const tParse = await timed(async () => { await QB.Qbk.parseBundle(dist.content); }, PKG_N);
+  const tImport = await timed(async () => {
+    await QB.QbkImporter.parse({ arrayBuffer: dist.content, fileName: 'pkg.qbk' });
+  }, PKG_N);
+  const delta = dist.content.byteLength - plain.content.byteLength;
+  report.push({
+    name: '分发题包 5k：构建（普通 qbk）', median: tPlain.median, min: tPlain.min, max: tPlain.max,
+    extra: '题包 ' + plain.content.byteLength + ' B（' + mb(plain.content.byteLength) + '）'
+  });
+  report.push({
+    name: '分发题包 5k：构建（含 manifest.json）', median: tDist.median, min: tDist.min, max: tDist.max,
+    extra: '题包 ' + dist.content.byteLength + ' B，manifest 增量 ' + delta + ' B（'
+      + (delta / plain.content.byteLength * 100).toFixed(3) + '%）'
+  });
+  report.push({
+    name: '分发题包 5k：解包（Qbk.parseBundle）', median: tParse.median, min: tParse.min, max: tParse.max,
+    extra: 'ZIP 解包 + bank.json/manifest.json 读取'
+  });
+  report.push({
+    name: '分发题包 5k：导入（QbkImporter 含清单校验）', median: tImport.median, min: tImport.min, max: tImport.max,
+    extra: '资产入库 + JSON 适配 + 清单/校验和核对'
+  });
+}
+
 QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
 
 console.log('\n================ 性能打点报告 ================');

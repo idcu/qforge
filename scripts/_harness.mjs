@@ -36,6 +36,7 @@ const MODULES = [
   'js/data/local-adapter.js',
   'js/data/api-adapter.js',
   'js/data/db.js',
+  'js/modules/package.js',
   'js/modules/qbk.js',
   'js/importers/adapters.js',
   'js/importers/json-importer.js',

@@ -38,6 +38,8 @@
     metaDav: 'meta:dav',
     metaCurrentBank: 'meta:currentBank',
     metaStartPrefs: 'meta:startPrefs',
+    // 已导入题包的 id/版本记录（按库分组；G4 重复题包交互的唯一来源）
+    metaPkgHistory: 'meta:pkgHistory',
     metaTheme: 'meta:theme',
     metaSchema: 'meta:schemaVersion',
     // 迁移锁/旧→新 hash 映射（迁移日志，运行期元数据，不进备份）

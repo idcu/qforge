@@ -30,7 +30,11 @@
     });
   }
 
-  function showPreview(bank, result) {
+  /**
+   * 导入预览
+   * @param {string|null} [presetMode] 预选落库方式（G4 重复题包交互选定后带入）：'overwrite' 或 'merge'
+   */
+  function showPreview(bank, result, presetMode) {
     return new Promise((resolve) => {
       const stats = result.stats || { byType: {} };
       const rows = QB.CONFIG.TYPES.map((t) =>
@@ -52,9 +56,11 @@
         '<tr><td>文件内重复</td><td>' + (stats.inFileDuplicates || 0) + '</td></tr>' +
         '</tbody></table>' +
         warnHtml +
-        '<div class="checkbox-row"><input type="radio" id="mode-merge" name="imp-mode" value="merge" checked>' +
+        '<div class="checkbox-row"><input type="radio" id="mode-merge" name="imp-mode" value="merge"' +
+        (presetMode === 'overwrite' ? '' : ' checked') + '>' +
         '<label for="mode-merge">合并（保留已有题目，跳过重复）</label></div>' +
-        '<div class="checkbox-row"><input type="radio" id="mode-over" name="imp-mode" value="overwrite">' +
+        '<div class="checkbox-row"><input type="radio" id="mode-over" name="imp-mode" value="overwrite"' +
+        (presetMode === 'overwrite' ? ' checked' : '') + '>' +
         '<label for="mode-over">覆盖（清空该题库后写入）</label></div>' +
         '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
         '<button class="btn" data-action="modal-ok">导入</button></div>',
@@ -65,6 +71,31 @@
             UI.closeModal();
             resolve({ mode: mode });
           };
+        }
+      );
+    });
+  }
+
+  /** G4：同一题包 id+版本重复导入的显式交互 → 'skip' | 'merge' | 'overwrite' */
+  function askDuplicate(manifest, prev) {
+    return new Promise((resolve) => {
+      UI.openModal(
+        '<h3>该题包已导入过</h3>' +
+        '<div class="li-meta">题包 <b>' + QB.escapeHtml(manifest.title || '未命名') + '</b> v' +
+        QB.escapeHtml(manifest.version || '') + '（id ' + QB.escapeHtml(manifest.packageId) + '）此前已导入本库' +
+        (prev && prev.at ? '（' + QB.formatDate(prev.at) + '）' : '') + '。</div>' +
+        '<div class="li-meta">请选择处理方式：<br>· <b>跳过</b>：不写入任何题目<br>' +
+        '· <b>并存</b>：合并导入，已存在题目按 contentHash 跳过<br>' +
+        '· <b>覆盖</b>：清空本库现有题目后写入该题包</div>' +
+        '<div class="modal-actions">' +
+        '<button class="btn btn-ghost" data-action="dup-skip">跳过</button>' +
+        '<button class="btn btn-ghost" data-action="dup-merge">并存</button>' +
+        '<button class="btn" data-action="dup-over">覆盖</button></div>',
+        (modal) => {
+          const pick = (value) => () => { UI.closeModal(); resolve(value); };
+          modal.querySelector('[data-action="dup-skip"]').onclick = pick('skip');
+          modal.querySelector('[data-action="dup-merge"]').onclick = pick('merge');
+          modal.querySelector('[data-action="dup-over"]').onclick = pick('overwrite');
         }
       );
     });
@@ -85,7 +116,27 @@
       UI.toast('未解析出任何题目', 'err');
       return null;
     }
-    const choice = await showPreview(bank, result);
+    // G4：分发包重复导入识别（同 id+版本 → 显式选择；同 id 新版本 → 仅提示，按合并去重）
+    const manifest = result.meta && result.meta.manifest;
+    let presetMode = null;
+    if (manifest) {
+      const prevSame = QB.Package.findDuplicate(bank.id, manifest);
+      if (prevSame) {
+        const action = await askDuplicate(manifest, prevSame);
+        if (!action || action === 'skip') {
+          UI.toast('已跳过题包 v' + (manifest.version || ''), 'ok');
+          return null;
+        }
+        presetMode = action;
+      } else {
+        const prevPkg = QB.Package.latestForPackage(bank.id, manifest.packageId);
+        if (prevPkg) {
+          UI.toast('题包 ' + (manifest.title || '') + ' 新版本 v' + (manifest.version || '') +
+            '（已导入 v' + (prevPkg.version || '') + '），按合并去重导入');
+        }
+      }
+    }
+    const choice = await showPreview(bank, result, presetMode);
     if (!choice) return null;
     try {
       const res = await QB.DB.questions.insertMany(bank.id, result.questions, {
@@ -93,6 +144,7 @@
         mode: choice.mode
       });
       if (source) await stampSource(bank, source);
+      if (manifest) QB.Package.recordImport(bank.id, manifest);
       UI.toast('导入完成：新增 ' + res.inserted + ' · 重复跳过 ' + res.duplicates + ' · 库内共 ' + res.total, 'ok');
       return res;
     } catch (e) {

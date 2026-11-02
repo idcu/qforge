@@ -91,7 +91,8 @@
 | `importers/line-parser.js` | **行式切题公共解析器**：`parseLines`/`blocksToQuestions`（题号/选项/答案/解析类标记/分类标记识别 + 题型推断），docx 与 md 共用；解析类标记（解析/解题思路/考点/释义…）经 `Adapters.matchAnalysisMarker` 识别并 `appendAnalysis` 增量合并，避免与表头别名两套维护；M2 起含材料块状态机（`[材料题]` 开块 / `材料：` / `(i)` 小问 / 顶层题号收块，输出 `isMaterial` 块交 `Adapters.toStandard` 递归）；父题解析标记后的多行续行（如合并后的 `【释义】…` 分段）在小问出现前归父题解析，不误入材料正文 |
 | `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX；入参区分**真实 File/Blob**（选文件/拖拽，内部 FileReader 读取）与**内存快照** `{name,text}` / `{name,arrayBuffer}`（网络导入/粘贴/测试注入），真实 File 上的 `text()`/`arrayBuffer()` 方法不与快照数据混用 |
 | `importers/qbk-importer.js` | `.qbk` 题库包：`Qbk.parseBundle` 解包 → 复用 JsonImporter → 资产写 QB.Assets（缺图警告） |
-| `modules/qbk.js` | `QB.Qbk`：qbk/qfbk 的 stored ZIP 编解码（bank.json/backup.json + assets/*）、PK 头识别、题目引用资产 id 收集 |
+| `modules/qbk.js` | `QB.Qbk`：qbk/qfbk 的 stored ZIP 编解码（bank.json/backup.json + 可选 manifest.json + assets/*）、PK 头识别、题目引用资产 id 收集；`buildBundle` 第 4 参 `extra` 仅分发题包使用，旧包解析 `manifest=null` |
+| `modules/package.js` | `QB.Package`：**分发题包清单唯一实现**——`makeManifest`/`parseManifest`/`verify`（题数·checksum·格式，只警告不阻断）/`compareVersions`/导入历史 `findDuplicate`·`latestForPackage`·`recordImport`（`meta:pkgHistory`）；导出与导入两侧只调用本模块，不复制校验逻辑 |
 | `importers/json-importer.js` | JSON 结构嗅探（数组/导出/中文嵌套）；解析前去 UTF-8 BOM（与 CSV/MD 一致） |
 | `importers/csv-importer.js` | CSV/TSV 表头映射（自动识别逗号/制表符/分号、BOM、引号转义） |
 | `importers/md-importer.js` | Markdown 清洗（标题/列表/加粗/反引号/引用，保护 `____`）后复用 LineParser |

@@ -128,6 +128,40 @@ CSV/XLSX 为同一张 11 列表（首行表头）：
 - **可访问/可打印**：正文语义标签（`header/article/footer`）、答案区高对比底色、`@media print` 分页保护。
 - **限制**：只读、不参与导入；历史记录（非题集）明确拒绝；图片过多时文件体积会显著增大（base64 约为原始字节的 1.33×）。
 
+### 2.5 分发题包（`.qbk` + `manifest.json`）
+
+「数据管理 → 导出分发题包」在普通 `.qbk` 结构上**只追加一个文本条目**，用于把题包发给他人后仍能识别来源/版本/完整性：
+
+```
+manifest.json             # 题包清单（约 300 B，见下）
+bank.json                 # 与普通导出逐字段相同（含 checksum）
+assets/asxxxxxxxx-123.jpg # 图片字节（同普通 .qbk）
+```
+
+```json
+{
+  "format": "qforge-package",
+  "manifestVersion": 1,
+  "packageId": "pkg-<16 hex>",
+  "version": "1.2.0",
+  "title": "题库名",
+  "description": "…",
+  "author": "…",
+  "questionCount": 538,
+  "createdAt": "2026-11-03T…Z",
+  "checksum": "3:<16 hex>",
+  "app": { "name": "淬题", "version": "1.0.0" }
+}
+```
+
+- **唯一实现** `QB.Package`（`js/modules/package.js`）：生成/解析/校验/版本比较/导入历史，导入器与导出器都只调用它。
+- `packageId` 默认由题库 id 经 FNV-1a 64 散列（同库多次导出不变）；`version` 在导出弹窗填写（默认 `1.0.0`），`author/description` 可选。
+- `checksum` 与 `bank.json.checksum` **同源同值**（v3 `3:`+16hex），不重复计算：分发构建复用 `jsonPayload()` 得到的校验和。
+- **向后兼容**：普通导出不产生 `manifest.json`；旧 `.qbk` 无该条目时解析为 `null`、不提示、导入行为与改动前一致。
+- **只读预览**：分发弹窗可直接「只读预览」，复用 `QB.SharePage` 生成自包含 HTML，在本地新标签页打开（不联网、不上传）。
+- 体积实测（538 题真实库）：普通 `.qbk` 与分发包字节差见 §6；manifest 增量仅数百字节。
+- 重复导入与校验行为见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §9。
+
 ## 3. 文件命名
 
 ```
@@ -151,8 +185,19 @@ QB.Exporters.buildContent(formatId, payload)
 QB.Exporters.FORMATS   // 格式注册表
 QB.Exporters.KINDS     // 对象注册表
 
+QB.Exporters.buildAsync(formatId, payload, opts?)
+  → { content, ext, mime, assetCount, missing, manifest }
+  // opts 仅 qbk 识别：{ distribute:true, version, author, description, title, packageId }
+
 // 浏览器外壳：收集 → 弹窗选格式 → 构建 → 下载
 QB.Exporters.openFlow({ kind, bank })
+// 分发题包：收集 → 填写版本/作者/描述（或只读预览）→ 构建（含 manifest.json）→ 下载
+QB.Exporters.distributeFlow({ kind:'bank', bank })
+QB.Exporters.openPreview(payload)   // 复用分享页，本地新标签打开
+
+// 题包清单公共抽象（生成/解析/校验/版本比较/导入历史）
+QB.Package.makeManifest(opts) / parseManifest(text) / verify(...) / compareVersions(a, b)
+QB.Package.findDuplicate(bankId, manifest) / latestForPackage(bankId, packageId) / recordImport(bankId, manifest)
 ```
 
 ## 5. 扩展方法

@@ -655,6 +655,10 @@
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
         return QB.Exporters.openFlow({ kind: 'bank', bank: State.bank });
       }
+      case 'bank-package': {
+        if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        return QB.Exporters.distributeFlow({ kind: 'bank', bank: State.bank });
+      }
       case 'export-wrong': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
         return QB.Exporters.openFlow({ kind: 'wrong', bank: State.bank });

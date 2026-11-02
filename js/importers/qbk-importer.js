@@ -17,18 +17,31 @@
       throw new Error('题库包内 bank.json 解析失败：' + e.message);
     }
     const ids = await QB.Assets.putEntries(bundle.assets);
-    const warnings = jsonRes.warnings.slice();
+    // 分发包清单校验（QB.Package 唯一实现）：无 manifest（旧包）零警告、行为不变；
+    // 清单损坏/题数或校验和不符**只警告不阻断**（与仓库既有 checksum 规则一致）
+    const check = QB.Package.verify(bundle.manifest, bundle.manifestError,
+      { checksum: jsonRes.meta && jsonRes.meta.checksum }, jsonRes.questions);
+    const warnings = jsonRes.warnings.slice().concat(check.warnings);
     const referenced = QB.Qbk.referencedIds(jsonRes.questions);
     const stored = await QB.Assets.getMap(referenced);
     const missing = referenced.filter((id) => !stored.has(id));
     if (missing.length) warnings.push('有 ' + missing.length + ' 张图片在包中缺失，将显示为占位');
+    const manifest = check.manifest;
     return {
       questions: jsonRes.questions,
       warnings: warnings,
       format: 'qbk',
       assetCount: ids.length,
       // 透传内容校验和（JSON 导入器已复核）；预览展示「一致/不一致」
-      meta: jsonRes.meta || null
+      meta: Object.assign({}, jsonRes.meta || {}, {
+        manifest: manifest,
+        manifestOk: check.ok,
+        manifestChecksumOk: check.checksumOk,
+        countOk: check.countOk,
+        packageId: manifest ? manifest.packageId : '',
+        version: manifest ? manifest.version : '',
+        title: manifest ? manifest.title : ''
+      })
     };
   }
 

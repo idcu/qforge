@@ -170,6 +170,7 @@
       '<button class="btn btn-ghost" data-action="bank-import-text">粘贴文本导入</button>' +
       urlImportBtn + refreshBtn +
       '<button class="btn btn-ghost" data-action="bank-export">导出题目</button>' +
+      '<button class="btn btn-ghost" data-action="bank-package" title="导出含 manifest/版本/校验的分发题包，可发给他人一键导入">导出分发题包</button>' +
       '<button class="btn btn-ghost" data-action="backup-manage">备份与恢复</button>' +
       '<button class="btn btn-ghost" data-action="questions-manage">题目管理（新增/编辑/删除）</button>' +
       '</div>';
@@ -763,10 +764,25 @@
 
   /** 导入预览的内容校验和行（meta 来自 JSON/qbk 导入器；无校验和返回空） */
   function renderImportChecksum(meta) {
-    if (!meta || !meta.checksum) return '';
-    const ok = meta.checksumOk !== false;
-    return '<div class="li-meta" data-import-checksum="' + (ok ? 'ok' : 'mismatch') + '">内容校验和 <code>' +
-      esc(meta.checksum) + '</code> · ' + (ok ? '一致' : '不一致（文件可能被修改或传输损坏）') + '</div>';
+    if (!meta) return '';
+    let html = '';
+    if (meta.checksum) {
+      const ok = meta.checksumOk !== false;
+      html += '<div class="li-meta" data-import-checksum="' + (ok ? 'ok' : 'mismatch') + '">内容校验和 <code>' +
+        esc(meta.checksum) + '</code> · ' + (ok ? '一致' : '不一致（文件可能被修改或传输损坏）') + '</div>';
+    }
+    // 分发题包清单（manifest.json）：旧包无此字段；校验不符只提示，不阻断导入
+    if (meta.manifest) {
+      const m = meta.manifest;
+      const ck = meta.manifestChecksumOk === true ? '一致'
+        : (meta.manifestChecksumOk === false ? '不一致' : '未提供');
+      const state = meta.manifestOk === false ? 'warn' : 'ok';
+      html += '<div class="li-meta" data-import-manifest="' + state + '">题包 <b>' + esc(m.title || '未命名') +
+        '</b> v' + esc(m.version || '') + ' · ' + (m.questionCount || 0) + ' 题' +
+        (m.author ? ' · 作者 ' + esc(m.author) : '') +
+        ' · 清单校验和 <code>' + esc(m.checksum || '') + '</code> ' + ck + '</div>';
+    }
+    return html;
   }
 
   /**

@@ -6,6 +6,52 @@
 
 ---
 
+## `<提交 hash 待回填>` · feat(package): .qbk 分发题包（manifest/校验/重复导入/只读预览）
+
+**核心改动**
+- **新增 `js/modules/package.js`（`QB.Package`，清单唯一实现）**：`makeManifest`（packageId=题库 id 的
+  FNV-1a 64 散列 `pkg-<16hex>`、version 默认 1.0.0、题数/checksum/作者/描述/时间）、`parseManifest`
+  （坏 JSON/非对象返回可读错误，不抛）、`verify`（格式/版本/题数/checksum 自洽，**只产警告不阻断**）、
+  `compareVersions`、导入历史 `history/latestForPackage/findDuplicate/recordImport`（新键 `meta:pkgHistory`，
+  每库保留最近 20 条）。导出器与导入器只调用它，**不存在第二份校验实现**。
+- `modules/qbk.js`：`buildBundle(jsonName, jsonText, assets, extra?)` 增加可选第 4 参（仅分发题包用），
+  备份/普通 qbk 不传 → 包结构与旧版逐字节同构；`parseBundle` 新增返回 `manifest`/`manifestError`
+  （无 manifest 的旧包为 `null` + 空错误）。
+- `modules/exporter.js`：`buildJSON` 拆出 `jsonPayload()`（checksum 只算一次，manifest 直接复用）；
+  `buildQBK(payload, opts?)` 在 `opts.distribute` 时追加 `manifest.json`；`buildAsync(formatId, payload, opts?)`
+  透传 opts 并回传 `manifest`；新增 `distributeFlow({kind, bank})`（版本/作者/描述弹窗 + 只读预览 + 下载）与
+  `openPreview(payload)`（复用 `QB.SharePage` 自包含 HTML，本地 blob 新标签页打开，不联网/不上传）。
+- `importers/qbk-importer.js`：调用 `QB.Package.verify`，把清单警告并入 warnings，`meta` 增加
+  `manifest/manifestOk/manifestChecksumOk/countOk/packageId/version/title`。
+- `modules/data-io.js`：命中「同 packageId+version」→ 弹窗**跳过/并存/覆盖**（不静默重复）；同 id 新版本仅提示；
+  选定方式带入预览单选；成功导入后 `recordImport`。
+- `modules/ui-renderer.js`：导入预览显示题包名/版本/题数/清单校验和（`data-import-manifest`）；题库工具栏新增
+  「导出分发题包」；`js/app.js` 新增 `bank-package` 动作；`data/contracts.js` 新增 `meta:pkgHistory`；
+  `index.html` + `scripts/_harness.mjs` 加载 `package.js`。
+
+**验证数据（2026-11-03，Node v24 / `--expose-gc`）**
+- 往返（`assets.test.mjs` 新增 **52** 项，全套 **4214 / 4214 通过**）：题数 2/2、题型（single+material）、
+  材料小问分值 25/15、材料正文/解析/难度、资产 1/1、`manifestOk=true`、`manifestChecksumOk=true`、
+  `countOk=true`、导入警告 0；同库两次导出 `packageId` 相同；`3:<16hex>` 校验和与 bank.json 同源。
+- 四类异常（均**只警告不阻断**，各 1 条用例）：manifest 缺失（旧包）→ 正常导入、**0 条清单警告**；
+  manifest 损坏 → 「不是合法 JSON…已跳过校验」+ 仍导入；checksum 不符 → `manifestOk=false` +
+  「不一致」警告 + 仍导入；题数不符（9 vs 1）→ 「题数 9…不一致」+ 仍导入。id 冲突 → 弹窗三选一，
+  并存语义断言 `inserted=0/duplicates=2`、覆盖后库内仍 2 题。
+- 体积（5k 合成库，bench）：普通 `.qbk` **3,234,267 B** → 分发版 **3,234,729 B**，增量 **462 B（+0.014%）**。
+- 性能（5k，3 次中位数，纳入 bench 观测、**不设门禁**）：普通 qbk 构建 **76.62ms**、含 manifest **76.87ms**、
+  `Qbk.parseBundle` **9.03ms**、`QbkImporter.parse`（含清单校验/资产）**137.02ms**。
+- 回归：`test-all` 25 运行项 0 失败；`bench --assert` **53/53 门禁通过**；`docs-check --static` 全部一致。
+  首屏 78 文件（70 内联 js），**292.2 KB gzip / 831.4 KB raw**（前 282.5 / 797.5，+3.4% / +4.3%，因新增模块）。
+
+**遗留 TODO / 风险**
+- 重复题包弹窗属 UI 层，**无 DOM 断言**（识别/并存/覆盖的落库语义已测，弹窗本身未做浏览器手测）。
+- packageId 由题库 id 派生：同一题库多次导出稳定；**导入后另存为新库再导出会换 id**（不用于跨库同源追踪）。
+- URL 导入仍受 8MB 快照上限约束，大分发包需文件/拖拽导入。
+- `meta:pkgHistory` 随备份导出、随库保留最多 20 条；api 模式下该历史仅存本机（不随后端同步）。
+- 清单 checksum 与 bank.json checksum 为**字符串相等**比较（不重算），依赖 JSON 导入器对 bank.json 的独立复核。
+
+---
+
 ## bc8e963 · feat(storage): 运行时探测 LocalStorage 配额上限
 
 **核心改动**
