@@ -6,7 +6,34 @@
 
 ---
 
-## （待回填） · feat(storage): schema v5 一次性迁移（hash 64 位 + per-hash 复习 + 分段日志）
+## fcd6820 · ci(docs): docs-check 静态基线 + 独立轻量 CI job（Phase E）
+
+**核心改动**
+- `scripts/docs-check.mjs` 三模式：默认 **live**（实测 spawn 套件 + 门禁统计 + 首屏体积后比对）、
+  `--write`（live 后写 `scripts/docs-baseline.json`）、`--static`（只读基线的套件断言数/门禁数 +
+  实时读取运行项/首屏文件/gzip，**不 spawn 套件、不跑 bench**）。
+- 新增 `scripts/docs-baseline.json`：`{generatedAt, runItems, suiteFiles, totalAssertions, gateCount, counts, firstScreen}`。
+- `.github/workflows/test.yml` 新增独立 `docs-check` job（Node 24，仅 `node scripts/docs-check.mjs --static`），
+  与 `logic-tests` 矩阵并行，不塞进重腿、避免重复跑全部套件与 bench。
+- 文档同步：`README.md`（CI 段落补独立轻量 job）、`docs/DEVELOPMENT.md`（§4 补 job 口径、基线刷新方式、live/static 差异）。
+
+**验证数据（2026-11-02 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/docs-check.mjs --write`：24 运行项 / **3860 断言** / **35 门禁** / 76 文件（68 内联 js）/
+  **248.8 KB gzip · 690.5 KB raw**，文档 0 漂移；写入基线后 `--static` 复跑同为 0 漂移。
+- 主腿耗时影响：`node scripts/test-all.mjs` 仍 **24 个运行项 / 0 失败 / 32.9s**（上一轮 24.5s）；
+  +8.4s 主因本阶段 `migrate.test` 57→129 项（三档完整性/断点重入/多标签单锁/回滚/双读对照）。
+  独立 docs-check job 不增加主腿耗时。
+
+**公共抽象（新增/调整）**
+- 开发工具新增三模式与基线文件（**不进运行时、不改任何 Public API**）；无业务模块公共件变化。
+
+**TODO/风险**
+- 基线需**手动** `--write` 刷新并同 commit 提交；CI 不会自动更新，若忘记刷新则 static 模式报断言数漂移。
+- static 模式只比对「套件断言数/门禁数/运行项/首屏」四类数字，不校验耗时类数字（同机波动，文档按快照标注日期）。
+
+---
+
+## e90ea43 · feat(storage): schema v5 一次性迁移（hash 64 位 + per-hash 复习 + 分段日志）
 
 **核心改动（Phase D：D1–D4 合并为一个 schema 版本，只留一条兼容线）**
 - D1 迁移框架 `js/modules/migrate.js`：`SCHEMA_VERSION=5`，`run({force?})` 读旧 → 转换 → 校验 → 原子写 → 标记版本；返回 `{migrated, sharded, repaired, layout}`。
