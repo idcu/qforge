@@ -6,6 +6,28 @@
 
 ---
 
+## 待回填 · docs(bench): 明确耗时类数字口径（Phase F4）
+
+**核心改动**
+- `README.md`「实测数据」段与 `docs/DEVELOPMENT.md` bench 段新增「**耗时口径（F4，2026-11-02）**」：
+  毫秒/内存/体积数值为**同机参考值**（Node v24.14.0、当前机器负载），跨机器/跨轮次波动属正常；
+  `scripts/docs-check.mjs --static` **只校验运行项、断言数、门禁数与首屏体积**，**不校验耗时数字**。
+- 结论：**决定不把耗时类数字纳入 `docs-check` 门禁**（理由：跨机/负载波动会造成误报漂移，且耗时正确性已由
+  `bench --assert` 的门禁阈值覆盖）；**无代码改动**（`scripts/docs-check.mjs` 未改，校验逻辑本身不含耗时匹配）。
+
+**验证数据（2026-11-02 本机）**
+- `node scripts/test-all.mjs`：**24 个运行项 / 0 失败 / 3911 断言**。
+- `node --expose-gc scripts/bench.mjs --assert`：**35/35 门禁通过**（阈值判定不变）。
+- `node scripts/docs-check.mjs --static`：**24 运行项 / 3911 断言 / 35 门禁 / 76 文件 / 252.5 KB gzip / 704.0 KB raw**，
+  文档数字全部一致（新增文案不含被校验的数字模式，0 漂移）。
+
+**TODO/风险**
+- 耗时数字仍写在文档中，只是**不进门禁**；读者需结合 `bench --assert` 阈值与 `CHANGELOG.internal.md` 逐轮实测对比，
+  不能把某一次毫秒值当绝对基线。
+- 无新增公共抽象（纯文档口径说明）。
+
+---
+
 ## 待回填 · feat(backup): 旧客户端兼容备份导出（Phase F3）
 
 **核心改动**
