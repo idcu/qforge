@@ -6,6 +6,98 @@
 
 ---
 
+## d01a12c · test(bench): Phase G 三档容量/写入/迁移 heap 门禁与文档数字同步（G4）
+
+**核心改动**
+- `scripts/bench.mjs`：`instrumentStorePeak` 改为每 500ms `bestEffortGc()` 后采样 `heapUsed`，输出**驻留峰值**（GC 后）、
+  **原始峰值**（未 GC）与**浏览器口径估算**（驻留 − 全量回读 IDB 克隆增量）；新增 IDB 5000/20000/50000 三档迁移与写入打点。
+- 新增门禁（`--assert` 35→49 项）：IDB 三档迁移耗时（≤8000/20000/70000ms）与单次评分写入（≤1ms）、
+  三档逐键完整性、20000 题迁移 heap 驻留峰值 ≤100MB、50000 题容量 ≤100MB 且 >LS 5MB。
+- 文档数字同步：README/DEVELOPMENT 运行项 24→25、断言 3911→3998、门禁 35→49、首屏 76→77 文件（69 内联 js）、
+  252.5→267.3KB gzip / 704.0→751.5KB raw（新增 `js/data/store.js`）；`scripts/docs-baseline.json` 刷新。
+
+**验证数据（`node --expose-gc scripts/bench.mjs --assert`，2026-11-02 本机 Node v24.14.0，全 49/49 门禁通过）**
+- IDB 迁移：5000 题 **494.37ms / 4.96MB**（LS UTF-16 3.84MB，驻留 +15.41MB，原始 +89.32MB，浏览器口径 +10.12MB）；
+  20000 题 **5719.22ms / 19.97MB**（15.50MB，+60.82MB / +217.74MB / +39.62MB）；
+  50000 题 **24765.73ms / 45.35MB**（38.94MB，+136.33MB / +294.82MB / +90.14MB）。
+- IDB 单次评分写入（单事务 flush）：**0.05 / 0.15 / 0.14ms**，上行 **211 / 213 / 213B**；对照 v5 per-hash LS **0.14ms@20000**。
+- v5 LS 迁移基线：1000/3000/20000 = **25.95 / 75.21 / 497.05ms**，heap 峰值 **+15.43 / +47.01 / +107.21MB**（门禁 120MB）；
+  per-hash 写入 **0.02 / 0.02 / 0.13ms**。
+- `node scripts/test-all.mjs`：**25 运行项 / 0 失败 / 3998 断言 / 25.2s**；
+  `node scripts/docs-check.mjs --static`：**全部一致**（25 运行项 / 3998 断言 / 49 门禁 / 77 文件 / 267.3KB gzip）。
+
+**TODO/风险**
+- IDB 占用为 `QB.Store.estimate()` 的**序列化字节估算**（UTF-16 口径），Node 无 `navigator.storage.estimate`；
+  **不是浏览器真实配额占用**。浏览器真实配额/隐私模式/多标签 IDB 事务**未验证**。
+- heap 驻留峰值仍含 Node 内存后端把数据放在 JS 堆的偏差；「浏览器口径估算」为扣克隆增量后的推算值，非实测。
+- 50000 题迁移耗时 24.8s 已进默认 bench 门禁（上限 70s），本地全跑 bench 约 1 分钟；未做成 `--scale` 可选，避免门禁缺档。
+
+**公共抽象（新增/调整）**
+- 新增 `scripts/lib/idb-memory.mjs::createMemoryIDB`（零依赖最小 IndexedDB 内存实现，事务 journal 回滚 + `failWrite` 注入）。
+- `scripts/_harness.mjs::createHarness` 新增可选 `opts.indexedDB` / `opts.BroadcastChannel`；`load()` 显式注入两个全局。
+- `QB.Store` 新增 `estimate()/stats()/query()/logTail()/isBootstrap()/isBackupExcluded()/tagOf()` 等公共面。
+- 以上均不改变 `QB.Storage` / `QB.DB` / `backup` / 导入导出既有调用签名。
+
+---
+
+## 4a1ee4a · feat(migrate): schema v6 迁移到 IndexedDB 并保留 LocalStorage 退路（Phase G G3）
+
+**核心改动**
+- `js/modules/migrate.js`：`SCHEMA_VERSION=6`；v5→v6 复用既有迁移框架——抢 `meta:migrationLock`（30s TTL）→
+  `QB.Backup.saveAutoBackup` → 32 键/批复制 → 分块逐键深比对 → 写 `meta:storageBackend='idb'` →
+  `Storage.adoptStore`（直接复用 LS 源水合缓存，**去掉整库回读克隆**）→ 写 schema 版本戳 + `flush`。
+  **成功后不删除 LS 旧数据**；IDB 不可用写 `ls-fallback` 并保持 LS 可用。
+- `js/modules/backup.js`：`isRuntimeKey` 纳入 `QB.Store.isBackupExcluded`；replace 恢复跳过引导标记；
+  IDB 模式 `buildBackup` 先 `await flush()`；备份弹窗展示当前后端与「清理旧 LocalStorage / 回退 / 重新启用 IDB」入口；
+  回滚失败保持 IDB，不半切。
+- `scripts/migrate.test.mjs` / `scripts/shard.test.mjs` 版本断言 5→6；`snap()` 排除运行期迁移标记。
+- 文档同步：`docs/DATABASE.md` §3/§4/§5/§7.1/§9；`docs/user-guide.md` §9/§9.1/§10。
+  备份 `data` 结构与文件名不变 → `docs/EXPORT-FORMAT.md` 无需改动。
+
+**验证数据（2026-11-02 本机 Node v24.14.0，Node 内存 IDB 口径）**
+- `node scripts/migrate.test.mjs`：**151/151 通过**；`node scripts/shard.test.mjs`：**115/115 通过**。
+- IDB 三档迁移：**494.37 / 5719.22 / 24765.73ms**，IDB 估算 **4.96 / 19.97 / 45.35MB**；
+  逐键完整性 **5000/5000、20000/20000、50000/50000**，日志按 FIFO 保留 20000 条，**LS 保留=true**。
+- 20000 题迁移 heap 驻留峰值 **+60.82MB**（门禁 100MB），浏览器口径估算 **+39.62MB**。
+- 50000 题同数据 LS UTF-16 **38.94MB > 5MB** 配额 → 必须走 IDB；IDB 估算 45.35MB ≈ 5MB 的 9.1×。
+
+**TODO/风险**
+- **浏览器真实配额、隐私模式失败形态、多标签 IDB 事务语义未验证**：仅有 Node 内存实现与单测覆盖。
+- 回滚需 IDB 数据仍完整（`rollbackToLS` 从 IDB 写回 LS，失败保持 IDB 并抛错）；旧 LS 数据在 cleanup 前一直保留。
+- 迁移后旧 LS 与 IDB 双份占用（题量越大越明显），需用户显式清理；文档已提示。
+- 公共抽象：`QB.Store.migrateToIdb/verifyAgainstLS/cleanupLegacyLS/rollbackToLS/reenableIdb/markFallback`、
+  `QB.Storage.initStore/adoptStore/flush`；既有 `QB.Storage`/`QB.DB` 调用签名不变。
+
+---
+
+## 8c9f7f3 · feat(storage): 引入 QB.Store 双后端与 IndexedDB 存储（Phase G G1/G2）
+
+**核心改动**
+- 新增 `js/data/store.js`：IDB 对象仓 `qforge-kv/kv`（`keyPath=key`）+ 索引
+  `by_bank`/`by_kind`/`by_bank_kind`/`by_kind_seq`；`lsBackend`/`idbBackend` 提供**同一套接口**
+  `init/readAll/query/logTail/set/batch/remove/clear/stats/estimate`，业务层零分叉；`batch` 单事务、失败整体回滚；
+  启动按 `meta:storageBackend` 标记选后端，IDB 不可用/打开失败写 `ls-fallback` 安全回落。
+- `js/utils/storage.js`：同步门面语义不变（内存缓存 + `setSync` 穿透 + `getFresh`）；IDB 模式下同调用栈多次
+  `setSync` 聚合为**一个微任务事务**，`await Storage.flush()` 确认落盘；引导标记仍同步写 LS。
+- `js/data/local-adapter.js`：`backup.export/import` IDB 模式先 flush 再返回；LS 模式保持同步返回。
+- `index.html` 加载顺序插入 `js/data/store.js`；`js/app.js` boot 先 `initStore`；harness 注入 IDB/BroadcastChannel。
+- 文档同步：`docs/ARCHITECTURE.md` §3.2/§3.3/§8 与新增 §9（分层/数据划分/后端选择/schema v6 步骤/回滚降级）。
+
+**验证数据（2026-11-02 本机 Node v24.14.0）**
+- `node scripts/idb.test.mjs`：**87/87 通过**（初始化/回落/单事务回滚/三类索引查询/v5-v6 逐键一致/LS 保留/幂等/
+  中断重入/多标签单锁/cleanup/rollback/reenable/空库新装）。
+- `node scripts/test-all.mjs`：**25 运行项 / 0 失败 / 3998 断言**。
+- `node --expose-gc scripts/bench.mjs --assert`：**49/49 门禁通过**；IDB 写入 **0.05/0.15/0.14ms**、
+  上行 **211/213/213B**（单事务）；50000 题 IDB 估算 **45.35MB**。
+- `node scripts/docs-check.mjs --static`：全部一致（含新增套件 87 项与 77 文件首屏）。
+
+**TODO/风险**
+- **浏览器真实 IDB 配额/隐私模式/多标签事务未验证**（Node 内存实现口径）。
+- 未新增第三方依赖：IDB 测试用自研 `scripts/lib/idb-memory.mjs`；`Storage` 同步读语义依赖启动时整库水合，
+  大数据量首屏仍有一次全库读（与 v5 同口径），未测量浏览器侧首屏水合耗时。
+
+---
+
 ## 4358eb3 · docs(bench): 明确耗时类数字口径（Phase F4）
 
 **核心改动**
