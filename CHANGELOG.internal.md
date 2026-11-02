@@ -6,7 +6,7 @@
 
 ---
 
-## <hash 待回填> · perf(migrate): 校验统一为 QB.deepEqual，逐批回读不整库物化
+## d361a92 · perf(migrate): 校验统一为 QB.deepEqual，逐批回读不整库物化
 
 **核心改动**
 - 根因先证后改（`node --expose-gc`，阶段间强制 GC，20k）：backup +0.14MB/2.47ms；v1→v2 峰值
