@@ -7,19 +7,37 @@
   "dependencies": [
     {
       "name": "gitee:idcu/ngm-repo",
-      "ref": "d7dfe1889de73fd09f1743ce660747c59a37d812",
+      "ref": "92bd2d98d4e3a91c7210abeeb3a1e608c58a92be",
+      "refType": "commit",
+      "path": "packages/core/assets"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "92bd2d98d4e3a91c7210abeeb3a1e608c58a92be",
+      "refType": "commit",
+      "path": "packages/core/util"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "92bd2d98d4e3a91c7210abeeb3a1e608c58a92be",
+      "refType": "commit",
+      "path": "packages/format/dsv"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "92bd2d98d4e3a91c7210abeeb3a1e608c58a92be",
       "refType": "commit",
       "path": "packages/format/xlsx-read"
     },
     {
       "name": "gitee:idcu/ngm-repo",
-      "ref": "d7dfe1889de73fd09f1743ce660747c59a37d812",
+      "ref": "92bd2d98d4e3a91c7210abeeb3a1e608c58a92be",
       "refType": "commit",
       "path": "packages/format/xml-lite"
     },
     {
       "name": "gitee:idcu/ngm-repo",
-      "ref": "d7dfe1889de73fd09f1743ce660747c59a37d812",
+      "ref": "92bd2d98d4e3a91c7210abeeb3a1e608c58a92be",
       "refType": "commit",
       "path": "packages/format/zip"
     }

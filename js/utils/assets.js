@@ -1,15 +1,14 @@
 /**
- * 图片资产存储（IndexedDB，零依赖）
+ * 图片资产存储（适配 @idcu/core-assets）
  *
- * 题目文本里只存占位标记 ![](asset:<id>)，二进制图片放 IndexedDB（容量远大于
- * localStorage 的 5MB 上限）。id 为「FNV-1a(字节)-长度」内容寻址，同图自动去重。
- *
- * 驱动可注入：默认 IDBDriver（浏览器）；测试用 memoryDriver()，与 Repository 的
- * local/api 双实现同一思路，业务代码只依赖本模块的异步接口。
+ * 保留原有 QB.Assets API 与驱动注入方式；内容寻址、去重、孤儿清理由公共模块完成。
+ * 既有 as… 资产 id 不变，旧数据仍可原样读取（driver.get 按 id 直取，不做重算）。
  */
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
+  const Core = global.__idcuAssets;
+  if (!Core) throw new Error('assets: @idcu/core-assets 未加载');
 
   const ASSET_CFG = (QB.CONFIG && QB.CONFIG.ASSETS) || {};
   const DB_NAME = ASSET_CFG.IDB_NAME || 'qforge';
@@ -33,12 +32,41 @@
   function extOfMime(mime) { return MIME_EXT[String(mime || '').toLowerCase()] || 'img'; }
   function mimeOfExt(ext) { return EXT_MIME[String(ext || '').toLowerCase()] || 'application/octet-stream'; }
 
-  /** FNV-1a 32 位（字节）→ 8 位 hex，拼上长度抗碰撞（唯一实现见 utils/fnv.js） */
+  /** FNV-1a 32 位（字节）+ 长度，保留既有 as… 前缀（逻辑在公共模块） */
   function idFor(bytes) {
-    return 'as' + QB.FNV.toHex(QB.FNV.hashBytes(bytes)) + '-' + bytes.length;
+    return Core.idFor(bytes, { prefix: 'as' });
   }
 
-  /* ---------------- 内存驱动（测试/回退） ---------------- */
+  /* ---------------- 旧式驱动 → 模块驱动 ---------------- */
+  /* 旧驱动记录形状 {bytes,mime}；模块驱动契约为 get()→{id,bytes,meta}、put(id,bytes,meta) */
+  function adaptDriver(d) {
+    return {
+      kind: d.kind || 'injected',
+      async get(id) {
+        const rec = await d.get(id);
+        return rec ? { id: id, bytes: rec.bytes, meta: { mime: rec.mime } } : null;
+      },
+      async put(id, bytes, meta) {
+        await d.put(id, { bytes: bytes, mime: (meta && meta.mime) || 'application/octet-stream' });
+      },
+      async putWithId(id, bytes, meta) {
+        await d.put(id, { bytes: bytes, mime: (meta && meta.mime) || 'application/octet-stream' });
+      },
+      async remove(id) { await d.remove(id); },
+      async clear() { await d.clear(); },
+      async ids() { return d.ids(); },
+      async all() {
+        const list = await d.all();
+        return (list || []).map((x) => ({
+          id: x.id,
+          meta: { mime: x.mime },
+          size: x.bytes ? x.bytes.length : 0
+        }));
+      }
+    };
+  }
+
+  /* ---------------- 内存驱动（测试/回退，保持旧记录形状） ---------------- */
 
   function memoryDriver() {
     const map = new Map();
@@ -53,72 +81,28 @@
     };
   }
 
-  /* ---------------- IndexedDB 驱动 ---------------- */
+  /* ---------------- 默认 IndexedDB 驱动（懒创建） ---------------- */
+  let current = null;      /* 显式注入的模块驱动；null 表示默认 IDB */
+  let libCache = null;
 
-  function idbDriver() {
-    let openPromise = null;
-    function db() {
-      if (openPromise) return openPromise;
-      openPromise = new Promise((resolve, reject) => {
-        if (typeof indexedDB === 'undefined') { reject(new Error('当前环境不支持 IndexedDB')); return; }
-        const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = () => {
-          const d = req.result;
-          if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE);
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error || new Error('IndexedDB 打开失败'));
+  function defaultDriver() {
+    return Core.idbDriver({ dbName: DB_NAME, storeName: STORE, version: DB_VERSION });
+  }
+
+  function lib() {
+    if (!libCache) {
+      libCache = Core.createAssets({
+        driver: current || defaultDriver(),
+        idPrefix: 'as'
       });
-      return openPromise;
     }
-    function tx(mode, fn) {
-      return db().then((d) => new Promise((resolve, reject) => {
-        const t = d.transaction(STORE, mode);
-        const store = t.objectStore(STORE);
-        let result;
-        Promise.resolve(fn(store)).then((r) => { result = r; }).catch(reject);
-        t.oncomplete = () => resolve(result);
-        t.onerror = () => reject(t.error || new Error('IndexedDB 事务失败'));
-        t.onabort = () => reject(t.error || new Error('IndexedDB 事务中止'));
-      }));
-    }
-    return {
-      kind: 'idb',
-      put: (id, rec) => tx('readwrite', (s) => new Promise((res, rej) => {
-        const r = s.put(rec, id); r.onsuccess = () => res(); r.onerror = () => rej(r.error);
-      })),
-      get: (id) => tx('readonly', (s) => new Promise((res, rej) => {
-        const r = s.get(id); r.onsuccess = () => res(r.result || null); r.onerror = () => rej(r.error);
-      })),
-      all: () => tx('readonly', (s) => new Promise((res, rej) => {
-        const out = [];
-        const req = s.openCursor();
-        req.onsuccess = () => {
-          const cur = req.result;
-          if (cur) { out.push(Object.assign({ id: cur.key }, cur.value)); cur.continue(); } else res(out);
-        };
-        req.onerror = () => rej(req.error);
-      })),
-      ids: () => tx('readonly', (s) => new Promise((res, rej) => {
-        const r = s.getAllKeys(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-      })),
-      remove: (id) => tx('readwrite', (s) => new Promise((res, rej) => {
-        const r = s.delete(id); r.onsuccess = () => res(); r.onerror = () => rej(r.error);
-      })),
-      clear: () => tx('readwrite', (s) => new Promise((res, rej) => {
-        const r = s.clear(); r.onsuccess = () => res(); r.onerror = () => rej(r.error);
-      }))
-    };
+    return libCache;
   }
 
-  let driverPromise = null;
-  function getDriver() {
-    if (!driverPromise) driverPromise = Promise.resolve(idbDriver());
-    return driverPromise;
-  }
-  /** 注入驱动（测试用）；传 null 恢复默认 */
+  /** 注入驱动（测试/远端）；传 null 恢复默认 IndexedDB */
   function useDriver(driver) {
-    driverPromise = driver ? Promise.resolve(driver) : null;
+    current = driver ? adaptDriver(driver) : null;
+    libCache = null;
   }
 
   function asBytes(data) {
@@ -130,45 +114,48 @@
 
   /** 存入图片（内容寻址去重），返回 id */
   async function put(bytes, mime) {
-    const b = asBytes(bytes);
-    const id = idFor(b);
-    await (await getDriver()).put(id, { bytes: b, mime: String(mime || 'application/octet-stream') });
-    return id;
+    return lib().put(asBytes(bytes), { mime: String(mime || 'application/octet-stream') });
   }
 
-  /** 批量存入（恢复/导入），返回去重后的全部 id */
+  /** 批量存入（恢复/导入），保留显式 id；返回去重后的全部 id */
   async function putEntries(entries) {
-    const d = await getDriver();
     const ids = [];
     for (const e of (entries || [])) {
       if (!e || !e.id) continue;
-      await d.put(e.id, { bytes: asBytes(e.bytes), mime: e.mime || 'application/octet-stream' });
-      ids.push(e.id);
+      ids.push(await lib().putWithId(e.id, asBytes(e.bytes), { mime: e.mime || 'application/octet-stream' }));
     }
     return ids;
   }
 
   /** 取单条 {id,bytes,mime} 或 null */
   async function get(id) {
-    const rec = await (await getDriver()).get(id);
-    return rec ? Object.assign({ id: id }, rec) : null;
+    const rec = await lib().get(id);
+    return rec ? { id: rec.id, bytes: rec.bytes, mime: (rec.meta && rec.meta.mime) || 'application/octet-stream' } : null;
   }
 
   /** 批量取：Map<id, record>（缺失的 id 不出现） */
   async function getMap(ids) {
-    const d = await getDriver();
+    const map = await lib().getMap(ids, { asMap: true });
     const out = new Map();
-    for (const id of new Set(ids || [])) {
-      const rec = await d.get(id);
-      if (rec) out.set(id, Object.assign({ id: id }, rec));
+    for (const [id, rec] of map) {
+      out.set(id, { id: id, bytes: rec.bytes, mime: (rec.meta && rec.meta.mime) || 'application/octet-stream' });
     }
     return out;
   }
 
-  async function allEntries() { return (await getDriver()).all(); }
-  async function ids() { return (await getDriver()).ids(); }
-  async function remove(id) { return (await getDriver()).remove(id); }
-  async function clear() { return (await getDriver()).clear(); }
+  /** 全量（含字节，供备份导出） */
+  async function allEntries() {
+    const out = [];
+    for (const id of await lib().ids()) {
+      const rec = await get(id);
+      if (rec) out.push(rec);
+    }
+    return out;
+  }
+
+  async function ids() { return lib().ids(); }
+  async function remove(id) { return lib().remove(id); }
+  async function clear() { return lib().clear(); }
 
   /**
    * 清理未被任何题目文本引用的孤儿图片（调用方需先扫描全量题目给出引用集）
@@ -176,9 +163,9 @@
    */
   async function removeOrphans(referencedIds) {
     const keep = new Set(referencedIds || []);
-    const all = await ids();
+    const all = await lib().ids();
     const dead = all.filter((id) => !keep.has(id));
-    for (const id of dead) await remove(id);
+    for (const id of dead) await lib().remove(id);
     return dead;
   }
 

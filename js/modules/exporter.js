@@ -14,7 +14,6 @@
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
-  const BOM = '\uFEFF';
 
   /* ---------------- 收集导出对象 ---------------- */
 
@@ -62,12 +61,6 @@
   }
   function safeName(s) {
     return String(s || '导出').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60).trim() || '导出';
-  }
-  function csvCell(v) {
-    let s = String(v == null ? '' : v);
-    // CSV 公式注入防护：Excel 会把 = + @ 或“-字母”开头的单元格当公式执行；前置单引号强制文本。
-    if (/^[=+@]/.test(s) || /^-\D/.test(s)) s = "'" + s;
-    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
   function typeTag(q) { return QB.typeBadge ? QB.typeBadge(q.type) : q.type; }
   /** 答案文本统一走 QB.AnswerText（填空/简答/其余题型的答案行唯一实现） */
@@ -210,12 +203,15 @@
   }
 
   function buildCSV(payload) {
-    if (payload.kind === 'history') {
-      const lines = historyToTable(payload).map((row) => row.map(csvCell).join(','));
-      return BOM + lines.join('\r\n');
-    }
-    const lines = toTable(payload).map((row) => row.map(csvCell).join(','));
-    return BOM + lines.join('\r\n'); // UTF-8 BOM，Excel 直接打开不乱码
+    const rows = payload.kind === 'history' ? historyToTable(payload) : toTable(payload);
+    /* 公共 DSV 写出；quoteChars 与公式防护保持原有字节输出 */
+    return global.DSV.formatRows(rows, {
+      delimiter: ',',
+      eol: '\r\n',
+      bom: true,
+      quoteChars: /[",\r\n]/,
+      guardFormula: /^[=+@]|^-\D/
+    });
   }
 
   /**
