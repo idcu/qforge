@@ -33,18 +33,19 @@
    文件名 `<题库名>-分发题包-v<版本>-<题数>题-<时间>.qbk`；`openFlow` 的通用文件名同样受益。
 
 **接线级回归（`scripts/assets.test.mjs` +31，套件 119→150）**
-- **runImport 透传 meta（9 项）**：返回值含 `meta` 键、`meta.manifest.packageId/version/manifestOk` 与
+- **runImport 透传 meta（10 项）**：返回值含 `meta` 键、`meta.manifest.packageId/version/manifestOk` 与
   `buildAsync` 一致；记录导入前 `findDuplicate` 为空、`recordImport` 后命中同版本；第二次 `runImport`
   仍透传（覆盖真机缺陷复现路径）。
-- **预览契约（6 项）**：`SharePage.build` 返回对象且 `content` 为字符串；桩 `Blob/URL/window.open/setTimeout`
+- **预览契约（8 项）**：`SharePage.build` 返回对象且 `content` 为字符串；桩 `Blob/URL/window.open/setTimeout`
   后断言 `Blob` 第一段是 `string`、非 `[object Object]`、且 `=== build().content`。
 - **URL `.qbk`（7 项）**：`Source.fetchSnapshot('…pkg.qbk', {loader})` 的 `text()` 桩直接抛错、`arrayBuffer()`
   返回包体；断言快照有 `arrayBuffer`、无 `text`、8 位字节 checksum，`validateUrl` 接受 `.qbk`，快照可直接
   交给 `runImport` 解析出题并透传 `meta`（Node 模拟 fetch 响应，替代真机网络口径）。
 - **文件名唯一（6 项）**：同一毫秒连续两次不同、同秒不同毫秒不同、扩展名/题数/版本在位。
-- **「修复前会失败」证据**：先写测试并在未改代码时实跑——**128 通过 / 15 失败**（meta 6 条、预览 2 条、
-  URL 4 条、文件名生成器 1 条；URL 后续 2 条与文件名 5 条因前置失败由 `if` 守卫跳过未计入）。
-  修复后同套件 **150/150 通过**。纯 DOM 弹窗（三选一）仍不在 Node 覆盖范围，见风险。
+- **「修复前会失败」证据**：先写测试并在未改代码时实跑——**128 通过 / 15 失败**（meta 8 条、预览 2 条、
+  URL 4 条、文件名生成器 1 条；URL 后续 3 条与文件名 5 条因前置失败由 `if` 守卫跳过未计入）。
+  修复后同套件 **150/150 通过**。上述失败已用 `git archive b4114b0` 抽出旧代码 + 新测试复跑核对。
+  纯 DOM 弹窗（三选一）仍不在 Node 覆盖范围，见风险。
 
 **验证数据（2026-11-03，本机 Node v24.14.0）**
 - `test-all`：25 个运行项 **0 失败**，断言 **4245/4245**（前 4214；`assets.test.mjs` 119→150）。
