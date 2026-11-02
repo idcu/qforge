@@ -262,7 +262,15 @@
 
   function idbOpen() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open(AUTO_DB, 1);
+      let req;
+      try {
+        req = indexedDB.open(AUTO_DB, 1);
+      } catch (e) {
+        // 受限环境（隐私模式/被策略禁用）open 可能**同步抛出** SecurityError；
+        // 必须转成 Promise 拒绝，让调用方按「备份失败」处理，而不是逃逸成未捕获异常。
+        reject(e);
+        return;
+      }
       req.onupgradeneeded = () => { req.result.createObjectStore(AUTO_STORE); };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error || new Error('IndexedDB 打开失败'));
@@ -281,6 +289,12 @@
     }));
   }
 
+  /**
+   * IndexedDB **存在性**快速判断（不探活）。
+   * 只用于选择备份路径：存在 ≠ 可用（隐私模式/策略禁用会在 open 时抛 SecurityError）。
+   * 真正的可用性由 idbOpen 的失败结果承担：打开失败会拒绝并被 saveAutoBackup 当作备份失败，
+   * 迁移据此安全中止（数据原样保留在 LS），不会半写。
+   */
   function hasIdb() {
     return typeof indexedDB !== 'undefined' && indexedDB !== null;
   }

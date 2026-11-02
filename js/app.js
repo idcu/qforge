@@ -1429,6 +1429,12 @@
     } catch (e) { /* 进度展示失败不影响迁移 */ }
     try {
       if (QB.Migration && QB.DB.backend !== 'api') await QB.Migration.run();
+    } catch (e) {
+      // F1：迁移中任何失败（典型：隐私模式/策略禁用导致 IndexedDB open 抛 SecurityError，
+      // 进而自动备份失败）都必须**可见但不打断**：记录错误、提示已回退，继续启动。
+      // 数据仍完整保留在 LocalStorage（迁移写入前即中止），版本号不推进，下次启动会再次尝试 IDB。
+      console.error('[Migration] 存储迁移未完成，保持兼容模式：', e);
+      UI.toast('当前环境不支持本地新版存储，已回退到兼容模式（数据未受影响）', 'err');
     } finally {
       if (offProgress) offProgress();
     }

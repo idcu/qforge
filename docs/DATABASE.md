@@ -341,6 +341,7 @@ LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务
 ### 9.3 降级/容量策略
 
 - **IDB 可用（默认）**：首页「本地存储」健康卡按 IDB 估算/配额展示；容量的真正上限由浏览器 IDB 配额决定（未验证具体数值）。建议仍定期备份。
+- **IDB 打开抛错（`SecurityError` 等）→ 安全回落且不打断启动**：`QB.Store.detect()` 把 open 失败吸收为 `{ok:false}`；`QB.Backup.idbOpen()` 也把**同步抛错**转成 Promise 拒绝。自动备份失败时 `Migration.run` 以「自动备份失败」中止（不写任何一侧数据），`boot()` 捕获后提示「当前环境不支持本地新版存储，已回退到兼容模式」并继续渲染首页/题库，不产生未捕获拒绝。此时 `meta:storageBackend='ls-fallback'`、`meta:lsBackupState='idb-unavailable'`，schema 版本**不推进**（下次启动仍会重新探测 IDB，可用时再迁移）。`QB.Backup.hasIdb()` 只判存在性、不承担探活，探活结果由 open 的真实失败承担。
 - **IDB 不可用（隐私模式/配额拒绝/版本冲突）→ 回落 LocalStorage**：回到 §9.1 口径，保守建议上限约 **2,900 题**（5MB/1.72KB），70% 告警线约 **2,000 题**；超过即应导出备份、改用 API 后端（`DATA_BACKEND='api'`）或分机存放。
 - UI 已有「本地存储」健康卡（`QB.UIRenderer.renderStorageHealth`）：≥70% 警告、≥85% 危险；写盘失败经 `Storage.onError` 全局提示。IDB 模式下该卡显示 `QB.Store.estimate()` 的估算值。
 - **双份占用自动收敛（H3）**：迁移完成当次保留 LS 旧数据（`lsBackupState='retained'`）作为退路；**下一次启动** `Store.init()` 先校验 IDB 可读（题目数 >0 且与分片清单一致），通过后自动清理 LS（只保留 `BOOTSTRAP_KEYS`）并写 `meta:lsCleanupAt` + `lsBackupState='cleaned'`。实测回收：5k **5,054 键 / 4.80 MB**（5ms）、20k **20,204 键 / 19.36 MB**（22ms）、50k **50,354 键 / 43.81 MB**（76ms）；清理后 LS 业务占用为 0、IDB 题目数不变。清理失败不删除任何一侧（IDB 完好，下次启动可重试），此后回退只能依赖全量备份；备份弹窗仍保留手动入口。

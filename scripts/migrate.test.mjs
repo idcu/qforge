@@ -497,6 +497,51 @@ section('F1 自动备份失败 → 迁移中止且不写入任何数据');
   ok(!QB.Storage.keys().includes(QB.KEYS.metaMigrationBackup), '未留下半写备份键');
 }
 
+section('F1 SecurityError：IndexedDB open 抛错 → 迁移中止、回落 LS、不白屏');
+{
+  // 隐私模式/企业策略下 indexedDB.open 可能**同步抛出** SecurityError（真机已复现白屏）。
+  // 断言：迁移以「自动备份失败」中止；数据逐字节未动；版本不推进（下次启动仍尝试 IDB）；
+  //       后端标记为 ls-fallback，QB.Storage 保持 LS 可用（首页/题库/答题仍可读写）。
+  const throwing = {
+    open() {
+      const e = new Error('The operation is insecure.');
+      e.name = 'SecurityError';
+      throw e;
+    }
+  };
+  const fb = await createHarness(ROOT, { indexedDB: throwing });
+  const B = fb.QB;
+  B.DB.init();
+  const bank = await B.DB.banks.create({ name: '受限环境库' });
+  await B.DB.questions.insertMany(bank.id, [q1()], { dedupe: false });
+  B.Storage.setSync(B.KEYS.metaSchema, 5);
+  const before = JSON.stringify(B.Storage.keys()
+    .filter((k) => !(B.Store && B.Store.isBackupExcluded(k)))
+    .sort()
+    .map((k) => [k, B.Storage.get(k)]));
+
+  const info = await B.Storage.initStore();
+  eq(info.mode, 'ls', 'open 抛错时存储初始化回落 LS（不抛出）');
+  eq(B.Store.marker, 'ls-fallback', '后端标记为 ls-fallback（可见、可重试）');
+  ok(/SecurityError|error/i.test(info.fallbackReason || ''), '回落原因可观测：' + info.fallbackReason);
+
+  let threw = null;
+  try { await B.Migration.run(); } catch (e) { threw = e; }
+  ok(threw !== null, '迁移不静默继续，抛出可读错误（由 boot 捕获后继续启动）');
+  ok(/自动备份失败/.test(threw && threw.message || ''), '错误信息指明自动备份失败');
+  eq(B.Migration.currentVersion(), 5, 'schema 仍为 5（下次启动会再次尝试 IDB）');
+  eq(B.Storage.mode, 'ls', '迁移中止后保持 LS 可用');
+  eq((await B.DB.questions.list(bank.id, {})).items.length, 1, '题库可读（不白屏）');
+  eq(JSON.stringify(B.Storage.keys()
+    .filter((k) => !(B.Store && B.Store.isBackupExcluded(k)))
+    .sort()
+    .map((k) => [k, B.Storage.get(k)])), before, '业务数据逐字节未改动（迁移在写入前中止）');
+  B.Storage.setSync('f1-probe', { ok: true });
+  eq(B.Storage.get('f1-probe').ok, true, '迁移中止后写入仍可用');
+  ok(!B.Storage.keys().includes(B.KEYS.metaMigrationLock), '迁移锁已释放');
+  ok(!B.Storage.keys().includes(B.KEYS.metaMigrationBackup), '未在 LS 留下半写备份键');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

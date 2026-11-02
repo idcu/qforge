@@ -69,6 +69,10 @@ ok(index.indexOf('icon.svg') >= 0, 'index.html 引用图标');
 const app = read('js/app.js');
 ok(app.indexOf("navigator.serviceWorker.register('sw.js'") >= 0, '注册 sw.js（相对路径）');
 ok(/location\.protocol\s*===?\s*'https:'/.test(app) && app.indexOf("'http:'") >= 0, '仅 http(s) 环境注册（file:// 跳过）');
+// F1：迁移失败（如 IndexedDB open 抛 SecurityError）必须被 boot 捕获并提示回退，不能白屏
+ok(/try\s*\{\s*if\s*\(QB\.Migration[\s\S]{0,160}QB\.Migration\.run\(\)[\s\S]{0,40}\}\s*catch\s*\(/.test(app),
+  'boot 内用 try/catch 包裹 QB.Migration.run（失败不逃逸为未捕获拒绝）');
+ok(app.indexOf('当前环境不支持本地新版存储，已回退到兼容模式') >= 0, '迁移失败时给出可见回落提示');
 
 section('悬浮滚动按钮（回到顶部 / 直达底部）');
 ok(index.indexOf('id="btn-top"') >= 0, 'index.html 含「回到顶部」按钮 #btn-top');
