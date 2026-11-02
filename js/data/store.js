@@ -34,6 +34,10 @@
   const BACKEND_KEY = 'meta:storageBackend';
   /** 迁移进度断点（游标 + 已完成键数）：只存极小状态，中断后据此续传 */
   const PROGRESS_KEY = 'meta:migrationProgress';
+  /** 运行时配额探测的临时块键（探测结束/中断/失败都必须删除，永不驻留） */
+  const PROBE_KEY = 'meta:lsQuotaProbe';
+  /** 探测结果缓存（设备级运行期元数据，不进备份、不参与业务键判定） */
+  const QUOTA_CACHE_KEY = 'meta:lsQuotaCap';
   /* 只留 LocalStorage 的极小状态（打开 IDB 之前同步可读 / 跨标签协调 / 备份回落） */
   const BOOTSTRAP_KEYS = [
     BACKEND_KEY,
@@ -43,13 +47,28 @@
     'meta:lsBackupState',
     'meta:schemaVersion',
     'meta:migrationLock',
-    'meta:migrationBackup'
+    'meta:migrationBackup',
+    PROBE_KEY,
+    QUOTA_CACHE_KEY
   ];
   /* 仅描述「本设备当前用哪个后端」的运行期标记：不进入备份/恢复（换设备应重新探测），
      也不参与「恢复 replace 时删除旧键」——否则会把新设备的后端选择一起删掉。 */
   const BACKUP_EXCLUDED_KEYS = [
-    BACKEND_KEY, PROGRESS_KEY, 'meta:lsMigratedAt', 'meta:lsCleanupAt', 'meta:lsBackupState'
+    BACKEND_KEY, PROGRESS_KEY, 'meta:lsMigratedAt', 'meta:lsCleanupAt', 'meta:lsBackupState',
+    PROBE_KEY, QUOTA_CACHE_KEY
   ];
+  /* 探测失败时回退的保守预算（= 名义 5MiB − 32KiB），来源标记为 conservative-constant */
+  const QUOTA_FALLBACK_CHARS = 5 * 1024 * 1024 - 32 * 1024;
+  /* 探测粒度与范围：1Mi 起步倍增到 16Mi，首次配额失败后二分到 16Ki 分辨率 */
+  const PROBE_START_CHARS = 1024 * 1024;
+  const PROBE_MAX_CHARS = 16 * 1024 * 1024;
+  const PROBE_MIN_CHARS = 64;
+  const PROBE_GRAIN_CHARS = 16 * 1024;
+  const PROBE_MAX_SAMPLES = 40;
+  /* 缓存有效期：探测值 7 天；回退值 1 小时（尽快重试，避免一次临时异常长期降级） */
+  const QUOTA_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  const QUOTA_FALLBACK_TTL_MS = 60 * 60 * 1000;
+  const QUOTA_BOOKKEEPING_CHARS = 32 * 1024;
   /* 键分类（索引 by_kind 的取值域；报告/容量统计共用） */
   const KINDS = [
     'banks', 'questionShard', 'questionsMeta', 'questionsLegacy', 'wrong', 'favorite',
@@ -93,6 +112,120 @@
     const out = {};
     lsKeys().forEach((k) => { out[k] = lsGet(k); });
     return out;
+  }
+
+  /* ---------------- 运行时 LocalStorage 配额探测（唯一实现） ---------------- */
+
+  function uaTag() {
+    try {
+      if (typeof navigator !== 'undefined' && navigator && typeof navigator.userAgent === 'string') {
+        return navigator.userAgent;
+      }
+    } catch (_) { /* 受限环境 */ }
+    return 'unknown';
+  }
+
+  function isQuotaError(e) {
+    return !!e && (e.name === 'QuotaExceededError' || e.code === 22 || /quota/i.test(String(e.message || '')));
+  }
+
+  function removeProbeKey() {
+    if (!hasLS()) return;
+    try { global.localStorage.removeItem(fullKey(PROBE_KEY)); } catch (_) { /* 清理失败不阻断 */ }
+  }
+
+  /**
+   * 单次探测写：写入 `valueLen` 个字符 → 回读校验 → **无论成败都删除探测键**。
+   * 返回 {ok} / {quota} / {rejected} / {error}，不把异常抛给调用方（探测失败走保守回退）。
+   */
+  function probeAttempt(valueLen) {
+    if (!hasLS()) return { error: new Error('no-localstorage') };
+    const key = fullKey(PROBE_KEY);
+    try {
+      try { global.localStorage.removeItem(key); } catch (_) { /* ignore */ }
+      const val = 'x'.repeat(valueLen);
+      global.localStorage.setItem(key, val);
+      const got = global.localStorage.getItem(key);
+      if (got !== val) return { rejected: true };
+      return { ok: true };
+    } catch (e) {
+      if (isQuotaError(e)) return { quota: true, error: e };
+      return { error: e };
+    } finally {
+      try { global.localStorage.removeItem(key); } catch (_) { /* ignore */ }
+    }
+  }
+
+  /**
+   * 实测当前环境可写的序列化字符上限（口径与 `lsUsedChars` 完全一致：value + key + 2）。
+   * 起步 1Mi 倍增到 16Mi；首次配额失败后二分，分辨率 16Ki 字符。探测键在 finally 中删除。
+   * 探测内部异常/写入被拒/超过上界 → 返回保守常量并标注来源，不冒充探测值。
+   * @returns {{source:'probe'|'conservative-constant', capacityChars:number, budgetChars:number,
+   *   granularityChars:number, samples:number, ms:number, usedAtProbe:number, reason?:string}}
+   */
+  function measureLSQuota() {
+    const started = Date.now();
+    const fallback = (reason, extra) => Object.assign({
+      source: 'conservative-constant',
+      capacityChars: QUOTA_FALLBACK_CHARS,
+      budgetChars: QUOTA_FALLBACK_CHARS,
+      granularityChars: 0,
+      samples: extra && extra.samples || 0,
+      ms: Date.now() - started,
+      usedAtProbe: extra && extra.usedAtProbe || 0,
+      reason: reason || 'probe-failed'
+    }, extra || {});
+    if (!hasLS()) return fallback('no-localstorage');
+    removeProbeKey();
+    const usedOthers = Store.lsUsedChars(true);
+    const keyChars = fullKey(PROBE_KEY).length + 2;
+    let lo = usedOthers; // 已驻留数据本身就是下限
+    let hi = null;
+    let samples = 0;
+    let size = PROBE_START_CHARS;
+    try {
+      while (size <= PROBE_MAX_CHARS && samples < PROBE_MAX_SAMPLES) {
+        const r = probeAttempt(size);
+        samples++;
+        if (r.ok) {
+          lo = usedOthers + size + keyChars;
+          size *= 2;
+          continue;
+        }
+        if (r.quota) { hi = usedOthers + size + keyChars; break; }
+        return fallback(r.rejected ? 'write-rejected' : 'probe-error:' + ((r.error && r.error.name) || 'error'),
+          { samples: samples, usedAtProbe: usedOthers });
+      }
+      if (hi === null) {
+        return fallback('probe-upper-bound', { samples: samples, usedAtProbe: usedOthers });
+      }
+      while (hi - lo > PROBE_GRAIN_CHARS && samples < PROBE_MAX_SAMPLES) {
+        const mid = Math.floor((lo + hi) / 2);
+        const valueLen = mid - usedOthers - keyChars;
+        if (valueLen < PROBE_MIN_CHARS) break;
+        const r = probeAttempt(valueLen);
+        samples++;
+        if (r.ok) lo = mid;
+        else if (r.quota) hi = mid;
+        else {
+          return fallback(r.rejected ? 'write-rejected' : 'probe-error:' + ((r.error && r.error.name) || 'error'),
+            { samples: samples, usedAtProbe: usedOthers });
+        }
+      }
+      const capacity = lo;
+      return {
+        source: 'probe',
+        capacityChars: capacity,
+        budgetChars: Math.max(0, capacity - QUOTA_BOOKKEEPING_CHARS),
+        granularityChars: hi - lo,
+        samples: samples,
+        ms: Date.now() - started,
+        usedAtProbe: usedOthers,
+        reason: null
+      };
+    } finally {
+      removeProbeKey();
+    }
   }
 
   /* ---------------- 键 → 索引标签（唯一实现） ---------------- */
@@ -399,6 +532,9 @@
     STORE_NAME: STORE_NAME,
     BOOTSTRAP_KEYS: BOOTSTRAP_KEYS,
     KINDS: KINDS,
+    /** 探测失败时回退的保守预算（字符；供测试/诊断引用，不在业务逻辑里另立常量） */
+    LS_QUOTA_FALLBACK_CHARS: QUOTA_FALLBACK_CHARS,
+    QUOTA_CACHE_KEY: QUOTA_CACHE_KEY,
     mode: 'ls',
     available: false,
     marker: null,
@@ -420,6 +556,74 @@
       lsSet(BACKEND_KEY, marker);
     },
 
+    /**
+     * 运行时 LocalStorage 容量（**容量口径唯一实现**）：命中缓存直接返回；未命中/过期/
+     * UA 变化/`force` 时执行一次探测。缓存写在 `meta:lsQuotaCap`（引导键，不进备份）。
+     *
+     * 过期策略：探测值 7 天；回退值 1 小时（临时异常尽快重试）；UA 变化立即重测。
+     * 调用方：`js/app.js` 首屏后的空闲预热、`Store.preflightMigration`（仅 IDB 不可用分支）、测试/诊断。
+     * @param {{force?:boolean}} [opts]
+     * @returns {{source:'probe'|'conservative-constant', capacityChars:number, budgetChars:number,
+     *   granularityChars:number, samples:number, ms:number, usedAtProbe:number, at:number, ua:string,
+     *   cacheHit:boolean, cacheWriteFailed?:boolean, reason?:string|null}}
+     */
+    ensureLSQuota(opts) {
+      const force = !!(opts && opts.force);
+      const now = Date.now();
+      const ua = uaTag();
+      const used = Store.lsUsedChars(true);
+      const cache = lsGet(QUOTA_CACHE_KEY, null);
+      const cached = cache && typeof cache === 'object' && cache.v === 1
+        && Number(cache.capacityChars) > 0 && cache.ua === ua;
+      const ttl = (cached && cache.source === 'probe') ? QUOTA_CACHE_TTL_MS : QUOTA_FALLBACK_TTL_MS;
+      const fresh = !!cached && (now - (Number(cache.at) || 0) < ttl)
+        && Number(cache.capacityChars) >= used;
+      if (!force && fresh) return Object.assign({}, cache, { cacheHit: true });
+      const measured = measureLSQuota();
+      const rec = {
+        v: 1, at: now, ua: ua,
+        source: measured.source,
+        capacityChars: measured.capacityChars,
+        budgetChars: measured.budgetChars,
+        granularityChars: measured.granularityChars,
+        samples: measured.samples,
+        ms: measured.ms,
+        usedAtProbe: measured.usedAtProbe,
+        reason: measured.reason || null
+      };
+      let cacheWriteFailed = false;
+      try { lsSet(QUOTA_CACHE_KEY, rec); } catch (_) { cacheWriteFailed = true; }
+      return Object.assign(rec, { cacheHit: false, cacheWriteFailed: cacheWriteFailed });
+    },
+
+    /**
+     * 只读容量：命中有效缓存则返回；否则返回保守常量（**不探测、不写盘**，不阻塞首屏）。
+     * 调用方：`Store.preflightMigration`（IDB 可用分支，只用于 nearLimit/percent 展示）。
+     */
+    readLSQuota() {
+      const now = Date.now();
+      const ua = uaTag();
+      const used = Store.lsUsedChars(true);
+      const cache = lsGet(QUOTA_CACHE_KEY, null);
+      const cached = cache && typeof cache === 'object' && cache.v === 1
+        && Number(cache.capacityChars) > 0 && cache.ua === ua
+        && (now - (Number(cache.at) || 0) < ((cache.source === 'probe') ? QUOTA_CACHE_TTL_MS : QUOTA_FALLBACK_TTL_MS))
+        && Number(cache.capacityChars) >= used;
+      if (cached) return Object.assign({}, cache, { cacheHit: true });
+      return {
+        v: 1, at: now, ua: ua,
+        source: 'conservative-constant',
+        capacityChars: QUOTA_FALLBACK_CHARS,
+        budgetChars: QUOTA_FALLBACK_CHARS,
+        granularityChars: 0,
+        samples: 0,
+        ms: 0,
+        usedAtProbe: used,
+        reason: 'no-probe-cache',
+        cacheHit: false
+      };
+    },
+
     /** 探测 IDB 是否真正可用（隐私模式/配额拒绝/版本冲突都会在这里失败） */
     async detect() {
       if (!idbFactory()) return { ok: false, reason: 'no-indexeddb' };
@@ -439,6 +643,10 @@
      * @returns {Promise<{mode:string, available:boolean, records:Map<string,*>|null, fallbackReason?:string}>}
      */
     async init() {
+      // 清掉上次异常中断可能残留的探测块（引导键，不碰业务键）。
+      // 探测本身不在启动关键路径执行：IDB 可用时预检恒定放行，无需为容量阻塞首屏；
+      // 需要容量判断（IDB 不可用）时由 preflightMigration 同步探测，启动后再后台预热缓存。
+      removeProbeKey();
       const marker = lsGet(BACKEND_KEY, null);
       Store.marker = marker;
       const det = await Store.detect();
@@ -798,34 +1006,41 @@
     },
 
     /**
-     * 迁移前容量预检（只读，不写任何键；调用方 `js/modules/migrate.js::doRun`）。
+     * 迁移前容量预检（只读，不写任何业务键；调用方 `js/modules/migrate.js::doRun`）。
      *
      * 口径（与 `docs/DATABASE.md`「迁移前容量预检」一致）：
      *   - 计量单位 = 序列化字符数（key + JSON 串 + 2 个分隔符），不是字节；
-     *   - 预算 = `QB.CONFIG.STORAGE_QUOTA_BYTES`（名义 5MiB）− 32KiB 记账余量 = 5,210,112 字符；
-     *   - 实测 Edge 上限 5,222,564 字符 → 预算比实测保守约 0.24%（宁可提前提示，不中途炸）；
+     *   - 容量来自 `Store.ensureLSQuota()`：首屏后空闲预热或 IDB 不可用分支首次预检时实测当前环境上限（16Ki 分辨率），
+     *     缓存于 `meta:lsQuotaCap`；探测失败时回退保守常量 5,210,112 并标注
+     *     `quotaSource='conservative-constant'`，不把回退值冒充探测值；
+     *   - 预算 = 实测容量 − 32KiB 记账余量（建库/浏览器内部开销），回退时常量本身即预算；
      *   - IDB 可用：迁移期只写引导键（锁/进度/标记，几十~几百字节），**不写业务键**，
-     *     因此即使已用超出名义预算也放行——迁移恰是近满用户的唯一减压手段；只在
+     *     因此即使已用超出预算也放行——迁移恰是近满用户的唯一减压手段；只在
      *     `nearLimit` 时提示清理。引导键若真写不进，失败发生在任何业务写入之前，语义不变；
      *   - IDB 不可用：迁移前自动备份会回落 LS（整份副本），v4→v5 布局改写期间新旧键并存，
      *     因此保守按「再装一整份」估算所需空间，不足则写入前中止。
      *
      * 误差与误判：
-     *   - 浏览器配额各家不同（Safari/Firefox/移动端均未实测）；无痕模式可能为 0 → 会误报「空间不足」，
-     *     但这同样是真实约束，属安全方向的误判；
-     *   - 只统计 `qb:` 前缀键；同源其他应用的数据不占用本应用配额，故不计入；
-     *   - 字符数不是浏览器的实际字节记账，Chromium 实测偏差 < 0.4%，其他引擎可能更大；
+     *   - 探测分辨率 16Ki 字符：实测值只会**不大于**真实上限，误差 ≤ 16Ki（约 0.31%）；
+     *   - 探测只写临时键 `meta:lsQuotaProbe`，结束/中断/失败都在 finally 删除，不碰业务键；
+     *   - 无痕模式可能为 0 → 会误报「空间不足」，但这同样是真实约束，属安全方向的误判；
+     *   - 只统计 `qb:` 前缀键；同源其他应用的数据虽占用配额，但探测已把它们计入可用空间；
      *   - 预检通过也不保证写入一定成功（并发写入/浏览器临时限制），失败仍按既有安全回退处理。
      *
-     * @param {{idbUsable?:boolean}} [opts] idbUsable 由调用方按 `Store.available` 传入
+     * @param {{idbUsable?:boolean, quota?:Object}} [opts] idbUsable 由调用方按 `Store.available` 传入
      * @returns {{ok:boolean, reason:string, idbUsable:boolean, usedChars:number, budgetChars:number,
-     *   neededChars:number, freeChars:number, percent:number, nearLimit:boolean}}
+     *   capacityChars:number, neededChars:number, freeChars:number, percent:number, nearLimit:boolean,
+     *   quotaSource:string, quotaGranularityChars:number, quotaCacheHit:boolean, quotaProbeMs:number}}
      */
     preflightMigration(opts) {
       opts = opts || {};
       const idbUsable = !!opts.idbUsable;
       const used = Store.lsUsedChars(true);
-      const budget = ((QB.CONFIG && QB.CONFIG.STORAGE_QUOTA_BYTES) || 5 * 1024 * 1024) - 32 * 1024;
+      const quota = (opts.quota && typeof opts.quota === 'object')
+        ? opts.quota
+        : (idbUsable ? Store.readLSQuota() : Store.ensureLSQuota());
+      const capacity = Math.max(0, Number(quota.capacityChars) || 0);
+      const budget = Math.max(0, Number(quota.budgetChars) || 0);
       const reserve = 128 * 1024;
       const free = budget - used;
       const ratio = budget > 0 ? used / budget : 1;
@@ -838,11 +1053,16 @@
         reason: ok ? (nearLimit ? 'near-limit' : 'ok') : 'ls-capacity',
         idbUsable: idbUsable,
         usedChars: used,
+        capacityChars: capacity,
         budgetChars: budget,
         neededChars: needed,
         freeChars: free > 0 ? free : 0,
         percent: Math.round(ratio * 1000) / 10,
-        nearLimit: nearLimit
+        nearLimit: nearLimit,
+        quotaSource: quota.source || 'conservative-constant',
+        quotaGranularityChars: Number(quota.granularityChars) || 0,
+        quotaCacheHit: !!quota.cacheHit,
+        quotaProbeMs: Number(quota.ms) || 0
       };
     },
 

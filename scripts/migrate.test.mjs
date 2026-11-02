@@ -788,20 +788,24 @@ section('P3 容量预检反例：IDB 不可用 + 空间不足 → 写入前中�
   await H.QB.Storage.initStore();
   eq(H.QB.Storage.mode, 'ls', 'IDB 不可用时初始化为 LS');
 
-  // 把名义配额压到「已用量 + 64KB」：预算 = 配额 − 32KB < 已用 + 128KB 预留 → 必然不足
+  // 注入真实配额替身：已用量 + 64KB。探测会实测该上限，预检预算 = 上限 − 32KB < 已用 + 128KB 预留
   const used = H.QB.Store.lsUsedChars(true);
-  const prevQuota = H.QB.CONFIG.STORAGE_QUOTA_BYTES;
-  H.QB.CONFIG.STORAGE_QUOTA_BYTES = used + 64 * 1024;
+  H.controls.quota.chars = used + 64 * 1024;
+  const probed = H.QB.Store.ensureLSQuota({ force: true });
+  eq(probed.source, 'probe', '配额替身被运行时探测到（source=probe）');
+  ok(Math.abs((used + 64 * 1024) - probed.capacityChars) <= Math.max(probed.granularityChars, 1),
+    '探测值与注入配额一致（误差 ≤ 粒度）');
   const before = new Map(raw);
   let err = null;
   try { await H.QB.Migration.run(); } catch (e) { err = e; }
-  H.QB.CONFIG.STORAGE_QUOTA_BYTES = prevQuota;
 
   ok(!!err, '容量不足时迁移明确失败（不静默继续）');
   eq(err && err.code, 'LS_CAPACITY', '错误码为 LS_CAPACITY');
   eq(err && err.preflight && err.preflight.idbUsable, false, '预检按「IDB 不可用」口径拦截');
+  eq(err && err.preflight && err.preflight.quotaSource, 'probe', '预检使用探测值而非保守常量');
   ok(err && /LocalStorage/.test(err.message), '错误信息可读并指明 LocalStorage 空间不足');
   eq(raw.size, before.size, '失败前后 LS 键数量不变（无残留键）');
+  ok(!raw.has('qb:meta:lsQuotaProbe'), '探测键未残留');
   eq(raw.get('qb:' + H.QB.KEYS.metaSchema), before.get('qb:' + H.QB.KEYS.metaSchema), 'schema 版本未被推进');
   ok(!raw.has('qb:' + H.QB.KEYS.metaMigrationLock), '迁移锁已释放（无锁残留）');
   ok(H.QB.Store.readMarker() !== 'idb', '未写入 idb 后端标记（未开始迁移）');
@@ -822,14 +826,144 @@ section('P4 容量预检接近上限：仍放行但标记 nearLimit（供 UI 提
   eq(pf.nearLimit, true, '标记 nearLimit=true（UI 提示清理空间）');
   ok(pf.reason === 'near-limit', 'reason=near-limit');
 
-  // IDB 可用时，即使已用超出名义预算也不阻断（迁移不写 LS 业务键，且是近满用户的唯一减压手段）
+  // IDB 可用时，即使已用超出预算也不阻断（迁移不写 LS 业务键，且是近满用户的唯一减压手段）
   const used = H.QB.Store.lsUsedChars(true);
-  const prevQuota = H.QB.CONFIG.STORAGE_QUOTA_BYTES;
-  H.QB.CONFIG.STORAGE_QUOTA_BYTES = Math.round(used / 2);
+  const realEnsure = H.QB.Store.readLSQuota;
+  H.QB.Store.readLSQuota = () => ({
+    source: 'probe', capacityChars: Math.round(used / 2), budgetChars: Math.round(used / 2),
+    granularityChars: 0, cacheHit: true, ms: 0
+  });
   const over = H.QB.Store.preflightMigration({ idbUsable: true });
-  H.QB.CONFIG.STORAGE_QUOTA_BYTES = prevQuota;
-  eq(over.ok, true, '超出名义预算仍放行（IDB 可用）');
+  H.QB.Store.readLSQuota = realEnsure;
+  eq(over.ok, true, '超出预算仍放行（IDB 可用）');
   ok(over.percent > 100, 'percent 如实反映超限（' + over.percent + '%）');
+}
+
+section('N1 运行时探测：三档注入配额（1/3/5 MiB 等效字符数）');
+{
+  const rows = [];
+  for (const limit of [1 << 20, 3 << 20, 5 << 20]) {
+    const H = await createHarness(ROOT, { quotaChars: limit });
+    const q = H.QB.Store.ensureLSQuota({ force: true });
+    eq(q.source, 'probe', '注入 ' + limit + ' 字符时来源=probe');
+    eq(q.cacheHit, false, '首次探测未命中缓存');
+    ok(q.capacityChars <= limit, '探测值不超过注入上限（' + q.capacityChars + ' ≤ ' + limit + '）');
+    ok(limit - q.capacityChars <= q.granularityChars,
+      '误差 ≤ 探测粒度（' + (limit - q.capacityChars) + ' ≤ ' + q.granularityChars + '）');
+    ok(q.granularityChars <= 16 * 1024, '粒度 ≤ 16Ki 字符（' + q.granularityChars + '）');
+    const cacheKey = 'qb:' + H.QB.Store.QUOTA_CACHE_KEY;
+    const cache = JSON.parse(H.window.localStorage.getItem(cacheKey));
+    eq(cache.source, 'probe', '缓存记录来源=probe');
+    eq(cache.capacityChars, q.capacityChars, '缓存与本次探测值一致');
+    ok(!H.window.localStorage.getItem('qb:meta:lsQuotaProbe'), '探测键已清理');
+    rows.push({ limit: limit, capacity: q.capacityChars, error: limit - q.capacityChars,
+      granularity: q.granularityChars, samples: q.samples, ms: q.ms });
+  }
+  console.log('  [N1] ' + JSON.stringify(rows));
+}
+
+section('N2 探测缓存：命中不重写；过期 / UA 变化触发重测');
+{
+  const raw = new Map();
+  const H = await createHarness(ROOT, { raw: raw, quotaChars: 3 << 20 });
+  const cold = H.QB.Store.ensureLSQuota({ force: true });
+  eq(cold.source, 'probe', '冷启动探测成功');
+  H.controls.resetSets();
+  const warm = H.QB.Store.ensureLSQuota();
+  eq(warm.cacheHit, true, '二次调用命中缓存');
+  eq(warm.capacityChars, cold.capacityChars, '缓存值与冷启动一致');
+  eq(H.controls.sets, 0, '命中缓存不产生任何 LocalStorage 写入');
+
+  // 过期：把 at 拨到 8 天前（> 7 天 TTL）→ 重测
+  const cacheKey = 'qb:' + H.QB.Store.QUOTA_CACHE_KEY;
+  const rec = JSON.parse(raw.get(cacheKey));
+  rec.at = Date.now() - 8 * 24 * 60 * 60 * 1000;
+  raw.set(cacheKey, JSON.stringify(rec));
+  const expired = H.QB.Store.ensureLSQuota();
+  eq(expired.cacheHit, false, '超过 7 天后重新探测');
+  eq(expired.source, 'probe', '重测来源=probe');
+
+  // UA/浏览器指纹变化：立即重测
+  const rec2 = JSON.parse(raw.get(cacheKey));
+  rec2.ua = 'another-browser/1.0';
+  raw.set(cacheKey, JSON.stringify(rec2));
+  const uaChange = H.QB.Store.ensureLSQuota();
+  eq(uaChange.cacheHit, false, 'UA 变化后重新探测');
+}
+
+section('N3 探测失败：写入抛错 / 写入被拒 / 无上界 → 回退保守常量并标注来源');
+{
+  // 3a 写入抛错（任意异常）
+  const H = await createHarness(ROOT);
+  H.window.localStorage.setItem('qb:user:wrong:demo', JSON.stringify(['keep']));
+  const before = H.window.localStorage.getItem('qb:user:wrong:demo');
+  H.controls.failWrites = true;
+  const q = H.QB.Store.ensureLSQuota({ force: true });
+  eq(q.source, 'conservative-constant', '写入抛错 → 来源=保守常量');
+  eq(q.capacityChars, H.QB.Store.LS_QUOTA_FALLBACK_CHARS, '回退值为 5,210,112');
+  eq(q.budgetChars, H.QB.Store.LS_QUOTA_FALLBACK_CHARS, '回退时预算即保守常量');
+  ok(/probe-error/.test(q.reason || ''), '标注失败原因（' + q.reason + '）');
+  ok(!H.window.localStorage.getItem('qb:meta:lsQuotaProbe'), '失败后探测键无残留');
+  eq(H.window.localStorage.getItem('qb:user:wrong:demo'), before, '业务键未被改动');
+
+  // 3b 写入被静默拒绝（setItem 不抛错但值未落盘）
+  const H2 = await createHarness(ROOT);
+  H2.controls.dropWrites = true;
+  const q2 = H2.QB.Store.ensureLSQuota({ force: true });
+  eq(q2.source, 'conservative-constant', '写入被拒 → 来源=保守常量');
+  eq(q2.reason, 'write-rejected', '标注 write-rejected');
+  eq(q2.capacityChars, H2.QB.Store.LS_QUOTA_FALLBACK_CHARS, '回退值为 5,210,112');
+
+  // 3c 无配额上界（Node 无配额替身）→ 不冒充探测值
+  const H3 = await createHarness(ROOT);
+  const q3 = H3.QB.Store.ensureLSQuota({ force: true });
+  eq(q3.source, 'conservative-constant', '超过探测上界 → 来源=保守常量');
+  eq(q3.reason, 'probe-upper-bound', '标注 probe-upper-bound');
+  eq(q3.capacityChars, H3.QB.Store.LS_QUOTA_FALLBACK_CHARS, '回退值为 5,210,112');
+}
+
+section('N4 探测残留：完成 / 中断 / 失败三种情况键集合增删为 0（探测缓存键除外）');
+{
+  const isProbeNoise = (k) => k === 'qb:meta:lsQuotaProbe' || k === 'qb:' + 'meta:lsQuotaCap';
+  const snap = (raw) => Array.from(raw.keys()).filter((k) => !isProbeNoise(k)).sort();
+
+  // 4a 完成（配额替身）：探测成功
+  {
+    const raw = new Map();
+    const H = await createHarness(ROOT, { raw: raw, quotaChars: 3 << 20 });
+    H.window.localStorage.setItem('qb:user:wrong:demo', JSON.stringify(['keep']));
+    const before = snap(raw);
+    H.QB.Store.ensureLSQuota({ force: true });
+    eq(JSON.stringify(snap(raw)), JSON.stringify(before), '完成后业务/引导键集合不变');
+    ok(!raw.has('qb:meta:lsQuotaProbe'), '完成后探测键已删除');
+  }
+  // 4b 中断（探测中途抛错）
+  {
+    const raw = new Map();
+    const H = await createHarness(ROOT, { raw: raw, quotaChars: 3 << 20 });
+    H.window.localStorage.setItem('qb:user:wrong:demo', JSON.stringify(['keep']));
+    const before = snap(raw);
+    H.controls.resetSets();
+    H.controls.failAfterSets = 1; // 第 1 次探测写成功，第 2 次抛出
+    const q = H.QB.Store.ensureLSQuota({ force: true });
+    eq(q.source, 'conservative-constant', '中断 → 回退保守常量');
+    eq(JSON.stringify(snap(raw)), JSON.stringify(before), '中断后业务/引导键集合不变');
+    ok(!raw.has('qb:meta:lsQuotaProbe'), '中断后探测键已删除');
+    eq(raw.get('qb:user:wrong:demo'), JSON.stringify(['keep']), '业务键值不变');
+  }
+  // 4c 失败（写入被拒）
+  {
+    const raw = new Map();
+    const H = await createHarness(ROOT, { raw: raw });
+    H.window.localStorage.setItem('qb:user:wrong:demo', JSON.stringify(['keep']));
+    const before = snap(raw);
+    H.controls.dropWrites = true;
+    const q = H.QB.Store.ensureLSQuota({ force: true });
+    eq(q.source, 'conservative-constant', '被拒 → 回退保守常量');
+    eq(JSON.stringify(snap(raw)), JSON.stringify(before), '被拒后业务/引导键集合不变');
+    ok(!raw.has('qb:meta:lsQuotaProbe'), '被拒后探测键已删除');
+  }
+  console.log('  [N4] 完成/中断/失败三例：业务键与引导键集合增删均为 0，探测键无残留');
 }
 
 console.log('\n================ 汇总 ================');

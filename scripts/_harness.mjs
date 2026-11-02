@@ -77,12 +77,15 @@ const MODULES = [
 
 /**
  * @param {string} qbDir 工程根目录（含 js/ 的目录绝对路径）
- * @param {{raw?:Map<string,string>, indexedDB?:Object, BroadcastChannel?:Function}} [opts]
+ * @param {{raw?:Map<string,string>, indexedDB?:Object, BroadcastChannel?:Function,
+ *   quotaChars?:number}} [opts]
  *   raw：共享底层 localStorage 存储（多标签测试用；两个 harness 传入同一 Map 即模拟两个
  *     标签共享磁盘，各自拥有独立的 Storage 内存缓存）。
  *   indexedDB：注入 IDB 工厂（默认无，模拟不支持 IDB 的环境；测试用
  *     `scripts/lib/idb-memory.mjs` 的 createMemoryIDB）。多个 harness 传同一工厂 = 同一 IDB。
  *   BroadcastChannel：注入跨标签通道实现（默认无）。
+ *   quotaChars：LocalStorage 配额替身（按 `key.length + value.length + 2` 计，超限抛
+ *     `QuotaExceededError`；不传则无上限，保持既有测试语义）。
  */
 export async function createHarness(qbDir, opts) {
   const o = opts || {};
@@ -91,6 +94,35 @@ export async function createHarness(qbDir, opts) {
   // 则 lsKeys() 退化为 O(n²)（50k 键时清理耗时被放大到数十秒，属于测试替身偏差）。
   let keyCache = null;
   const invalidateKeys = () => { keyCache = null; };
+  const quota = {
+    chars: Number.isFinite(o.quotaChars) && o.quotaChars > 0 ? Number(o.quotaChars) : null,
+    /* 仅限制运行时配额探测键（qb:meta:lsQuotaProbe）的可见上限；其余写入不受限。
+       用于「LS 是迁移目标」等人工超过真实浏览器配额的压测段：让探测实测到指定上限，
+       同时不误伤 50k 夹具/迁移备份这类刻意超出真机规模的写入。 */
+    probeChars: Number.isFinite(o.probeQuotaChars) && o.probeQuotaChars > 0 ? Number(o.probeQuotaChars) : null
+  };
+  // 与 QB.Store.lsUsedChars 同口径的增量计数（仅配额启用时维护，避免每次写 O(n) 扫描）
+  let usedChars = 0;
+  raw.forEach((v, k) => { usedChars += String(k).length + String(v).length + 2; });
+  const controls = {
+    quota,
+    failWrites: false,
+    /** true 时 setItem 静默丢弃写入（模拟「写入被拒但未抛错」，用于探测回读校验） */
+    dropWrites: false,
+    failAfterSets: 0,
+    sets: 0,
+    resetSets() { controls.sets = 0; },
+    usedChars() { return usedChars; }
+  };
+  const quotaError = () => {
+    try { return new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }
+    catch (_) {
+      const e = new Error('The quota has been exceeded.');
+      e.name = 'QuotaExceededError';
+      e.code = 22;
+      return e;
+    }
+  };
   const localStorage = {
     get length() { return raw.size; },
     key(i) {
@@ -98,9 +130,32 @@ export async function createHarness(qbDir, opts) {
       return keyCache[i];
     },
     getItem(k) { return raw.has(k) ? raw.get(k) : null; },
-    setItem(k, v) { raw.set(k, String(v)); invalidateKeys(); },
-    removeItem(k) { raw.delete(k); invalidateKeys(); },
-    clear() { raw.clear(); invalidateKeys(); }
+    setItem(k, v) {
+      controls.sets++;
+      if (controls.failWrites) {
+        throw controls.failWrites === true ? new Error('injected write failure') : controls.failWrites;
+      }
+      if (controls.failAfterSets && controls.sets > controls.failAfterSets) {
+        throw new Error('injected probe interruption');
+      }
+      if (controls.dropWrites) { invalidateKeys(); return; }
+      const ks = String(k);
+      const vs = String(v);
+      const next = usedChars - (raw.has(ks) ? ks.length + raw.get(ks).length + 2 : 0)
+        + ks.length + vs.length + 2;
+      if (quota.chars != null && next > quota.chars) throw quotaError();
+      if (quota.probeChars != null && /meta:lsQuotaProbe$/.test(ks) && next > quota.probeChars) throw quotaError();
+      usedChars = next;
+      raw.set(ks, vs);
+      invalidateKeys();
+    },
+    removeItem(k) {
+      const ks = String(k);
+      if (raw.has(ks)) usedChars -= ks.length + raw.get(ks).length + 2;
+      raw.delete(ks);
+      invalidateKeys();
+    },
+    clear() { raw.clear(); usedChars = 0; invalidateKeys(); }
   };
   const window = { localStorage, addEventListener() {}, removeEventListener() {}, console };
   window.window = window;
@@ -117,5 +172,5 @@ export async function createHarness(qbDir, opts) {
 
   MODULES.forEach(load);
 
-  return { QB: window.QB, window, modules: MODULES };
+  return { QB: window.QB, window, modules: MODULES, controls: controls };
 }

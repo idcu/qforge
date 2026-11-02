@@ -1513,6 +1513,13 @@
     await render();
     await maybeResume();
     registerSW();
+    // 运行时 LocalStorage 配额探测放到首屏空闲期（首次约数百 ms，之后命中缓存 ~0.x ms）：
+    // IDB 可用时预检恒定放行，容量只用于 nearLimit 提示；IDB 不可用会在预检里同步探测。
+    const probeQuota = () => {
+      try { QB.Store.ensureLSQuota(); } catch (e) { /* 探测失败已内部回退，不打断页面 */ }
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(probeQuota, { timeout: 2000 });
+    else setTimeout(probeQuota, 800);
   }
 
   /** 注册 Service Worker（仅 http(s) 环境；file:// 与不支持的浏览器静默跳过） */

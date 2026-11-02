@@ -21,7 +21,8 @@
  *   - **迁移期不写 LS 业务键**：进入迁移后业务写入只进内存缓冲（`Storage.beginMigrationBuffer`），
  *     LS 只允许引导键；v4→v5 生成的 per-hash/分段键由 v5→v6 统一复制进 IDB，因此迁移不再
  *     消耗 LocalStorage 空间（近满旧库也能完成）。失败时 LS 仍是迁移前快照，丢弃内存缓冲即可。
- *   - **容量预检**：写入前按序列化字符数估算（见 QB.Store.preflightMigration）。IDB 可用时迁移
+ *   - **容量预检**：写入前按运行时探测的 LocalStorage 字符上限判定（见 QB.Store.preflightMigration /
+ *     ensureLSQuota；探测失败回退保守常量并标注来源）。IDB 可用时迁移
  *     不写 LS 业务键，恒放行（仅在接近上限时提示）；IDB 不可用时按整份副本估算，不足则
  *     写入前中止，绝不在写到一半时爆 QuotaExceededError。
  *   - **多标签并发**：meta:migrationLock 版本戳（owner + at，30s 过期视为陈旧锁），只有

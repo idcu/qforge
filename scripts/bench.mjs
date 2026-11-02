@@ -29,7 +29,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
 const ROOT = path.resolve(QB_DIR, '..');
 
-const { QB, window } = await createHarness(QB_DIR);
+/* harness 的 localStorage 默认无配额（12a 的 20k 夹具 + 迁移备份约 16.9Mi、12b/12c 的 50k
+   夹具 >30Mi，均刻意超过真实浏览器 5MiB，真机不可达）。仅给「运行时配额探测键」注入
+   16Mi 上限，让 12a 预检实测到一个有限值并放行；不伪造探测值，也不限制其他写入。
+   真实浏览器 5MiB 行为由 migrate.test P/N 与真机 CDP 覆盖。 */
+const { QB, window } = await createHarness(QB_DIR, { probeQuotaChars: 16 * 1024 * 1024 });
 
 /* 额外加载纯 HTML 渲染器：ui-renderer 只产出 HTML 字符串，不需要真实 DOM，仅需 location
    （与 scripts/ui-renderer.test.mjs 同一加载方式，不改共享 harness）；用于量测「首屏/答题」渲染侧成本。 */
@@ -579,16 +583,12 @@ async function buildLegacyBank(n, tier) {
   QB.QuestionShards.writeAll(bank.id, questions);
   QB.Storage.setSync(QB.KEYS.review(bank.id), oldMap);
   QB.Storage.setSync(QB.KEYS.revlog, oldLog);
+  // 探测成本单独计量（真机启动段），此处预热，迁移计时只含迁移主体
+  QB.Store.ensureLSQuota();
   return { bankId: bank.id, oldMap: oldMap, questions: questions, checks: checks };
 }
 
 const migrationRows = [];
-/* harness 的 localStorage 是无配额内存 Map：本段量的是「LS 是迁移目标」（无 IDB）的性能，
-   20000 题夹具约 7.8M 字符，已超出真实浏览器 5MiB 配额（真机不可达，Phase 5 已记录）。
-   预检按真实配额会把替身误判为「空间不足」，因此本段把名义配额抬到夹具规模之上；
-   预检的正例/反例由 migrate.test P2–P4 与真机 CDP 覆盖，不在此处重复。 */
-const benchLSScopeQuota = QB.CONFIG.STORAGE_QUOTA_BYTES;
-QB.CONFIG.STORAGE_QUOTA_BYTES = 64 * 1024 * 1024;
 for (const tier of [1000, 3000, 20000]) {
   const legacy = await buildLegacyBank(tier, tier);
   const heap0 = (bestEffortGc(), process.memoryUsage().heapUsed);
@@ -709,8 +709,6 @@ if (scaleArg) {
   });
   QB.Storage.clearAll();
 }
-QB.CONFIG.STORAGE_QUOTA_BYTES = benchLSScopeQuota; // 恢复真实口径，后续段落按默认配额展示占用
-
 /* ---------- 12c. IndexedDB 存储底座（Phase G / G4）：三档容量 + 迁移 + 写入 ----------
  * 口径：Node 无原生 IndexedDB，使用 scripts/lib/idb-memory.mjs 的内存实现。
  *   - 「IDB 占用」= QB.Store.estimate() 的序列化字节估算（UTF-16），**不是浏览器真实配额**；

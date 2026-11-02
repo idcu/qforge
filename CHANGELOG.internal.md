@@ -6,6 +6,72 @@
 
 ---
 
+## （hash 待回填）· feat(storage): 运行时探测 LocalStorage 配额上限
+
+**核心改动**
+- `js/data/store.js`：新增唯一探测实现 `measureLSQuota()` + 对外 `Store.ensureLSQuota(opts)`（探测并写缓存）
+  与 `Store.readLSQuota()`（只读缓存、不探测不写）。探测键 `meta:lsQuotaProbe`（引导键），
+  从 1Mi 字符倍增到 16Mi、首次 `QuotaExceededError` 后二分到 **16Ki 字符**粒度（最少 64、最多 40 次采样），
+  每次写后回读校验，`finally` 与 `Store.init()` 都清理探测键；不碰业务键、不影响 `lsBackupState`。
+  探测键与缓存键 `meta:lsQuotaCap` 均加入 `BOOTSTRAP_KEYS` / `BACKUP_EXCLUDED_KEYS`。
+- 缓存记录 `{v, at, ua, source, capacityChars, budgetChars, granularityChars, samples, ms, usedAtProbe}`：
+  探测值有效期 **7 天**、回退值 **1 小时**；`navigator.userAgent` 变化、缓存容量 < 当前已用、记录损坏即重测。
+- 回退（`source='conservative-constant'`）：`no-localstorage` / 写入被静默拒绝（回读不一致）/
+  `probe-error:<Name>` / `probe-upper-bound`（>16Mi）→ 预算 **5,210,112 字符**，`reason` 一并返回，不冒充探测值。
+- `preflightMigration`：`idbUsable=true` 时只读有效缓存（无缓存用保守常量、**不探测**）并**恒放行**
+  （≥85% 仅置 `nearLimit`）；`idbUsable=false` 时同步 `ensureLSQuota()` 后按 `used+128KiB` 判定，
+  不足抛 `LS_CAPACITY`。返回值新增 `quotaSource / quotaGranularityChars / quotaCacheHit / quotaProbeMs`，
+  既有字段与语义不变；`QB.Store` 公开方法只新增 `ensureLSQuota/readLSQuota` 两个。
+- `js/app.js`：首屏 `render()` 之后用 `requestIdleCallback(..., {timeout:2000})`（无则 800ms `setTimeout`）
+  后台探测一次，失败已内部回退、不打断页面；**探测不进入启动关键路径**。
+- `scripts/_harness.mjs`：注入 `quota.chars / probeQuotaChars / failWrites / dropWrites / failAfterSets`，
+  探测键单独限额；`scripts/migrate.test.mjs` 新增 N1–N4；`scripts/bench.mjs` 用 `probeQuotaChars: 16Mi`
+  并预热探测，避免替身把探测成本计入迁移计时。
+
+**验证数据（真机 Edge 151 / CDP 真窗口，2026-11-03）**
+- 探测精度：独立复测当前环境上限 **5,242,894 字符**；运行时探测值 **5,226,640**，
+  误差 **−16,254 字符（0.31%）**，小于 16Ki 粒度；预算 **5,193,872**。
+  与历史 Phase 5 记录 **5,222,564** 相比 **+4,076（0.078%）**（历史值与本次独立复测本身相差 20,330，
+  属记账口径/浏览器内部预留差异）。近满库反例探测值 **5,231,284**（误差 −11,610）、预算 **5,198,516**。
+- 启动耗时：无探测基线 `Store.init` **4.9 / 11.3ms**；改为空闲探测后 **2.5 / 3.4ms**；
+  后台探测 **352–402ms**；二次启动（命中缓存）`ensureLSQuota` **0.3–0.4ms**、`Store.init` **4.0 / 7.1ms**。
+  即首次与二次启动均未让探测进入首屏关键路径。
+- 探测残留（真机）：完成 / 第 3 次写抛错中断 / `setItem` 静默拒绝三例，探测键均无残留；
+  业务键与引导键集合（除 `meta:lsQuotaCap`）增删为 **0**，`qb:user:residue:demo` 值不变。
+- 预检反例（IDB 禁用，同 12k 夹具 + 300,000 字符 filler）：`capacityChars=5,231,284`、
+  `budgetChars=5,198,516`、`quotaSource=probe`、粒度 16,384；`code=LS_CAPACITY` 于写入前中止，
+  toast「已用 5149363 / 上限 5198516 字符」，无业务键增删、schema 仍 0、锁已释放、`business=[]`。
+
+**验证数据（Node v24.14.0）**
+- N1 注入三档（1Mi/3Mi/5Mi 字符）：探测容量 **1,040,405 / 3,129,366 / 5,226,518**，
+  误差 **8,171 / 16,362 / 16,362**，粒度 **8,193 / 16,384 / 16,384**，采样 **8 / 10 / 12** 次；
+  均不超过注入上限且误差 ≤ 粒度。
+- N3 回退：写入抛 `Error` → `source=conservative-constant`、`reason=probe-error:Error`；
+  静默拒绝 → `write-rejected`；>16Mi 上界 → `probe-upper-bound`；三例预算均为 **5,210,112**，探测键无残留。
+- N4 残留：完成 / 中断 / 失败三例，业务键与引导键集合增删为 0（缓存键除外）。
+- `node scripts/migrate.test.mjs` **291 断言 / 0 失败**；`node scripts/test-all.mjs` **25 项 / 0 失败**；
+  `node --expose-gc scripts/bench.mjs --assert` **53 项门禁全部通过**。
+
+**回归（真机 Edge 151）**
+- 12k bench 旧库：`mode=idb`、`schema=6`、12,124 键逐键一致、201/201 复习状态抽样一致、
+  12,000 条日志映射、`lsBackupState=retained`；4 次计时 **1953 / 2134 / 2870 / 3573ms**
+  （同机基线 **2453ms**，中位数约 **2502ms**，+2.0%，属环境抖动），堆峰值 30.27–30.59MB（基线 30.28MB）。
+- 5k：**790.7ms / +20.88MB**（基线 864.0ms / +20.60MB）；20k 最小字段：**218.9ms / +21.01MB**
+  （基线 211.4ms / +22.56MB）；两者 `verified 5054/105`、201/201 抽样一致，堆峰值未劣化。
+- D1 中断自愈与锁心跳（2s）代码未改动；`idb.test` 106/0、`migrate.test` 的 F2b/F2c 全通过。
+
+**遗留 TODO / 风险**
+- **Safari / Firefox / 移动端仍未实机验证**（本轮只有 Edge 151 真机）。探测已替代硬编码，
+  理论上随环境自适应；风险转为「未知引擎的 `QuotaExceededError` 行为、单键上限、UA 变化粒度
+  是否与 Edge 一致」，Node 替身与 Edge 已覆盖已知分支，未知引擎仍需实机抽验。
+- 探测上界 16Mi 字符：容量更大的环境会判 `probe-upper-bound` 并回退保守常量（低估，安全方向）。
+- 后台探测本身耗时 **352–402ms**，期间会反复写入/删除探测键（最大尝试 16Mi 字符的临时字符串），
+  不阻塞首屏，但在低端移动设备上的 CPU/内存抖动未实测。
+- 命中缓存只读 JSON（~0.3–0.6ms）；缓存被清空/首次启动时 IDB 可用路径使用保守常量展示容量，
+  不触发同步探测——容量提示可能暂时偏保守，迁移判定本身（恒放行）不受影响。
+
+---
+
 ## ef2eaef · fix(migrate): 迁移期间不再向 LocalStorage 追加业务写入
 
 **根因（先证后改）**
@@ -52,7 +118,7 @@
 - IDB 可用但 LS 已超名义预算时选择**放行**（迁移不写业务键，且是近满用户唯一减压手段）；
   若引导键真的写不进，失败发生在任何业务写入前，安全回退 —— 但用户会看到通用失败提示而非
   容量提示（未在真机复现「引导键写不进」的极端场景）。
-- 预检按字符数估算，Safari/Firefox/移动端配额未实测；无痕/受限环境可能误报「空间不足」（安全方向）。
+- 预检现已改为运行时探测（16Ki 字符粒度，探测失败回退 5,210,112 常量并标注来源）；**Safari/Firefox/移动端仍未实机验证**（该风险由本条目后续的 `feat(storage)` 探测实现部分覆盖），未知引擎的 `QuotaExceededError` 行为与单键上限是否一致仍待抽验；无痕/受限环境可能误报「空间不足」（安全方向）。
 - 迁移期内存缓冲会把 v1→v5 产物的全部新布局键驻留内存直到 v5→v6 完成（12k 峰值 +30.20MB），
   比旧实现多一份内存占用；这是换取「不写 LS」的必要代价，超大库（>50k）需继续观察。
 - 反例的「IDB 不可用」为 CDP 注入 `SecurityError`，非真实 InPrivate；真实无痕窗口与多标签 IDB 事务语义仍未实机验证（与本条修复无关的既有风险）。

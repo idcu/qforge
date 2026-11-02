@@ -292,8 +292,8 @@ Exporters.openFlow({kind, bank})
 | 存放位置 | 键 | 理由 |
 | --- | --- | --- |
 | **IndexedDB**（业务数据） | `banks` / `questions:*`（分片 + 清单）/ `user:review:<bank>:<hash>` + `user:reviewMeta` / `user:revlogMeta` + `user:revlog:<i>` / 错题 / 收藏 / 历史 / 会话 / 权重 / 当前库 / 主题 / 开始偏好 / 题目图片资产索引 | 数据量随题量增长（50k 题约 45MB 估算），必须解除 LS 约 5MB 硬顶；IDB 配额按 origin 计算且通常远大于 LS |
-| **LocalStorage**（引导标记，`QB.Store.BOOTSTRAP_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:schemaVersion` / `meta:migrationLock` / `meta:migrationBackup` | **打开 IDB 之前就要同步可读**（决定用哪个后端）；迁移锁需跨标签同步原子；自动备份在 IDB 不可用时要有落点。这些都是极小状态，不占容量 |
-| 备份排除（`BACKUP_EXCLUDED_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` | 只描述「本设备当前用哪个后端」，换设备应重新探测；恢复 replace 时也不删除（否则会把新设备的后端选择一起删掉） |
+| **LocalStorage**（引导标记，`QB.Store.BOOTSTRAP_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:schemaVersion` / `meta:migrationLock` / `meta:migrationBackup` / `meta:lsQuotaProbe` / `meta:lsQuotaCap` | **打开 IDB 之前就要同步可读**（决定用哪个后端）；迁移锁需跨标签同步原子；自动备份在 IDB 不可用时要有落点；`meta:lsQuotaProbe` 是探测临时键（每次探测结束/启动时清理，不得残留），`meta:lsQuotaCap` 是容量探测缓存。这些都是极小状态，不占容量 |
+| 备份排除（`BACKUP_EXCLUDED_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:lsQuotaProbe` / `meta:lsQuotaCap` | 只描述「本设备当前用哪个后端/容量」，换设备应重新探测；恢复 replace 时也不删除（否则会把新设备的后端选择一起删掉） |
 
 题目图片二进制沿用既有独立 IDB 库 `qforge/assets`（不属于本节的 KV 底座）。
 
@@ -319,7 +319,7 @@ Exporters.openFlow({kind, bank})
    - **中断自愈**：等待超过 TTL 后不再只弹 toast，而是按 `[0,1000,3000,6000]` 退避重试 `Migration.run()` 主动重抢过期锁；重抢成功即完成迁移并切后端，随后把等待期写入/删除回放进 IDB。
    - 重试仍失败时返回 `persisted=false`，UI 状态栏**持久显示**「本页写入尚未落盘（迁移未完成）」并 toast 明确告知，绝不静默留在内存或假装成功。
    - 引导标记（后端标记/迁移标记/schema 版本/迁移锁）在等待期**不被门控**、始终同步写 LocalStorage：否则接管方 `tryLock` 写的锁只留在本页内存，其他标签看不到。业务键的等待期门控保持不变。
-   - **迁移前容量预检**（2026-11-03）：抢锁成功后、备份/写入前调用 `QB.Store.preflightMigration({idbUsable})`（口径见 [DATABASE.md](DATABASE.md) §9.5）。IDB 可用时迁移只写引导键，恒放行（≥85% 仅标记 `nearLimit` 供 UI 提示）；IDB 不可用时按「整份副本」估算，不足即抛 `LS_CAPACITY`、释放锁、不写任何业务键。
+   - **迁移前容量预检**（2026-11-03，运行时探测）：抢锁成功后、备份/写入前调用 `QB.Store.preflightMigration({idbUsable})`（口径见 [DATABASE.md](DATABASE.md) §9.5）。上限由 `QB.Store.ensureLSQuota()` 运行时探测：独立键 `meta:lsQuotaProbe`，从 1Mi 字符倍增到 16Mi、首次配额失败后二分到 16Ki 粒度，写后回读校验，`finally` 清理；结果缓存到 `meta:lsQuotaCap`（探测值 7 天 / 回退值 1 小时 / UA 变化或缓存失效重测）。探测在首屏渲染后空闲期后台执行（`requestIdleCallback`，超时 2s；无则 800ms `setTimeout`），不进启动关键路径。IDB 可用时预检**只读有效缓存**（`Store.readLSQuota()`，无缓存用保守常量且不探测）并恒放行（≥85% 仅标记 `nearLimit` 供 UI 提示）；IDB 不可用时同步 `ensureLSQuota()` 后按「整份副本」估算，不足即抛 `LS_CAPACITY`、释放锁、不写任何业务键。探测失败回退保守常量 5,210,112 字符并标记 `source=conservative-constant`，不冒充探测值。
    - **迁移写入缓冲**（2026-11-03）：备份成功后调用 `QB.Storage.beginMigrationBuffer()`。迁移期间业务写入只进内存缓存/待写队列，**LocalStorage 只允许写引导键**（锁/进度/标记），因此 v4→v5 的 per-hash/分段键不再追加到 LS（修复近满旧库在 `user:revlog:47` 爆 `QuotaExceededError`）。目标为 LS（IDB 不可用）时不启用缓冲，仍用推进前快照 `restoreAll` 回滚。
 2. `saveAutoBackup` 迁移前全量备份：分块保存**原始 JSON 串**（100 键/条，不解析成对象）；优先独立 IDB `qforge-backup/snapshots`，不可用时回落 `meta:migrationBackup`；写后回读逐串校验，失败即中止、不写任何数据。
 3. `Store.detect()`：IDB 不可用 → 写 `ls-fallback`，本次迁移按 LS 结束（业务可用）。
