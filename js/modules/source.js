@@ -11,7 +11,11 @@
   const CFG = (QB.CONFIG && QB.CONFIG.NETWORK) || {};
   const URL_LIMIT_BYTES = CFG.URL_IMPORT_MAX_BYTES || 8 * 1024 * 1024;
   const URL_TIMEOUT_MS = CFG.URL_IMPORT_TIMEOUT_MS || 15000;
-  const BINARY_EXTS = ['xlsx', 'docx'];
+
+  /** 二进制扩展名唯一权威在导入注册表（QB.Importers.BINARY_EXTS），此处不再重复定义 */
+  function binaryExts() {
+    return (QB.Importers && QB.Importers.BINARY_EXTS) || ['xlsx', 'docx', 'qbk'];
+  }
 
   /** 来源种类 */
   const KINDS = { LOCAL: 'local', FILE: 'file', PASTE: 'paste', DROP: 'drop', URL: 'url' };
@@ -43,7 +47,7 @@
     }
     const ext = (u.pathname.toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || '';
     if (!QB.Importers || !QB.Importers.has(ext)) {
-      return { ok: false, reason: '地址需以支持的文件结尾（json/csv/tsv/txt/md/xlsx/docx）' };
+      return { ok: false, reason: '地址需以支持的文件结尾（json/csv/tsv/txt/md/xlsx/docx/qbk）' };
     }
     return { ok: true, url: u, ext: ext };
   }
@@ -83,7 +87,7 @@
     opts = opts || {};
     const checked = validateUrl(rawUrl);
     if (!checked.ok) throw new Error(checked.reason);
-    const isBinary = BINARY_EXTS.indexOf(checked.ext) >= 0;
+    const isBinary = binaryExts().indexOf(checked.ext) >= 0;
     const name = (checked.url.pathname.split('/').pop() || 'remote.' + checked.ext);
     const loader = opts.loader || ((u) => fetch(u, { redirect: 'follow' }));
 

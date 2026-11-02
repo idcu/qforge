@@ -6,6 +6,66 @@
 
 ---
 
+## <待回填> · fix(package): 分发题包四缺陷（预览契约 / runImport meta / URL qbk / 文件名唯一）
+
+**缺陷根因（Edge 151 真机复现，代码定位一致）**
+1. **只读预览整页 `[object Object]`**：`QB.SharePage.build()` 的契约是
+   `{content, ext, mime, assetCount, missing}`，`openPreview` 把整个对象塞进 `Blob([html])`，
+   对象被 Blob 转换为字符串 `[object Object]`。**同类误用核对**：`SharePage.build` 仅两个调用方——
+   html 格式构建器 `return QB.SharePage.build(payload)`（由 `buildAsync` 统一取 `r.content`，正确）
+   与 `openPreview`（错误，唯一一处）。
+2. **重复导入三选一永不出现**：`Importers.runImport` 只有一个返回分支，且未带 `result.meta`；
+   `data-io.commitImport` 依赖 `result.meta.manifest` 判重，条件恒空 → 不写 `meta:pkgHistory`，
+   第二次导入直接进普通预览（真机 key 从 `questions,warnings,format,stats,ext` 核对一致）。
+3. **URL 导入 `.qbk` 失败**：`source.js` 重复定义本地 `BINARY_EXTS=['xlsx','docx']`（缺 `qbk`），
+   快照按文本读取后交给要求 `arrayBuffer` 的 qbk 解析器 → 报「无法识别的二进制导入入参」。
+4. **同秒导出同名覆盖**：`stamp()` 实际只到分钟（`yyyymmdd-hhmm`；用户报告为秒级，代码核实为分钟级），
+   同一分钟内连续导出文件名相同，浏览器下载按同名只保留 1 个文件（真机 2 次下载事件落 1 个文件）。
+
+**修法（每处只改唯一正确层）**
+1. `exporter.openPreview`：`built = await SharePage.build(payload)` 后取 `built.content`，Blob 只收字符串。
+2. `importers/registry.runImport`：返回值增加 `meta: result.meta || null`（**唯一返回分支，已全覆盖**）；
+   下游 `data-io` 继续只依赖 `result.meta.manifest`，各调用方不再自行嗅解析器私有字段。
+3. `source.js`：删除本地 `BINARY_EXTS`，`binaryExts()` 运行时复用 `QB.Importers.BINARY_EXTS`（唯一权威，
+   含 `xlsx/docx/qbk`）；`validateUrl` 与 URL 导入弹窗文案补 `qbk`。
+4. `exporter`：`stamp()` 改为 `YYYYMMDD-HHMMSS-SSS`（毫秒）+ 同毫秒连续调用追加 `-2/-3` 序号；
+   抽出唯一实现 `packageFilename(bankName, version, count, date)`（`distributeFlow` 与测试共用），
+   文件名 `<题库名>-分发题包-v<版本>-<题数>题-<时间>.qbk`；`openFlow` 的通用文件名同样受益。
+
+**接线级回归（`scripts/assets.test.mjs` +31，套件 119→150）**
+- **runImport 透传 meta（9 项）**：返回值含 `meta` 键、`meta.manifest.packageId/version/manifestOk` 与
+  `buildAsync` 一致；记录导入前 `findDuplicate` 为空、`recordImport` 后命中同版本；第二次 `runImport`
+  仍透传（覆盖真机缺陷复现路径）。
+- **预览契约（6 项）**：`SharePage.build` 返回对象且 `content` 为字符串；桩 `Blob/URL/window.open/setTimeout`
+  后断言 `Blob` 第一段是 `string`、非 `[object Object]`、且 `=== build().content`。
+- **URL `.qbk`（7 项）**：`Source.fetchSnapshot('…pkg.qbk', {loader})` 的 `text()` 桩直接抛错、`arrayBuffer()`
+  返回包体；断言快照有 `arrayBuffer`、无 `text`、8 位字节 checksum，`validateUrl` 接受 `.qbk`，快照可直接
+  交给 `runImport` 解析出题并透传 `meta`（Node 模拟 fetch 响应，替代真机网络口径）。
+- **文件名唯一（6 项）**：同一毫秒连续两次不同、同秒不同毫秒不同、扩展名/题数/版本在位。
+- **「修复前会失败」证据**：先写测试并在未改代码时实跑——**128 通过 / 15 失败**（meta 6 条、预览 2 条、
+  URL 4 条、文件名生成器 1 条；URL 后续 2 条与文件名 5 条因前置失败由 `if` 守卫跳过未计入）。
+  修复后同套件 **150/150 通过**。纯 DOM 弹窗（三选一）仍不在 Node 覆盖范围，见风险。
+
+**验证数据（2026-11-03，本机 Node v24.14.0）**
+- `test-all`：25 个运行项 **0 失败**，断言 **4245/4245**（前 4214；`assets.test.mjs` 119→150）。
+- `bench --assert --expose-gc`：**53/53** 门禁通过（日志逐项核对）；heapUsed 增量
+  **8.51 → 11.16 MB（+2.66 MB ≤ 40 MB）**；分发 5k 观测（3 次中位数）：构建普通 **105.62 ms** /
+  含 manifest **107.92 ms**、解包 **12.78 ms**、导入 **194.76 ms**（同机参考值，不设门禁；比上轮
+  76.62/76.87/9.03/137.02 慢，属本机负载波动，未改该路径逻辑）。
+- `docs-check --static`：25 运行项 / 4245 断言 / 53 门禁基线一致；首屏 78 文件
+  （70 内联 js）**292.8 KB gzip / 832.8 KB raw**（前 292.2 / 831.4）。
+- 未新增依赖、未改公开签名、未放宽校验（manifest checksum 不符仍只警告不阻断）。
+
+**风险 / 未验证（按真机结果改准）**
+- **真机（Edge 151）已验证且本轮修复**：只读预览正文不再 `[object Object]`、同 id+同版本第二次导入
+  出现三选一、URL 导入 `.qbk` 成功、同秒两次导出落 2 个文件。
+- **仍未真机验证**：① 含图片资产的分发包端到端（图片入库 + 再导入预览内嵌）；② 三选一的「**跳过**」分支
+  实际点击（并存/覆盖的落库语义已在 Node 断言）；③ api 模式下题包历史（`meta:pkgHistory` 仅本机）；
+  ④ >8MB 远端包的拒绝文案在真机的呈现。
+- 三选一弹窗本身无 DOM 测试；本轮未触碰容量/限流/迁移相关路径。
+
+---
+
 ## 2a03e92 · feat(package): .qbk 分发题包（manifest/校验/重复导入/只读预览）
 
 **核心改动**

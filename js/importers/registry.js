@@ -73,12 +73,15 @@
 
     const result = await parser.parse(input);
     const validated = QB.Adapters.validateQuestions(result.questions || []);
+    // 解析器附加元数据（.qbk 清单/校验和）必须在此统一透传：下游 data-io 只依赖
+    // result.meta.manifest 识别重复导入，各调用方不得自行再嗅解析器私有字段。
     return {
       questions: result.questions || [],
       warnings: (result.warnings || []).concat(validated.warnings || []),
       format: result.format || ext,
       stats: validated.stats,
-      ext: ext
+      ext: ext,
+      meta: result.meta || null
     };
   }
 

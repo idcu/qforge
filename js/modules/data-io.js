@@ -243,7 +243,7 @@
     return new Promise((resolve) => {
       UI.openModal(
         '<h3>从网络地址导入</h3>' +
-        '<div class="li-meta">输入题目文件的 http(s) 直链（json / csv / tsv / txt / md / xlsx / docx）。' +
+        '<div class="li-meta">输入题目文件的 http(s) 直链（json / csv / tsv / txt / md / xlsx / docx / qbk）。' +
         '远端文件作为快照保存到本地，可离线使用；服务器需允许跨域访问（CORS），否则请另存为文件后拖拽导入。上限 8MB。</div>' +
         '<input type="url" id="url-area" class="grow" style="width:100%;margin-top:8px" placeholder="https://example.com/questions.json" value="' +
         QB.escapeHtml(presetUrl || '') + '" />' +

@@ -316,7 +316,8 @@ assets/asyyyyyyyy-456.png
 
 - 由「导出 → 题库包 .qbk」或「导出分发题包」生成；导入时走与其他格式完全相同的预览/合并/覆盖流程，图片自动写入本浏览器 IndexedDB（同内容去重）。
 - 包内缺失题目引用的图片时给出警告，题面位置显示占位，不阻断导入。
-- URL 网络导入同样支持 .qbk（受 8MB 快照上限约束；超大题库包请文件/拖拽导入）。
+- URL 网络导入同样支持 .qbk（受 8MB 快照上限约束；超大题库包请文件/拖拽导入）；**.qbk 按二进制拉取**（`Source.fetchSnapshot` 直接复用导入注册表的 `BINARY_EXTS` 唯一权威，含 `xlsx/docx/qbk`），得到 `arrayBuffer` 快照后交给 qbk 解析器；不会按文本读取（否则 ZIP 字节会被解码成乱码并报「无法识别的二进制导入入参」）。
+- **导入结果统一透传 `meta`**：`QB.Importers.runImport()` 的所有格式都在返回值中带上解析器的 `meta`（.qbk 为清单/校验和；其他格式为 `null`）。下游 `data-io.commitImport` 只依赖 `result.meta.manifest` 做重复识别，调用方不需要各自去嗅解析器私有字段。
 - **分发题包（含 `manifest.json`）校验**（`QB.Package.verify`，唯一实现；结构见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) §2.5）：
   - **manifest 缺失**（旧包）：正常导入，**不产生任何清单相关警告**，行为与改动前完全一致。
   - **manifest 损坏**（非 JSON / 非对象）：警告「manifest.json 不是合法 JSON…已跳过题包版本/完整性校验」，**继续导入**。

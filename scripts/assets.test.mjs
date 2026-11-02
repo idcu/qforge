@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { QB } = await createHarness(path.resolve(__dirname, '..'));
+const { QB, window } = await createHarness(path.resolve(__dirname, '..'));
 QB.DB.init();
 
 let pass = 0;
@@ -402,6 +402,144 @@ section('分发题包异常：manifest 缺失/损坏/校验和不符/题数不�
 
   // id 冲突的落库语义（对话框为 UI 层，选项对应 insertMany 的 merge/overwrite，已在上一节断言）
   ok(!!QB.Package.findDuplicate(bank.id, goodManifest) === false, '未记录导入前不判重复');
+}
+
+section('接线级回归：runImport 透传 meta → data-io 判重可见');
+{
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  QB.Storage.set(QB.KEYS.metaPkgHistory, {});
+  const bank = await QB.DB.banks.create({ name: '接线库' });
+  await QB.DB.questions.insertMany(bank.id, [
+    { type: 'judge', question: '接线题', options: [], answer: '正确' }
+  ], { dedupe: true, mode: 'merge' });
+  const payload = await QB.Exporters.collect('bank', bank);
+  const dist = await QB.Exporters.buildAsync('qbk', payload, { distribute: true, version: '1.0.1' });
+
+  // 与 data-io.importUrlFlow 同形态（name + arrayBuffer 快照），覆盖真实接线而非 QbkImporter.parse
+  const viaRun = await QB.Importers.runImport({ name: 'wire.qbk', arrayBuffer: dist.content });
+  eq(viaRun.questions.length, 1, 'runImport 解析 1 题');
+  ok('meta' in viaRun, 'runImport 返回值含 meta 键（修复前丢失）');
+  ok(!!(viaRun.meta && viaRun.meta.manifest), 'runImport 透传 meta.manifest（修复前为 undefined）');
+  eq(viaRun.meta && viaRun.meta.manifest && viaRun.meta.manifest.packageId, dist.manifest.packageId,
+    'meta.manifest.packageId 与 buildAsync 一致');
+  eq(viaRun.meta && viaRun.meta.manifest && viaRun.meta.manifest.version, '1.0.1', 'meta.manifest.version 透传');
+  eq(viaRun.meta && viaRun.meta.manifestOk, true, 'meta.manifestOk 透传');
+
+  // data-io.commitImport 的判重入口条件：result.meta && result.meta.manifest
+  const before = viaRun.meta && viaRun.meta.manifest ? QB.Package.findDuplicate(bank.id, viaRun.meta.manifest) : null;
+  ok(before === null, '记录导入前：判重为空');
+  QB.Package.recordImport(bank.id, dist.manifest);
+  const after = viaRun.meta && viaRun.meta.manifest ? QB.Package.findDuplicate(bank.id, viaRun.meta.manifest) : null;
+  ok(!!after, '记录导入后：runImport → findDuplicate 命中（修复前因 meta 丢失恒为空）');
+  eq(after && after.version, '1.0.1', '判重命中同版本');
+
+  // 同一包第二次导入（真机缺陷复现路径）仍能命中
+  const viaRun2 = await QB.Importers.runImport({ name: 'wire2.qbk', arrayBuffer: dist.content });
+  ok(!!(viaRun2.meta && viaRun2.meta.manifest), '第二次 runImport 仍透传 meta');
+}
+
+section('接线级回归：openPreview 交给 Blob 的是 build().content 字符串');
+{
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  const bank = await QB.DB.banks.create({ name: '预览契约库' });
+  await QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: '预览题', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' }
+  ], { dedupe: true, mode: 'merge' });
+  const payload = await QB.Exporters.collect('bank', bank);
+  const built = await QB.SharePage.build(payload);
+  eq(typeof built.content, 'string', 'SharePage.build 契约：content 为字符串');
+  eq(typeof built, 'object', 'SharePage.build 契约：整体返回对象');
+
+  // 浏览器外壳桩：只替换 openPreview 触达的全局，调用后立即还原
+  const savedBlob = globalThis.Blob;
+  const savedCreate = URL.createObjectURL;
+  const savedRevoke = URL.revokeObjectURL;
+  const savedOpen = window.open;
+  const savedSetTimeout = globalThis.setTimeout;
+  let capturedParts = null;
+  let openedUrl = null;
+  globalThis.Blob = class {
+    constructor(parts) { capturedParts = parts; }
+  };
+  URL.createObjectURL = () => 'blob:preview-contract';
+  URL.revokeObjectURL = () => {};
+  window.open = (u) => { openedUrl = u; return { closed: false }; };
+  globalThis.setTimeout = () => 0;
+
+  let opened = false;
+  try {
+    opened = await QB.Exporters.openPreview(payload);
+  } finally {
+    globalThis.Blob = savedBlob;
+    URL.createObjectURL = savedCreate;
+    URL.revokeObjectURL = savedRevoke;
+    window.open = savedOpen;
+    globalThis.setTimeout = savedSetTimeout;
+  }
+  ok(opened === true, 'openPreview 返回 true');
+  eq(openedUrl, 'blob:preview-contract', 'openPreview 用对象 URL 打开新窗口');
+  ok(Array.isArray(capturedParts), 'Blob 入参为数组');
+  eq(typeof (capturedParts && capturedParts[0]), 'string', 'Blob 第一段是字符串（修复前为 object）');
+  ok(capturedParts && capturedParts[0] !== '[object Object]', 'Blob 内容不是 [object Object]');
+  eq(capturedParts && capturedParts[0], built.content, 'Blob 内容等于 build().content（同一构建日）');
+}
+
+section('接线级回归：URL 导入 .qbk 走二进制读取 → qbk 解析器');
+{
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  const bank = await QB.DB.banks.create({ name: 'URL 题包库' });
+  await QB.DB.questions.insertMany(bank.id, [
+    { type: 'judge', question: 'URL 题包题', options: [], answer: '正确' }
+  ], { dedupe: true, mode: 'merge' });
+  const payload = await QB.Exporters.collect('bank', bank);
+  const dist = await QB.Exporters.buildAsync('qbk', payload, { distribute: true, version: '1.0.2' });
+  const url = 'https://example.com/pkg.qbk';
+
+  // loader 桩模拟 fetch 响应：qbk 只应走 arrayBuffer()；若误按文本读，text() 直接抛错（修复前即此路径）
+  const response = {
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    text: async () => { throw new Error('qbk 不应按文本读取'); },
+    arrayBuffer: async () => dist.content
+  };
+  let snap = null;
+  let snapError = '';
+  try {
+    snap = await QB.Source.fetchSnapshot(url, { loader: async () => response });
+  } catch (e) {
+    snapError = e.message;
+  }
+  ok(!!snap, 'fetchSnapshot 成功（修复前报：' + (snapError || '') + '）');
+  ok(!!(snap && snap.arrayBuffer), '快照含 arrayBuffer');
+  eq(snap && snap.text, undefined, '二进制快照不写 text');
+  ok(/^[0-9a-f]{8}$/.test((snap && snap.checksum) || ''), '快照 checksum 为 8 位字节校验和（实际 ' + (snap && snap.checksum) + '）');
+  eq(QB.Source.validateUrl(url).ok, true, 'validateUrl 接受 .qbk');
+  if (snap) {
+    const viaRun = await QB.Importers.runImport({ name: snap.name, arrayBuffer: snap.arrayBuffer });
+    eq(viaRun.questions.length, 1, 'URL 快照 → runImport → qbk 解析 1 题');
+    ok(!!(viaRun.meta && viaRun.meta.manifest), 'URL 路径同样透传 meta.manifest');
+  }
+}
+
+section('接线级回归：同秒连续导出文件名不重复');
+{
+  const fn = QB.Exporters._packageFilename;
+  ok(typeof fn === 'function', '分发文件名生成器已导出（_packageFilename）');
+  if (typeof fn === 'function') {
+    const d1 = new Date(2026, 0, 2, 3, 4, 5, 600);
+    const d2 = new Date(2026, 0, 2, 3, 4, 5, 601);
+    // 连续两次同一毫秒 → 序号兜底
+    const a = fn('物业题库A', '1.2.0', 538, d1);
+    const a2 = fn('物业题库A', '1.2.0', 538, new Date(2026, 0, 2, 3, 4, 5, 600));
+    ok(a !== a2, '同一毫秒连续两次 → 序号兜底保证不同（' + a + ' / ' + a2 + '）');
+    // 同秒不同毫秒 → 毫秒位直接区分
+    const b = fn('物业题库A', '1.2.0', 538, d2);
+    ok(a2 !== b, '同秒不同毫秒 → 文件名不同（' + a2 + ' / ' + b + '）');
+    ok(/\.qbk$/.test(a), '扩展名为 .qbk');
+    ok(a.indexOf('-538题-') >= 0, '含题数');
+    ok(a.indexOf('v1.2.0') >= 0, '含版本');
+  }
 }
 
 console.log('\n================ 汇总 ================');

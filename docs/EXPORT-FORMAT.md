@@ -158,18 +158,21 @@ assets/asxxxxxxxx-123.jpg # 图片字节（同普通 .qbk）
 - `packageId` 默认由题库 id 经 FNV-1a 64 散列（同库多次导出不变）；`version` 在导出弹窗填写（默认 `1.0.0`），`author/description` 可选。
 - `checksum` 与 `bank.json.checksum` **同源同值**（v3 `3:`+16hex），不重复计算：分发构建复用 `jsonPayload()` 得到的校验和。
 - **向后兼容**：普通导出不产生 `manifest.json`；旧 `.qbk` 无该条目时解析为 `null`、不提示、导入行为与改动前一致。
-- **只读预览**：分发弹窗可直接「只读预览」，复用 `QB.SharePage` 生成自包含 HTML，在本地新标签页打开（不联网、不上传）。
+- **只读预览**：分发弹窗可直接「只读预览」，复用 `QB.SharePage` 生成自包含 HTML，在本地新标签页打开（不联网、不上传）。`build()` 返回 `{content, ext, mime, assetCount, missing}`，预览取 `content` 字符串交给 Blob（不得把整个对象塞入 Blob，否则页面正文只会是 `[object Object]`）。
 - 体积实测（538 题真实库）：普通 `.qbk` 与分发包字节差见 §6；manifest 增量仅数百字节。
 - 重复导入与校验行为见 [IMPORT-FORMAT.md](IMPORT-FORMAT.md) §9。
 
 ## 3. 文件命名
 
 ```
-<题库名>-<对象名>-<数量><单位>-<YYYYMMDD-HHMM>.<ext>
-例：物业题库A-错题本-36题-20261013-1830.csv
-    物业题库A-历史记录-12条-20261014-1015.csv
+<题库名>-<对象名>-<数量><单位>-<YYYYMMDD-HHMMSS-SSS>.<ext>
+例：物业题库A-错题本-36题-20261013-1830-12-345.csv
+    物业题库A-历史记录-12条-20261014-1015-07-890.csv
+分发题包：<题库名>-分发题包-v<版本>-<数量>题-<YYYYMMDD-HHMMSS-SSS>.qbk
+例：物业题库A-分发题包-v1.2.0-538题-20261103-2045-12-345.qbk
 ```
 单位由 KINDS 定义（题集为「题」，history 为「条」）。
+时间戳精确到毫秒；**同一毫秒内连续导出再追加 `-2`、`-3` 序号**，避免同名文件被浏览器下载覆盖。
 题库名中的非法文件名字符（`\ / : * ? " < > |`）会被替换为 `_`。
 
 ## 4. 内部接口（供扩展/测试）
@@ -193,7 +196,7 @@ QB.Exporters.buildAsync(formatId, payload, opts?)
 QB.Exporters.openFlow({ kind, bank })
 // 分发题包：收集 → 填写版本/作者/描述（或只读预览）→ 构建（含 manifest.json）→ 下载
 QB.Exporters.distributeFlow({ kind:'bank', bank })
-QB.Exporters.openPreview(payload)   // 复用分享页，本地新标签打开
+QB.Exporters.openPreview(payload)   // 复用分享页，本地新标签打开（内部取 SharePage.build().content 字符串）
 
 // 题包清单公共抽象（生成/解析/校验/版本比较/导入历史）
 QB.Package.makeManifest(opts) / parseManifest(text) / verify(...) / compareVersions(a, b)

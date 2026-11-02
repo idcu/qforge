@@ -56,9 +56,23 @@
   /* ---------------- 公共小工具 ---------------- */
 
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+  function pad3(n) { return n < 10 ? '00' + n : (n < 100 ? '0' + n : '' + n); }
+  // 同毫秒兜底序号：文件名时间戳精确到毫秒，且同一毫秒内连续导出再追加序号，避免浏览器
+  // 同名下载被覆盖（Edge「另存为」默认按同名去重只保留一个文件）。
+  let lastStampBase = '';
+  let stampSeq = 0;
   function stamp(d) {
     d = d || new Date();
-    return d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '-' + pad2(d.getHours()) + pad2(d.getMinutes());
+    const base = d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + '-' +
+      pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) + '-' + pad3(d.getMilliseconds());
+    if (base === lastStampBase) { stampSeq++; return base + '-' + stampSeq; }
+    lastStampBase = base;
+    stampSeq = 0;
+    return base;
+  }
+  /** 分发题包文件名（唯一实现；测试可传固定 Date 验证同秒唯一） */
+  function packageFilename(bankName, version, count, date) {
+    return safeName(bankName) + '-分发题包-v' + safeName(version) + '-' + count + '题-' + stamp(date) + '.qbk';
   }
   function safeName(s) {
     return String(s || '导出').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60).trim() || '导出';
@@ -646,7 +660,9 @@
     if (!QB.SharePage) { QB.UIRenderer.toast('分享页模块未加载', 'err'); return false; }
     let html;
     try {
-      html = await QB.SharePage.build(payload);
+      const built = await QB.SharePage.build(payload);
+      // build() 契约为 { content, ext, mime, ... }；Blob 只能接收 HTML 字符串
+      html = built && typeof built === 'object' ? built.content : built;
     } catch (e) {
       QB.UIRenderer.toast('预览生成失败：' + e.message, 'err');
       return false;
@@ -700,8 +716,7 @@
       QB.UIRenderer.toast('导出失败：' + e.message, 'err');
       return null;
     }
-    const filename = safeName(opts.bank.name) + '-分发题包-v' + safeName(info.version) + '-' +
-      payload.entries.length + '题-' + stamp() + '.qbk';
+    const filename = packageFilename(opts.bank.name, info.version, payload.entries.length);
     download(filename, built.mime, built.content);
     const kb = (built.content.byteLength / 1024).toFixed(1);
     const imgNote = built.assetCount ? '，含图片 ' + built.assetCount + ' 张' : '';
@@ -717,6 +732,7 @@
   QB.Exporters = {
     KINDS, FORMATS, collect, buildContent, buildAsync, openFlow, download,
     distributeFlow, openPreview,
-    _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines, _historyToTable: historyToTable
+    _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines, _historyToTable: historyToTable,
+    _packageFilename: packageFilename
   };
 })(window);
