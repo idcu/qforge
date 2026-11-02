@@ -28,6 +28,8 @@
 
   const SCHEMA_VERSION = 6;
   const LOCK_TTL_MS = 30000;
+  /** 持锁迁移期间续租间隔：远小于 TTL，保证「胜者只是慢」时等待者不会误判为崩溃 */
+  const LOCK_RENEW_MS = 2000;
   let inflight = null;
 
   function currentVersion() {
@@ -47,6 +49,24 @@
   function releaseLock(owner) {
     const cur = QB.Storage.getFresh(QB.KEYS.metaMigrationLock, null);
     if (cur && cur.owner === owner) QB.Storage.remove(QB.KEYS.metaMigrationLock);
+  }
+
+  /**
+   * 持锁期间心跳续租（同一把锁，不新增并发原语）：
+   * 迁移可能因大库/低性能设备超过 30s TTL，若锁不续租，等待者会误判「胜者已崩溃」而并发迁移。
+   * 仅在锁仍属于自己时续租；发现锁被接管则停止写入（让新 owner 负责）。
+   */
+  function startLockHeartbeat(owner) {
+    const timer = setInterval(() => {
+      try {
+        const cur = QB.Storage.getFresh(QB.KEYS.metaMigrationLock, null);
+        if (cur && cur.owner === owner) {
+          QB.Storage.setSync(QB.KEYS.metaMigrationLock, { owner: owner, at: Date.now() });
+        }
+      } catch (_) { /* 续租失败不打断迁移；锁过期后由等待者接管 */ }
+    }, LOCK_RENEW_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    return timer;
   }
 
   /* ---------------- 失败回滚快照 ---------------- */
@@ -484,39 +504,45 @@
       return { fromVersion: fromVersion, version: fromVersion, locked: true };
     }
 
-    // F1：迁移写入前先落全量自动备份；备份失败即中止（不进入任何数据改写）
-    const backup = QB.Backup;
-    if (!backup || typeof backup.saveAutoBackup !== 'function') {
-      releaseLock(owner);
-      throw new Error('迁移已中止：备份模块不可用，无法生成迁移前自动备份');
-    }
-    let autoBackup;
+    // 持锁即续租：迁移再慢，锁也不会因 30s TTL 被等待者误抢（胜者崩溃时心跳停止，锁自然过期）
+    const heartbeat = startLockHeartbeat(owner);
     try {
-      autoBackup = await backup.saveAutoBackup({ fromVersion: fromVersion, toVersion: SCHEMA_VERSION });
-    } catch (backupErr) {
-      releaseLock(owner);
-      const e = new Error('迁移已中止：自动备份失败（' + (backupErr && backupErr.message || backupErr) + '）');
-      e.cause = backupErr;
-      throw e;
-    }
+      // F1：迁移写入前先落全量自动备份；备份失败即中止（不进入任何数据改写）
+      const backup = QB.Backup;
+      if (!backup || typeof backup.saveAutoBackup !== 'function') {
+        releaseLock(owner);
+        throw new Error('迁移已中止：备份模块不可用，无法生成迁移前自动备份');
+      }
+      let autoBackup;
+      try {
+        autoBackup = await backup.saveAutoBackup({ fromVersion: fromVersion, toVersion: SCHEMA_VERSION });
+      } catch (backupErr) {
+        releaseLock(owner);
+        const e = new Error('迁移已中止：自动备份失败（' + (backupErr && backupErr.message || backupErr) + '）');
+        e.cause = backupErr;
+        throw e;
+      }
 
-    const snap = snapshotAll();
-    const result = { fromVersion: fromVersion, version: SCHEMA_VERSION, autoBackup: !!autoBackup };
-    try {
-      if (fromVersion < 2) result.migrated = await migrateV1ToV2();
-      if (fromVersion < 3) result.sharded = await migrateV2ToV3();
-      if (fromVersion < 4) result.repaired = await migrateV3ToV4();
-      result.layout = await migrateV4ToV5();
-      result.backend = await migrateV5ToV6();
-      QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
-      await QB.Storage.flush();
-      try { await backup.markAutoBackupDone(); } catch (_) { /* 进度标记失败不影响迁移结果 */ }
-      releaseLock(owner);
-      return result;
-    } catch (e) {
-      try { restoreAll(snap); } catch (rollbackErr) { e.rollbackError = rollbackErr; }
-      try { releaseLock(owner); } catch (_) { /* ignore */ }
-      throw e;
+      const snap = snapshotAll();
+      const result = { fromVersion: fromVersion, version: SCHEMA_VERSION, autoBackup: !!autoBackup };
+      try {
+        if (fromVersion < 2) result.migrated = await migrateV1ToV2();
+        if (fromVersion < 3) result.sharded = await migrateV2ToV3();
+        if (fromVersion < 4) result.repaired = await migrateV3ToV4();
+        result.layout = await migrateV4ToV5();
+        result.backend = await migrateV5ToV6();
+        QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
+        await QB.Storage.flush();
+        try { await backup.markAutoBackupDone(); } catch (_) { /* 进度标记失败不影响迁移结果 */ }
+        releaseLock(owner);
+        return result;
+      } catch (e) {
+        try { restoreAll(snap); } catch (rollbackErr) { e.rollbackError = rollbackErr; }
+        try { releaseLock(owner); } catch (_) { /* ignore */ }
+        throw e;
+      }
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 

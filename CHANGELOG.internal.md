@@ -6,6 +6,69 @@
 
 ---
 
+## （待回填）· fix(storage): 等待标签在锁超时后接管迁移（D1 中断自愈）
+
+**核心改动**
+- 根因：等待方只轮询 backend marker，30s 超时仅 toast；且引导键（迁移锁）写入在 `_awaiting` 期间
+  也被门控，只落本页内存，接管方无法跨标签发布锁 → 胜者崩溃即永久卡死、等待期写入滞留内存。
+- `js/utils/storage.js`
+  - 新增 `waitForMigrationTakeover(opts)`：超时后按 `[0,1000,3000,6000]` 退避重抢锁并重试
+    `Migration.run()`；先 `_backendReady()` 直接完成切换，否则 `_runTakeoverMigration()`；
+    `tryLock` 返回 `locked` 时转入 `waitForMigrationSwitch`（不并发迁移）。**唯一调用方：
+    `js/app.js::boot`**（本提交新增的唯一公开方法，其余为私有）。
+  - 新增 `_runTakeoverMigration()`：迁移前快照 `_pending/_awaitDeletes/_clearPending`（`Migration.run`
+    内 `adoptStore` 会重置队列），非 idb 则放回内存队列，idb 则回放并复位 `_awaiting`。
+  - 新增 `_applyPendingWrites(pending, deletes, clear)`：等待期写入回放的**唯一实现**，
+    `_completeMigrationSwitch` 与接管路径共用（禁止第二条回放实现）。
+  - 引导键（`isBootstrapKey`）在 `setSync/set/remove` 中绕过 `_awaiting` 门控（业务键门控不变）；
+    `_writeBootstrap` 先落掉普通防抖待写，避免紧随的 `adoptStore/initStore` 重置 `_pending` 丢分片。
+- `js/modules/migrate.js`：`LOCK_RENEW_MS=2000`，`startLockHeartbeat(owner)` 每 2s 续写锁 `at`
+  （`timer.unref()`）；`doRun` 抢锁后启动、`finally` 清理，备份/迁移/释放锁原逻辑不变。
+- `js/app.js`：等待期改为调用 `waitForMigrationTakeover({timeoutMs:30000})`；切换成功清空
+  `State.storageNotice` 并提示「已接管并保存暂存写入」；失败设置**持久** `storageNotice`
+  「本页写入尚未落盘（迁移未完成），请保持本页打开」并由 `updateStatus` 持续渲染（不再 30s 后恢复普通文案）；
+  等待/接管异常单独 try/catch，同样进入未落盘提示。
+- `scripts/migrate.test.mjs`：**F2b 16 项**（锁 held→过期→重抢→迁移完成→回放 21/22）、**F2c 12 项**
+  （胜者存活但慢：心跳续租 `at` 前进、owner 不变、等待者重抢返回 `locked`、迁移调用 0）；172 → **200**。
+- 文档：`docs/ARCHITECTURE.md` §9.4 改为「协作式 + 中断自愈」；README/DEVELOPMENT 断言数与
+  首屏体积同步；`scripts/docs-baseline.json` 刷新。
+
+**验证数据（Node v24.14.0）**
+- `node scripts/test-all.mjs`：**25 运行项 / 0 失败 / 4071 断言 / 34.5s**（migrate **200/0**、idb **106/0**）。
+- `node --expose-gc scripts/bench.mjs --assert`：**53 项门禁全部通过**，heapUsed 增量 **+2.67MB**（8.40→11.07MB）；
+  IDB 迁移 5000/20000/50000 = 178.18/752.56/2125.82ms，原始峰值 +65.70/+105.39/+240.06MB。
+- 反例说明：`node scripts/bench.mjs --assert`（不带 `--expose-gc`）本轮 heapUsed 增量 51~53MB > 40MB 门禁；
+  同一基线 `HEAD 740512e` 的独立 worktree 实测为 **91.07MB > 40MB**，即该门禁项依赖 `--expose-gc` 的
+  GC 口径，非本次改动引入；脚本自身与 `docs-check` 均以 `--expose-gc` 运行。
+
+**验证数据（真机 Edge 151 / CDP 真窗口，非无头；2026-11-02）**
+- 崩溃接管（A 拿锁 → B 等待写第 21 条 → 写后 6ms 杀 A，锁龄 593ms）：
+  - 等待期 `write21 {favLen:21, lsFavLen:20, pending:1, awaiting:true}`（未写 LS）；
+  - 锁于 30s TTL 过期后 B 抢到新锁（`owner` 变化、`lockAgeMs=3`），`takeoverRes
+    {switched:true, takeover:true, attempts:1, takeoverMs:30294, persisted:true, lastError:null}`，
+    `takeoverFromKillMs=30634`；
+  - 切换后 `favLen=21, pending=0, awaiting=false, lockPresent=false`；再写第 22 条 → `favLen=22`；
+  - 落盘 `{mode:idb, marker:idb, schemaVersion:6, favLen:22, idbKeyCount:29, lsFavLen:20, lsBackupState:retained}`；
+    **刷新后 `favLen=22`、`total=5000`、`lsFavLen=0`、`lsBackupState=cleaned`、`uncaughtCount=0`**；
+    `verdict.allPass=true`。
+  - 证据：`.screenshots/storage-v6-fix/f2-crash2-result.json`、`crash2-after-takeover.png`、`crash2-after-reload.png`。
+- 反例（胜者只是慢：注入 45s `migrateToIdb` 延迟，锁 >TTL）：
+  - B 在 **30.088s / 41.135s** 两次重抢均返回 `locked`（`bMigrateCalls=0`，无双迁移）；
+  - `winnerHeldLockAtLeastMs=41135`、`takeoverRes {takeover:false, attempts:2, takeoverMs:45419}`、
+    `switchObservedMs=45714`；最终/刷新均 **21**、`uncaughtCount=0`、`verdict.allPass=true`。
+  - 证据：`.screenshots/storage-v6-fix/f2-slow-winner-result.json`、`slow-winner-after-switch.png`、
+    `slow-winner-after-reload.png`。
+
+**TODO/风险（多标签策略覆盖边界）**
+- 已覆盖：启动时「另一标签持锁 → 等待切换」、胜者崩溃后 TTL 接管 + 等待期写入回放、胜者慢时心跳防误抢、
+  接管失败/等待异常时的持久未落盘提示。
+- 未覆盖：①真实 InPrivate 回退路径（无痕下 IDB 可用，仍未自然复现）；②3+ 标签同时等待/接管未做真机矩阵；
+  ③胜者在备份/校验阶段被杀后接管方是否复用到半成品备份，仅 Node 覆盖中断重入，无真机专项；
+  ④接管失败后（`persisted=false`）关闭页面仍会丢失内存队列（已持久提示，未做磁盘队列）。
+- 引导键绕过门控依赖 `isBootstrapKey` 白名单；新增引导键必须同步加入，否则会再次只落本页内存。
+
+---
+
 ## bf101f0 · fix(pwa): SW 注册改为 boot 内直接 register，不再依赖已过期的 load 事件
 
 **核心改动**

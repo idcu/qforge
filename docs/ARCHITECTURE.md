@@ -55,7 +55,7 @@
 | `utils/helpers.js` | `QB.Helpers` | `debounce`（返回函数带 **`.cancel()`**，可丢弃挂起调用）/`throttle/cloneDeep/uid/escapeHtml/formatDate/formatDuration/calculateAccuracy` |
 | `utils/time.js` | `QB.Time` | 自然日公共抽象：`dayStart/dayIndex/isSameDay/endOfDay`（唯一实现；SRS 到期、复习队列、学习热力图共用，禁止各自 `setHours(0,0,0,0)`） |
 | `utils/rich-text.js` | `QB.RichText` | 模型内容上屏统一入口：`render()`（转义 + `^{}`/`_{}` 上下标 + **轻量公式子集 `\frac{}{}`/`\sqrt{}`/`\sqrt[n]{}`（CSS 排版，参数组可嵌套、内部递归渲染）**）、`toPlain()`（去记号，不转义）、`questionAssetIds()`（收集题内图片 id，含材料正文 `material` 与递归小问 `children`，供 qbk 打包/备份孤儿清理的引用集） |
-| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存，且支持 `registerMerge(match, merge)` 对指定键做按键合并（当前用于 `user:review:*` / `user:reviewRev:*`，复用 `QB.ReviewMerge`）；`getFresh()` 绕过缓存直读（写前重读）；visibility/beforeunload 落盘；`usageBytes()`。**双后端门面（v6）**：接口/同步读语义不变，后端由 `QB.Store` 决定——IDB 模式下写先更新缓存并聚合成**一个微任务 IDB 事务**（同调用栈内多次 `setSync` 原子提交，失败整体回滚并保留待写重试），确认落盘用 `await Storage.flush()`；引导标记仍同步写 LS |
+| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存，且支持 `registerMerge(match, merge)` 对指定键做按键合并（当前用于 `user:review:*` / `user:reviewRev:*`，复用 `QB.ReviewMerge`）；`getFresh()` 绕过缓存直读（写前重读）；visibility/beforeunload 落盘；`usageBytes()`。**双后端门面（v6）**：接口/同步读语义不变，后端由 `QB.Store` 决定——IDB 模式下写先更新缓存并聚合成**一个微任务 IDB 事务**（同调用栈内多次 `setSync` 原子提交，失败整体回滚并保留待写重试），确认落盘用 `await Storage.flush()`；引导标记仍同步写 LS，且等待切换期（`_awaiting`）不被门控（业务键门控不变），否则接管方写的迁移锁只留本页内存 |
 | `utils/fnv.js` | `QB.FNV` | FNV-1a 散列唯一实现：32 位 `hashString`（UTF-16 码元）/`hashBytes`/`toHex`（资产 id、来源/URL checksum），**64 位 `hashString64`/`hashBytes64`（BigInt，16 hex）**（contentHash v3、导出内容校验和）；question-id/assets/source/exporter 共用（serve-api 为 Node ESM 独立实现，等价性由 E2E 守护） |
 | `utils/random.js` | `QB.mulberry32` | 确定性 PRNG 唯一实现（`[0,1)`），供 `QB.shuffle`/`shuffleOptions` 与 FSRS fuzz 共用 |
 | `utils/answer-text.js` | `QB.AnswerText` | 填空答案拼接/回退与按题型答案行文本：`joinBlanks/blankAnswers/answerText`；exporter/share-page/question-editor/adapters/judge-answer 共用 |
@@ -313,7 +313,11 @@ Exporters.openFlow({kind, bank})
 
 沿用 v5 迁移框架（同一 `Migration.run`、同一把锁、同一套快照/回滚），**不改数据形状**；迁移过程改为**流式分批 + 断点续传**，任何时刻只保留在途批次：
 
-1. 抢 `meta:migrationLock`（owner + 30s TTL）；抢不到说明其他标签在迁移，本标签**进入等待**（`QB.Storage.waitForMigrationSwitch`）：轮询 `meta:storageBackend`（200ms）+ 复用 `BroadcastChannel` 的 `{type:'backend'}` 广播，期间读写仍走内存缓存但**写入只排队、不落 LocalStorage**（否则会被迁移后的自动清理当旧数据删除）；切换完成后再水合 IDB 并把等待期写入/删除补写进 IDB。超时同样不落 LS（继续缓冲），由 UI 提示保持页面打开。
+1. 抢 `meta:migrationLock`（owner + 30s TTL）；抢不到说明其他标签在迁移，本标签**进入等待**（`QB.Storage.waitForMigrationTakeover`）：轮询 `meta:storageBackend`（200ms）+ 复用 `BroadcastChannel` 的 `{type:'backend'}` 广播，期间读写仍走内存缓存但**写入只排队、不落 LocalStorage**（否则会被迁移后的自动清理当旧数据删除）。
+   - **协作式**：持锁标签每 2s 心跳续租**同一把锁**（`startLockHeartbeat`，不新增并发原语），迁移再慢锁也不会因 30s TTL 被误判为崩溃；等待者的 `Migration.run()` 仍以 `tryLock` 为唯一裁决点，返回 `locked` 时继续等胜者完成，**不会出现两个标签并发迁移**。
+   - **中断自愈**：等待超过 TTL 后不再只弹 toast，而是按 `[0,1000,3000,6000]` 退避重试 `Migration.run()` 主动重抢过期锁；重抢成功即完成迁移并切后端，随后把等待期写入/删除回放进 IDB。
+   - 重试仍失败时返回 `persisted=false`，UI 状态栏**持久显示**「本页写入尚未落盘（迁移未完成）」并 toast 明确告知，绝不静默留在内存或假装成功。
+   - 引导标记（后端标记/迁移标记/schema 版本/迁移锁）在等待期**不被门控**、始终同步写 LocalStorage：否则接管方 `tryLock` 写的锁只留在本页内存，其他标签看不到。业务键的等待期门控保持不变。
 2. `saveAutoBackup` 迁移前全量备份：分块保存**原始 JSON 串**（100 键/条，不解析成对象）；优先独立 IDB `qforge-backup/snapshots`，不可用时回落 `meta:migrationBackup`；写后回读逐串校验，失败即中止、不写任何数据。
 3. `Store.detect()`：IDB 不可用 → 写 `ls-fallback`，本次迁移按 LS 结束（业务可用）。
 4. `Store.migrateToIdb(lsSource())`：按分片流式复制非引导键——题目 **200 题/片**（与存储分片对齐），其余前缀键 **64 键/批**；每批「读 LS → 单事务写 IDB → 分块回读深比对 → 释放中间引用」，不把全库物化到内存。
@@ -324,7 +328,7 @@ Exporters.openFlow({kind, bank})
 9. 版本戳 `meta:schemaVersion=6`，`await flush()` 确认落盘；释放锁。
 10. **自动清理窗口**：下一次启动 `Store.init()` 检测 `lsBackupState==='retained'` → 先校验 IDB 可读（题目数 >0 且与分片清单一致）→ 自动 `cleanupLegacyLS()`：只保留 BOOTSTRAP_KEYS，写 `meta:lsCleanupAt` 并把 `lsBackupState` 置为 `'cleaned'`；清理后按 BOOTSTRAP_KEYS 重读 LS 刷新缓存。清理失败不删除任何一侧（IDB 数据完好，下次启动可重试），回退仍可走全量备份；备份弹窗仍保留手动「清理旧 LocalStorage」入口。
 
-幂等/重入：迁移中途中断（标记仍非 `idb`）→ 下次启动按 `meta:migrationProgress.done` 从断点续跑，同名记录覆盖写，最终收敛；多标签并发只有持锁标签执行，未持锁标签**等待切换**（见步骤 1），切换后补写等待期写入，避免「写 LS 后被清理」的静默丢数据（Node 回归：败者写收藏 21 条 → 清理 → 仍 21）。
+幂等/重入：迁移中途中断（标记仍非 `idb`）→ 下次启动按 `meta:migrationProgress.done` 从断点续跑，同名记录覆盖写，最终收敛；多标签并发只有持锁标签执行，未持锁标签**等待切换**；等待超时后按「协作式 + 中断自愈」策略重抢过期锁接管（见步骤 1），切换后补写等待期写入，避免「写 LS 后被清理」的静默丢数据。接管迁移会先快照等待期 `pending/deletes/clear`（`Migration.run` 内部 `adoptStore` 会重置待写队列），迁移成功后经 `_applyPendingWrites` 唯一实现回放，再复位 `_awaiting`（Node 回归：A 崩溃后 B 接管，等待期写的收藏 21/22 全部落 IDB，最终 22 → 刷新仍 22）。
 
 ### 9.5 回滚与降级路径
 

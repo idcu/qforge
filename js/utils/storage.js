@@ -208,6 +208,13 @@
         this._awaiting = true;
         return false;
       }
+      await this._applyPendingWrites(pending, deletes, clear);
+      this._awaiting = false;
+      return true;
+    },
+
+    /** 把等待期写入/删除补写进 IDB（先水合再回放；唯一实现，供等待切换与接管迁移共用） */
+    async _applyPendingWrites(pending, deletes, clear) {
       pending.forEach((value, key) => {
         this._cache.set(key, value);
         this._pending.set(key, value);
@@ -220,8 +227,106 @@
       });
       if (clear) this._clearPending = true;
       if (pending.size || deletes.size || clear) await this.flush();
+    },
+
+    /**
+     * 等待另一标签迁移；超过 TTL 后主动接管：重抢过期锁 + 退避重试 `QB.Migration.run()`。
+     * 调用方：`js/app.js::boot`（唯一）；Node 回归见 `scripts/migrate.test.mjs` F2b/F2c。
+     *
+     * 与 `waitForMigrationSwitch` 的区别：后者只等 marker（胜者崩溃就永远等不到），本方法在
+     * 超时后自行接管。接管前 `Migration.run()` 的 `tryLock` 仍是唯一裁决点：胜者存活时锁心跳
+     * 续租 → 返回 `locked`，不会出现两个标签同时迁移。
+     *
+     * @param {{timeoutMs?:number, retryDelays?:number[], waitAfterLockedMs?:number,
+     *          onTimeout?:Function}} [opts]
+     * @returns {Promise<{switched:boolean, takeover:boolean, attempts:number, takeoverMs:number,
+     *   buffered:number, persisted:boolean, timeout?:boolean, lastError?:string}>}
+     *   persisted=false 表示等待期写入仍只在内存，调用方必须显式告知用户。
+     */
+    async waitForMigrationTakeover(opts) {
+      const o = opts || {};
+      const retryDelays = Array.isArray(o.retryDelays) ? o.retryDelays : [0, 1000, 3000, 6000];
+      const waitAfterLockedMs = o.waitAfterLockedMs || 10000;
+      const startedAt = Date.now();
+      const first = await this.waitForMigrationSwitch({ timeoutMs: o.timeoutMs || 30000 });
+      if (first.switched) {
+        return { switched: true, takeover: false, attempts: 0, takeoverMs: 0, buffered: 0, persisted: true };
+      }
+      if (!first.timeout) {
+        return { switched: false, takeover: false, attempts: 0, takeoverMs: 0,
+                 buffered: this._pending.size, persisted: false };
+      }
+      if (typeof o.onTimeout === 'function') { try { o.onTimeout(); } catch (_) { /* 提示失败不影响接管 */ } }
+      let attempts = 0;
+      let lastError = null;
+      for (let i = 0; i < retryDelays.length; i++) {
+        const delay = retryDelays[i];
+        if (delay > 0 && !this._backendReady()) await this._waitTick(delay);
+        if (this._backendReady()) {
+          const ok = await this._completeMigrationSwitch();
+          if (ok) {
+            this.announceBackend('idb');
+            return { switched: true, takeover: false, attempts: attempts,
+                     takeoverMs: Date.now() - startedAt, buffered: 0, persisted: true };
+          }
+          continue;
+        }
+        if (!QB.Migration || typeof QB.Migration.run !== 'function') { lastError = 'migration-unavailable'; break; }
+        attempts += 1;
+        const res = await this._runTakeoverMigration();
+        if (res.switched) {
+          this.announceBackend('idb');
+          return { switched: true, takeover: true, attempts: attempts,
+                   takeoverMs: Date.now() - startedAt, buffered: 0, persisted: true,
+                   lastError: res.error || null };
+        }
+        lastError = res.error || (res.res && res.res.locked ? 'locked' : null);
+        if (res.res && res.res.locked) {
+          // 锁仍被存活标签持有（心跳续租）或已被其他等待者抢到：等它完成，绝不并发迁移
+          const w = await this.waitForMigrationSwitch({ timeoutMs: waitAfterLockedMs });
+          if (w.switched) {
+            this.announceBackend('idb');
+            return { switched: true, takeover: false, attempts: attempts,
+                     takeoverMs: Date.now() - startedAt, buffered: 0, persisted: true };
+          }
+        }
+      }
+      return { switched: false, takeover: false, attempts: attempts,
+               takeoverMs: Date.now() - startedAt, timeout: true,
+               buffered: this._pending.size, persisted: false, lastError: lastError };
+    },
+
+    /**
+     * 接管迁移一次：先快照等待期写入（`Migration.run` 成功会 `adoptStore` 重置待写队列），
+     * 迁移后按后端结果决定回放或把快照放回内存队列。
+     * @returns {Promise<{switched:boolean, res:Object|null, error:string|null}>}
+     */
+    async _runTakeoverMigration() {
+      const pending = new Map(this._pending);
+      const deletes = new Set(this._awaitDeletes);
+      const clear = this._clearPending;
+      this._awaitDeletes.clear();
+      this._clearPending = false;
+      let res = null;
+      let error = null;
+      try {
+        res = await QB.Migration.run();
+      } catch (e) {
+        error = (e && e.message) || String(e);
+      }
+      if (!this._isIdb()) {
+        // 未切换：快照放回等待队列（迁移失败时本页写入一条都不能丢）
+        pending.forEach((value, key) => {
+          this._cache.set(key, value);
+          this._pending.set(key, value);
+        });
+        deletes.forEach((key) => this._awaitDeletes.add(key));
+        if (clear) this._clearPending = true;
+        return { switched: false, res: res, error: error };
+      }
+      await this._applyPendingWrites(pending, deletes, clear);
       this._awaiting = false;
-      return true;
+      return { switched: true, res: res, error: error };
     },
 
     /** 本标签写入成功 → 广播键名，其他标签刷新缓存（不广播值，避免重复传输大分片） */
@@ -282,6 +387,13 @@
 
     /** 把引导标记同步写 LocalStorage（IDB 模式下的迁移锁/后端标记依赖同步可见） */
     _writeBootstrap(key, value) {
+      // 保持既有 setSync 语义：先落掉普通待写（防抖队列），再写引导键。
+      // 否则紧随其后的 adoptStore/initStore 会重置 _pending，未落盘的业务写入被静默丢弃。
+      // 等待切换期间照旧不落 LS（业务键门控不变）；IDB 模式的待写由事务队列负责。
+      if (!this._isIdb() && !this._awaiting && this._pending.size) {
+        this._cancelSchedule();
+        this._writeNow();
+      }
       global.localStorage.setItem(fullKeyOf(key), JSON.stringify(value));
       this._cache.set(key, value);
       this._pending.delete(key);
@@ -369,7 +481,9 @@
      *   异步失败经 onError 通知，`await flush()` 可确认落盘。
      */
     setSync(key, value) {
-      if (this._isIdb() && isBootstrapKey(key)) {
+      // 引导键（后端标记/迁移锁/版本戳）必须跨标签同步可见：即使本标签处于等待切换
+      // （_awaiting），也不能被等待门控拦住，否则接管时 tryLock 写的锁只留在本页内存。
+      if (isBootstrapKey(key)) {
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
       this._cache.set(key, value);
@@ -389,7 +503,7 @@
      * IDB 模式下同样走微任务聚合（不额外等待 200ms）。
      */
     set(key, value) {
-      if (this._isIdb() && isBootstrapKey(key)) {
+      if (isBootstrapKey(key)) {
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
       this._cache.set(key, value);
@@ -451,12 +565,13 @@
     remove(key) {
       this._cache.delete(key);
       this._pending.delete(key);
+      // 引导键（迁移锁/后端标记）删除也必须立即可见：等待期释放锁不能被 _awaitDeletes 拖延
+      if (isBootstrapKey(key)) {
+        this._awaitDeletes.delete(key);
+        try { this._deleteBootstrap(key); return; } catch (e) { this._notifyError(e); throw e; }
+      }
       if (this._awaiting) {
         this._awaitDeletes.add(key); // F2：记入待删，切换后补删 IDB
-        return;
-      }
-      if (this._isIdb() && isBootstrapKey(key)) {
-        this._deleteBootstrap(key);
         return;
       }
       if (this._isIdb()) {

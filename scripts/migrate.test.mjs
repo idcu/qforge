@@ -591,6 +591,115 @@ section('F2 多标签：败者等待切换，等待期写入不被清理丢弃�
   A.QB.Store.migrateToIdb = origMigrate;
 }
 
+section('F2b 持锁标签崩溃：等待者过 TTL 后接管并回放等待期写入（22→22）');
+{
+  const raw = new Map();
+  const idb = createMemoryIDB();
+  const BC = globalThis.BroadcastChannel;
+  const opts = { raw: raw, indexedDB: idb, BroadcastChannel: BC };
+  const A = await createHarness(ROOT, opts);
+  A.QB.DB.init();
+  const bank = await A.QB.DB.banks.create({ name: '崩溃接管库' });
+  await A.QB.DB.questions.insertMany(bank.id, [q1()], { dedupe: false });
+  const favKey = A.QB.KEYS.favorite(bank.id);
+  const fav20 = Array.from({ length: 20 }, (_, i) => ({ questionKey: 'k' + i, addedAt: i }));
+  A.QB.Storage.setSync(favKey, fav20);
+  A.QB.Storage.setSync(A.QB.KEYS.metaSchema, 5);
+
+  // 模拟「胜者已崩溃」：锁残留且超过 30s TTL、无心跳续租
+  raw.set('qb:' + A.QB.KEYS.metaMigrationLock, JSON.stringify({ owner: 'dead-winner', at: Date.now() - 31000 }));
+
+  const B = await createHarness(ROOT, opts);
+  B.QB.DB.init();
+  await B.QB.Storage.initStore();
+  eq(B.QB.Storage.mode, 'ls', '败者启动时仍是 LS');
+
+  const waitP = B.QB.Storage.waitForMigrationTakeover({ timeoutMs: 300, retryDelays: [0, 1000], waitAfterLockedMs: 5000 });
+  const fav21 = fav20.concat([{ questionKey: 'k20', addedAt: 20 }]);
+  B.QB.Storage.set(favKey, fav21);
+  const fav22 = fav21.concat([{ questionKey: 'k21', addedAt: 21 }]);
+  B.QB.Storage.set(favKey, fav22);
+  eq(JSON.parse(raw.get('qb:' + favKey)).length, 20, '等待期写入不落 LS（仍 20）');
+  eq(B.QB.Storage.get(favKey).length, 22, '本页内存可见 22 条');
+  eq(B.QB.Storage._pending.size, 1, '等待期写入按存储键排队（收藏整表 1 个键）');
+
+  const waitRes = await waitP;
+  eq(waitRes.switched, true, '等待者接管后切换到 IDB');
+  eq(waitRes.takeover, true, '结果标记为主动接管（takeover=true）');
+  ok(waitRes.attempts >= 1, '至少执行一次接管重试（实际 ' + waitRes.attempts + ' 次）');
+  ok(waitRes.takeoverMs > 0, 'takeoverMs 有实际值（' + waitRes.takeoverMs + 'ms）');
+  eq(waitRes.persisted, true, '结果标记写入已落盘（persisted=true）');
+  eq(B.QB.Storage.mode, 'idb', '败者门面已切到 idb');
+  eq((await B.QB.DB.progress.favoriteList(bank.id)).length, 22, '接管后 IDB 收藏 22 条（21+22 全保留）');
+  eq(B.QB.Storage._awaiting, false, '_awaiting 已重置');
+  eq(B.QB.Storage._pending.size, 0, '内存待写队列已清空');
+  ok(!raw.has('qb:' + B.QB.KEYS.metaMigrationLock), '接管完成后迁移锁已释放');
+
+  await B.QB.Storage.initStore(); // 模拟下一次启动（触发旧 LS 清理）
+  eq((await B.QB.DB.progress.favoriteList(bank.id)).length, 22, '重启后收藏仍为 22');
+  ok(!raw.has('qb:' + favKey), '重启后旧 LS 收藏已清理');
+}
+
+section('F2c 胜者仍存活（只是慢）：锁心跳续租，等待者不误抢、不并发迁移');
+{
+  const raw = new Map();
+  const idb = createMemoryIDB();
+  const BC = globalThis.BroadcastChannel;
+  const opts = { raw: raw, indexedDB: idb, BroadcastChannel: BC };
+  const A = await createHarness(ROOT, opts);
+  A.QB.DB.init();
+  const bank = await A.QB.DB.banks.create({ name: '慢迁移库' });
+  await A.QB.DB.questions.insertMany(bank.id, [q1()], { dedupe: false });
+  const favKey = A.QB.KEYS.favorite(bank.id);
+  const fav20 = Array.from({ length: 20 }, (_, i) => ({ questionKey: 'k' + i, addedAt: i }));
+  A.QB.Storage.setSync(favKey, fav20);
+  A.QB.Storage.setSync(A.QB.KEYS.metaSchema, 5);
+
+  const B = await createHarness(ROOT, opts);
+  B.QB.DB.init();
+  await B.QB.Storage.initStore();
+  eq(B.QB.Storage.mode, 'ls', '等待者启动时仍是 LS');
+
+  // 统计等待者是否真的执行了自己的迁移（并发迁移会导致它 >0）
+  let bMigrateCalls = 0;
+  const origB = B.QB.Store.migrateToIdb;
+  B.QB.Store.migrateToIdb = async function (src) { bMigrateCalls += 1; return origB.call(this, src); };
+
+  // 让胜者停在 migrateToIdb（模拟「还活着但很慢」），锁已落盘
+  const origA = A.QB.Store.migrateToIdb;
+  let release = null;
+  const gate = new Promise((r) => { release = r; });
+  A.QB.Store.migrateToIdb = async function (src) { await gate; return origA.call(this, src); };
+  const aRun = A.QB.Migration.run();
+  const lock0 = JSON.parse(raw.get('qb:' + A.QB.KEYS.metaMigrationLock));
+  ok(!!lock0 && lock0.owner, '胜者持锁（owner=' + (lock0 && lock0.owner) + '）');
+
+  await new Promise((r) => setTimeout(r, 2500)); // 超过心跳间隔，观察锁是否续租
+  const lock1 = JSON.parse(raw.get('qb:' + A.QB.KEYS.metaMigrationLock));
+  ok(lock1 && lock1.at > lock0.at, '胜者存活期间锁心跳续租（at ' + lock0.at + '→' + lock1.at + '）');
+  eq(lock1 && lock1.owner, lock0.owner, '续租不改变锁 owner');
+
+  // 等待者 TTL 设小，立即尝试接管；锁仍新鲜 → 只得到 locked，不得自行迁移
+  const waitP = B.QB.Storage.waitForMigrationTakeover({ timeoutMs: 200, retryDelays: [0, 1000], waitAfterLockedMs: 30000 });
+  B.QB.Storage.set(favKey, fav20.concat([{ questionKey: 'k20', addedAt: 20 }]));
+  await new Promise((r) => setTimeout(r, 500)); // 让等待者完成首次接管尝试
+  const lock2 = JSON.parse(raw.get('qb:' + A.QB.KEYS.metaMigrationLock));
+  eq(lock2 && lock2.owner, lock0.owner, '等待者尝试接管后锁 owner 仍是胜者（未被误抢）');
+  eq(bMigrateCalls, 0, '等待者未执行自己的迁移（无并发迁移）');
+
+  release();
+  await aRun;
+  const waitRes = await waitP;
+  eq(waitRes.switched, true, '胜者完成后等待者切换到 IDB');
+  eq(waitRes.takeover, false, '本次不是等待者接管（takeover=false）');
+  eq(bMigrateCalls, 0, '整个周期内等待者迁移调用仍为 0');
+  eq(B.QB.Storage.mode, 'idb', '等待者已切到 idb');
+  eq((await B.QB.DB.progress.favoriteList(bank.id)).length, 21, '等待期写入回放后收藏 21 条');
+  eq(B.QB.Storage._awaiting, false, '_awaiting 已重置');
+  A.QB.Store.migrateToIdb = origA;
+  B.QB.Store.migrateToIdb = origB;
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

@@ -35,7 +35,9 @@
     reviewLogBankId: null,
     // 统计页 FSRS 诊断缓存：{rev, value}，按 QB.DB.revlog.revision() 失效（避免每次 render 全量扫日志）
     fsrsDiag: null,
-    fsrsScope: null       // FSRS 权重作用域：null=全局，或 bankId
+    fsrsScope: null,      // FSRS 权重作用域：null=全局，或 bankId
+    // 持久存储告警（如迁移未完成、本页写入仍未落盘）：由 updateStatus 每次渲染追加，避免被普通文案覆盖
+    storageNotice: ''
   };
 
   const TABS = [
@@ -93,8 +95,9 @@
     const st = document.getElementById('status-text');
     const ex = document.getElementById('status-extra');
     if (st) {
-      st.textContent = (State.bank ? State.bank.name : '未选择题库') +
+      const base = (State.bank ? State.bank.name : '未选择题库') +
         (State.counts && State.counts.total ? ' · 共 ' + State.counts.total + ' 题' : '');
+      st.textContent = State.storageNotice ? base + ' · ' + State.storageNotice : base;
     }
     if (ex) ex.textContent = State.timerText || '';
     // 答题头内的倒计时（renderQuizRegions 输出 #quiz-timer）：每秒就地更新，不整块重建
@@ -1427,26 +1430,13 @@
         }
       });
     } catch (e) { /* 进度展示失败不影响迁移 */ }
+    let runRes = null;
+    let markerIdb = false;
     try {
       if (QB.Migration && QB.DB.backend !== 'api') {
-        const runRes = await QB.Migration.run();
+        runRes = await QB.Migration.run();
         if (QB.Storage.mode === 'idb') QB.Storage.announceBackend('idb');
-        const markerIdb = QB.Store && typeof QB.Store.readMarker === 'function' && QB.Store.readMarker() === 'idb';
-        // F2：另一标签持锁迁移，或它已在本次启动期间完成切换（本标签仍停在 LS），都要等待/切换。
-        // 本标签不写 LocalStorage（会被迁移后的清理当旧数据删除），期间写入进内存队列，切换后补写 IDB。
-        if (runRes && (runRes.locked || (markerIdb && QB.Storage.mode !== 'idb'))) {
-          const st = document.getElementById('status-text');
-          if (st) st.textContent = '另一标签正在迁移存储，本页等待切换…';
-          UI.toast('另一标签正在迁移存储，本页写入将暂存，完成切换后自动保存', 'ok');
-          const waitRes = await QB.Storage.waitForMigrationSwitch({ timeoutMs: 30000 });
-          if (waitRes.switched) {
-            UI.toast('存储迁移完成，已切换到新版本地存储', 'ok');
-          } else if (waitRes.timeout) {
-            UI.toast('迁移耗时较长，本页写入已暂存在内存；请保持页面打开，完成后自动保存', 'err');
-          } else {
-            UI.toast('本页暂无法切换到新版存储，写入继续暂存（不落旧存储）', 'err');
-          }
-        }
+        markerIdb = QB.Store && typeof QB.Store.readMarker === 'function' && QB.Store.readMarker() === 'idb';
       }
     } catch (e) {
       // F1：迁移中任何失败（典型：隐私模式/策略禁用导致 IndexedDB open 抛 SecurityError，
@@ -1456,6 +1446,46 @@
       UI.toast('当前环境不支持本地新版存储，已回退到兼容模式（数据未受影响）', 'err');
     } finally {
       if (offProgress) offProgress();
+    }
+    // F2：另一标签持锁迁移，或它已在本次启动期间完成切换（本标签仍停在 LS），都要等待/切换。
+    // 本标签不写 LocalStorage（会被迁移后的清理当旧数据删除），期间写入进内存队列，切换后补写 IDB。
+    try {
+      if (runRes && (runRes.locked || (markerIdb && QB.Storage.mode !== 'idb'))) {
+        const st = document.getElementById('status-text');
+        if (st) st.textContent = '另一标签正在迁移存储，本页等待切换…';
+        UI.toast('另一标签正在迁移存储，本页写入将暂存，完成切换后自动保存', 'ok');
+        // 等待超过 TTL 后主动重抢过期锁并重试迁移（胜者崩溃不再永久卡死）；
+        // 锁心跳保证「胜者只是慢」时不会被误抢，接管失败则持久提示本页写入未落盘。
+        const waitRes = await QB.Storage.waitForMigrationTakeover({
+          timeoutMs: 30000,
+          onTimeout: () => {
+            const el = document.getElementById('status-text');
+            if (el) el.textContent = '存储迁移超时，本页正在接管并重试…';
+            UI.toast('另一标签迁移超时，本页正在接管并重试；写入暂存在内存，请保持页面打开', 'err');
+          }
+        });
+        if (waitRes.switched) {
+          State.storageNotice = '';
+          if (waitRes.takeover) UI.toast('另一标签迁移已中断，本页已接管并保存暂存写入', 'ok');
+          else UI.toast('存储迁移完成，已切换到新版本地存储', 'ok');
+          if (waitRes.lastError) {
+            UI.toast('迁移收尾未完全成功（' + waitRes.lastError + '）；本页写入已保存，下次启动将重试', 'err');
+          }
+          updateStatus();
+        } else {
+          State.storageNotice = '本页写入尚未落盘（迁移未完成），请保持本页打开';
+          const el = document.getElementById('status-text');
+          if (el) el.textContent = '本页写入尚未落盘（迁移未完成），请勿关闭或刷新本页';
+          UI.toast('存储迁移仍未完成：本页写入未落盘，关闭或刷新本页会丢失这些修改', 'err');
+        }
+      }
+    } catch (e) {
+      // 等待/接管本身失败：不得静默吞掉，也不得让页面显示成「已保存」
+      console.error('[Migration] 等待另一标签迁移失败：', e);
+      State.storageNotice = '本页写入尚未落盘（迁移未完成），请保持本页打开';
+      const el = document.getElementById('status-text');
+      if (el) el.textContent = '本页写入尚未落盘（迁移未完成），请勿关闭或刷新本页';
+      UI.toast('存储迁移仍未完成：本页写入未落盘，关闭或刷新本页会丢失这些修改', 'err');
     }
     // 本地存储落盘失败（如配额已满）全局可见，不静默吞掉
     QB.Storage.onError(() => {
