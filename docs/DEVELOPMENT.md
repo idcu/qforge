@@ -96,9 +96,10 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 | `scripts/ui-renderer.test.mjs` | **174** | **作答反馈位置：解析区在操作按钮与答题卡之前（6 项）**；**收藏夹富文本去记号**；**结果页未作答与待自评分开计数**；**复习计划卡/难卡/本题历史**；**可访问性（6 项）**；**未作答统计与交卷分栏（10 项）：答题头 ○ 未答 N、答题卡「已答·未答」子区域、考试结果未作答计错、主操作/末栏独立容器**；组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例**；**收藏按钮已收藏态**；**搜索单行 sticky**；**历史统计 sticky 卡**；**区域数组与 DOM 对账（阶段 A）**；**答题卡格级增量（阶段 A）：帧稳定、子区域含已答/未答计数、仅计数+受影响格变化**；**结果页内联自评（6 项）：待自评简答按题号按钮、材料小问 data-child、已判定小问不渲染、得分/满分、文案指引**；**M4 材料小问乱序开关（组卷/练习/考试，3 项）与每题分值留空=默认（1 项）**；**导入校验和展示（5 项：无 meta 不渲染/一致/不一致/风险说明）**；**答题头倒计时 #quiz-timer（2 项：有 timerText 显示/无则不渲染）**；**开始弹窗回填上次参数（9 项：数量/分值/分类/时长/计时/小问乱序/选项乱序）** |
 | `scripts/review-queue.test.mjs` | **51** | 今日复习队列：限额裁剪（240 到期 + 160 新 → 200/20）、learning 优先、分钟级未到过滤、逾期升序、0 限额空队列、种子确定性、材料题整题 hash 入队；**每日累计额度 `dailyFromLog`：今日首条日志判新卡、同日 learning 不计复习、剩余额度 20-18 / 200-195 → 2/5、额度用尽空队列**；**QB.Time 自然日公共抽象**；SchedSettings 归一/默认/落库到 `bank.sched`；Wire `sched` 双向映射 |
 | `scripts/dom-patch.test.mjs` | **40** | `QB.DomPatch` 区域对账（`plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`，DOM-free）：首次全变化、内容一致全不重建、单区域变化、区域新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全、列表移除场景；**子区域（格级）：`contentOf` 取 frame、帧未变→顶层不重建、`snapshot` 以 frame 为基准、`normalize` 保留 `frame`/`sub`、`groupSub` 按容器归组去重剔除非法项** |
+| `scripts/idb.test.mjs` | **87** | IndexedDB 双后端存储（Phase G）：内存 IDB 驱动上的 `QB.Store` 初始/安全回落/单事务批量写失败整体回滚/四索引三类查询；`v5→v6` 迁移逐键一致 + LS 保留 + 幂等 + 中断重入 + 多标签单锁；无 IDB 与打开失败回落、cleanup/rollback/reenable、空库新装、`estimate` 估算口径 |
 | `scripts/contract.test.mjs` | **66** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源（**local-adapter 直读写 Storage，领域模块经 `QB.DB.*` 委托本适配器，禁双向委托以免自递归**）；**`historyAdd` 返回新增记录（与 api 适配器同形）**、**`historyUpdate` 保留 id/createdAt 且缺失 id 返回 null（4 项）**；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径；**权重归一下沉（4 项）：旧单组 `{w,...}` 读取归一为 global、banks 为空、local-adapter 不再引用 `QB.FSRSOpt`（数据层不反向依赖应用层）、使用 `QB.Weights.normalizeStore`**；**record 热路径（5 项）：本地一次落状态+日志、日志题库归属、logged/saved 回执** |
 | `scripts/api-backend.test.mjs` | **309** | **参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；**CORS 默认关闭、显式放行来源预检 204、未放行不带 ACAO**；**content_hash 按合并后完整题目重算、仅改解析不变**；**筛选查询不污染 count 缓存**；**historyAdd 返回形状与 local 一致**、**historyUpdate PATCH（保留 id/created_at、未知 id 404、api 回写得分，6 项）**；**bank.sched 创建/保存/回读**；**题目与题库元数据乐观并发（13+13 项）：base_updated_at 匹配成功/updated_at 单调递增/过期 409 CONFLICT+current/冲突不覆盖；api 适配器 baseUpdatedAt → 409 错误码与消息**；**复习进度多端冲突（12 项）：服务端 `review_rev` 初始 0、PUT 后 +1、`base_rev` 匹配成功、过期 409 CONFLICT + current 且不覆盖；客户端 409 后按 `last` 合并重试一次（merged=true、双方键保留、服务端 rev 递增、revlog 只 1 条）**；**B1 增量写入与 B3 revlog 版本（12 项）：PATCH 只合并增量键、其余键保留、`null` 删除、`rev` 递增、缺 `items` 400、`base_rev` 过期 409 返回 current/rev、本地缓存与 `revlog.revision()` 同步**；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、**`count`/`reviews` 按库缓存命中与写·级联·`backup.import` 后失效（5 项）**、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错（注入 fetch 走**真实网络失败**路径）；**跨布局整链 E2E（33 项）：本地模式造数 → 本地布局备份 → api 模式 `applyBackup` 经 `localToServer` + 真实 `POST /api/backup?mode=replace` → 直读 `GET /api/backup` 核对接管后端口径（snake_case、按库归集、id 保留）→ 再恢复到另一 local 上下文，题库/题目/错题/历史/revlog/权重逐项等价（闭环）**；**可选 Bearer 令牌鉴权（12 项）**；**静态安全头（6 项）**；**作答热路径（15 项）：首次作答 3 请求、热态 PATCH 1 请求、gradeMany 1 请求；错题额外 1；权重 write 后读缓存命中、remove 后重新 GET；revlog 非数组 400 BAD_REQUEST**；**按 IP 限流（24 项）：窗口限额/429+Retry-After/静态与 health 不受限/窗口重置/trustProxy 分桶/rateLimit:false 关闭，适配器 429 诚实抛出** |
-| **合计** | **3911 / 3911 通过 · 24 个运行项**（2026-11-02 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+| **合计** | **3998 / 3998 通过 · 25 个运行项**（2026-11-02 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
 
 **真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**：
 - 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。
@@ -119,7 +120,7 @@ node scripts/test-all.mjs
 
 ```bash
 node --expose-gc scripts/bench.mjs   # 采样 10 次取中位数，输出耗时与 heapUsed（--expose-gc 令 heapUsed 稳定可复核）
-node --expose-gc scripts/bench.mjs --assert   # 性能门禁：35 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
+node --expose-gc scripts/bench.mjs --assert   # 性能门禁：49 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
 node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
 
@@ -175,11 +176,13 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 > **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账（列表 + 答题区，含**答题卡格级增量**）。**列表侧**——错题本移除一条仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）。**答题区**——勾选选项时顶层仅重建 3/5 区域（占字节 15.6%）；答题卡由「整卡单区域」细化为 `frame` + `sub`：帧跨作答逐字节不变（整张 `<details>` 不重建，展开态不丢），仅按 key 就地替换变化的 **3/52** 子节点（计数 + 受影响格，占整卡 HTML 字节 2.0%）。相较细化前（整卡占答题区字节约 95.6%），答题热路径重建量 **由 95.6% 降至 15.6%**。**浏览器实机验证**：折叠答题卡后作答，卡片保持折叠（证明 `<details>` 未被重建）；作答使选项态/提交按钮/计数/当前格状态同步更新，控制台无报错。
 > `insertMany` 落库耗时以 v3（64 位）contentHash 语义哈希重算为主（约 11.32 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体）远低于旧单键写。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化；v3 的 BigInt 64 位哈希比 v2 的 32 位慢（单次约 2 倍），仍在门禁（≤30 ms）内。
 
-bench 全程 heapUsed：8.12 → 10.79 MB（**+2.67 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 19.61 MB；DOM 增量末态 19.80 MB）。首屏静态体积（index.html + css + 68 个 index 内联 js + FSRS 训练 Worker + sw.js + manifest/icon，共 76 个文件，逐文件 `gzip -9` 合计；2026-11-02 重测）：**252.5 KB gzip / 704.0 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：8.32 → 11.00 MB（**+2.68 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 19.86 MB；DOM 增量末态 20.04 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js + FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-02 重测）：**267.3 KB gzip / 751.5 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > **耗时口径（F4，2026-11-02）**：上列与 `bench.mjs` 输出中的毫秒/内存数值均为**同机参考值**（Node v24.14.0、当前机器负载），跨机器/跨轮次会波动；`scripts/docs-check.mjs --static` **只校验运行项、断言数、门禁数与首屏体积**，**不把耗时数字纳入校验**，故上述耗时仅作趋势参考，不构成文档门禁。
 
-> **存储 schema v5 一次性迁移验收（2026-11-02）**：1000 / 3000 / 20000 题（旧 v2 hash + 整表复习/日志布局）迁移耗时 **33.86 / 66.78 / 463.01 ms**，heap 峰值 **+13.80 / +42.31 / +89.22 MB**；逐条完整性 **1000/1000、3000/3000、20000/20000**（复习状态逐键相等、题目与日志 hash 全 v3、旧整表键清理、`schema=5`）。迁移后 per-hash 单次评分本地写 **0.03 / 0.02 / 0.13 ms**（O(1)，不随题量线性增长；上一轮整表 20000 题 **4.07 ms**），单次评分上行 **253 B**（整表 427.2 KB → 1728.9×）。门禁新增迁移三档耗时/完整性/heap 峰值与 per-hash 写入复杂度共 10 项（25→35）。
+> **存储 schema v5 一次性迁移验收（2026-11-02）**：1000 / 3000 / 20000 题（旧 v2 hash + 整表复习/日志布局）迁移耗时 **25.95 / 75.21 / 497.05 ms**，heap 峰值 **+15.43 / +47.01 / +107.21 MB**；逐条完整性 **1000/1000、3000/3000、20000/20000**（复习状态逐键相等、题目与日志 hash 全 v3、旧整表键清理、`schema=5`）。迁移后 per-hash 单次评分本地写 **0.02 / 0.02 / 0.13 ms**（O(1)，不随题量线性增长；上一轮整表 20000 题 **4.07 ms**），单次评分上行 **253 B**（整表 427.2 KB → 1728.9×）。门禁新增迁移三档耗时/完整性/heap 峰值与 per-hash 写入复杂度共 10 项（25→35）。
+
+> **存储底座 v6 / IndexedDB 验收（Phase G，2026-11-02）**：5000 / 20000 / 50000 题迁移到 IDB 耗时 **494.37 / 5719.22 / 24765.73 ms**，IDB 估算占用 **4.96 / 19.97 / 45.35 MB**（同数据 LS UTF-16 3.84 / 15.50 / 38.94 MB），迁移 heap 驻留峰值 **+15.41 / +60.82 / +136.33 MB**（原始峰值 +89.32 / +217.74 / +294.82 MB；浏览器口径估算 +10.12 / +39.62 / +90.14 MB）；三档逐键完整性全通过、`LS 保留=true`。单次评分（单事务 `flush`）**0.05 / 0.15 / 0.14 ms**、上行 **211 / 213 / 213 B**，对照 v5 per-hash LS 0.14 ms@20000 同量级。**50k 的 45.35 MB ≈ 5MB 的 9.1×，证明不再受 LS 5MB 硬顶**；仍受浏览器 IDB 配额约束。门禁新增 14 项（35→49）：IDB 三档迁移/写入、三档完整性、20000 迁移驻留堆峰值 ≤100MB、50000 容量 ≤100MB 且 >LS 5MB。**口径与未验证项**：Node 无原生 IndexedDB，使用 `scripts/lib/idb-memory.mjs` 内存实现；占用为序列化估算；**浏览器真实配额/隐私模式/多标签 IDB 事务未验证**（详见 `docs/DATABASE.md` §9）。
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 
@@ -200,9 +203,9 @@ node scripts/task-timer.mjs report                      # 明细表 + 已完成�
 
 ## 4. CI
 
-`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 **24 个运行项（冒烟 + 23 套件）**。时区矩阵用于拦截自然日/到期时间断言的时区回归。
+`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 **25 个运行项（冒烟 + 24 套件）**。时区矩阵用于拦截自然日/到期时间断言的时区回归。
 
-**独立轻量 `docs-check` job**（`scripts/docs-check.mjs --static`）：只读 `scripts/docs-baseline.json` 的套件断言数/门禁数，实时读取运行项与首屏文件/gzip 体积后与 README、本文比对，**不 spawn 套件、不跑 bench**，不拖慢重腿（重腿仍 24 个运行项，本机 32.9s）。数字有意变化时本地 `node scripts/docs-check.mjs --write` 刷新基线并随代码同 commit 提交；默认 live 模式则实测跑一遍套件与 bench 复算（手动核对用）。
+**独立轻量 `docs-check` job**（`scripts/docs-check.mjs --static`）：只读 `scripts/docs-baseline.json` 的套件断言数/门禁数，实时读取运行项与首屏文件/gzip 体积后与 README、本文比对，**不 spawn 套件、不跑 bench**，不拖慢重腿（重腿仍 25 个运行项，本机 32.9s）。数字有意变化时本地 `node scripts/docs-check.mjs --write` 刷新基线并随代码同 commit 提交；默认 live 模式则实测跑一遍套件与 bench 复算（手动核对用）。
 
 ## 5. 扩展指南（最小改动路径）
 

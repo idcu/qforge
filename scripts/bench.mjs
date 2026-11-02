@@ -19,6 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createMemoryIDB } from './lib/idb-memory.mjs';
 import { createServer } from './serve-api.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -695,8 +696,150 @@ if (scaleArg) {
   QB.Storage.clearAll();
 }
 
-QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
+/* ---------- 12c. IndexedDB 存储底座（Phase G / G4）：三档容量 + 迁移 + 写入 ----------
+ * 口径：Node 无原生 IndexedDB，使用 scripts/lib/idb-memory.mjs 的内存实现。
+ *   - 「IDB 占用」= QB.Store.estimate() 的序列化字节估算（UTF-16），**不是浏览器真实配额**；
+ *   - 内存实现无配额限制，浏览器真实配额/持久化语义一律标注「未验证」；
+ *   - heap 峰值 = 迁移全程按 Store.batch 采样（含未回收临时对象；带 --expose-gc 更接近真实）。
+ */
+const idbRows = [];
+let idbWriteBytes = 0;
 
+function instrumentStorePeak(Q) {
+  // 采样两条曲线：
+  //   rawPeak      = 迁移过程中未强制 GC 的 heapUsed 峰值（含未回收临时对象/垃圾）；
+  //   retainedPeak = 定期 bestEffortGc() 后采样的驻留峰值（更接近浏览器 GC 托管下的真实占用）。
+  // Node 内存后端的 localStorage/IndexedDB 数据都在 JS 堆内（浏览器中不在），故两者均标注口径。
+  const tracker = {
+    rawPeak: process.memoryUsage().heapUsed,
+    retainedPeak: process.memoryUsage().heapUsed,
+    samples: 0, gc: HAS_GC
+  };
+  const sampleRaw = () => { tracker.rawPeak = Math.max(tracker.rawPeak, process.memoryUsage().heapUsed); };
+  const sampleRetained = () => {
+    bestEffortGc();
+    tracker.samples += 1;
+    tracker.retainedPeak = Math.max(tracker.retainedPeak, process.memoryUsage().heapUsed);
+  };
+  const timer = setInterval(() => { sampleRaw(); sampleRetained(); }, 500);
+  if (typeof timer.unref === 'function') timer.unref();
+  return {
+    tracker,
+    stop() { clearInterval(timer); sampleRaw(); sampleRetained(); }
+  };
+}
+
+async function buildLegacyBankFor(Q, n, tier) {
+  Q.Storage.clearAll();
+  const bank = await Q.DB.banks.create({ name: 'IDB压测库' + tier });
+  const questions = [];
+  const oldMap = {};
+  const oldLog = [];
+  for (let i = 0; i < n; i++) {
+    const oldHash = '2:' + ((i * 2654435761) >>> 0).toString(16).padStart(8, '0');
+    const q = {
+      id: 'iq' + i, bankId: bank.id, type: 'single', question: 'IDB迁移题' + i + '？' + 'y'.repeat(i % 24),
+      options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A',
+      category: 'c' + (i % 10), createdAt: 1, updatedAt: 1, contentHash: oldHash
+    };
+    questions.push(q);
+    oldMap[oldHash] = {
+      algo: 'fsrs', stability: 2 + (i % 100) * 0.1, difficulty: 4 + (i % 10) * 0.1,
+      due: 1 + i, reps: i % 7, lapses: i % 3, last: i
+    };
+    oldLog.push({ id: 'il' + i, t: i, h: oldHash, r: 3 });
+  }
+  Q.QuestionShards.writeAll(bank.id, questions);
+  Q.Storage.setSync(Q.KEYS.review(bank.id), oldMap);
+  Q.Storage.setSync(Q.KEYS.revlog, oldLog);
+  return { bankId: bank.id, oldMap: oldMap, questions: questions };
+}
+
+for (const tier of [5000, 20000, 50000]) {
+  const idb = createMemoryIDB();
+  const h = await createHarness(QB_DIR, { indexedDB: idb });
+  const Q = h.QB;
+  await Q.Storage.initStore(); // 无标记 → LS；由 Migration v6 升级
+  Q.DB.init();
+  const legacy = await buildLegacyBankFor(Q, tier, tier);
+  const lsBefore = localStorageBytes(h.window.localStorage);
+
+  const heap0 = (bestEffortGc(), process.memoryUsage().heapUsed);
+  const inst = instrumentStorePeak(Q);
+  const t0 = process.hrtime.bigint();
+  const migRes = await Q.Migration.run({ force: true });
+  inst.stop();
+  const msMigrate = Number(process.hrtime.bigint() - t0) / 1e6;
+  const rawPeakMb = (inst.tracker.rawPeak - heap0) / 1024 / 1024;
+  const retainedMb = (inst.tracker.retainedPeak - heap0) / 1024 / 1024;
+  const heapAfterMigrate = (bestEffortGc(), process.memoryUsage().heapUsed);
+
+  // 估算浏览器口径：Node 内存后端的 IDB 数据也在 JS 堆里，全量回读一次的克隆增量 ≈ 该留存拷贝；
+  // 浏览器 IndexedDB 不在 JS 堆，扣除后即「门面缓存 + 迁移临时对象」的近似驻留。
+  const cloneRecs = await Q.Store.readAll(true, true);
+  const heapWithClone = (bestEffortGc(), process.memoryUsage().heapUsed);
+  cloneRecs.clear();
+  const heapNoClone = (bestEffortGc(), process.memoryUsage().heapUsed);
+  const idbCloneMb = Math.max(0, (heapWithClone - heapNoClone) / 1024 / 1024);
+  const browserEstMb = Math.max(0, retainedMb - idbCloneMb);
+
+  const est = await Q.Store.estimate();
+  const backendOk = migRes && migRes.backend && migRes.backend.backend === 'idb';
+  const markerOk = Q.Store.marker === 'idb' && Q.Storage.mode === 'idb';
+  let same = 0;
+  legacy.questions.forEach((q) => {
+    const nh = Q.makeContentHash(q);
+    const got = Q.ReviewStore.get(legacy.bankId, nh);
+    const want = legacy.oldMap[q.contentHash];
+    if (got && JSON.stringify(got) === JSON.stringify(want)) same++;
+  });
+  const questionsOk = Q.QuestionShards.readAll(legacy.bankId).every((q) => Q.isCurrentHash(q.contentHash));
+  const logs = Q.RevlogStore.list();
+  const logCap = Q.RevlogStore.MAX;
+  const expectedLogs = Math.min(tier, logCap);
+  const revlogOk = logs.length === expectedLogs;
+  const lsRetained = Q.Store.legacyLSUsedBytes() > 0;
+
+  // 单次评分写入：per-hash 状态 + 尾段日志（聚合为 1 个 IDB 事务），含 flush 落盘
+  const lastQ = legacy.questions[tier - 1];
+  const writeKey = Q.makeContentHash(lastQ);
+  const writeState = Q.ReviewStore.get(legacy.bankId, writeKey);
+  const sampleEntry = { t: 100000, h: writeKey, r: 3, b: legacy.bankId };
+  idbWriteBytes = Buffer.byteLength(JSON.stringify(writeState), 'utf8')
+    + Buffer.byteLength(JSON.stringify(sampleEntry), 'utf8')
+    + Buffer.byteLength(Q.KEYS.reviewState(legacy.bankId, writeKey), 'utf8');
+  const w = await timed(async (i) => {
+    const d = {}; d[writeKey] = Q.ReviewStore.get(legacy.bankId, writeKey);
+    await Q.DB.reviews.patch(legacy.bankId, d, [{ t: 100000 + i, h: writeKey, r: 3, b: legacy.bankId }]);
+    await Q.Storage.flush();
+  }, 20);
+
+  idbRows.push({
+    tier, ms: msMigrate, rawPeakMb, retainedMb, browserEstMb, idbCloneMb, heapAfterMigrate,
+    estBytes: est.bytes, estSource: est.source,
+    lsUtf16: lsBefore.utf16, writeMs: w.median, writeBytes: idbWriteBytes,
+    backendOk, markerOk, same, questionsOk, revlogOk, logs: logs.length, expectedLogs, lsRetained
+  });
+  report.push({
+    name: 'IDB 存储迁移（' + tier + ' 题，--idb 内存实现）',
+    median: msMigrate, min: msMigrate, max: msMigrate,
+    extra: 'IDB 估算 ' + mb(est.bytes) + '（' + (est.source === 'serialized-estimate' ? '序列化口径' : est.source)
+      + '），LS UTF-16 ' + mb(lsBefore.utf16) + '，完整性 ' + same + '/' + tier
+      + '，日志 ' + logs.length + '（上限 ' + logCap + '），LS 保留=' + lsRetained
+      + '，heap 驻留峰值 +' + retainedMb.toFixed(2) + ' MB（GC 后采样'
+      + (HAS_GC ? '' : '缺失：需 --expose-gc') + '）'
+      + '，原始峰值 +' + rawPeakMb.toFixed(2) + ' MB（含未回收临时对象）'
+      + '，浏览器口径估算 +' + browserEstMb.toFixed(2) + ' MB（扣除 Node 内存后端 IDB 拷贝 '
+      + idbCloneMb.toFixed(2) + ' MB）'
+  });
+  report.push({
+    name: 'IDB 单次评分写入（' + tier + ' 题，含事务 flush）',
+    median: w.median, min: w.min, max: w.max,
+    extra: '1 状态键 + 尾段日志聚合 1 事务，上行 ' + idbWriteBytes + ' B'
+  });
+}
+
+QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
 
 console.log('\n================ 性能打点报告 ================');
 console.log('环境：Node ' + process.version + '，采样 ' + N + ' 次取中位数，分片大小 ' + QB.QuestionShards.SHARD_SIZE + '\n');
@@ -774,6 +917,12 @@ if (process.argv.indexOf('--assert') >= 0) {
     ['schema v5 迁移（20000', 2000],
     ['per-hash 单次评分本地写（1000', 1],
     ['per-hash 单次评分本地写（20000', 1],
+    ['IDB 存储迁移（5000', 8000],
+    ['IDB 存储迁移（20000', 20000],
+    ['IDB 存储迁移（50000', 70000],
+    ['IDB 单次评分写入（5000', 1],
+    ['IDB 单次评分写入（20000', 1],
+    ['IDB 单次评分写入（50000', 1],
     ['导出构建（JSON+CSV+MD+TXT', 60]
   ];
   const fails = [];
@@ -826,6 +975,55 @@ if (process.argv.indexOf('--assert') >= 0) {
   } else {
     fails.push('迁移 20000 打点缺失');
   }
+  // Phase G（G4）新增三项门禁：IDB 写入耗时 / 迁移 heap 驻留峰值 / 大库容量占用
+  // 口径：Node 无原生 IndexedDB，数据来自 scripts/lib/idb-memory.mjs；IDB 占用为序列化估算，
+  //       heap 为「定期 GC 后采样」的驻留峰值（仍含 Node 内存后端把 LS/IDB 放进 JS 堆的偏差），
+  //       浏览器真实配额/内存/事务行为**未验证**。
+  idbRows.forEach((r) => {
+    const okAll = r.backendOk && r.markerOk && r.same === r.tier && r.questionsOk
+      && r.revlogOk && r.lsRetained;
+    console.log((okAll ? '  ✓ ' : '  ✗ ') + 'IDB 迁移完整性 ' + r.tier + '：逐键一致 ' + r.same + '/' + r.tier
+      + '，题目全 v3=' + r.questionsOk + '，日志 ' + r.logs + '（期望 ' + r.expectedLogs + '）='
+      + r.revlogOk + '，后端=' + r.backendOk + '，标记=' + r.markerOk + '，LS 保留=' + r.lsRetained);
+    if (!okAll) fails.push('IDB 迁移完整性 ' + r.tier);
+  });
+  const IDB_WRITE_MAX_MS = 1;
+  idbRows.forEach((r) => {
+    const ok = r.writeMs <= IDB_WRITE_MAX_MS;
+    console.log((ok ? '  ✓ ' : '  ✗ ') + 'IDB 单次评分写入（' + r.tier + '）：' + ms(r.writeMs) + ' ≤ '
+      + ms(IDB_WRITE_MAX_MS) + '，上行 ' + r.writeBytes + ' B（单事务）');
+    if (!ok) fails.push('IDB 写入耗时 ' + r.tier + ' ' + ms(r.writeMs));
+  });
+  const IDB_MIG_HEAP_MAX_MB = 100;
+  const idbMig20k = idbRows.find((r) => r.tier === 20000);
+  if (idbMig20k) {
+    if (!HAS_GC) {
+      console.log('  ✗ IDB 迁移 heap 驻留峰值（20000）：需 node --expose-gc（当前未启用 GC）');
+      fails.push('IDB 迁移 heap 驻留峰值需 --expose-gc');
+    } else {
+      const ok = idbMig20k.retainedMb <= IDB_MIG_HEAP_MAX_MB;
+      console.log((ok ? '  ✓ ' : '  ✗ ') + 'IDB 迁移 heap 驻留峰值（20000）：+' + idbMig20k.retainedMb.toFixed(2)
+        + ' MB ≤ ' + IDB_MIG_HEAP_MAX_MB + ' MB（原始峰值 +' + idbMig20k.rawPeakMb.toFixed(2) + ' MB；浏览器口径估算 +'
+        + idbMig20k.browserEstMb.toFixed(2) + ' MB，未验证）');
+      if (!ok) fails.push('IDB 迁移 heap 驻留峰值 ' + idbMig20k.retainedMb.toFixed(2) + 'MB > ' + IDB_MIG_HEAP_MAX_MB + 'MB');
+    }
+  } else {
+    fails.push('IDB 迁移 20000 打点缺失');
+  }
+  const IDB_CAP_MAX_MB = 100;
+  const idbCap50k = idbRows.find((r) => r.tier === 50000);
+  if (idbCap50k) {
+    const quota = QB.CONFIG.STORAGE.QUOTA_BYTES;
+    const capOk = idbCap50k.estBytes > quota && idbCap50k.estBytes <= IDB_CAP_MAX_MB * 1024 * 1024
+      && idbCap50k.lsUtf16 > quota;
+    console.log((capOk ? '  ✓ ' : '  ✗ ') + '大库容量占用（50000）：IDB 估算 ' + mb(idbCap50k.estBytes)
+      + '（> LS ' + mb(quota) + ' 且 ≤ ' + IDB_CAP_MAX_MB + ' MB），同数据 LS UTF-16 ' + mb(idbCap50k.lsUtf16)
+      + '（> LS 配额，故 50k 必须走 IDB；浏览器真实配额未验证）');
+    if (!capOk) fails.push('大库容量占用 50000：IDB ' + mb(idbCap50k.estBytes) + ' / LS ' + mb(idbCap50k.lsUtf16));
+  } else {
+    fails.push('IDB 迁移 50000 打点缺失');
+  }
+
   const w1k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（1000') === 0);
   const w20k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（20000') === 0);
   const w3k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（3000') === 0);
