@@ -201,16 +201,71 @@ section('迁移 v6：中断后重入（不写标记、LS 不变、最终收敛�
   await S.initStore();
   const seeded = await seedData(QB);
   S.setSync(QB.KEYS.metaSchema, 5);
-  const lsKeysBefore = QB.Store.lsSource().keys().length;
+  const lsDomainKeys = () => QB.Store.lsSource().keys().filter((k) => !QB.Store.isBootstrap(k)).length;
+  const lsDomainBefore = lsDomainKeys();
   await throwsAsync(() => QB.Migration.run(), /模拟写入失败|完整性|事务/, '迁移中途被打断并抛错');
   eq(QB.Store.marker, null, '中断时未写 idb 标记（下次启动可重入）');
   eq(S.mode, 'ls', '中断时门面仍为 LS（数据可继续用）');
-  eq(QB.Store.lsSource().keys().length, lsKeysBefore, '中断时 LS 旧数据完整（未删）');
+  eq(lsDomainKeys(), lsDomainBefore, '中断时 LS 旧业务数据完整（未删）');
+  ok(S.get('meta:migrationProgress') != null, '中断保留断点进度标记（下次启动可续传）');
   fail.on = false;
   const r = await QB.Migration.run();
   eq(r.backend.backend, 'idb', '重入后迁移成功');
+  eq(r.backend.migrated.resumed, true, '重入从断点续传（未从头重跑）');
+  ok(r.backend.migrated.startAt > 0, '续传起点 > 0（已校验批次不重跑）');
+  ok(r.backend.migrated.verified === r.backend.migrated.keys - r.backend.migrated.startAt, '续传后逐键校验剩余全部键');
   ok(await lsMatchesIdb(QB), '重入后逐键一致');
   eq((await QB.DB.questions.list(seeded.bank.id, {})).items.length, 420, '重入后题目完整');
+}
+
+section('迁移 v6：进度订阅（百分比 / 已完成分片 / 总片数）');
+{
+  const idb = createMemoryIDB();
+  const { QB } = await makeHarness({ indexedDB: idb });
+  const S = QB.Storage;
+  await S.initStore();
+  await seedData(QB);
+  S.setSync(QB.KEYS.metaSchema, 5);
+  const events = [];
+  const off = QB.Store.onMigrationProgress((p) => events.push(p));
+  await QB.Migration.run();
+  off();
+  ok(events.length > 0, '迁移期间发出进度事件（' + events.length + ' 条）');
+  ok(events.every((p, i) => i === 0 || p.done >= events[i - 1].done), 'done 单调递增（断点续传也成立）');
+  const last = events[events.length - 1];
+  eq(last.percent, 100, '最后一条进度为 100%');
+  eq(last.doneAll, true, '完成事件带 doneAll 标记');
+  ok(last.total > 0 && last.shardsTotal > 0, '进度包含总键数/总片数（' + last.done + '/' + last.total
+    + '，分片 ' + last.shardsDone + '/' + last.shardsTotal + '）');
+  eq(QB.Store.migrationProgress(), null, '完成后断点进度标记被清除');
+}
+
+section('H3：迁移完成 + 首次启动校验通过 → 自动清理旧 LS（可观测/不损坏 IDB）');
+{
+  const idb = createMemoryIDB();
+  const { QB } = await makeHarness({ indexedDB: idb });
+  const S = QB.Storage;
+  await S.initStore();
+  const seeded = await seedData(QB);
+  S.setSync(QB.KEYS.metaSchema, 5);
+  await QB.Migration.run();
+  eq(S.mode, 'idb', '迁移完成切到 IDB');
+  const lsBytes = QB.Store.legacyLSUsedBytes();
+  ok(lsBytes > 0, '迁移当次保留旧 LS（回退退路，占用 ' + lsBytes + ' B）');
+  const qBefore = (await QB.DB.questions.list(seeded.bank.id, {})).items.length;
+
+  // 首次启动：initStore 触发自动清理
+  const info = await S.initStore();
+  eq(info.mode, 'idb', '首次启动仍为 IDB');
+  const c = info.cleanup;
+  ok(c && c.removed > 0, '自动清理旧 LS：移除 ' + (c && c.removed) + ' 键 / ' + (c && c.bytes) + ' B / ' + (c && c.ms) + ' ms');
+  eq(QB.Store.legacyLSUsedBytes(), 0, '清理后旧 LS 业务占用为 0（容量回收）');
+  eq(S.get('meta:lsBackupState'), 'cleaned', '清理状态同步到缓存（不是旧的 retained）');
+  eq((await QB.DB.questions.list(seeded.bank.id, {})).items.length, qBefore, '清理不影响 IDB 数据完整性');
+  ok(await QB.Store.get(QB.KEYS.banks) !== undefined, 'IDB 题库仍在');
+  // 二次启动幂等：不重复清理、不报错
+  const again = await S.initStore();
+  eq(again.cleanup, null, '二次启动不再重复清理');
 }
 
 section('迁移 v6：多标签并发只迁移一次');

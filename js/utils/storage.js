@@ -79,8 +79,10 @@
       this._flushScheduled = false;
       this._flushChain = Promise.resolve();
       this._pending.clear();
-      if (i.mode === 'idb' && i.records) {
-        this._cache = new Map(i.records);
+      if (i.mode === 'idb') {
+        // 启动水合带 records；迁移完成路径不带 records —— 调用方已保证现有缓存包含全部业务键，
+        // 直接沿用可避免整库再解析一遍（少一份全量克隆，降低迁移峰值）。
+        if (i.records) this._cache = new Map(i.records);
         this.mode = 'idb';
         QB.Store.onWrite = (keys) => this._broadcastIdbWrite(keys);
         this._subscribeBroadcast();
@@ -425,6 +427,15 @@
       }
       this._cache.set(key, value);
       return value;
+    },
+
+    /**
+     * 仅读内存缓存（未命中返回 undefined，不触发磁盘解析）。
+     * 用于「缓存已权威」的场景：迁移前 `forceSync` 后缓存与 LocalStorage 一致，
+     * 逐批复制时复用已解析对象，避免把同一份题库/状态再 JSON.parse 一遍（降低迁移瞬时分配）。
+     */
+    peek(key) {
+      return this._cache.has(key) ? this._cache.get(key) : undefined;
     },
 
     /**

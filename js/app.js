@@ -1417,7 +1417,21 @@
     }
     // v1→v2 contentHash / v2→v3 分片 存量迁移（幂等）。仅 local 后端：api 模式下数据在服务端，
     // 本地 schema 迁移无对象，且服务端数据须已是 v3 形状（见 docs/API-CONTRACT.md）。
-    if (QB.Migration && QB.DB.backend !== 'api') await QB.Migration.run();
+    // v5→v6 迁移可能耗时数十秒（大库）：订阅进度并显示在状态栏，避免无声阻塞。
+    let offProgress = null;
+    try {
+      offProgress = QB.Store && QB.Store.onMigrationProgress(function (p) {
+        const st = document.getElementById('status-text');
+        if (st) {
+          st.textContent = '正在迁移存储到 IndexedDB ' + p.percent + '%（' + p.done + '/' + p.total + '）';
+        }
+      });
+    } catch (e) { /* 进度展示失败不影响迁移 */ }
+    try {
+      if (QB.Migration && QB.DB.backend !== 'api') await QB.Migration.run();
+    } finally {
+      if (offProgress) offProgress();
+    }
     // 本地存储落盘失败（如配额已满）全局可见，不静默吞掉
     QB.Storage.onError(() => {
       UI.toast('本地保存失败：浏览器存储可能已满，请尽快在「备份与恢复」导出备份并清理空间', 'err');

@@ -32,9 +32,12 @@
   const DB_VERSION = 1;
   const STORE_NAME = 'kv';
   const BACKEND_KEY = 'meta:storageBackend';
+  /** 迁移进度断点（游标 + 已完成键数）：只存极小状态，中断后据此续传 */
+  const PROGRESS_KEY = 'meta:migrationProgress';
   /* 只留 LocalStorage 的极小状态（打开 IDB 之前同步可读 / 跨标签协调 / 备份回落） */
   const BOOTSTRAP_KEYS = [
     BACKEND_KEY,
+    PROGRESS_KEY,
     'meta:lsMigratedAt',
     'meta:lsCleanupAt',
     'meta:lsBackupState',
@@ -44,7 +47,9 @@
   ];
   /* 仅描述「本设备当前用哪个后端」的运行期标记：不进入备份/恢复（换设备应重新探测），
      也不参与「恢复 replace 时删除旧键」——否则会把新设备的后端选择一起删掉。 */
-  const BACKUP_EXCLUDED_KEYS = [BACKEND_KEY, 'meta:lsMigratedAt', 'meta:lsCleanupAt', 'meta:lsBackupState'];
+  const BACKUP_EXCLUDED_KEYS = [
+    BACKEND_KEY, PROGRESS_KEY, 'meta:lsMigratedAt', 'meta:lsCleanupAt', 'meta:lsBackupState'
+  ];
   /* 键分类（索引 by_kind 的取值域；报告/容量统计共用） */
   const KINDS = [
     'banks', 'questionShard', 'questionsMeta', 'questionsLegacy', 'wrong', 'favorite',
@@ -132,9 +137,93 @@
     return { key: key, bank: t.bank, kind: t.kind, seq: t.seq, value: value };
   }
 
+  /**
+   * 深比对（不分配大字符串）：用于迁移逐批回读校验。
+   * 旧实现 JSON.stringify 两侧会为每批（200 题）复制出两份 MB 级字符串，
+   * 迁移全程的瞬时分配因此翻倍；结构化递归比较只分配栈帧/键数组。
+   * 值来自 JSON.parse / structuredClone，无 undefined 属性，语义与字符串比较一致。
+   */
   function deepEqual(a, b) {
-    try { return JSON.stringify(a) === JSON.stringify(b); } catch (_) { return false; }
+    if (a === b) return true;
+    if (typeof a !== typeof b) return false;
+    if (a === null || b === null || typeof a !== 'object') return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    if (Array.isArray(a)) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+      return true;
+    }
+    let countA = 0;
+    for (const k in a) if (Object.prototype.hasOwnProperty.call(a, k)) countA++;
+    let countB = 0;
+    for (const k in b) {
+      if (!Object.prototype.hasOwnProperty.call(b, k)) continue;
+      if (!Object.prototype.hasOwnProperty.call(a, k)) return false;
+      if (!deepEqual(a[k], b[k])) return false;
+      countB++;
+    }
+    return countA === countB;
   }
+
+  /* ---------------- LS → IDB 流式迁移：确定性顺序、分片批次、进度订阅 ---------------- */
+
+  /** 键的确定性迁移顺序（题库 → 分片 → 复习 → 日志 → 其他；分片按库 + 序号） */
+  function migrationRank(kind) {
+    const order = {
+      banks: 0, questionsMeta: 1, questionShard: 2, questionsLegacy: 3,
+      reviewMeta: 4, reviewState: 5, reviewLegacy: 6,
+      revlogMeta: 7, revlogSeg: 8, revlogLegacy: 9
+    };
+    return order[kind] != null ? order[kind] : 10;
+  }
+
+  /**
+   * 按键确定性排序（一次解析键标签，避免排序比较器里反复 split/正则）。
+   * 20k 键的 sort 约 30 万次比较，逐次 tagOf 会凭空生成大量临时数组/字符串，
+   * 这是迁移原始峰值（未 GC 采样）的主要噪声源之一。
+   */
+  function sortMigrationKeys(keys) {
+    const decorated = keys.map((k) => {
+      const t = tagOf(k);
+      return { k: k, r: migrationRank(t.kind), bank: t.bank, seq: t.seq };
+    });
+    decorated.sort((a, b) => {
+      if (a.r !== b.r) return a.r - b.r;
+      if (a.bank !== b.bank) return a.bank < b.bank ? -1 : 1;
+      if (a.seq !== b.seq) return a.seq - b.seq;
+      return a.k < b.k ? -1 : a.k > b.k ? 1 : 0;
+    });
+    return decorated.map((d) => d.k);
+  }
+
+  /**
+   * 分批计划：**题库分片每片单独一批**（在途只有 1 片 ≈200 题）；
+   * 其余小键（复习状态/日志段/偏好）最多 64 个一批。批次同时也是断点粒度。
+   */
+  function migrationChunks(keys) {
+    const out = [];
+    let group = [];
+    const flush = () => { if (group.length) { out.push(group); group = []; } };
+    keys.forEach((k) => {
+      if (tagOf(k).kind === 'questionShard') { flush(); out.push([k]); }
+      else {
+        group.push(k);
+        if (group.length >= 64) flush();
+      }
+    });
+    flush();
+    return out;
+  }
+
+  const progressListeners = new Set();
+  function emitProgress(p) {
+    progressListeners.forEach((fn) => { try { fn(p); } catch (_) { /* 订阅者异常不影响迁移 */ } });
+  }
+  function readProgress() {
+    const p = lsGet(PROGRESS_KEY, null);
+    return (p && typeof p === 'object' && !Array.isArray(p)) ? p : null;
+  }
+  function clearProgress() { lsDel(PROGRESS_KEY); }
 
   /* ---------------- IndexedDB 连接 ---------------- */
   function idbFactory() {
@@ -396,8 +485,25 @@
           Store.lastInit = { mode: 'ls', available: true, fallbackReason: 'idb-empty' };
           return Store.lastInit;
         }
+        // H3 自动清理：上次迁移已完成且逐键校验通过（lsBackupState='retained'）→ 本次启动
+        // 视为「首次启动校验通过」，回收旧 LocalStorage 双份占用。清理失败不影响 IDB 可用性。
+        let cleanup = null;
+        if (lsGet('meta:lsBackupState', null) === 'retained') {
+          try {
+            cleanup = Store.cleanupLegacyLS();
+            // 清理会同步改写 lsBackupState 等引导标记；records 是清理前读的，
+            // 必须按最新 LocalStorage 覆写，否则水合进 Storage 缓存后仍是旧状态。
+            BOOTSTRAP_KEYS.forEach((k) => {
+              const v = lsGet(k, undefined);
+              if (v === undefined) records.delete(k);
+              else records.set(k, v);
+            });
+          } catch (e) {
+            cleanup = { removed: 0, bytes: 0, ms: 0, error: (e && e.message) || String(e) };
+          }
+        }
         Store.mode = 'idb';
-        Store.lastInit = { mode: 'idb', available: true, records: records };
+        Store.lastInit = { mode: 'idb', available: true, records: records, cleanup: cleanup };
         return Store.lastInit;
       }
       Store.mode = 'ls';
@@ -525,9 +631,24 @@
       return {
         keys: () => lsKeys(),
         get: (k) => lsGet(k, undefined),
+        /** 原始 JSON 串（迁移字节统计用；缺失/不可读返回 null） */
+        raw: (k) => {
+          if (!hasLS()) return null;
+          try { return global.localStorage.getItem(fullKey(k)); } catch (_) { return null; }
+        },
         all: () => lsAll()
       };
     },
+
+    /** 迁移进度订阅（返回取消函数）；进度对象见 migrateToIdb 注释 */
+    onMigrationProgress(fn) {
+      if (typeof fn !== 'function') return function () {};
+      progressListeners.add(fn);
+      return function () { progressListeners.delete(fn); };
+    },
+
+    /** 当前断点进度（无迁移/已完成返回 null） */
+    migrationProgress() { return readProgress(); },
 
     /** 空库判定：LS 与 IDB 两侧都没有业务键（空库新装不应被误判为 IDB 数据丢失） */
     hasDomainKeys() {
@@ -554,58 +675,97 @@
     },
 
     /**
-     * LocalStorage → IndexedDB 迁移（幂等、可中断重入、逐键深比对）。
-     * 先分批写 IDB，再逐键回读比对（分块读，避免一次性把全库读进内存）；
-     * 全部一致才写 'idb' 标记 —— 中断/失败时标记不变，下次启动重跑会覆盖同名记录并收敛。
-     * **不删除 LS 旧数据**（保留退路）。
-     * @param {{keys:Function, get:Function}} [source]
+     * LocalStorage → IndexedDB **流式**迁移（幂等、可中断续传、逐批深比对）。
+     * - 分片（200 题/键）单独成批，其余小键 64 个一批；任何时刻只保留在途批次；
+     * - 每批「读 LS → 写 IDB（单事务）→ 回读逐键深比对 → 记断点 → 释放」；
+     * - 断点 `meta:migrationProgress` 存已完成键数，中断后从断点继续（键集合变化则保守重跑）；
+     * - 进度经 `QB.Store.onMigrationProgress(fn)` 订阅（`{done,total,percent,shardsDone,...}`）；
+     * - 全部一致才写 'idb' 标记；**迁移当次不删除 LS 旧数据**（退路），下次启动自动清理（见 init）。
+     * @param {{keys:Function, get:Function, raw?:Function}} [source]
      */
     async migrateToIdb(source) {
       const src = source || Store.lsSource();
       const started = Date.now();
-      const keys = src.keys().filter((k) => !isBootstrap(k));
+      const allKeys = sortMigrationKeys(src.keys().filter((k) => !isBootstrap(k)));
+      const total = allKeys.length;
+      const shardsTotal = allKeys.filter((k) => tagOf(k).kind === 'questionShard').length;
+
+      // 断点续传：同一键集合（键数一致）才复用；否则从头重跑（覆盖同名键，仍然幂等）
+      const prev = readProgress();
+      const resumable = !!(prev && prev.phase === 'v5-to-v6' && prev.total === total
+        && typeof prev.done === 'number' && prev.done > 0 && prev.done <= total);
+      const startAt = resumable ? prev.done : 0;
+      let shardsDone = resumable ? Math.min(Number(prev.shardsDone) || 0, shardsTotal) : 0;
+
+      const emit = (done, cursor) => {
+        const p = {
+          phase: 'v5-to-v6', done: done, total: total, cursor: cursor,
+          shardsDone: shardsDone, shardsTotal: shardsTotal,
+          percent: total ? Math.floor((done / total) * 100) : 100,
+          at: new Date().toISOString()
+        };
+        lsSet(PROGRESS_KEY, p);
+        emitProgress(p);
+        return p;
+      };
+      if (startAt) emit(startAt, prev.cursor);
+
       let copied = 0;
+      let verified = 0;
       let bytes = 0;
-      const CHUNK = 32;
-      for (let i = 0; i < keys.length; i += CHUNK) {
-        const part = keys.slice(i, i + CHUNK);
-        const ops = part.map((k) => {
+      let done = startAt;
+      let mismatched = null;
+
+      const chunks = migrationChunks(allKeys.slice(startAt));
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
+        // 只保留在途批次：解析一次 → 写 → 回读比对 → 丢弃
+        const values = new Array(chunk.length);
+        const ops = chunk.map((k, i) => {
           const v = src.get(k);
-          const raw = JSON.stringify(v) || '';
-          bytes += (raw.length + k.length + 2) * 2;
+          values[i] = v;
+          const raw = typeof src.raw === 'function' ? src.raw(k) : null;
+          const len = typeof raw === 'string' ? raw.length : (JSON.stringify(v) || '').length;
+          bytes += (len + k.length + 2) * 2;
           return { op: 'set', key: k, value: v };
         });
         await idbBackend.batch(ops);
-        copied += part.length;
-      }
-      // 逐键完整性校验（旧库 vs 新库全键深比对；分块读取控制峰值内存；最多记录 5 个差异样本）
-      const mismatched = [];
-      let verified = 0;
-      for (let i = 0; i < keys.length; i += CHUNK) {
-        const part = keys.slice(i, i + CHUNK);
-        const got = await idbGetMany(part);
-        part.forEach((k) => {
-          const oldValue = src.get(k);
-          if (!deepEqual(oldValue, got[k])) {
-            if (mismatched.length < 5) mismatched.push({ key: k });
-          } else {
-            verified++;
+        const got = await idbGetMany(chunk);
+        for (let i = 0; i < chunk.length; i++) {
+          if (!deepEqual(values[i], got[chunk[i]])) {
+            mismatched = { key: chunk[i] };
+            break;
           }
-        });
-        if (mismatched.length >= 5) break;
+          verified++;
+        }
+        if (mismatched) break;
+        copied += chunk.length;
+        done += chunk.length;
+        shardsDone += chunk.filter((k) => tagOf(k).kind === 'questionShard').length;
+        emit(done, chunk[chunk.length - 1]);
+        // 释放在途批次引用（values/ops/got 随迭代结束出作用域）
+        values.length = 0;
       }
-      if (mismatched.length) {
-        const e = new Error('迁移完整性校验失败：' + mismatched.length + ' 个键不一致（首个 ' + mismatched[0].key + '）');
-        e.mismatches = mismatched;
+      if (mismatched) {
+        // 断点保留在失败批次之前；下次启动从这里续传（已校验批次不重跑）
+        const e = new Error('迁移完整性校验失败：键不一致（首个 ' + mismatched.key + '）');
+        e.mismatches = [mismatched];
+        e.resumeFrom = done;
         throw e;
       }
       Store.writeMarker('idb');
       lsSet('meta:lsMigratedAt', new Date().toISOString());
       lsSet('meta:lsBackupState', 'retained');
       Store.mode = 'idb';
+      clearProgress();
+      emitProgress({
+        phase: 'v5-to-v6', done: total, total: total, cursor: total ? allKeys[total - 1] : '',
+        shardsDone: shardsTotal, shardsTotal: shardsTotal, percent: 100, doneAll: true,
+        at: new Date().toISOString()
+      });
       return {
-        keys: keys.length, copied: copied, bytes: bytes,
-        ms: Date.now() - started, mismatched: 0, verified: verified
+        keys: total, copied: copied, bytes: bytes, ms: Date.now() - started,
+        mismatched: 0, verified: verified, resumed: resumable, startAt: startAt
       };
     },
 
@@ -627,13 +787,15 @@
       return { checked: keys.length, same: same, mismatched: mismatched.length, samples: mismatched };
     },
 
-    /** 显式清理保留的 LocalStorage 旧数据（只保留 BOOTSTRAP_KEYS） */
+    /** 显式清理保留的 LocalStorage 旧数据（只保留 BOOTSTRAP_KEYS；返回回收量/耗时） */
     cleanupLegacyLS() {
+      const started = Date.now();
+      const bytes = Store.legacyLSUsedBytes();
       const removed = [];
       lsKeys().forEach((k) => { if (!isBootstrap(k)) { lsDel(k); removed.push(k); } });
       lsSet('meta:lsCleanupAt', new Date().toISOString());
       lsSet('meta:lsBackupState', 'cleaned');
-      return { removed: removed.length };
+      return { removed: removed.length, bytes: bytes, ms: Date.now() - started };
     },
 
     /** 保留的 LS 旧数据占用（清理入口展示用） */

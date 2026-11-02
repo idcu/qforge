@@ -15,8 +15,29 @@
  * 不是浏览器真实配额占用（浏览器实测一律在文档中标「未验证」）。
  */
 
+/**
+ * 模拟 structured clone：对象/数组复制（写入隔离），**原始值（含字符串）按引用共享**。
+ * 浏览器 IndexedDB 的数据在堆外（磁盘/引擎侧），Node 替身只能把它们放进 JS 堆；
+ * 若连不可变字符串也复制，测量口径会把「数据本体」再算一遍（20k 题约 +19MB），
+ * 与实际浏览器行为偏差过大。字符串是不可变原始值，共享不影响隔离语义。
+ * 非 JSON 型值（Map/Set/Date/TypedArray 等）仍走 structuredClone。
+ */
 function cloneValue(v) {
-  if (v === undefined) return undefined;
+  if (v === null || typeof v !== 'object') return v;
+  if (Array.isArray(v)) {
+    const out = new Array(v.length);
+    for (let i = 0; i < v.length; i++) out[i] = cloneValue(v[i]);
+    return out;
+  }
+  const proto = Object.getPrototypeOf(v);
+  if (proto === Object.prototype || proto === null) {
+    const out = {};
+    for (const k in v) {
+      if (Object.prototype.hasOwnProperty.call(v, k)) out[k] = cloneValue(v[k]);
+    }
+    return out;
+  }
+  if (v instanceof Date) return new Date(v.getTime());
   if (typeof structuredClone === 'function') {
     try { return structuredClone(v); } catch (_) { /* 退回 JSON */ }
   }

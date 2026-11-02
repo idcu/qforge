@@ -51,9 +51,26 @@
 
   /* ---------------- 失败回滚快照 ---------------- */
 
+  /**
+   * 失败回滚快照：保存**原始 JSON 串**而非对象引用。
+   * - 迁移会就地改写复习整表（remap），持引用会拿到改写后的值，回滚不完整；
+   * - 串取自已落盘的 LocalStorage（迁移前 saveAutoBackup 已 forceSync），与缓存共享同一份
+   *   不可变字符串，快照本身几乎不增加堆占用（H1：不把全库再复制一遍到内存）。
+   */
   function snapshotAll() {
     const keys = QB.Storage.keys();
-    return { keys: keys, values: keys.map((k) => [k, QB.Storage.get(k)]) };
+    const src = QB.Store && typeof QB.Store.lsSource === 'function' ? QB.Store.lsSource() : null;
+    return {
+      keys: keys,
+      raws: keys.map((k) => {
+        let raw = src && typeof src.raw === 'function' ? src.raw(k) : null;
+        if (typeof raw !== 'string') {
+          const v = QB.Storage.get(k);
+          raw = v === undefined ? null : JSON.stringify(v);
+        }
+        return [k, raw];
+      })
+    };
   }
 
   function restoreAll(snap) {
@@ -68,9 +85,11 @@
     });
     // 先恢复内存/待写队列再统一落盘：迁移失败常因配额，逐个 setSync 会在第一个键再次抛错
     // 导致后续键没回滚；set 不立即落盘，最后 forceSync 一次性提交（仍失败则待写队列保留旧值重试）。
-    snap.values.forEach((pair) => {
-      if (pair[1] === undefined) QB.Storage.remove(pair[0]);
-      else QB.Storage.set(pair[0], pair[1]);
+    snap.raws.forEach((pair) => {
+      if (pair[1] === null || pair[1] === undefined) { QB.Storage.remove(pair[0]); return; }
+      let value;
+      try { value = JSON.parse(pair[1]); } catch (_) { QB.Storage.remove(pair[0]); return; }
+      QB.Storage.set(pair[0], value);
     });
     QB.Storage.forceSync();
   }
@@ -119,25 +138,49 @@
 
     for (const bank of banks) {
       const bankId = bank.id;
-      const { items } = await QB.DB.questions.list(bankId, {});
-      if (!items.length) continue;
-
+      const meta = QB.QuestionShards.metaOf(bankId);
       const renamed = new Map();
-      const updated = items.map((q) => {
-        if (QB.hashVersionOf(q.contentHash) === 3) return q;
-        const oldHash = q.contentHash;
-        const newHash = QB.makeContentHash(q);
-        if (!oldHash || oldHash === newHash) return Object.assign({}, q, { contentHash: newHash });
-        renamed.set(oldHash, newHash);
-        globalRenamed.set(oldHash, newHash);
-        if (hashOwners.has(oldHash)) hashOwners.set(oldHash, null);
-        else hashOwners.set(oldHash, bankId);
-        return Object.assign({}, q, { contentHash: newHash });
-      });
-      if (!renamed.size && updated.every((q, i) => q === items[i])) continue;
 
-      writeQuestions(bankId, updated); // 先落题目
-      questions += renamed.size;
+      // 逐片处理：只把在途分片克隆/改写（H1：不把全库物化到内存）。
+      // 就地改 contentHash（不复制题目对象）：快照已改为原始 JSON 串，就地改不再破坏回滚；
+      // 20k 题少分配一份约 19MB 的对象图，是原始峰值的主要来源之一。
+      const mapShard = (list) => {
+        let dirty = false;
+        for (let i = 0; i < list.length; i++) {
+          const q = list[i];
+          if (!q) continue;
+          if (QB.hashVersionOf(q && q.contentHash) === 3) continue;
+          const oldHash = q && q.contentHash;
+          const newHash = QB.makeContentHash(q);
+          if (oldHash && oldHash !== newHash) {
+            renamed.set(oldHash, newHash);
+            globalRenamed.set(oldHash, newHash);
+            if (hashOwners.has(oldHash)) hashOwners.set(oldHash, null);
+            else hashOwners.set(oldHash, bankId);
+            dirty = true;
+            questions++;
+          } else if (!oldHash) {
+            dirty = true;
+            questions++;
+          }
+          q.contentHash = newHash;
+        }
+        return dirty ? list : null;
+      };
+
+      if (meta) {
+        for (let i = 0; i < meta.sizes.length; i++) {
+          const updated = mapShard(QB.QuestionShards.shardOf(bankId, i));
+          if (updated) QB.QuestionShards.setShard(bankId, i, updated);
+        }
+      } else {
+        // 极少见的 v1 单 blob 布局：v2→v3 会再分片；此处只能整读一次
+        const { items } = await QB.DB.questions.list(bankId, {});
+        const updated = mapShard(items);
+        if (updated) QB.Storage.set(QB.KEYS.questions(bankId), updated);
+      }
+      if (!renamed.size) continue;
+
       states += QB.ReviewStore.remap(bankId, renamed);
       QB.HashRemap.remapList(QB.KEYS.wrong(bankId), renamed, QB.HashRemap.mergeWrong);
       QB.HashRemap.remapList(QB.KEYS.favorite(bankId), renamed, QB.HashRemap.mergeFav);
@@ -224,6 +267,10 @@
 
   /**
    * 单库哈希升级 + 用户数据重映射 + 完整性逐条校验。
+   *
+   * 内存口径（H1）：题目升级**逐分片**处理（一次只在途 1 片 ≈200 题），不再 readAll/writeAll
+   * 整库物化；每片写完立即持久化映射（断点重入依据）。复习状态校验只保留「旧键 → 状态引用」
+   * 的浅层索引，逐键按新 hash 读取比对，不再构建 before/after 两份整表。
    * @returns {{questions:number, states:number, collisions:number, verified:number}}
    */
   async function upgradeBank(bankId, bankExists) {
@@ -232,27 +279,54 @@
     let collisions = 0;
 
     if (bankExists) {
-      const items = QB.QuestionShards.readAll(bankId);
-      let dirty = false;
       const ambiguous = new Set();
-      const updated = items.map((q) => {
-        if (QB.hashVersionOf(q && q.contentHash) === 3) return q;
-        const oldHash = q && q.contentHash;
-        const newHash = mapping.get(oldHash) || QB.makeContentHash(q);
-        if (oldHash && oldHash !== newHash) {
-          if (mapping.has(oldHash) && mapping.get(oldHash) !== newHash) ambiguous.add(oldHash);
-          else mapping.set(oldHash, newHash);
+      // 逐片重写：v3 题直接沿用；非 v3 题按映射/重算升级，只有真正改动的分片才写回。
+      // 同样就地改 contentHash（快照为原始串，回滚安全），避免为每道题复制一份对象。
+      const mapShard = (list) => {
+        let dirty = false;
+        for (let i = 0; i < list.length; i++) {
+          const q = list[i];
+          if (!q) continue;
+          if (QB.hashVersionOf(q.contentHash) === 3) continue;
+          const oldHash = q.contentHash;
+          const newHash = mapping.get(oldHash) || QB.makeContentHash(q);
+          if (oldHash && oldHash !== newHash) {
+            if (mapping.has(oldHash) && mapping.get(oldHash) !== newHash) ambiguous.add(oldHash);
+            else mapping.set(oldHash, newHash);
+            dirty = true;
+          } else if (!oldHash) {
+            dirty = true;
+          }
+          q.contentHash = newHash;
+          questions++;
         }
-        dirty = true;
-        questions++;
-        return Object.assign({}, q, { contentHash: newHash });
-      });
+        return dirty ? list : null;
+      };
+      const meta = QB.QuestionShards.metaOf(bankId);
+      if (meta) {
+        let dirtyShards = 0;
+        for (let i = 0; i < meta.sizes.length; i++) {
+          const updated = mapShard(QB.QuestionShards.shardOf(bankId, i));
+          if (!updated) continue;
+          QB.QuestionShards.setShard(bankId, i, updated); // 只重写该片（sizes 不变）
+          dirtyShards++;
+          // 断点保护：分片改写后旧 hash 即消失，需把已见映射分批落盘；
+          // 每 10 片序列化一次（O(n) 映射不宜每片重写），中断重入时据此补全用户数据重映射
+          if (mapping.size && dirtyShards % 10 === 0) saveMapping(bankId, mapping);
+        }
+        if (mapping.size && dirtyShards) saveMapping(bankId, mapping);
+      } else {
+        // 极少见的旧单 blob 布局（v2→v3 会再分片）：此处只能整读一次
+        const updated = mapShard(QB.QuestionShards.legacyOf(bankId));
+        if (updated) QB.Storage.set(QB.KEYS.questions(bankId), updated);
+        if (mapping.size) saveMapping(bankId, mapping);
+      }
       collisions = ambiguous.size;
-      if (mapping.size) saveMapping(bankId, mapping); // 先持久化映射（断点重入依据）
-      if (dirty) QB.QuestionShards.writeAll(bankId, updated);
     }
 
+    // 旧状态浅层索引（键 → 状态引用，不复制值）：供迁移后逐键比对
     const before = QB.ReviewStore.readMap(bankId);
+    const beforeKeys = Object.keys(before);
     let states = 0;
     if (mapping && mapping.size) {
       states += QB.ReviewStore.remap(bankId, mapping);
@@ -263,13 +337,12 @@
     // 布局转换（per-hash / 分段）——即便无映射也需执行（旧备份/旧库）
     const layout = QB.ReviewStore.convertLegacy(bankId);
 
-    // 完整性校验：旧整表每个状态都必须在新键下逐字段一致
-    const after = QB.ReviewStore.readMap(bankId);
+    // 完整性校验：旧整表每个状态都必须在新键下逐字段一致（逐键 O(1) 读，不建 after 整表）
     let verified = 0;
     let mismatch = null;
-    Object.keys(before).forEach((oldHash) => {
+    beforeKeys.forEach((oldHash) => {
       const target = mapping && mapping.has(oldHash) ? mapping.get(oldHash) : oldHash;
-      const got = after[target];
+      const got = QB.ReviewStore.get(bankId, target);
       if (!got) { mismatch = mismatch || ('状态丢失：' + oldHash + ' → ' + target); return; }
       if (!deepEqual(got, before[oldHash])) { mismatch = mismatch || ('状态不一致：' + oldHash + ' → ' + target); return; }
       verified++;
@@ -362,12 +435,23 @@
       return { backend: 'ls', fallback: det.reason };
     }
     const src = Store.lsSource();
-    const migrated = await Store.migrateToIdb(src);
-    // 直接复用 LS 源水合内存缓存（含引导标记），不再整库回读 IDB 一次：
-    // 迁移刚完成时两侧内容已逐键校验一致，多一次 txGetAll 只会多一份全库克隆（抬高峰值）。
-    const records = new Map();
-    src.keys().forEach((k) => records.set(k, src.get(k)));
-    QB.Storage.adoptStore({ mode: 'idb', records: records });
+    // 读源：键/原始串仍来自 LocalStorage；值优先复用已解析的内存缓存。
+    // 迁移前 saveAutoBackup 已 forceSync 且全量读过一次，此缓存即 LS 权威值；
+    // 逐批再 JSON.parse 同一份 20k 题会白造约 20MB 瞬时对象，是迁移原始峰值的主要来源之一。
+    const source = {
+      keys: function () { return src.keys(); },
+      raw: function (k) { return src.raw(k); },
+      get: function (k) {
+        const cached = QB.Storage.peek(k);
+        return cached === undefined ? src.get(k) : cached;
+      }
+    };
+    const migrated = await Store.migrateToIdb(source);
+    // 复用现有缓存水合（只补读缺失键），不再整库重建 records：
+    // 迁移按批次读写、逐批深比对已通过，此刻缓存里的值与已落盘 IDB 一致；多建一份全量 Map
+    // 只会多一次整库克隆（抬高峰值）。QB.Storage.get 会把尚未读过的键按需解析进缓存。
+    src.keys().forEach((k) => { QB.Storage.get(k); });
+    QB.Storage.adoptStore({ mode: 'idb' });
     return { backend: 'idb', migrated: migrated };
   }
 

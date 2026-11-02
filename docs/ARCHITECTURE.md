@@ -284,7 +284,7 @@ Exporters.openFlow({kind, bank})
 - **一套接口、两条实现**：`QB.Store.get/set/del/keys/batch/clear` 对两后端行为一致；业务代码不写 `if (idb)`，领域模块（题库/SRS/错题/收藏/历史/计划/revlog）**禁止直连 `localStorage`**。禁止为 IDB 另写一套领域逻辑。
 - **同步门面不拆**：`QB.Storage` 的同步读（`get/getFresh/keys`）是上层大量同步调用的既有契约。IDB 模式用「启动时全量水合内存缓存」维持同步读；写走缓存 + 微任务聚合事务，`flush()` 确认真实落盘。
 - **原子性**：一次评分在同一调用栈里写「状态键 + 尾段日志 + 修订号」，IDB 模式下聚合成**一个事务**；事务失败整体回滚、待写保留、`onError` 通知并重试（不会出现状态写成功、日志丢一半）。
-- **O(改动数) 写入**：迁移只换后端，不换布局——题目仍 200 题/片、复习仍 per-hash 键、日志仍 200 条/段；单次评分只写 1 个状态键 + 1 个尾段（实测 0.15ms / 约 213B，见 [DATABASE.md](DATABASE.md) §9）。
+- **O(改动数) 写入**：迁移只换后端，不换布局——题目仍 200 题/片、复习仍 per-hash 键、日志仍 200 条/段；单次评分只写 1 个状态键 + 1 个尾段（实测 0.06ms / 213B @20000 题，与 v5 per-hash 基线 0.14ms 同量级，见 [DATABASE.md](DATABASE.md) §9）。
 
 ### 9.2 数据划分
 
@@ -311,18 +311,20 @@ Exporters.openFlow({kind, bank})
 
 ### 9.4 schema v6（LocalStorage → IndexedDB）每一步
 
-沿用 v5 迁移框架（同一 `Migration.run`、同一把锁、同一套快照/回滚），**不改数据形状**：
+沿用 v5 迁移框架（同一 `Migration.run`、同一把锁、同一套快照/回滚），**不改数据形状**；迁移过程改为**流式分批 + 断点续传**，任何时刻只保留在途批次：
 
 1. 抢 `meta:migrationLock`（owner + 30s TTL）；抢不到说明其他标签在迁移，本标签继续用 LS 等待刷新。
-2. `saveAutoBackup` 迁移前全量备份（优先独立 IDB `qforge-backup/snapshots`；不可用时回落 `meta:migrationBackup`），失败即中止、不写任何数据。
+2. `saveAutoBackup` 迁移前全量备份：分块保存**原始 JSON 串**（100 键/条，不解析成对象）；优先独立 IDB `qforge-backup/snapshots`，不可用时回落 `meta:migrationBackup`；写后回读逐串校验，失败即中止、不写任何数据。
 3. `Store.detect()`：IDB 不可用 → 写 `ls-fallback`，本次迁移按 LS 结束（业务可用）。
-4. `Store.migrateToIdb(lsSource())`：按 32 键/批复制非引导键到 IDB；每批 `batch` 单事务。**不删除 LS 旧数据**。
-5. 逐键完整性校验：分块回读 IDB，与 LS 源做深比对（题库/题目/复习/错题/收藏/日志全覆盖）；任一不一致即抛错，标记保持未迁移。
-6. 全部一致 → 写 `meta:storageBackend='idb'` + `lsMigratedAt`，`lsBackupState='retained'`；`QB.Storage.adoptStore({mode:'idb', records})` 切换门面（`records` 直接从 LS 源构建，避免额外整库回读克隆）。
-7. 版本戳 `meta:schemaVersion=6`，`await flush()` 确认落盘；释放锁。
-8. **退路保留**：LS 旧数据保持 `retained`，不自动删除；备份弹窗提供「清理旧 LocalStorage」（显式入口，`cleanupLegacyLS`）与「回退到 LocalStorage」。
+4. `Store.migrateToIdb(lsSource())`：按分片流式复制非引导键——题目 **200 题/片**（与存储分片对齐），其余前缀键 **64 键/批**；每批「读 LS → 单事务写 IDB → 分块回读深比对 → 释放中间引用」，不把全库物化到内存。
+5. **断点续传**：每批完成即写 `meta:migrationProgress`（`{v,done,total,bytes,at}`，始终同落 LocalStorage）；中断后下次启动从 `done` 继续，已完成批次不从头重跑；重入幂等（同名 key 覆盖写，最终逐键一致）。
+6. **进度可订阅**：`Store.onMigrationProgress(fn)`（返回取消订阅函数）与 `Store.migrationProgress()` 提供 `{done,total,percent,bytes}`；`app.js::boot` 订阅并在状态栏显示「正在迁移存储到 IndexedDB X%（done/total）」，完成后取消订阅，避免长时间无声阻塞。
+7. 逐键完整性校验：分块回读 IDB，与 LS 源做深比对（题库/题目/复习/错题/收藏/日志全覆盖）；任一不一致即抛错，标记保持未迁移。
+8. 全部一致 → 写 `meta:storageBackend='idb'` + `lsMigratedAt`，`lsBackupState='retained'`；`QB.Storage.adoptStore({mode:'idb', records})` 切换门面（`records` 直接从 LS 源构建，避免额外整库回读克隆）。
+9. 版本戳 `meta:schemaVersion=6`，`await flush()` 确认落盘；释放锁。
+10. **自动清理窗口**：下一次启动 `Store.init()` 检测 `lsBackupState==='retained'` → 先校验 IDB 可读（题目数 >0 且与分片清单一致）→ 自动 `cleanupLegacyLS()`：只保留 BOOTSTRAP_KEYS，写 `meta:lsCleanupAt` 并把 `lsBackupState` 置为 `'cleaned'`；清理后按 BOOTSTRAP_KEYS 重读 LS 刷新缓存。清理失败不删除任何一侧（IDB 数据完好，下次启动可重试），回退仍可走全量备份；备份弹窗仍保留手动「清理旧 LocalStorage」入口。
 
-幂等/重入：迁移中途中断（标记仍非 `idb`）→ 下次启动重跑，同名记录覆盖写，最终收敛；多标签并发只有持锁标签执行，其余标签在 `initStore()` 时仍读 LS，刷新后切 IDB。
+幂等/重入：迁移中途中断（标记仍非 `idb`）→ 下次启动按 `meta:migrationProgress.done` 从断点续跑，同名记录覆盖写，最终收敛；多标签并发只有持锁标签执行，其余标签在 `initStore()` 时仍读 LS，刷新后切 IDB。
 
 ### 9.5 回滚与降级路径
 
@@ -332,6 +334,6 @@ Exporters.openFlow({kind, bank})
 | 回退到迁移前快照（`snapshot`） | 直接写 `ls` 标记，改用保留的迁移前 LS 数据 | 迁移后新写入不保留（需用户明确选择） |
 | 回退后重新启用 | `reenableIdb` 重新探测 + `migrateToIdb` 逐键校验 | 以当前 LS 为准 |
 | IDB 在目标环境不可用 | 启动即 `ls-fallback`，业务继续用 LS | 无丢失；容量仍受 LS 限制 |
-| 想彻底释放 LS 空间 | `cleanupLegacyLS` 只保留 BOOTSTRAP_KEYS | 删除 LS 退路，此后回退只能靠备份 |
+| 想彻底释放 LS 空间 | 迁移后首次启动校验 IDB 完整即**自动** `cleanupLegacyLS`（只保留 BOOTSTRAP_KEYS）；备份弹窗仍可手动触发 | 删除 LS 退路，此后回退只能靠备份 |
 
 回滚需要什么：① 保留的 LS 旧数据或一份全量备份；② 页面刷新后重新 `initStore`；③ 若 LS 空间不足以容纳 IDB 数据，回退会明确失败并保持 IDB（不会静默丢数据）。浏览器真实配额/隐私模式/多标签事务语义**未做浏览器实机验证**，Node 侧以内存实现验证语义（见 [DATABASE.md](DATABASE.md) §9 口径声明）。

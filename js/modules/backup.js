@@ -257,6 +257,8 @@
   const AUTO_DB = 'qforge-backup';
   const AUTO_STORE = 'snapshots';
   const AUTO_ID = 'pre-migration';
+  const AUTO_CHUNK_KEYS = 100; // H1：每条备份记录 100 个键（值为原始 JSON 串，不解析成对象）
+  const RAW_ENCODING = 'chunked-raw-v1';
 
   function idbOpen() {
     return new Promise((resolve, reject) => {
@@ -284,13 +286,40 @@
   }
 
   /**
-   * 写迁移前自动备份；**写失败即抛错**（调用方须中止迁移）。
-   * @param {{fromVersion:number, toVersion:number}} info
-   * @returns {Promise<Object>} 已落盘的备份信封
+   * 采集当前数据的**原始 JSON 串**（不解析成对象）：
+   * 迁移前整库已落盘为字符串，直接引用这些字符串即零额外堆占用；
+   * 运行期键（迁移锁/断点映射/进度标记等）不入备份，敏感字段（WebDAV 密码）在落盘前脱敏。
+   * @returns {Array<[string,string]>} [逻辑键, 原始 JSON 串]
    */
-  async function saveAutoBackup(info) {
-    const startedAt = new Date().toISOString();
-    const envelope = await buildBackup(undefined, {
+  function collectRawData() {
+    QB.Storage.forceSync();
+    const src = QB.Store && typeof QB.Store.lsSource === 'function' ? QB.Store.lsSource() : null;
+    const items = [];
+    QB.Storage.keys().forEach((k) => {
+      if (isRuntimeKey(k)) return;
+      let raw = src && typeof src.raw === 'function' ? src.raw(k) : null;
+      if (typeof raw !== 'string') raw = JSON.stringify(QB.Storage.get(k));
+      if (k === QB.KEYS.metaDav) {
+        try {
+          const o = {};
+          o[k] = JSON.parse(raw);
+          raw = JSON.stringify(redactSecrets(o)[k]);
+        } catch (_) { /* 原串保留（不可解析的键仍可回退恢复） */ }
+      }
+      items.push([k, raw]);
+    });
+    return items;
+  }
+
+  function autoMeta(info, startedAt, itemCount) {
+    return {
+      app: MAGIC,
+      version: QB.CONFIG.VERSION,
+      schemaVersion: QB.Migration ? QB.Migration.SCHEMA_VERSION : 0,
+      exportedAt: startedAt,
+      encoding: RAW_ENCODING,
+      dataKeys: itemCount,
+      dataChunks: Math.ceil(itemCount / AUTO_CHUNK_KEYS),
       progress: {
         purpose: 'pre-migration',
         phase: 'captured',
@@ -298,35 +327,122 @@
         toVersion: info.toVersion,
         startedAt: startedAt
       }
-    });
-    if (hasIdb()) {
-      try {
-        await idbRequest('readwrite', (store) => store.put(envelope, AUTO_ID));
-        const back = await readAutoBackup();
-        if (!isBackup(back) || back.progress.startedAt !== startedAt) throw new Error('自动备份校验失败（IndexedDB 回读不一致）');
-      } catch (e) {
-        try { await idbRequest('readwrite', (store) => store.delete(AUTO_ID)); } catch (_) { /* 尽力清理半写记录 */ }
-        throw e;
+    };
+  }
+
+  /** 原始串备份是否完整（只读元信息，不解析载荷） */
+  function isRawMeta(v) {
+    return !!(v && typeof v === 'object' && v.app === MAGIC && v.encoding === RAW_ENCODING
+      && typeof v.dataKeys === 'number' && typeof v.dataChunks === 'number');
+  }
+
+  /** 原始串分块 → 标准备份信封（仅在「读自动备份」时解析；不进入迁移热路径） */
+  function decodeRawBackup(meta, chunks) {
+    const data = {};
+    let seen = 0;
+    const byIndex = new Map();
+    chunks.forEach((c) => {
+      if (c && typeof c === 'object' && typeof c.i === 'number' && Array.isArray(c.keys) && Array.isArray(c.raws)) {
+        byIndex.set(c.i, c);
       }
-    } else {
-      try {
-        QB.Storage.setSync(QB.KEYS.metaMigrationBackup, envelope);
-        const back = QB.Storage.getFresh(QB.KEYS.metaMigrationBackup, null);
-        if (!isBackup(back) || back.progress.startedAt !== startedAt) throw new Error('自动备份校验失败（LocalStorage 回读不一致）');
-      } catch (e) {
-        // 落盘失败会把值留在缓存/待写队列：清掉，避免迁移中止后残留「半写备份」
-        try { QB.Storage.remove(QB.KEYS.metaMigrationBackup); } catch (_) { /* ignore */ }
-        throw e;
+    });
+    for (let i = 0; i < meta.dataChunks; i++) {
+      const c = byIndex.get(i);
+      if (!c) return null;
+      for (let j = 0; j < c.keys.length; j++) {
+        try { data[c.keys[j]] = JSON.parse(c.raws[j]); } catch (_) { return null; }
+        seen++;
       }
     }
-    return envelope;
+    if (seen !== meta.dataKeys) return null;
+    return {
+      app: meta.app,
+      version: meta.version,
+      schemaVersion: meta.schemaVersion,
+      exportedAt: meta.exportedAt,
+      data: foldLayout(data),
+      progress: meta.progress
+    };
+  }
+
+  /**
+   * 写迁移前自动备份；**写失败即抛错**（调用方须中止迁移）。
+   * IDB 路径：分块保存原始 JSON 串（每 100 键一条记录），不把全库解析成对象；
+   *   写后回读逐串比对，保证「备份可用」才让迁移继续。
+   * 无 IDB（Node 受限环境/隐私模式）回落 LocalStorage 单记录信封（旧行为）。
+   * @param {{fromVersion:number, toVersion:number}} info
+   * @returns {Promise<Object>} 已落盘备份的元信息（IDB 路径）或完整信封（LS 路径）
+   */
+  async function saveAutoBackup(info) {
+    const startedAt = new Date().toISOString();
+    if (hasIdb()) {
+      const items = collectRawData();
+      const meta = autoMeta(info, startedAt, items.length);
+      const chunks = [];
+      for (let i = 0; i < meta.dataChunks; i++) {
+        const part = items.slice(i * AUTO_CHUNK_KEYS, (i + 1) * AUTO_CHUNK_KEYS);
+        chunks.push({ i: i, keys: part.map((p) => p[0]), raws: part.map((p) => p[1]) });
+      }
+      try {
+        // 单事务：清掉上一次自动备份（含旧格式/旧分块）后原子写入
+        await idbRequest('readwrite', (store) => {
+          store.clear();
+          store.put(meta, AUTO_ID);
+          chunks.forEach((c) => store.put(c, AUTO_ID + ':d:' + c.i));
+        });
+        // 回读逐串校验（字符串是不可变原始值，比较不产生额外堆副本，也不解析载荷）
+        const recs = await idbRequest('readonly', (store) => store.getAll());
+        const gotMeta = (recs || []).find((r) => isRawMeta(r));
+        const gotChunks = (recs || []).filter((r) => r && typeof r.i === 'number' && Array.isArray(r.raws));
+        const byIndex = new Map(gotChunks.map((c) => [c.i, c]));
+        let ok = !!gotMeta && gotMeta.progress.startedAt === startedAt
+          && gotMeta.dataKeys === items.length && gotMeta.dataChunks === chunks.length;
+        for (let i = 0; i < chunks.length && ok; i++) {
+          const e = chunks[i];
+          const g = byIndex.get(i);
+          if (!g || g.keys.length !== e.keys.length || g.raws.length !== e.raws.length) { ok = false; break; }
+          for (let j = 0; j < e.keys.length; j++) {
+            if (g.keys[j] !== e.keys[j] || g.raws[j] !== e.raws[j]) { ok = false; break; }
+          }
+        }
+        if (!ok) throw new Error('自动备份校验失败（IndexedDB 回读不一致）');
+      } catch (e) {
+        try { await idbRequest('readwrite', (store) => store.clear()); } catch (_) { /* 尽力清理半写记录 */ }
+        throw e;
+      }
+      return meta;
+    }
+    try {
+      const envelope = await buildBackup(undefined, {
+        progress: {
+          purpose: 'pre-migration',
+          phase: 'captured',
+          fromVersion: info.fromVersion,
+          toVersion: info.toVersion,
+          startedAt: startedAt
+        }
+      });
+      QB.Storage.setSync(QB.KEYS.metaMigrationBackup, envelope);
+      const back = QB.Storage.getFresh(QB.KEYS.metaMigrationBackup, null);
+      if (!isBackup(back) || back.progress.startedAt !== startedAt) throw new Error('自动备份校验失败（LocalStorage 回读不一致）');
+      return envelope;
+    } catch (e) {
+      // 落盘失败会把值留在缓存/待写队列：清掉，避免迁移中止后残留「半写备份」
+      try { QB.Storage.remove(QB.KEYS.metaMigrationBackup); } catch (_) { /* ignore */ }
+      throw e;
+    }
   }
 
   /** 读取迁移前自动备份（无则 null） */
   async function readAutoBackup() {
     if (hasIdb()) {
-      const v = await idbRequest('readonly', (store) => store.get(AUTO_ID));
-      return isBackup(v) ? v : null;
+      const meta = await idbRequest('readonly', (store) => store.get(AUTO_ID));
+      if (meta === undefined || meta === null) return null;
+      if (isBackup(meta)) return meta; // 旧格式：单记录完整信封
+      if (!isRawMeta(meta)) return null;
+      const recs = await idbRequest('readonly', (store) => store.getAll());
+      const chunks = (recs || []).filter((r) => r && typeof r === 'object' && typeof r.i === 'number' && Array.isArray(r.raws));
+      return decodeRawBackup(meta, chunks);
     }
     const v = QB.Storage.getFresh(QB.KEYS.metaMigrationBackup, null);
     return isBackup(v) ? v : null;
@@ -334,17 +450,30 @@
 
   /** 标记自动备份已完成迁移（进度标记；失败静默，不影响迁移结果） */
   async function markAutoBackupDone() {
-    const back = await readAutoBackup();
-    if (!back) return false;
+    if (hasIdb()) {
+      const meta = await idbRequest('readonly', (store) => store.get(AUTO_ID));
+      if (meta === undefined || meta === null) return false;
+      if (isRawMeta(meta)) {
+        // 只改元信息，不回读/重写 20MB 载荷（迁移收尾阶段的峰值来源之一）
+        meta.progress = Object.assign({}, meta.progress, { phase: 'migrated', doneAt: new Date().toISOString() });
+        await idbRequest('readwrite', (store) => store.put(meta, AUTO_ID));
+        return true;
+      }
+      if (!isBackup(meta)) return false;
+      meta.progress = Object.assign({}, meta.progress, { phase: 'migrated', doneAt: new Date().toISOString() });
+      await idbRequest('readwrite', (store) => store.put(meta, AUTO_ID));
+      return true;
+    }
+    const back = QB.Storage.getFresh(QB.KEYS.metaMigrationBackup, null);
+    if (!back || !isBackup(back)) return false;
     back.progress = Object.assign({}, back.progress, { phase: 'migrated', doneAt: new Date().toISOString() });
-    if (hasIdb()) await idbRequest('readwrite', (store) => store.put(back, AUTO_ID));
-    else QB.Storage.setSync(QB.KEYS.metaMigrationBackup, back);
+    QB.Storage.setSync(QB.KEYS.metaMigrationBackup, back);
     return true;
   }
 
   /** 删除迁移前自动备份（用户在备份弹窗里确认后调用） */
   async function clearAutoBackup() {
-    if (hasIdb()) { await idbRequest('readwrite', (store) => store.delete(AUTO_ID)); return; }
+    if (hasIdb()) { await idbRequest('readwrite', (store) => store.clear()); return; }
     QB.Storage.remove(QB.KEYS.metaMigrationBackup);
   }
 

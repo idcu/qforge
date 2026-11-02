@@ -200,13 +200,14 @@ CREATE TABLE assets (
 | `qb:meta:startPrefs` | —（前端偏好） | 最近一次练习/考试开始参数（各题型数量/分值、分类、时长、计时/乱序开关），仅本机 |
 | `qb:meta:migrationLock` | —（迁移运行期） | `{owner, at}` 多标签迁移锁；TTL 30s，陈锁可接管；迁移完成即释放，不进备份 |
 | `qb:meta:migrationBackup` | —（迁移运行期回落） | **F1 迁移前自动全量备份**（标准备份信封 + `progress` 进度标记）；仅当 IndexedDB 不可用时回落本键，不进备份、恢复入口见 §7.1 |
+| `qb:meta:migrationProgress` | —（迁移运行期，**始终 LocalStorage**） | `{v,done,total,bytes,at}` LS→IDB 迁移**断点续传进度**：每批写完后更新，中断后从 `done` 继续；迁移完成即清除，不进备份 |
 | `qb:meta:hashMap:<bankId>` | —（迁移运行期） | `{oldHash: newHash}` 断点续跑的哈希映射；迁移成功后保留到最后一步再移除，供中断重入复用，不进备份 |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
 | `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 **6**（v2 contentHash → v3 题目分片 → v4 分片一致修复 → v5 hash 64 位 + per-hash 复习 + 分段日志 → **v6 存储底座迁 IndexedDB**），启动时由 `Migration.run({force?})` 幂等升级（v1→…→v6 链式；已是 6 且后端已切换时为空操作） |
 | `qb:meta:storageBackend` | —（运行期引导标记，**始终 LocalStorage**） | 后端选择：`'idb'` / `'ls'`（用户显式回退，不再自动升级）/ `'ls-fallback'`（IDB 不可用或读失败）/ 缺失（首次，仍用 LS 待 v6 迁移）。不进备份、恢复 replace 不删除 |
 | `qb:meta:lsMigratedAt` | —（运行期引导标记，**始终 LocalStorage**） | LS→IDB 迁移完成时间（ISO）；用于展示与诊断，不进备份 |
-| `qb:meta:lsBackupState` | —（运行期引导标记，**始终 LocalStorage**） | LS 旧数据处置状态：`retained`（迁移后保留退路，默认）/ `cleaned`（已显式清理）/ `rollback-current` / `rollback-snapshot` / `idb-unavailable`；不进备份 |
-| `qb:meta:lsCleanupAt` | —（运行期引导标记，**始终 LocalStorage**） | 显式清理 LS 旧数据的时间（ISO）；不进备份 |
+| `qb:meta:lsBackupState` | —（运行期引导标记，**始终 LocalStorage**） | LS 旧数据处置状态：`retained`（迁移完成、等待下次启动校验后自动清理）/ `cleaned`（已清理，自动或手动）/ `rollback-current` / `rollback-snapshot` / `idb-unavailable`；不进备份 |
+| `qb:meta:lsCleanupAt` | —（运行期引导标记，**始终 LocalStorage**） | 清理 LS 旧数据的时间（ISO；自动清理与手动清理共用）；不进备份 |
 
 **字段命名转换**：前端 camelCase（`contentHash`/`createdAt`）↔ 数据库 snake_case（`content_hash`/`created_at`）。迁移脚本按此映射批量 POST 到 `/api/banks/{id}/questions/batch`。
 
@@ -217,7 +218,7 @@ CREATE TABLE assets (
 - **v2→v3 题目分片（阶段 A）**：单库题目由「单 blob 数组」改为「分片 + 清单」——写放大 O(全库)→O(分片)，读按需只解析覆盖区间分片。迁移由同一 `Migration.run` 幂等完成：遍历形如 `questions:<bankId>`（不含后续冒号段）的旧 blob，用公共抽象 `QB.QuestionShards.writeAll` 切片；已存在清单则跳过（幂等，大库 450 题切 200/200/50 二次运行逐字节不变）。运行时另有**双重读兼容**：旧单 blob 在 `readAll/readRange/count/locate` 中回退读取，任一写操作（create/update/remove/insertMany）触发一次性写时迁移并删除旧键。
 - **v3→v4 分片一致修复（2026-10-29）**：v3 的删除路径在「中间分片被清空」时只移除分片键并收缩 `sizes`，未对后续分片重编号，导致清单索引与物理分片错位——`count` 有数、`list` 为空，余题成为不可达孤儿（导出亦随之丢失）。v4 在启动时逐库调用 `QB.QuestionShards.invariant` 自检；不通过则用 `QB.QuestionShards.compact` 按**物理分片键升序**拼接后重新切片（可恢复已产生的孤儿题），满足不变量则跳过 → 幂等。此后单题删除/批删在清空任一分片时统一走 `compact` 重编号，禁止各自 `sizes.splice`。
 - **v4→v5 一次性迁移（hash 64 + per-hash 复习 + 分段日志）**：同一版本内完成三件事，只留一条兼容线——① 题目 `contentHash` 由 `2:`+8hex 升级为 `3:`+16hex，按 `meta:hashMap:<bankId>` 重映射 `review/wrong/fav/revlog`；② 复习状态整表拆为 `user:review:<bankId>:<hash>` + `user:reviewMeta:<bankId>`；③ 评分日志整表拆为 `user:revlogMeta` + `user:revlog:<i>`（200/段）。可靠性：每库先持久化哈希映射再改数据（中断重入复用映射，不二次改写/不重复）；布局转换**先写新键再删旧键**；进入前对全部逻辑键做内存快照，任一步抛错 `restoreAll` 回滚；`meta:migrationLock`（owner + 30s TTL）保证多标签只跑一次，同标签模块级单飞；已是 v5 时 `ensureLayout` 只做归一（补清单/折叠残留），不重写数据。旧整表布局保留**双读**（迁移前/中断/旧备份导入），对外读语义（分数、到期、历史）与旧实现逐位一致（`scripts/migrate.test.mjs` 对照断言）。
-- **v5→v6 存储底座（LocalStorage → IndexedDB，Phase G）**：**不转换数据形状**，只换承载后端——沿用同一 `Migration.run`：持 `meta:migrationLock` → `saveAutoBackup` 全量备份（失败即中止）→ 探测 IDB（不可用写 `ls-fallback` 并继续 LS）→ 按 32 键/批复制非引导键到 `qforge-kv/kv`（每批单事务）→ **逐键深比对**旧库与新库（题库/题目/复习/错题/收藏/日志全覆盖）→ 全部一致才写 `meta:storageBackend='idb'`。**LS 旧数据保留**（`lsBackupState='retained'`）作为退路，不立即删除；幂等（中断重跑同名记录覆盖）、多标签单锁、失败按迁移快照回滚。索引：`by_bank`（按库取分片）、`by_bank_kind` + `by_kind_seq`（按 hash 取复习状态 / 按库取日志尾 N 条）、`by_kind`。写入仍为 O(改动数)（1 状态键 + 尾段日志聚合 1 个事务）。
+- **v5→v6 存储底座（LocalStorage → IndexedDB，Phase G/H1）**：**不转换数据形状**，只换承载后端——沿用同一 `Migration.run`：持 `meta:migrationLock` → `saveAutoBackup` 全量备份（**分块存原始 JSON 串**，100 键/条，失败即中止）→ 探测 IDB（不可用写 `ls-fallback` 并继续 LS）→ **流式分批复写**：题目 200 题/片（与存储分片对齐）、其余前缀键 64 键/批，每批「读 LS → 单事务写 IDB → 分块回读深比对 → 释放中间引用」，任何时刻只保留在途批次 → 逐键深比对（题库/题目/复习/错题/收藏/日志全覆盖）→ 全部一致才写 `meta:storageBackend='idb'`。**断点续传**：每批完成写 `meta:migrationProgress`，中断后从 `done` 继续；**进度可订阅** `Store.onMigrationProgress` / `Store.migrationProgress()`。**自动清理**：迁移完成后的下一次启动，`Store.init()` 校验 IDB 题目数与清单一致后自动 `cleanupLegacyLS()`（只留 BOOTSTRAP_KEYS，写 `meta:lsCleanupAt` + `lsBackupState='cleaned'`），失败不动任何一侧、下次可重试。索引：`by_bank`（按库取分片）、`by_bank_kind` + `by_kind_seq`（按 hash 取复习状态 / 按库取日志尾 N 条）、`by_kind`。写入仍为 O(改动数)（1 状态键 + 尾段日志聚合 1 个事务）。
 - **查询索引**：`(bank_id, type)`、`(bank_id, category)` 支撑列表筛选；`attempts(bank_id, created_at)` 支撑历史分页。
 - **UI 级按需装载（阶段 A）**：`Questions.count(bankId)` 直读清单 `count` 字段（O(1)，不解析分片）；`Questions.revision()` 为全库写修订号，任一题目写操作 +1，供门面 `QB.DB.loadQuestions(bankId)` 的整库读缓存做失效判定（机制上避免"忘记手动失效"读到旧数据）。`app.js` 依视图按需装载，`question-editor`/`buildIndex` 复用同一缓存。
 - **导入幂等**：`insertMany` 的 `mode=merge` 依赖上述唯一键跳过重复；`mode=overwrite` 先清库再写。更新来源题库时同题干的**答案修正**因 hash 变化会作为新题插入（旧题保留），不做静默覆盖。
@@ -304,7 +305,9 @@ LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务
 **口径声明（重要，禁止外推为浏览器实测）**：
 - Node 无原生 IndexedDB，IDB 侧使用零依赖内存实现 `scripts/lib/idb-memory.mjs`（只覆盖本项目用到的 API：对象仓/索引/事务/`getAll`/批量写）。
 - 「IDB 占用」= `QB.Store.estimate()` 的**序列化字节估算（UTF-16 口径）**；Node 无 `navigator.storage.estimate`，**不是浏览器真实配额占用**。
-- 「heap 驻留峰值」= 迁移全程每 500ms `bestEffortGc()` 后采样的 `heapUsed` 峰值（需 `--expose-gc`）；仍含 Node 内存后端把 localStorage/IndexedDB 数据放在 JS 堆的偏差。「原始峰值」为未强制 GC 的 `heapUsed` 峰值（含未回收临时对象），仅作参考。「浏览器口径估算」= 驻留峰值 − 全量回读一次 IDB 的克隆增量（该拷贝在浏览器不在 JS 堆）。
+- 「heap **原始峰值**」= 迁移全程在两条写路径（`Storage.set/setSync` 与 `Store.onWrite`）采样 `heapUsed` 的最大增量，**不强制 GC**；这是 `bench --assert` 的**迁移门禁口径**（与 v5 迁移门禁同口径）。
+- 「heap **驻留峰值**」= 同上采样点、每 1000 次写 `bestEffortGc()` 后的峰值（需 `--expose-gc`）；**仅作参考输出、不参与门禁**。注意 G4 时为每 20 次写 GC，H1 改为每 1000 次（控制 bench 时长），故**驻留值不与 G4 直接可比**。
+- 「浏览器口径估算」= 驻留峰值 − 全量回读一次 IDB 的克隆增量（该拷贝在浏览器不在 JS 堆）。
 - **浏览器真实配额、隐私模式行为、多标签 IDB 事务语义：未验证**。
 
 复现：`node --expose-gc scripts/bench.mjs --assert`（三档 5000/20000/50000 已进默认门禁）。
@@ -319,22 +322,26 @@ LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务
 - 单题成本：迁移前 **0.76–0.77 KB/题**，迁移后 **1.64–1.72 KB/题**（per-hash 布局为每个复习状态独立成键，键前缀重复导致约 **2.2×** 空间放大，换取 O(1) 单题写入）。
 - 相对 5MB 估算配额：5,000 题迁移后 **167.8%**、50,000 题 **1605.5%**——**LS 模式下明确超限**，不是「可能有问题」。
 
-### 9.2 v6 IndexedDB 后端实测（Phase G / G4）
+### 9.2 v6 IndexedDB 后端实测（Phase G/H1，2026-11-02）
 
-| 规模 | IDB 估算占用 | 同数据 LS UTF-16 | 迁移耗时 | heap 驻留峰值（GC 后） | 原始峰值（未 GC） | 浏览器口径估算 |
+| 规模 | IDB 估算占用 | 同数据 LS UTF-16 | 迁移耗时（H1 / G4 旧） | 原始峰值（门禁，H1 / G4 旧） | 驻留峰值（参考，H1） | 自动清理回收 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 5,000 | **4.96 MB** | 3.84 MB | **494.37 ms** | **+15.41 MB** | +89.32 MB | +10.12 MB |
-| 20,000 | **19.97 MB** | 15.50 MB | **5,719.22 ms** | **+60.82 MB** | +217.74 MB | +39.62 MB |
-| 50,000 | **45.35 MB** | 38.94 MB | **24,765.73 ms** | **+136.33 MB** | +294.82 MB | +90.14 MB |
+| 5,000 | **4.96 MB** | 3.84 MB | **193.24 ms** / 494.37 ms | **+65.70 MB** / +89.32 MB | +65.49 MB | 5,054 键 / 4.80 MB / 5 ms |
+| 20,000 | **19.97 MB** | 15.50 MB | **733.77 ms** / 5,719.22 ms | **+105.31 MB** / +217.74 MB | +99.53 MB | 20,204 键 / 19.36 MB / 22 ms |
+| 50,000 | **45.35 MB** | 38.94 MB | **2,065.16 ms** / 24,765.73 ms | **+240.10 MB** / +294.82 MB | +155.31 MB | 50,354 键 / 43.81 MB / 76 ms |
 
-- **容量结论**：50,000 题的 IDB 估算占用 **45.35 MB ≈ 5MB 的 9.1×**，同数据在 LS 布局为 38.94 MB（远超 5MB）——**50k 已不再受 LocalStorage 5MB 硬顶限制**；仍受浏览器 IndexedDB 配额约束（通常按 origin 且远大于 5MB，**浏览器真实值未验证**）。
-- **写入**：单次评分（1 状态键 + 尾段日志，聚合 1 个事务后 `flush`）中位数 **5,000 = 0.05ms / 20000 = 0.15ms / 50000 = 0.14ms**，上行为 **211 / 213 / 213 B**；对照 v5 per-hash LS 基线 **0.14ms @20000**——后端切换后写入耗时与载荷**不随题量线性增长**（仍 O(改动数)）。
-- **完整性**：三档均 **逐键一致**（5000/5000、20000/20000、50000/50000），题目 hash 全 v3；评分日志按设计 FIFO 保留最近 **20,000 条**（`REVLOG_MAX`，非丢数据）；迁移后 LS 旧数据仍在（`LS 保留=true`）。
-- **门禁**（`bench --assert`）：IDB 写入 ≤1ms（三档）、20000 迁移 heap 驻留峰值 ≤100MB、50000 容量 ≤100MB 且 >LS 5MB、逐档完整性全通过。
+- **H1 流式改造效果**（最终代码 `bench --assert` 一轮；耗时同机多轮会波动，此前的另一轮为 241.10 / 771.31 / 2,024.63 ms）：迁移耗时 20k **5,719 → 734 ms（7.8×）**、50k **24,766 → 2,065 ms（12.0×）**；原始峰值 20k **217.74 → 105.31 MB（−51.6%）**、50k **294.82 → 240.10 MB（−18.6%）**、5k **89.32 → 65.70 MB（−26.4%）**。50k 降幅较小：在 Node 内存 IDB 实现下，IDB 自身数据也在 JS 堆（全量回读克隆约 25 MB），加上迁移前备份原始串与 LS 源的并存，属于该实现固有偏差；**浏览器实机未验证**。
+- **驻留峰值不作门禁**：采样点固定为两条写路径，但 GC 节奏由 G4 的每 20 次写改为每 1000 次写（控制 bench 时长），因此 H1 驻留值（+65.49 / +99.53 / +155.31 MB）**与 G4 旧值不可直接比较**，仅作参考。
+- **容量结论**：50,000 题的 IDB 估算占用 **45.35 MB ≈ 5MB 的 9.1×**，同数据在 LS 布局为 38.94 MB（远超 5MB）——**50k 已不再受 LocalStorage 5MB 硬顶限制**；仍受浏览器 IndexedDB 配额约束（**浏览器真实值未验证**）。
+- **写入（H4 不倒退）**：单次评分（1 状态键 + 尾段日志，聚合 1 个事务后 `flush`）中位数 **5,000 = 0.03ms / 20000 = 0.06ms / 50000 = 0.04ms**，上行 **211 / 213 / 213 B**；对照 v5 per-hash LS 基线 **0.14ms @20000** 与 G4 **0.15ms @20000**，耗时与载荷**不随题量线性增长**（仍 O(改动数)）。
+- **完整性**：三档均 **逐键一致**（5000/5000、20000/20000、50000/50000），题目 hash 全 v3；评分日志按设计 FIFO 保留最近 **20,000 条**（`REVLOG_MAX`，非丢数据）。迁移完成当次 `LS 保留=true`；**下一次启动校验 IDB 完整后自动清理**，三档均实测回收（LS 业务占用归零、IDB 题目数不变）。
+- **门禁（`bench --assert`）**：IDB 写入 ≤1ms（三档）、**迁移原始峰值 20000 ≤120MB / 50000 ≤270MB**、三档完整性全通过、三档旧 LS 自动清理有效、50000 容量 ≤100MB 且 >LS 5MB、per-hash 写入复杂度。
+- **阈值依据（不为了过关放宽）**：`20000 ≤120MB` 为用户给定上限，实测 105.31MB（余量 12.2%）；`50000 ≤270MB` 基于实测 240.10MB（余量 11.1%）设定，且**低于**旧 G4 原始峰值 294.82MB——阈值本身即可否决「退回整库物化」的回归，未按 2.5× 题量线性外推到 300MB 以避免门槛形同虚设。
 
 ### 9.3 降级/容量策略
 
 - **IDB 可用（默认）**：首页「本地存储」健康卡按 IDB 估算/配额展示；容量的真正上限由浏览器 IDB 配额决定（未验证具体数值）。建议仍定期备份。
 - **IDB 不可用（隐私模式/配额拒绝/版本冲突）→ 回落 LocalStorage**：回到 §9.1 口径，保守建议上限约 **2,900 题**（5MB/1.72KB），70% 告警线约 **2,000 题**；超过即应导出备份、改用 API 后端（`DATA_BACKEND='api'`）或分机存放。
 - UI 已有「本地存储」健康卡（`QB.UIRenderer.renderStorageHealth`）：≥70% 警告、≥85% 危险；写盘失败经 `Storage.onError` 全局提示。IDB 模式下该卡显示 `QB.Store.estimate()` 的估算值。
+- **双份占用自动收敛（H3）**：迁移完成当次保留 LS 旧数据（`lsBackupState='retained'`）作为退路；**下一次启动** `Store.init()` 先校验 IDB 可读（题目数 >0 且与分片清单一致），通过后自动清理 LS（只保留 `BOOTSTRAP_KEYS`）并写 `meta:lsCleanupAt` + `lsBackupState='cleaned'`。实测回收：5k **5,054 键 / 4.80 MB**（5ms）、20k **20,204 键 / 19.36 MB**（22ms）、50k **50,354 键 / 43.81 MB**（76ms）；清理后 LS 业务占用为 0、IDB 题目数不变。清理失败不删除任何一侧（IDB 完好，下次启动可重试），此后回退只能依赖全量备份；备份弹窗仍保留手动入口。
 - **仍属未验证/后续项**：浏览器真实 IDB 配额与清理策略、隐私模式下 `indexedDB.open` 的具体失败形态、多标签 IDB 事务/锁的浏览器实现差异——本阶段只以 Node 内存实现与单测覆盖语义，浏览器实机未跑。

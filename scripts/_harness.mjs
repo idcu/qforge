@@ -87,13 +87,20 @@ const MODULES = [
 export async function createHarness(qbDir, opts) {
   const o = opts || {};
   const raw = o.raw instanceof Map ? o.raw : new Map();
+  // key(i) 缓存快照：浏览器 localStorage.key(i) 是 O(1)，若每次 Array.from(map.keys())
+  // 则 lsKeys() 退化为 O(n²)（50k 键时清理耗时被放大到数十秒，属于测试替身偏差）。
+  let keyCache = null;
+  const invalidateKeys = () => { keyCache = null; };
   const localStorage = {
     get length() { return raw.size; },
-    key(i) { return Array.from(raw.keys())[i]; },
+    key(i) {
+      if (!keyCache) keyCache = Array.from(raw.keys());
+      return keyCache[i];
+    },
     getItem(k) { return raw.has(k) ? raw.get(k) : null; },
-    setItem(k, v) { raw.set(k, String(v)); },
-    removeItem(k) { raw.delete(k); },
-    clear() { raw.clear(); }
+    setItem(k, v) { raw.set(k, String(v)); invalidateKeys(); },
+    removeItem(k) { raw.delete(k); invalidateKeys(); },
+    clear() { raw.clear(); invalidateKeys(); }
   };
   const window = { localStorage, addEventListener() {}, removeEventListener() {}, console };
   window.window = window;
