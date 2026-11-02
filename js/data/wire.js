@@ -11,6 +11,38 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
+  /* 复习调度设置（bank.sched）唯一映射：本地 camelCase ↔ wire snake_case。
+   * 唯一实现供 QB.Wire.bank 与 api-adapter.toWireBank 复用，禁止各自手写字段表。 */
+  const SCHED_TO_WIRE = {
+    newPerDay: 'new_per_day', reviewPerDay: 'review_per_day',
+    requestRetention: 'request_retention', maximumIntervalDays: 'maximum_interval_days',
+    learningSteps: 'learning_steps', leechThreshold: 'leech_threshold'
+  };
+
+  /** 本地 sched → wire（只输出已定义键；learningSteps 秒数组浅拷贝） */
+  function schedTo(s) {
+    if (!s) return null;
+    const out = {};
+    Object.keys(SCHED_TO_WIRE).forEach((k) => {
+      if (s[k] === undefined) return;
+      out[SCHED_TO_WIRE[k]] = Array.isArray(s[k]) ? s[k].slice() : s[k];
+    });
+    return out;
+  }
+
+  /** wire sched → 本地（缺省键保留 undefined，由 QB.SchedSettings.normalize 统一补默认） */
+  function schedFrom(w) {
+    if (!w) return null;
+    return {
+      newPerDay: w.new_per_day,
+      reviewPerDay: w.review_per_day,
+      requestRetention: w.request_retention,
+      maximumIntervalDays: w.maximum_interval_days,
+      learningSteps: Array.isArray(w.learning_steps) ? w.learning_steps.slice() : w.learning_steps,
+      leechThreshold: w.leech_threshold
+    };
+  }
+
   const bank = {
     from(w) {
       return {
@@ -18,10 +50,7 @@
         // 来源溯源（file/paste/drop/url）：题库元数据的一部分，API/备份必须与 local 同链路保留
         source: w.source || null,
         // 复习调度设置（可选）：wire snake_case ↔ 本地 camelCase；缺失时为 null（使用默认限额）
-        sched: w.sched ? {
-          newPerDay: w.sched.new_per_day,
-          reviewPerDay: w.sched.review_per_day
-        } : null,
+        sched: schedFrom(w.sched),
         createdAt: w.created_at, updatedAt: w.updated_at
       };
     },
@@ -31,14 +60,11 @@
         source: b.source || null,
         created_at: b.createdAt, updated_at: b.updatedAt
       };
-      if (b.sched) {
-        out.sched = {
-          new_per_day: b.sched.newPerDay,
-          review_per_day: b.sched.reviewPerDay
-        };
-      }
+      if (b.sched) out.sched = schedTo(b.sched);
       return out;
-    }
+    },
+    schedTo: schedTo,
+    schedFrom: schedFrom
   };
 
   const question = {

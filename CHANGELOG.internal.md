@@ -6,6 +6,43 @@
 
 ---
 
+## <COMMIT> · feat(srs): 复习调度参数化（P1-A 数据打通 + P1-B 四参数）
+
+**目标与范围**
+- P1-A（零行为变化）：`bank.sched` 新字段能存、能同步、能随备份/导出往返。
+- P1-B（默认 bit-identical）：`requestRetention / maximumIntervalDays / learningSteps / leechThreshold` 四个参数只对未来调度生效。
+- 明确不做：fuzz、easyDays、leech 动作（suspend/tag）、独立 relearning steps；不新增「可配但不起作用」的字段。
+
+**核心改动**
+- `js/modules/sched-settings.js`：`DEFAULTS` 扩为 6 键；`normalize` 钳制（留存率 0.70–0.97、最大间隔 1–36500、步骤 1–4 个升序去重、难卡 0–9999）、**未知键原样保留**、幂等且不改入参；`ofBankId` 按库缓存（save 后更新）。
+- `js/modules/fsrs.js`：`review(state, rating, now, w, opts?)` 经既有 `opts.sched` 读取参数；`nextIntervalDays` 新增**可选**第 4 参 `maxDays`；`factorOf`/`powerDecay` 恒用固定 0.9 锚点，**不随留存率变化**；`schedSteps` 秒→毫秒（WeakMap 缓存）。
+- **`steps[1]` 雷**：`reviewNew` 仅当 `steps.length > 1` 才取 `steps[1]`，单步配置下 `good` 直接毕业（不再产生 `due=NaN`）；`reviewLearning` 读取 `learning.step` 时钳到 `[0, len-1]`，不批量改写已有状态。
+- 唯一解析点：`SRSStore.grade` 每次评分、`gradeMany` **每批只读一次** `SchedSettings.ofBankId(bankId)`，经 `opts.sched` 传入；app/review-queue/renderer 不各自解析或写默认。
+- P1-A 映射：`Wire.bank.schedTo/schedFrom` snake↔camel（6 键）；`api-adapter.toWireBank/fromWire` 复用；`exporter` 仅在设置过时写 `bank.sched`（camelCase、秒数组），`manifest` 不动；备份按 `banks` 键原样往返。
+- UI：统计页「今日复习计划」齿轮新增 4 项输入（保留率/最大间隔/步骤秒/难卡阈值），明确提示「只影响之后的评分与到期，不重排已有 due」；`ui-renderer` 难卡徽标改读 `settings.leechThreshold`。
+
+**默认等价证据（金样本，禁止容差）**
+- 动手前用 `bc0e960` 生成 `scripts/fixtures/fsrs-sched-golden.json`：固定 T0、官方 21 权重、固定评分序列，共 2 组 / 11 步，逐字段记录 `{due, stability, difficulty, reps, lapses, learning}`。
+- 实现后「`sched` 缺失」与「显式写默认值」两种入参 **逐字段 Deep-equal**（严格 `===`，无容差）；0.90 留存率与缺省同样严格相等。
+
+**逐参数验证**
+- 留存率单调：`days(0.80) > days(0.90) > days(0.95)`（高留存 → 更短间隔）；`factorOf`/`powerDecay` 在任意留存率下逐值不变。
+- `maximumIntervalDays`：新 due 被压到上限；既有 due 不被重排。
+- `learningSteps` 默认 `[60,600]` 与基线一致；单步 `[600]` 无 `NaN`、`good` 毕业；多步 `[10,30,120]` 逐级推进；读取越界 `step` 被钳制；非法 `[]/[0]/[-1,60]/字符串/乱序` 回退或归一。
+- 三入口一致：同一题库、同一序列，练习 `grade` / 考试 `gradeMany` / 自评 `grade` 的 review map 与 revlog 条数全等。
+
+**验证数据（2026-11-03，本机 Node v24.14.0 / Asia-Shanghai）**
+- `test-all`：**27 个运行项 0 失败，4425 / 4425 断言通过**（前 4285；增量 +140 = sched +122、backup +8、assets +5、exporter +4、api-backend +1）。
+- `bench --assert --expose-gc`：**55 / 55 门禁通过**；`SRSStore.grade` **0.0817 ms ≤ 0.0866 ms**、`gradeMany` **0.2269 ms ≤ 0.2329 ms**（基线 0.0825 / 0.2218 ms 系 `bc0e960` 同机 4 轮取最差中位数，门禁 +5%）；heapUsed **8.52 → 11.20 MB（+2.68 MB ≤ 40 MB）**。
+- `docs-check --static`：27 运行项 / 4425 断言 / 55 门禁一致；首屏 **296.8 KB gzip / 843.2 KB raw**（较上轮 +3.5 KB gzip，来自新增设置弹窗与参数解析代码）。
+
+**遗留 TODO / 风险**
+- 首个评分多一次 `GET /api/banks/<id>` 读取 `bank.sched`（之后按库缓存命中；热态仍 1 次 PATCH）。多端并发下缓存可能读到旧值，与 `FSRSOpt` 权重缓存同口径，属已知限制。
+- **push 未完成**：远端 `origin/main` 分叉（远端 5 个本地没有的提交），按指令停手，未 rebase/reset/merge；本轮改动仅本地 commit。
+- 未做 `fuzz/easyDays/leech 动作/独立 relearning steps`；后续若加，必须同样走 `opts.sched` 唯一通道。
+
+---
+
 ## 6733726 · fix(import): 三选一不可达（QB.formatDate 悬空）与 Esc 悬挂；新增全仓引用对账
 
 **缺陷根因（真机 Edge 151）**

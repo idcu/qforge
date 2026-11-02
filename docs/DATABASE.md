@@ -29,13 +29,24 @@ CREATE TABLE banks (
   source_uri     TEXT,                               -- 文件名 / '剪贴板' / 远端 URL
   source_checksum CHAR(8),                           -- 上次拉取内容 FNV-1a，仅 url
   source_fetched_at BIGINT,                          -- 上次拉取时间，仅 url
-  sched       JSON,                                  -- 复习设置 {new_per_day, review_per_day}，可空=默认
+  sched       JSON,                                  -- 复习设置（开放 JSON，见下方字段表），可空=默认
   created_at  BIGINT       NOT NULL,
   updated_at  BIGINT       NOT NULL
 );
 ```
 > 前端 bank.source 为嵌套对象 `{kind, uri, fetchedAt, checksum, refreshable}`；无该字段的旧题库按 `local` 兜底（读取时归一，不写迁移）。注意区分：来源（题目从哪进入本地）与存储后端（`DATA_BACKEND` local/api）是两个维度。
-> `bank.sched` 为复习限额 `{new_per_day, review_per_day}`（前端 camelCase `newPerDay/reviewPerDay`），缺省用 `CONFIG.LIMITS` 默认值；随题库记录一起备份与同步。
+> `bank.sched` 为**开放 JSON**（不做 schema 升级；未知键原样保留，避免老客户端保存时清空新字段）。本地/备份为 camelCase，wire/server 为 snake_case；随题库记录一起备份与同步。字段：
+
+| 字段（本地） | wire/server | 类型/范围 | 默认 | 说明 |
+| --- | --- | --- | --- | --- |
+| `newPerDay` | `new_per_day` | 整数 0–999 | `CONFIG.LIMITS.NEW_PER_DAY` | 每日新题额度（复习队列） |
+| `reviewPerDay` | `review_per_day` | 整数 0–9999 | `CONFIG.LIMITS.REVIEW_PER_DAY` | 每日到期复习额度（复习队列） |
+| `requestRetention` | `request_retention` | 浮点 0.70–0.97 | `0.90` | 目标留存率；只影响新算出的间隔（越高越短） |
+| `maximumIntervalDays` | `maximum_interval_days` | 整数 1–36500 | `36500` | 新间隔上限；不重排已有 due |
+| `learningSteps` | `learning_steps` | 1–4 个正整数（**秒**），升序去重 | `[60, 600]` | 新卡/重学步骤；内部转毫秒 |
+| `leechThreshold` | `leech_threshold` | 整数（0=关闭） | `8` | 仅难卡徽标阈值，不做 suspend/tag |
+
+> 归一唯一实现 `QB.SchedSettings.normalize`（钳制/升序去重/幂等/保留未知键）；写路径 `banks.update({sched})`，读路径按库缓存。参数**只对未来的评分与到期生效**，不批量改写已有复习状态。
 
 ### 2.2 questions（题目）
 ```sql

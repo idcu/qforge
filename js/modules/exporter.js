@@ -129,12 +129,15 @@
   /** JSON 导出对象（JSON 文本与分发题包 manifest 共用，checksum 只算一次） */
   function jsonPayload(payload) {
     if (payload.kind === 'history') return null;
+    const bank = { name: payload.bank.name, description: payload.bank.description || '', category: payload.bank.category || '' };
+    // 可选：题库自定义了复习调度才写入（未设置时 bank 结构与旧版逐字段同构，旧导入端直接忽略）
+    if (payload.bank.sched) bank.sched = QB.SchedSettings.normalize(payload.bank.sched);
     const out = {
       app: QB.CONFIG.APP_NAME,
       version: QB.CONFIG.VERSION,
       exportedAt: new Date().toISOString(),
       kind: payload.kind,
-      bank: { name: payload.bank.name, description: payload.bank.description || '', category: payload.bank.category || '' },
+      bank: bank,
       questions: payload.entries.map((e) => toPlain(e.question, e.meta))
     };
     // 内容校验和（P4）：对 questions 规范化 JSON 计算 FNV-1a 64 位（v3 前缀）；导入端复核，

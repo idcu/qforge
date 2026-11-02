@@ -63,6 +63,20 @@ async function timed(fn, n) {
   }
   return { median: median(samples), min: Math.min.apply(null, samples), max: Math.max.apply(null, samples) };
 }
+/** 多次重复取「各轮中位数的中位数」，并记录最好一轮中位数（best）：微秒级操作受 OS 调度噪声影响，
+ *  门禁用 best 过滤环境毛刺（真实回归会同时抬高 best，不会漏报） */
+async function stableTimed(fn, n, runs) {
+  const meds = [];
+  let min = Infinity;
+  let max = 0;
+  for (let r = 0; r < (runs || 3); r++) {
+    const t = await timed(fn, n);
+    meds.push(t.median);
+    min = Math.min(min, t.min);
+    max = Math.max(max, t.max);
+  }
+  return { median: median(meds), best: Math.min.apply(null, meds), min: min, max: max };
+}
 function mb(bytes) { return (bytes / 1024 / 1024).toFixed(2) + ' MB'; }
 function ms(v) { return v.toFixed(2) + ' ms'; }
 /** 冷读：清空 Storage 内存缓存，迫使重新 JSON.parse（衡量"未命中缓存"的真实读取成本） */
@@ -73,7 +87,7 @@ const HAS_GC = typeof global.gc === 'function';
 
 const report = [];
 function row(name, timeTriple, extra) {
-  report.push({ name, median: timeTriple.median, min: timeTriple.min, max: timeTriple.max, extra: extra || '' });
+  report.push({ name, median: timeTriple.median, best: timeTriple.best, min: timeTriple.min, max: timeTriple.max, extra: extra || '' });
 }
 
 const heapBefore = (bestEffortGc(), process.memoryUsage().heapUsed);
@@ -487,6 +501,18 @@ row('FSRS.review 带 fuzz（opt-in 间隔抖动）', await timed(() => {
 row('FSRS.review 新卡首次评分', await timed(() => {
   QB.FSRS.review(null, QB.FSRS.RATINGS.good, fsAnchor, FW);
 }, 200), '含指数式 D₀ / S₀ 初始化');
+
+/* ---------- 5b. SRSStore 评分端到端（本地适配器：读状态/权重 + 一次 patch） ---------- */
+const gradeBank = await QB.DB.banks.create({ name: 'SRS 评分基线', category: 'bench' });
+await QB.DB.questions.insertMany(gradeBank.id, bigAll.slice(0, 20), { dedupe: false });
+const gradeQs = (await QB.DB.questions.list(gradeBank.id, {})).items;
+row('SRSStore.grade 单次评分（本地适配器）', await stableTimed(async (i) => {
+  await QB.SRSStore.grade(gradeBank.id, gradeQs[i % gradeQs.length], QB.SRS.RATINGS.good, qNow + i * 1000);
+}, 1000, 5), '存储层 stateFor + 一次 patch（状态 + revlog）；5 轮×1000 取中位数');
+row('SRSStore.gradeMany 批量 20 题（本地适配器）', await stableTimed(async (i) => {
+  await QB.SRSStore.gradeMany(gradeBank.id,
+    gradeQs.map((q) => ({ question: q, rating: QB.SRS.RATINGS.good })), qNow + i * 1000);
+}, 200, 5), '批量读 20 状态 + 一次 patch；5 轮×200 取中位数');
 
 // 合成评分日志（可解释的显著偏离真权重，与 fsrs-opt.test 同一夹具口径）
 const fsSynth = [];
@@ -1039,6 +1065,22 @@ if (process.argv.indexOf('--assert') >= 0) {
     console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：' + ms(r.median) + ' ≤ ' + ms(max));
     if (!ok) fails.push(needle + ' ' + ms(r.median) + ' > ' + ms(max));
   });
+  // P1-B 参数化相对门禁：基线为 bc0e960（改造前）同一 bench 口径（5 轮×1000/5 轮×200，取最好一轮中位数）实测
+  // 连跑 4 次取「最差的一次」作为基线（避免抖动误伤；真实回归会显著抬高该值）：
+  //   grade 0.0789/0.0740/0.0825/0.0780 → 0.0825；gradeMany 0.2064/0.2084/0.2218/0.2005 → 0.2218
+  const GRADE_BASELINE_MS = 0.0825;
+  const GRADE_MANY_BASELINE_MS = 0.2218;
+  [['SRSStore.grade 单次评分', GRADE_BASELINE_MS], ['SRSStore.gradeMany 批量 20 题', GRADE_MANY_BASELINE_MS]]
+    .forEach(([needle, base]) => {
+      const r = report.find((x) => x.name.indexOf(needle) === 0);
+      if (!r) { fails.push(needle + ' 缺失'); return; }
+      const max = base * 1.05;
+      const val = r.best == null ? r.median : r.best;
+      const ok = val <= max;
+      console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：' + val.toFixed(4) + ' ms ≤ ' + max.toFixed(4) + ' ms'
+        + '（基线 ' + base.toFixed(4) + ' ms +5%，取最好一轮中位数）');
+      if (!ok) fails.push(needle + ' ' + ms(val) + ' > 基线+5% ' + ms(max));
+    });
   const heapDeltaMb = (heapAfter - heapBefore) / 1024 / 1024;
   const heapOk = heapDeltaMb <= 40;
   console.log((heapOk ? '  ✓ ' : '  ✗ ') + 'heapUsed 增量：' + heapDeltaMb.toFixed(2) + 'MB ≤ 40.00MB');

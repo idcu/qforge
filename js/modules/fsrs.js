@@ -61,7 +61,7 @@
   const REQUEST_RETENTION = 0.9;
   const MAX_INTERVAL_DAYS = 36500;          // 官方 maximum_interval 默认 36500 天
   const RATINGS = { again: 1, hard: 2, good: 3, easy: 4 };
-  // 新卡/重学的分钟级步骤（毫秒）；good 跨过最后一步即毕业（应用层叠加层）
+  // 新卡/重学的分钟级步骤（毫秒）——**默认值**，实际可由 opts.sched.learningSteps（秒）覆盖
   const LEARNING_STEPS = [60 * 1000, 10 * 60 * 1000];
   // 同日判定阈值（天）：elapsed < 1 → 走 short-term 稳定度（对齐 py-fsrs；fsrs-rs 用 ==0）
   const SAME_DAY_LIMIT_DAYS = 1;
@@ -170,11 +170,44 @@
     return Math.max(ns, STABILITY_MIN);
   }
 
-  /** 由稳定度与目标保留率反解间隔（天）：官方按整日取整，下限 1 天、上限 MAX_INTERVAL_DAYS */
-  function nextIntervalDays(stability, requestRetention, w) {
+  /** 由稳定度与目标保留率反解间隔（天）：官方按整日取整，下限 1 天、上限 maxDays（默认 36500） */
+  function nextIntervalDays(stability, requestRetention, w, maxDays) {
     const rr = requestRetention || REQUEST_RETENTION;
     const ivl = stability / factorOf(w) * (Math.pow(rr, 1 / decayOf(w)) - 1);
-    return clamp(Math.round(ivl), 1, MAX_INTERVAL_DAYS);
+    const cap = Number.isFinite(Number(maxDays)) ? Math.max(1, Math.round(Number(maxDays))) : MAX_INTERVAL_DAYS;
+    return clamp(Math.round(ivl), 1, cap);
+  }
+
+  /* ---------------- 调度参数（opts.sched，已由 QB.SchedSettings.normalize 归一） ----------------
+   * 唯一解析点在 SRSStore.grade/gradeMany：本模块只消费已归一的值，缺省回落到本模块默认，
+   * 便于纯函数直接调用（测试/bench）。requestRetention 只进 nextIntervalDays；
+   * decayOf/factorOf 是稳定度衰减的定义锚点，**不随保留率变化**。 */
+
+  function schedRetention(sched) {
+    const v = sched && Number(sched.requestRetention);
+    return isFinite(v) && v > 0 && v < 1 ? v : REQUEST_RETENTION;
+  }
+
+  function schedMaxDays(sched) {
+    const v = sched && Number(sched.maximumIntervalDays);
+    return isFinite(v) && v > 0 ? Math.round(v) : MAX_INTERVAL_DAYS;
+  }
+
+  /** learningSteps 以秒存储 → 毫秒（长度 1–4；非法/空回落默认两步）。按 sched 对象缓存，热路径避免每次分配 */
+  const stepsCache = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function schedSteps(sched) {
+    if (!sched) return LEARNING_STEPS;
+    if (stepsCache && stepsCache.has(sched)) return stepsCache.get(sched);
+    let ms = LEARNING_STEPS;
+    if (Array.isArray(sched.learningSteps) && sched.learningSteps.length) {
+      const converted = sched.learningSteps
+        .map((x) => Math.round(Number(x) * 1000))
+        .filter((x) => isFinite(x) && x > 0)
+        .slice(0, 4);
+      if (converted.length) ms = converted;
+    }
+    if (stepsCache) stepsCache.set(sched, ms);
+    return ms;
   }
 
   /* ---------------- fuzz（间隔抖动，opt-in） ---------------- */
@@ -228,10 +261,10 @@
     };
   }
 
-  /** 由稳定度排长期间隔（含可选 fuzz） */
-  function longTermDue(now, s, w, fuzzRand) {
-    let ivl = nextIntervalDays(s, REQUEST_RETENTION, w);
-    if (fuzzRand) ivl = applyFuzz(ivl, fuzzRand);
+  /** 由稳定度排长期间隔（含可选 fuzz；保留率/上限来自 opts.sched） */
+  function longTermDue(now, s, w, fuzzRand, sched) {
+    let ivl = nextIntervalDays(s, schedRetention(sched), w, schedMaxDays(sched));
+    if (fuzzRand) ivl = Math.min(applyFuzz(ivl, fuzzRand), schedMaxDays(sched));
     return Math.round(now + ivl * DAY);
   }
 
@@ -240,12 +273,12 @@
    * mode='new'（新卡学完）：以毕业评分重新初始化 s/d；
    * mode='review'（遗忘后重学完）：沿用又错更新后的 s/d。
    */
-  function graduate(prev, rating, now, w, mode, fuzzRand) {
+  function graduate(prev, rating, now, w, mode, fuzzRand, sched) {
     const s = mode === 'new' ? initStability(rating, w) : prev.stability;
     const d = mode === 'new' ? initDifficulty(rating, w) : prev.difficulty;
     return {
       algo: 'fsrs',
-      due: longTermDue(now, s, w, fuzzRand),
+      due: longTermDue(now, s, w, fuzzRand, sched),
       stability: s,
       difficulty: d,
       reps: prev.reps,
@@ -255,43 +288,43 @@
   }
 
   /** learning/relearning 中再评分：只推进步骤与分钟级 due，s/d 不动（应用层叠加层） */
-  function reviewLearning(prev, r, now, w, fuzzRand) {
+  function reviewLearning(prev, r, now, w, fuzzRand, steps, sched) {
     const mode = prev.learning.mode;
-    const step = prev.learning.step || 0;
+    // 旧状态可能带超出当前配置长度的 step：读取时钳到 [0, len-1]，不改写既有状态
+    const step = clamp(Math.round(prev.learning.step || 0), 0, steps.length - 1);
     const base = {
       algo: 'fsrs', stability: prev.stability, difficulty: prev.difficulty,
       reps: prev.reps + 1, lapses: prev.lapses, last: now
     };
     if (r === RATINGS.again) {
-      return Object.assign(base, { due: now + LEARNING_STEPS[0], learning: { step: 0, mode: mode } });
+      return Object.assign(base, { due: now + steps[0], learning: { step: 0, mode: mode } });
     }
     if (r === RATINGS.hard) {
-      return Object.assign(base, { due: now + LEARNING_STEPS[step], learning: { step: step, mode: mode } });
+      return Object.assign(base, { due: now + steps[step], learning: { step: step, mode: mode } });
     }
-    if (r === RATINGS.good && step + 1 < LEARNING_STEPS.length) {
-      return Object.assign(base, { due: now + LEARNING_STEPS[step + 1], learning: { step: step + 1, mode: mode } });
+    if (r === RATINGS.good && step + 1 < steps.length) {
+      return Object.assign(base, { due: now + steps[step + 1], learning: { step: step + 1, mode: mode } });
     }
-    return graduate(base, r, now, w, mode, fuzzRand);
+    return graduate(base, r, now, w, mode, fuzzRand, sched);
   }
 
   /**
    * 新卡首次评分（对齐 SRS.md §4 / Anki 默认 learning steps）：
-   *   again / hard → step 0（1 分钟）
-   *   good         → step 1（10 分钟）
+   *   again / hard → step 0（默认 1 分钟）
+   *   good         → 下一步（默认 10 分钟）；**单步配置**（len=1）无下一步 → 直接毕业
    *   easy         → 直接毕业，按 FSRS 长期间隔
-   * hard 不再跳到 10 分钟、good 不再直接毕业；两者必须走完 1m/10m 才毕业。
    */
-  function reviewNew(r, now, w, fuzzRand) {
+  function reviewNew(r, now, w, fuzzRand, steps, sched) {
     const s = initStability(r, w);
     const d = initDifficulty(r, w);
     const base = { algo: 'fsrs', stability: s, difficulty: d, reps: 1, lapses: r === RATINGS.again ? 1 : 0, last: now };
     if (r === RATINGS.again || r === RATINGS.hard) {
-      return Object.assign(base, { due: now + LEARNING_STEPS[0], learning: { step: 0, mode: 'new' } });
+      return Object.assign(base, { due: now + steps[0], learning: { step: 0, mode: 'new' } });
     }
-    if (r === RATINGS.good) {
-      return Object.assign(base, { due: now + LEARNING_STEPS[1], learning: { step: 1, mode: 'new' } });
+    if (r === RATINGS.good && steps.length > 1) {
+      return Object.assign(base, { due: now + steps[1], learning: { step: 1, mode: 'new' } });
     }
-    return graduate(base, r, now, w, 'new', fuzzRand);
+    return graduate(base, r, now, w, 'new', fuzzRand, sched);
   }
 
   /**
@@ -300,7 +333,9 @@
    * @param {number} rating 1-4（again/hard/good/easy）
    * @param {number} [now] 时间戳
    * @param {number[]} [w] 21 个权重（默认官方 FSRS-6）
-   * @param {{fuzzSeed?:number}} [opts] fuzzSeed 提供时启用确定性间隔抖动（默认关闭）
+   * @param {{fuzzSeed?:number, sched?:Object}} [opts] fuzzSeed 提供时启用确定性间隔抖动（默认关闭）；
+   *   sched 为 QB.SchedSettings.normalize 的输出（requestRetention / maximumIntervalDays / learningSteps 秒），
+   *   缺省时完全走本模块默认（与改造前 bit-identical）
    */
   function review(prev, rating, now, w, opts) {
     w = w || DEFAULT_W;
@@ -309,12 +344,14 @@
     const r = clamp(Math.round(Number.isNaN(n) ? RATINGS.good : n), 1, 4);
     opts = opts || {};
     const fuzzRand = opts.fuzzSeed == null ? null : QB.mulberry32(opts.fuzzSeed | 0);
+    const sched = opts.sched || null;
+    const steps = schedSteps(sched);
 
     if (prev && prev.algo === 'fsrs' && prev.learning) {
-      return reviewLearning(prev, r, now, w, fuzzRand);
+      return reviewLearning(prev, r, now, w, fuzzRand, steps, sched);
     }
     if (!(prev && prev.algo === 'fsrs' && prev.stability > 0)) {
-      return reviewNew(r, now, w, fuzzRand);
+      return reviewNew(r, now, w, fuzzRand, steps, sched);
     }
 
     // 已毕业卡：先更新难度 D，再以新 D 计算稳定度 S（官方顺序）
@@ -328,12 +365,12 @@
 
     const out = withFields(prev, now, s, d, r === RATINGS.again);
     if (r === RATINGS.again) {
-      // 遗忘：进 relearning（1 分钟后再见），s/d 已更新，毕业时沿用
-      out.due = now + LEARNING_STEPS[0];
+      // 遗忘：进 relearning（按配置的第一步后再见），s/d 已更新，毕业时沿用
+      out.due = now + steps[0];
       out.learning = { step: 0, mode: 'review' };
       return out;
     }
-    out.due = longTermDue(now, s, w, fuzzRand);
+    out.due = longTermDue(now, s, w, fuzzRand, sched);
     return out;
   }
 

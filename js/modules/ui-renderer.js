@@ -372,9 +372,13 @@
     const regions = [];
 
     const unansweredNow = Math.max(0, prog.total - answeredCountOf(engine));
+    // 难卡阈值来自题库调度设置（默认值唯一来源 QB.SchedSettings.DEFAULTS；0 = 关闭徽标）
+    const leechThreshold = opts.settings && isFinite(Number(opts.settings.leechThreshold))
+      ? Math.max(0, Math.round(Number(opts.settings.leechThreshold)))
+      : QB.SchedSettings.DEFAULTS.leechThreshold;
     regions.push({ key: 'quiz-head', html: '<div class="quiz-head" data-region="quiz-head">' +
       '<div><span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span> ' +
-      (opts.reviewState && opts.reviewState.lapses >= 8
+      (leechThreshold > 0 && opts.reviewState && opts.reviewState.lapses >= leechThreshold
         ? '<span class="type-badge leech-badge" title="累计遗忘 ' + opts.reviewState.lapses + ' 次，建议拆分或重学">难卡</span> '
         : '') +
       '<span class="q-progress">第 ' + prog.current + ' / ' + prog.total + ' 题</span>' +

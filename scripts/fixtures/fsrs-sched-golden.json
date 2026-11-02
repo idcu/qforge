@@ -1,0 +1,148 @@
+{
+  "meta": {
+    "note": "生成于 bc0e960（参数化改造前）；默认调度必须与此逐字段相等",
+    "weights": "FSRS-6 官方默认 21 权重",
+    "t0": 1767225600000,
+    "firstDueAt": "每步取上一步 due 作为复习时刻"
+  },
+  "cases": [
+    {
+      "name": "new-card-全分支（good→good→good→again→good→hard→easy）",
+      "steps": [
+        {
+          "rating": 3,
+          "at": 1767225600000,
+          "due": 1767226200000,
+          "stability": 2.3065,
+          "difficulty": 2.118103970459015,
+          "reps": 1,
+          "lapses": 0,
+          "learning": {
+            "step": 1,
+            "mode": "new"
+          }
+        },
+        {
+          "rating": 3,
+          "at": 1767226200000,
+          "due": 1767399000000,
+          "stability": 2.3065,
+          "difficulty": 2.118103970459015,
+          "reps": 2,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 3,
+          "at": 1767399000000,
+          "due": 1768349400000,
+          "stability": 10.971048263078137,
+          "difficulty": 2.1112142357853942,
+          "reps": 3,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 1,
+          "at": 1768349400000,
+          "due": 1768349460000,
+          "stability": 1.4247495232709013,
+          "difficulty": 7.392238132342694,
+          "reps": 4,
+          "lapses": 1,
+          "learning": {
+            "step": 0,
+            "mode": "review"
+          }
+        },
+        {
+          "rating": 3,
+          "at": 1768349460000,
+          "due": 1768350060000,
+          "stability": 1.4247495232709013,
+          "difficulty": 7.392238132342694,
+          "reps": 5,
+          "lapses": 1,
+          "learning": {
+            "step": 1,
+            "mode": "review"
+          }
+        },
+        {
+          "rating": 2,
+          "at": 1768350060000,
+          "due": 1768350660000,
+          "stability": 1.4247495232709013,
+          "difficulty": 7.392238132342694,
+          "reps": 6,
+          "lapses": 1,
+          "learning": {
+            "step": 1,
+            "mode": "review"
+          }
+        },
+        {
+          "rating": 4,
+          "at": 1768350660000,
+          "due": 1768437060000,
+          "stability": 1.4247495232709013,
+          "difficulty": 7.392238132342694,
+          "reps": 7,
+          "lapses": 1,
+          "learning": null
+        }
+      ]
+    },
+    {
+      "name": "毕业卡同日 short-term + 遗忘重学",
+      "steps": [
+        {
+          "rating": 3,
+          "at": 1767225600000,
+          "due": 1767657600000,
+          "stability": 5,
+          "difficulty": 4.9902283692968386,
+          "reps": 4,
+          "lapses": 1,
+          "learning": null
+        },
+        {
+          "rating": 1,
+          "at": 1767657600000,
+          "due": 1767657660000,
+          "stability": 0.9240245014677704,
+          "difficulty": 8.338550500731797,
+          "reps": 5,
+          "lapses": 2,
+          "learning": {
+            "step": 0,
+            "mode": "review"
+          }
+        },
+        {
+          "rating": 3,
+          "at": 1767657660000,
+          "due": 1767658260000,
+          "stability": 0.9240245014677704,
+          "difficulty": 8.338550500731797,
+          "reps": 6,
+          "lapses": 2,
+          "learning": {
+            "step": 1,
+            "mode": "review"
+          }
+        },
+        {
+          "rating": 4,
+          "at": 1767658260000,
+          "due": 1767744660000,
+          "stability": 0.9240245014677704,
+          "difficulty": 8.338550500731797,
+          "reps": 7,
+          "lapses": 2,
+          "learning": null
+        }
+      ]
+    }
+  ]
+}

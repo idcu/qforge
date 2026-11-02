@@ -640,8 +640,10 @@ section('作答热路径请求收敛（api）：reviews.record + 权重缓存');
 
   calls = [];
   await QB.SRSStore.grade(bank.id, q, 2, 1000);
-  eq(calls.length, 3, '首次作答 3 请求（GET reviews + GET weights + PATCH record）');
+  eq(calls.length, 4, '首次作答 4 请求（GET reviews + GET weights + GET bank sched + PATCH record）');
   eq(calls.filter((c) => c.method === 'GET' && c.url.indexOf('/fsrs-weights') >= 0).length, 1, '首次作答读一次权重');
+  eq(calls.filter((c) => c.method === 'GET' && /^\/api\/banks\/[^/]+$/.test(c.url)).length, 1,
+    '首次作答读一次题库调度设置（SchedSettings 唯一解析点；后续按库缓存命中）');
   const writeCall = calls[calls.length - 1];
   eq(writeCall.method, 'PATCH', '状态与日志经 PATCH reviews 增量提交');
   const sent = JSON.parse(writeCall.body);

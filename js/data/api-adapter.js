@@ -121,9 +121,7 @@
     if (!b) return out;
     ['name', 'description', 'category'].forEach((k) => { if (b[k] !== undefined) out[k] = b[k]; });
     if (b.source !== undefined) out.source = b.source;
-    if (b.sched !== undefined) {
-      out.sched = b.sched ? { new_per_day: b.sched.newPerDay, review_per_day: b.sched.reviewPerDay } : null;
-    }
+    if (b.sched !== undefined) out.sched = QB.Wire.bank.schedTo(b.sched);
     return out;
   }
   const fromWireQuestion = (w) => QB.Wire.question.from(w);

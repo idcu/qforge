@@ -173,6 +173,19 @@ section('导出器 qbk 格式');
   eq(back.questions[0].question, question.question, '占位标记随 JSON 往返保留');
   eq(parsed.assets[0].id, imgId, '导出包资产 id 一致');
   ok(typeof back.checksum === 'string' && /^3:[0-9a-f]{16}$/.test(back.checksum), 'qbk bank.json 含内容校验和（v3：3:+16hex）');
+  // bank.sched（可选）：随 .qbk 的 bank.json 导出，本地 camelCase，旧包无此键
+  const payloadSched = {
+    kind: 'bank',
+    bank: { name: '导出图包', sched: { requestRetention: 0.85, learningSteps: [30, 120], maximumIntervalDays: 200, leechThreshold: 6 } },
+    entries: [{ question: question, meta: {} }]
+  };
+  const builtSched = await QB.Exporters.buildAsync('qbk', payloadSched);
+  const backSched = JSON.parse((await QB.Qbk.parseBundle(builtSched.content)).text);
+  eq(backSched.bank.sched.requestRetention, 0.85, 'qbk bank.json 含 bank.sched.requestRetention');
+  eq(JSON.stringify(backSched.bank.sched.learningSteps), '[30,120]', 'qbk bank.json 含 bank.sched.learningSteps（秒）');
+  eq(backSched.bank.sched.maximumIntervalDays, 200, 'qbk bank.json 含 bank.sched.maximumIntervalDays');
+  eq(backSched.bank.sched.leechThreshold, 6, 'qbk bank.json 含 bank.sched.leechThreshold');
+  ok(!('sched' in back.bank), '未设置调度时 bank.json 不含 sched（旧包结构不变）');
   const qres = await QB.QbkImporter.parse({ arrayBuffer: built.content, fileName: 'c.qbk' });
   eq(qres.meta.checksumOk, true, 'qbk 导入：校验和一致（P4）');
   // 旧版（v2 及更早）导出为裸 8 位 FNV-1a：导入必须继续接受，不误警/不阻断

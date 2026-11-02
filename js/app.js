@@ -243,6 +243,7 @@
         regions = UI.renderQuizRegions(State.engine, {
           favorited: favorited,
           timerText: State.timerText,
+          settings: QB.SchedSettings.ofBank(State.bank),
           reviewState: quizReviewState(cq),
           reviewHistory: quizReviewHistory(cq)
         });
@@ -1083,6 +1084,7 @@
   function openSchedDialog() {
     if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
     const s = QB.SchedSettings.ofBank(State.bank);
+    const D = QB.SchedSettings.DEFAULTS;
     UI.openModal(
       '<h3>复习设置 · ' + esc(State.bank.name) + '</h3>' +
       '<p class="li-meta">控制「今日复习」每轮最多排入的题量，顺序为：学习中（分钟级）→ 到期复习 → 新题。' +
@@ -1092,25 +1094,45 @@
       '<input type="number" min="0" max="9999" id="sched-new" value="' + s.newPerDay + '" /></div>' +
       '<div><label class="qe-label">每日复习上限</label>' +
       '<input type="number" min="0" max="9999" id="sched-rev" value="' + s.reviewPerDay + '" /></div>' +
+      '<div><label class="qe-label">目标保留率（' + QB.SchedSettings.RETENTION_MIN + '–' +
+      QB.SchedSettings.RETENTION_MAX + '）</label>' +
+      '<input type="number" min="' + QB.SchedSettings.RETENTION_MIN + '" max="' +
+      QB.SchedSettings.RETENTION_MAX + '" step="0.01" id="sched-rr" value="' + s.requestRetention + '" /></div>' +
+      '<div><label class="qe-label">最大间隔（天）</label>' +
+      '<input type="number" min="' + QB.SchedSettings.MAX_INTERVAL_MIN + '" max="' +
+      QB.SchedSettings.MAX_INTERVAL_MAX + '" id="sched-max" value="' + s.maximumIntervalDays + '" /></div>' +
+      '<div><label class="qe-label">学习步骤（秒，逗号分隔 1–4 个）</label>' +
+      '<input type="text" id="sched-steps" value="' + s.learningSteps.join(',') + '" /></div>' +
+      '<div><label class="qe-label">难卡阈值（0=关闭）</label>' +
+      '<input type="number" min="0" max="9999" id="sched-leech" value="' + s.leechThreshold + '" /></div>' +
       '</div>' +
-      '<p class="li-meta">默认新题 ' + QB.SchedSettings.DEFAULTS.newPerDay + ' / 复习 ' +
-      QB.SchedSettings.DEFAULTS.reviewPerDay + '；设置存于题库记录，local / api / 备份三端一致。</p>' +
+      '<p class="li-meta">默认：新题 ' + D.newPerDay + ' / 复习 ' + D.reviewPerDay + ' / 保留率 ' +
+      D.requestRetention + ' / 最大 ' + D.maximumIntervalDays + ' 天 / 步骤 ' + D.learningSteps.join(',') +
+      ' 秒 / 难卡 ' + D.leechThreshold + '。<strong>调度参数只影响之后的评分与到期，不会重排已有到期时间。</strong>' +
+      '设置存于题库记录，local / api / 备份三端一致。</p>' +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
       '<button class="btn" data-action="modal-ok">保存</button></div>',
       (modal) => {
         modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
         modal.querySelector('[data-action="modal-ok"]').onclick = async () => {
           try {
+            const stepsRaw = (modal.querySelector('#sched-steps').value || '')
+              .split(/[,，、\s]+/).map(Number).filter((n) => isFinite(n));
             const res = await QB.SchedSettings.save(State.bank, {
               newPerDay: parseInt(modal.querySelector('#sched-new').value, 10),
-              reviewPerDay: parseInt(modal.querySelector('#sched-rev').value, 10)
+              reviewPerDay: parseInt(modal.querySelector('#sched-rev').value, 10),
+              requestRetention: parseFloat(modal.querySelector('#sched-rr').value),
+              maximumIntervalDays: parseInt(modal.querySelector('#sched-max').value, 10),
+              learningSteps: stepsRaw,
+              leechThreshold: parseInt(modal.querySelector('#sched-leech').value, 10)
             });
             State.bank = res.bank;
             const i = State.banks.findIndex((b) => b.id === res.bank.id);
             if (i >= 0) State.banks[i] = res.bank;
             invalidateReviewLog();
             UI.closeModal();
-            UI.toast('复习设置已保存（新 ' + res.settings.newPerDay + ' / 复习 ' + res.settings.reviewPerDay + '）', 'ok');
+            UI.toast('复习设置已保存（新 ' + res.settings.newPerDay + ' / 复习 ' + res.settings.reviewPerDay +
+              ' / 保留率 ' + res.settings.requestRetention + ' / 最大 ' + res.settings.maximumIntervalDays + ' 天）', 'ok');
             render();
           } catch (e) {
             UI.toast('保存失败：' + e.message, 'err');

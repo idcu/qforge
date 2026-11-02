@@ -169,6 +169,15 @@ eq(byType(jsonObj.questions).fill, 1, 'JSON 填空 1');
 const jsonRt = (await QB.JsonImporter.parse({ text: jsonBuilt.content, fileName: 'rt.json' })).questions;
 eq(jsonRt.length, 6, 'JSON 往返：仍 6 题');
 assertSelfConsistent(jsonRt, 'JSON 往返');
+// bank.sched（可选）：设置后才出现在 bank.json；未设置时旧结构不变
+const schedPayload = await QB.Exporters.collect('bank', Object.assign({}, bank, {
+  sched: QB.SchedSettings.normalize({ requestRetention: 0.85, maximumIntervalDays: 200, learningSteps: [30, 120], leechThreshold: 6 })
+}));
+const schedJson = JSON.parse(QB.Exporters.buildContent('json', schedPayload).content);
+eq(schedJson.bank.sched.requestRetention, 0.85, 'JSON bank.sched.requestRetention 随导出');
+eq(JSON.stringify(schedJson.bank.sched.learningSteps), '[30,120]', 'JSON bank.sched.learningSteps（秒）随导出');
+eq(schedJson.bank.sched.maximumIntervalDays, 200, 'JSON bank.sched.maximumIntervalDays 随导出');
+ok(!('sched' in jsonObj.bank), '未设置调度时 JSON bank 结构不变（旧包兼容）');
 
 /* ================= 4. CSV 导出、转义与往返 ================= */
 section('CSV 导出');

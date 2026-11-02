@@ -206,6 +206,9 @@ section('localToServer：本地布局 → 后端布局（往返一致）');
 {
   clearAll();
   const b = await QB.DB.banks.create({ name: '本地库' });
+  await QB.SchedSettings.save(b, {
+    requestRetention: 0.85, maximumIntervalDays: 500, learningSteps: [30, 120], leechThreshold: 6
+  });
   await QB.DB.questions.insertMany(b.id, [
     { type: 'single', question: '本地题 A', options: [{ letter: 'A', text: '甲' }], answer: 'A' },
     { type: 'judge', question: '本地题 B', options: [], answer: '正确' }
@@ -213,10 +216,20 @@ section('localToServer：本地布局 → 后端布局（往返一致）');
   const qs = (await QB.DB.questions.list(b.id, {})).items;
   await QB.DB.progress.wrongAdd(b.id, qs[0]);
   const localPayload = (await QB.Backup.buildBackup()).data;
+  // 本地布局：banks 键原样复制，bank.sched 四个新字段随备份往返
+  eq(localPayload[QB.KEYS.banks][0].sched.requestRetention, 0.85, '备份：本地 banks 原样保留 sched.requestRetention');
+  eq(JSON.stringify(localPayload[QB.KEYS.banks][0].sched.learningSteps), '[30,120]', '备份：本地 banks 原样保留 learningSteps');
   const s = QB.Backup.localToServer(localPayload);
   eq(s.banks.length, 1, 'banks 1 个');
   eq(s.banks[0].id, b.id, 'id 原样保留');
   eq(s.banks[0].created_at, b.createdAt, 'createdAt → created_at');
+  eq(s.banks[0].sched.request_retention, 0.85, '后端布局：request_retention 随备份上行');
+  eq(JSON.stringify(s.banks[0].sched.learning_steps), '[30,120]', '后端布局：learning_steps 随备份上行');
+  eq(s.banks[0].sched.maximum_interval_days, 500, '后端布局：maximum_interval_days 随备份上行');
+  eq(s.banks[0].sched.leech_threshold, 6, '后端布局：leech_threshold 随备份上行');
+  const backLocal = QB.Backup.serverToLocal(s)[QB.KEYS.banks][0];
+  eq(backLocal.sched.requestRetention, 0.85, '后端 → 本地：requestRetention 还原');
+  eq(JSON.stringify(backLocal.sched.learningSteps), '[30,120]', '后端 → 本地：learningSteps 还原');
   eq(s.questions[b.id].length, 2, '题目按库归集');
   eq(s.questions[b.id][0].bank_id, b.id, '题目带 bank_id');
   ok(!!s.questions[b.id][0].content_hash, '题目带 content_hash');

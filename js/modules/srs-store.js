@@ -107,26 +107,34 @@
     const ts = now == null ? Date.now() : now;
     const k = keyFor(q);
     const fr = fsrsRating(rating);
-    const cur = await stateFor(bankId, k);
-    const next = QB.FSRS.review(cur, fr, ts, await QB.FSRSOpt.getActiveWeights(bankId));
+    // 调度参数唯一解析点：与状态/权重并行，每库至多读一次 bank（缓存见 SchedSettings）
+    const [cur, w, sched] = await Promise.all([
+      stateFor(bankId, k),
+      QB.FSRSOpt.getActiveWeights(bankId),
+      QB.SchedSettings.ofBankId(bankId)
+    ]);
+    const next = QB.FSRS.review(cur, fr, ts, w, { sched: sched });
     // 热路径：状态 + 评分日志一次提交；api 模式只上行本批改动键（patch），一个请求
     await commitGraded(bankId, { [k]: next }, [{ t: ts, h: k, r: fr, b: bankId }]);
     return next;
   }
 
-  /** 批量应用：[{question, rating}]（应用层 0–3） */
+  /** 批量应用：[{question, rating}]（应用层 0–3）；整批只解析一次 sched、只读一次状态表 */
   async function gradeMany(bankId, entries, now) {
     if (!entries || !entries.length) return;
     const ts = now == null ? Date.now() : now;
     const keys = entries.map((e) => keyFor(e.question));
-    const stateMap = await statesFor(bankId, keys);
-    const w = await QB.FSRSOpt.getActiveWeights(bankId);
+    const [stateMap, w, sched] = await Promise.all([
+      statesFor(bankId, keys),
+      QB.FSRSOpt.getActiveWeights(bankId),
+      QB.SchedSettings.ofBankId(bankId)
+    ]);
     const logs = [];
     const delta = {};
     entries.forEach((e) => {
       const k = keyFor(e.question);
       const fr = fsrsRating(e.rating);
-      const next = QB.FSRS.review(stateMap[k] || null, fr, ts, w);
+      const next = QB.FSRS.review(stateMap[k] || null, fr, ts, w, { sched: sched });
       delta[k] = next;
       stateMap[k] = next;
       logs.push({ t: ts, h: k, r: fr, b: bankId });

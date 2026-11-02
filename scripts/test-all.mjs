@@ -30,6 +30,7 @@ const ORDER = [
   'migrate.test.mjs',
   'shard.test.mjs',
   'contract.test.mjs',
+  'sched.test.mjs',
   'references.test.mjs',
   'api-backend.test.mjs',
   'review-queue.test.mjs',

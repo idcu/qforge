@@ -1,19 +1,19 @@
 {
-  "generatedAt": "2026-11-02T19:31:53.314Z",
-  "runItems": 26,
-  "suiteFiles": 25,
-  "totalAssertions": 4285,
-  "gateCount": 53,
+  "generatedAt": "2026-11-02T21:09:51.020Z",
+  "runItems": 27,
+  "suiteFiles": 26,
+  "totalAssertions": 4425,
+  "gateCount": 55,
   "counts": {
     "smoke-test.mjs": 724,
-    "api-backend.test.mjs": 309,
-    "assets.test.mjs": 177,
-    "backup.test.mjs": 119,
+    "api-backend.test.mjs": 310,
+    "assets.test.mjs": 182,
+    "backup.test.mjs": 127,
     "blueprint.test.mjs": 18,
     "contract.test.mjs": 66,
     "dom-patch.test.mjs": 40,
     "editor.test.mjs": 72,
-    "exporter.test.mjs": 200,
+    "exporter.test.mjs": 204,
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
     "idb.test.mjs": 106,
@@ -23,6 +23,7 @@
     "references.test.mjs": 13,
     "review-queue.test.mjs": 51,
     "rich-text.test.mjs": 66,
+    "sched.test.mjs": 122,
     "shard.test.mjs": 115,
     "source.test.mjs": 39,
     "srs.test.mjs": 63,
@@ -35,7 +36,7 @@
   "firstScreen": {
     "scripts": 70,
     "files": 78,
-    "rawKB": "833.9",
-    "gzipKB": "293.3"
+    "rawKB": "843.2",
+    "gzipKB": "296.8"
   }
 }

@@ -113,13 +113,13 @@
 | `modules/statistics.js` | `overview`/`typePerformance`/`suggestions`/`dailyActivity`（近 N 周答题热力，周一列首对齐） |
 | `modules/search-filter.js` | `haystack`（题干+选项+答案/填空/参考答案+解析+材料+分类+标签，材料题递归）、`search`/`filter`/`highlight`/`categories`/`tags`；高亮先转义后正则，XSS 安全 |
 | `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
-| `modules/fsrs.js` | **FSRS-6 纯调度器**（21 个官方默认权重，逐项对齐 py-fsrs 6.3.2）：`review(state,rating,now,weights,opts?)`/`initialState/isLearning`、指数式初始难度、可学习衰减（DECAY=-w20）、召回/遗忘/同日稳定度、整日间隔反解、opt-in fuzz、新卡/重学 learning steps（1m/10m 状态机），无 DOM/存储依赖。公式/状态机/边界见 [SRS.md](SRS.md) |
+| `modules/fsrs.js` | **FSRS-6 纯调度器**（21 个官方默认权重，逐项对齐 py-fsrs 6.3.2）：`review(state,rating,now,weights,opts?)`/`initialState/isLearning`、指数式初始难度、可学习衰减（DECAY=-w20）、召回/遗忘/同日稳定度、整日间隔反解、opt-in fuzz、新卡/重学 learning steps（默认 1m/10m，可由 `opts.sched` 覆盖），无 DOM/存储依赖。`factorOf`/`powerDecay` 恒以 0.9 为稳定度衰减锚点，**不随目标留存率变化**；`nextIntervalDays(stability, requestRetention?, w?, maxDays?)` 的留存率/上限仅影响新算出的间隔。公式/状态机/边界见 [SRS.md](SRS.md) |
 | `modules/fsrs-train-core.js` | 训练**纯计算核心**（Storage/DOM 零依赖）：computeTrain/diagnose/序列/NLL/梯度/Adam/门控常量（门控基线 `initWeights` 与热启动起点 `startWeights` 分离）；Worker 与主线程共用同一数值来源，见 [SRS.md](SRS.md) §8.2 |
 | `modules/fsrs-opt.js` | revlog/权重**存取**（经 `QB.DB.revlog/weights`，**均为异步**；local-adapter 直写 LocalStorage / api-adapter 走 REST）+ 一键训练：`train`（存储包装，`async`）/`trainAsync`（Worker 优先自动回退）；门控采纳后唯一写盘点；权重支持全局 + 按题库 preset（旧单组结构自动归一，唯一实现 `QB.Weights.normalizeStore` 在 utils/weights.js，被 local-adapter/api-adapter 复用）。**增量重训**：采纳后记录 `trainedLogLen`，`shouldRetrain()` 纯读判定增量触发，已有权重时以之为热启动起点（`WARM_ITERATIONS` 少迭代，门控基线不变）。细节见 [SRS.md](SRS.md) §8 |
 | `modules/fsrs-train-client.js` | 训练执行选择器：`supported(env)` 判定（http(s)+Worker）、`run(revlog,opts)` 消息往返（30s 超时）并透传训练参数（含热启动 `startWeights`）、构造/运行失败自动回退主线程；env/createWorker/compute 可注入测试 |
 | `workers/fsrs-worker.js` | 训练 Worker（不经 index.html）：importScripts fsrs.js + train-core，收 `train`（`initWeights` 基线 / `startWeights?` 热启动）回 `done/error`；SW 预缓存，离线可用 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
-| `modules/sched-settings.js` | `QB.SchedSettings`：按题库复习限额（`bank.sched`）归一/读取/保存；默认值唯一来源 `CONFIG.LIMITS.NEW_PER_DAY/REVIEW_PER_DAY`，复用 banks 仓库（local/api/备份同语义） |
+| `modules/sched-settings.js` | `QB.SchedSettings`：按题库调度设置（`bank.sched`）**唯一归一实现**——`newPerDay/reviewPerDay/requestRetention/maximumIntervalDays/learningSteps（秒）/leechThreshold`；`normalize` 钳制范围、步骤升序去重并保留未知键（老客户端保存不清空新字段）；`ofBank/ofBankId` 按库缓存（save 后更新），复用 banks 仓库（local/api/备份同语义）。默认值唯一来源 `DEFAULTS`（每日限额仍与 `CONFIG.LIMITS` 同值） |
 | `modules/start-prefs.js` | `QB.StartPrefs`：练习/考试开始弹窗上次参数（各题型数量/分值、分类、时长、计时/乱序开关）归一与存取；本机偏好 `meta:startPrefs`，不参与跨设备备份转换 |
 | `modules/review-queue.js` | `QB.ReviewQueue`：今日复习队列纯函数——learning（分钟级已到期）→ 到期复习（逾期在前，封顶 `reviewPerDay-learning`）→ 新题（封顶 `newPerDay`）；`dailyFromLog(log,bankId,now)` 从 revlog 推导今日已引入新卡/已复习次数，实现**跨会话每日累计额度**；返回 `{questions, counts, settings}`，不碰存储/DOM |
 | `modules/srs-store.js` | SRS 状态按题库存取（`user:review:<bank>`，contentHash 键）**经 `QB.DB.reviews`（异步）**：`grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear` 均 `async`；评分提交优先 `reviews.patch`（api 增量上行，B1），无 patch 的适配器回退 `record` 整表；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（同步纯函数，一次作答一条 revlog 契约） |
@@ -133,6 +133,24 @@
 | `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |
 | `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT/**只读分享页 HTML** 八格式（qbk 异步读 IndexedDB、html 异步读图片资产），题库/错题/收藏；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder）；格式可按 `formats`（对象白名单）与 `kinds`（格式白名单）双重过滤；材料题在 MD/DOCX/TXT 经公共 `materialBlock` 行式分流（M2-A），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
 | `modules/share-page.js` | `QB.SharePage`：只读分享页构建（复用 `RichText.questionAssetIds` 收集图片、`Assets.getMap` 读字节并内嵌 data URL、`RichText.render` 转义渲染）；`buildHTML(payload, assetMap)` 纯构建可测，`build(payload)` 异步读资产；无脚本/无网络请求/可打印 |
+
+### 3.6 复习调度参数（唯一解析入口）
+
+`bank.sched` 是开放 JSON，字段与默认值：
+
+| 字段 | 范围/格式 | 默认 | 作用 |
+| --- | --- | --- | --- |
+| `newPerDay` | 0–999 整数 | `CONFIG.LIMITS.NEW_PER_DAY` | 每日新题额度（复习队列） |
+| `reviewPerDay` | 0–9999 整数 | `CONFIG.LIMITS.REVIEW_PER_DAY` | 每日到期复习额度（复习队列） |
+| `requestRetention` | 0.70–0.97 浮点 | **0.90** | 目标留存率，只进 `nextIntervalDays` 入参（越高 → 间隔越短） |
+| `maximumIntervalDays` | 1–36500 整数 | **36500** | 新算间隔上限，只压未来 due，不重排已有 due |
+| `learningSteps` | 1–4 个正整数（**秒**），升序去重 | **[60, 600]** | 新卡/重学步骤；内部转毫秒；长度 1 时 `good` 直接毕业 |
+| `leechThreshold` | 0–9999 整数（0=关闭） | **8** | 仅控制难卡徽标（`lapses ≥ 阈值`），不做 suspend/tag |
+
+- **归一**：`QB.SchedSettings.normalize` 是唯一实现；幂等、不改入参、未知键原样保留。
+- **唯一解析点**：`SRSStore.grade` 每次评分、`SRSStore.gradeMany` **每批只读一次库** `QB.SchedSettings.ofBankId(bankId)`，经 `FSRS.review(state, rating, now, weights, { sched })` 既有 `opts` 通道传入。app / review-queue / ui-renderer 均不各自解析或写默认值；`FSRS.review` 的 `sched` 缺失等价于显式默认（金样本 `scripts/fixtures/fsrs-sched-golden.json` 锁定 bit-identical）。
+- **只对未来的卡生效**：参数不重排已有到期时间、不批量改写 learning 状态；读取 `learning.step` 时钳到 `[0, len-1]`。
+- **明确不做**：fuzz、easyDays、leech 动作（suspend/tag）、独立 relearning steps。不新增「可配但不起作用」的字段。
 
 ## 4. 关键数据流
 
