@@ -36,6 +36,8 @@
    */
   function showPreview(bank, result, presetMode) {
     return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => { if (settled) return; settled = true; resolve(value); };
       const stats = result.stats || { byType: {} };
       const rows = QB.CONFIG.TYPES.map((t) =>
         '<tr><td>' + QB.typeLabel(t) + '</td><td>' + (stats.byType[t] || 0) + '</td></tr>').join('');
@@ -65,25 +67,32 @@
         '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
         '<button class="btn" data-action="modal-ok">导入</button></div>',
         (modal) => {
-          modal.querySelector('[data-action="modal-cancel"]').onclick = () => { UI.closeModal(); resolve(null); };
+          modal.querySelector('[data-action="modal-cancel"]').onclick = () => { finish(null); UI.closeModal(); };
           modal.querySelector('[data-action="modal-ok"]').onclick = () => {
             const mode = modal.querySelector('#mode-over').checked ? 'overwrite' : 'merge';
+            finish({ mode: mode });
             UI.closeModal();
-            resolve({ mode: mode });
           };
-        }
+        },
+        () => finish(null)
       );
     });
   }
 
-  /** G4：同一题包 id+版本重复导入的显式交互 → 'skip' | 'merge' | 'overwrite' */
+  /**
+   * G4：同一题包 id+版本重复导入的显式交互 → 'skip' | 'merge' | 'overwrite'
+   * Esc 语义与「跳过」一致（不写入任何题目）：弹窗被 UI.closeModal 关闭时通过 onClose 收口，
+   * 保证 Promise 一定有终态，导入流程不会悬挂。
+   */
   function askDuplicate(manifest, prev) {
     return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => { if (settled) return; settled = true; resolve(value); };
       UI.openModal(
         '<h3>该题包已导入过</h3>' +
         '<div class="li-meta">题包 <b>' + QB.escapeHtml(manifest.title || '未命名') + '</b> v' +
         QB.escapeHtml(manifest.version || '') + '（id ' + QB.escapeHtml(manifest.packageId) + '）此前已导入本库' +
-        (prev && prev.at ? '（' + QB.formatDate(prev.at) + '）' : '') + '。</div>' +
+        (prev && prev.at ? '（' + QB.Helpers.formatDate(prev.at) + '）' : '') + '。</div>' +
         '<div class="li-meta">请选择处理方式：<br>· <b>跳过</b>：不写入任何题目<br>' +
         '· <b>并存</b>：合并导入，已存在题目按 contentHash 跳过<br>' +
         '· <b>覆盖</b>：清空本库现有题目后写入该题包</div>' +
@@ -92,11 +101,13 @@
         '<button class="btn btn-ghost" data-action="dup-merge">并存</button>' +
         '<button class="btn" data-action="dup-over">覆盖</button></div>',
         (modal) => {
-          const pick = (value) => () => { UI.closeModal(); resolve(value); };
+          // 先结算再关闭：closeModal 会触发 onClose（Esc 语义），已被 settle 防重
+          const pick = (value) => () => { finish(value); UI.closeModal(); };
           modal.querySelector('[data-action="dup-skip"]').onclick = pick('skip');
           modal.querySelector('[data-action="dup-merge"]').onclick = pick('merge');
           modal.querySelector('[data-action="dup-over"]').onclick = pick('overwrite');
-        }
+        },
+        () => finish('skip')
       );
     });
   }

@@ -3,6 +3,7 @@
  * IDB 驱动以内存驱动注入；ZIP 走 stored（Node 无需 DecompressionStream）。
  * 运行：node scripts/assets.test.mjs
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
@@ -539,6 +540,168 @@ section('接线级回归：同秒连续导出文件名不重复');
     ok(/\.qbk$/.test(a), '扩展名为 .qbk');
     ok(a.indexOf('-538题-') >= 0, '含题数');
     ok(a.indexOf('v1.2.0') >= 0, '含版本');
+  }
+}
+
+section('路径级：三选一（真实 UIRenderer + 假 DOM）与 Esc 终态');
+{
+  const ROOT = path.resolve(__dirname, '..');
+  const h2 = await createHarness(ROOT);
+  const loadInto = (rel) => new Function('window', 'globalThis',
+    fs.readFileSync(path.join(ROOT, rel), 'utf8'))(h2.window, h2.window);
+  // 浏览器加载顺序：ui-renderer 先于 data-io（data-io 在模块顶层捕获 UI）
+  loadInto('js/modules/ui-renderer.js');
+  loadInto('js/modules/data-io.js');
+  const Q2 = h2.QB;
+  Q2.DB.init();
+  const UI2 = Q2.UIRenderer;
+
+  // 只实现 openModal/closeModal 触达的节点能力；Esc 由 closeModal 模拟（app.js 同路径）
+  const buttons = {};
+  const fakeModal = {
+    innerHTML: '',
+    offsetParent: null,
+    querySelector(sel) {
+      if (sel === '#mode-over') return { checked: /id="mode-over"[^>]*checked/.test(fakeModal.innerHTML) };
+      const m = /data-action="([^"]+)"/.exec(sel);
+      if (!m) return null;
+      return buttons[m[1]] || (buttons[m[1]] = { onclick: null });
+    },
+    querySelectorAll() { return []; },
+    setAttribute() {},
+    focus() {}
+  };
+  const root = {
+    hidden: true,
+    innerHTML: '',
+    onkeydown: null,
+    setAttribute() {},
+    removeAttribute() {},
+    querySelector(sel) {
+      if (sel !== '.modal') return null;
+      fakeModal.innerHTML = this.innerHTML;
+      return fakeModal;
+    }
+  };
+  const savedDocument = globalThis.document;
+  globalThis.document = {
+    getElementById(id) { return id === 'modal-root' ? root : null; },
+    activeElement: null,
+    body: { contains() { return false; } }
+  };
+  const toasts = [];
+  UI2.toast = (msg) => { toasts.push(String(msg)); };
+
+  try {
+    Q2.Assets.useDriver(Q2.Assets.memoryDriver());
+    Q2.Storage.set(Q2.KEYS.metaPkgHistory, {});
+    const bank = await Q2.DB.banks.create({ name: '三选一路径库' });
+    await Q2.DB.questions.insertMany(bank.id, [
+      { type: 'judge', question: '既有题', options: [], answer: '正确' }
+    ], { dedupe: true, mode: 'merge' });
+    const payload = await Q2.Exporters.collect('bank', bank);
+    const dist = await Q2.Exporters.buildAsync('qbk', payload, { distribute: true, version: '1.0.3' });
+    Q2.Package.recordImport(bank.id, dist.manifest); // 制造「此前已导入」
+    const result = await Q2.Importers.runImport({ name: 'dup.qbk', arrayBuffer: dist.content });
+    eq(result.questions.length, 1, '重复导入解析 1 题');
+
+    // 1) 弹窗渲染 + formatDate 修复（修复前 TypeError 抛在 openModal 之前）
+    let openModalCalls = 0;
+    const realOpen = UI2.openModal;
+    UI2.openModal = function (html, onMount, onClose) { openModalCalls++; return realOpen.call(UI2, html, onMount, onClose); };
+    const p1 = Q2.DataIO.commitImport(bank, result, null);
+    let p1Error = null;
+    const p1Done = p1.then((v) => v, (e) => { p1Error = e; return '__error'; });
+    await Promise.resolve();
+    eq(openModalCalls, 1, 'commitImport 后第一次弹窗已渲染（修复前在 openModal 之前抛错）');
+    ok(p1Error === null, 'commitImport 不抛异常（修复前：QB.formatDate is not a function）');
+    ok(root.innerHTML.indexOf('data-action="dup-skip"') >= 0 &&
+      root.innerHTML.indexOf('data-action="dup-merge"') >= 0 &&
+      root.innerHTML.indexOf('data-action="dup-over"') >= 0, '三个按钮 action 分别为 dup-skip/dup-merge/dup-over');
+    ok(/（\d{4}-\d{2}-\d{2} \d{2}:\d{2}）/.test(root.innerHTML), '上次导入时间由 QB.Helpers.formatDate 正常格式化');
+    const preCount = (await Q2.DB.questions.list(bank.id, {})).items.length;
+    eq(preCount, 1, '弹窗前库内 1 题');
+
+    // 2) 跳过
+    if (buttons['dup-skip'] && buttons['dup-skip'].onclick) {
+      buttons['dup-skip'].onclick();
+    } else {
+      ok(false, '跳过按钮不可达（弹窗未渲染）');
+    }
+    eq(await p1Done, null, '跳过 → 返回 null（不写入）');
+    ok(toasts.some((t) => t.indexOf('已跳过') >= 0), '跳过有 toast');
+    eq((await Q2.DB.questions.list(bank.id, {})).items.length, 1, '跳过后库内仍 1 题');
+
+    // 3) 并存：进入预览且预选 merge
+    openModalCalls = 0;
+    const p2 = Q2.DataIO.commitImport(bank, result, null);
+    let p2Error = null;
+    const p2Done = p2.then((v) => v, (e) => { p2Error = e; return '__error'; });
+    eq(openModalCalls, 1, '并存：先渲染三选一');
+    if (buttons['dup-merge'] && buttons['dup-merge'].onclick) {
+      buttons['dup-merge'].onclick();
+      await new Promise((r) => setTimeout(r, 0));
+      eq(openModalCalls, 2, '并存：随后渲染普通预览');
+      ok(root.innerHTML.indexOf('导入预览') >= 0, '并存后进入预览弹窗');
+      ok(/value="merge"[^>]*checked/.test(root.innerHTML), '并存预选 merge（非 overwrite）');
+      if (buttons['modal-ok'] && buttons['modal-ok'].onclick) buttons['modal-ok'].onclick();
+      const r2 = await p2Done;
+      ok(p2Error === null && r2 && r2.total === 1, '并存落库 total=1（内容重复跳过）');
+    } else {
+      ok(false, '并存按钮不可达（三选一弹窗未渲染）');
+      await p2Done;
+    }
+
+    // 4) 覆盖：进入预览且预选 overwrite
+    openModalCalls = 0;
+    const p3 = Q2.DataIO.commitImport(bank, result, null);
+    let p3Error = null;
+    const p3Done = p3.then((v) => v, (e) => { p3Error = e; return '__error'; });
+    eq(openModalCalls, 1, '覆盖：先渲染三选一');
+    if (buttons['dup-over'] && buttons['dup-over'].onclick) {
+      buttons['dup-over'].onclick();
+      await new Promise((r) => setTimeout(r, 0));
+      eq(openModalCalls, 2, '覆盖：随后渲染普通预览');
+      ok(/value="overwrite"[^>]*checked/.test(root.innerHTML), '覆盖预选 overwrite');
+      if (buttons['modal-ok'] && buttons['modal-ok'].onclick) buttons['modal-ok'].onclick();
+      const r3 = await p3Done;
+      ok(p3Error === null && r3 && r3.total === 1, '覆盖落库 total=1');
+    } else {
+      ok(false, '覆盖按钮不可达（三选一弹窗未渲染）');
+      await p3Done;
+    }
+
+    // 5) Esc：等价「跳过」，Promise 必须有终态（修复前悬挂）
+    openModalCalls = 0;
+    const p4 = Q2.DataIO.commitImport(bank, result, null);
+    let p4Done = false;
+    let p4Value = '__pending';
+    let p4Error = null;
+    p4.then((v) => { p4Done = true; p4Value = v; }, (e) => { p4Done = true; p4Error = e; });
+    eq(openModalCalls, 1, 'Esc 前渲染三选一');
+    UI2.closeModal(); // 与 app.js Esc 走同一入口
+    await new Promise((r) => setTimeout(r, 0));
+    ok(p4Done, 'Esc 关闭后 Promise 有终态（不悬挂）');
+    ok(p4Error === null, 'Esc 路径无异常（修复前 TypeError 中断流程）');
+    eq(p4Value, null, 'Esc 语义 = 跳过 → 返回 null');
+    ok(toasts.some((t) => t.indexOf('已跳过') >= 0), 'Esc 与跳过语义一致（有已跳过 toast）');
+    eq((await Q2.DB.questions.list(bank.id, {})).items.length, 1, 'Esc 后库内仍 1 题（无写入）');
+
+    // 6) 预览弹窗 Esc 同样收口（同类悬挂 Promise）
+    openModalCalls = 0;
+    const p5 = Q2.DataIO.commitImport(bank, result, 'merge');
+    let p5Done = false;
+    let p5Value = '__pending';
+    p5.then((v) => { p5Done = true; p5Value = v; }, () => { p5Done = true; p5Value = '__error'; });
+    eq(openModalCalls, 1, '直入预览弹窗');
+    UI2.closeModal();
+    await new Promise((r) => setTimeout(r, 0));
+    ok(p5Done, '预览 Esc 后 Promise 已结束');
+    eq(p5Value, null, '预览 Esc 语义 = 取消导入 → null');
+
+    UI2.openModal = realOpen;
+  } finally {
+    globalThis.document = savedDocument;
   }
 }
 

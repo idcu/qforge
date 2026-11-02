@@ -1050,9 +1050,18 @@
     )).filter((el) => el.offsetParent !== null);
   }
 
-  function openModal(html, onMount) {
+  let modalOnClose = null;
+
+  /**
+   * @param {string} html 弹窗内容
+   * @param {(modal: Element) => void} [onMount] 挂载后绑定按钮
+   * @param {() => void} [onClose] 关闭钩子：任何方式关闭（含 Esc / 取消）都会触发一次，
+   *   供调用方收口 Promise，避免「Esc 关闭后流程悬挂」。
+   */
+  function openModal(html, onMount, onClose) {
     const root = document.getElementById('modal-root');
     lastFocus = document.activeElement || null;
+    modalOnClose = typeof onClose === 'function' ? onClose : null;
     root.innerHTML = '<div class="modal">' + html + '</div>';
     root.hidden = false;
     root.setAttribute('role', 'dialog');
@@ -1078,6 +1087,8 @@
 
   function closeModal() {
     const root = document.getElementById('modal-root');
+    const hook = modalOnClose;
+    modalOnClose = null;
     root.hidden = true;
     root.innerHTML = '';
     root.onkeydown = null;
@@ -1088,6 +1099,7 @@
       try { lastFocus.focus(); } catch (e) { /* 元素已移除时忽略 */ }
     }
     lastFocus = null;
+    if (hook) { try { hook(); } catch (e) { /* 关闭钩子异常不影响弹窗清理 */ } }
   }
 
   /**

@@ -6,6 +6,61 @@
 
 ---
 
+## <待回填> · fix(package): 三选一不可达（QB.formatDate 悬空）与 Esc 悬挂；新增全仓引用对账
+
+**缺陷根因（真机 Edge 151）**
+1. **HIGH｜三选一永不出现**：`data-io.askDuplicate` 拼接文案时调用不存在的 `QB.formatDate`，
+   真实实现是 `QB.Helpers.formatDate`。异常抛在 `UI.openModal` 之前，弹窗永不渲染，
+   真实 UI 下 `dup-skip` / `dup-merge` / `dup-over` 三个分支全部不可达（toast：
+   「操作失败：QB.formatDate is not a function」，栈 `askDuplicate → commitImport`）。
+2. **LOW｜Esc 关闭后流程悬挂**：`app.js` 的 Esc 直接调用 `UI.closeModal()`，而 `askDuplicate` 的 Promise
+   只在按钮 `onclick` 中 resolve → Esc 后无写入、无 toast、Promise 永不结束。
+   同类问题：`showPreview`（普通预览弹窗）也只有按钮出口，Esc 会同样悬挂。
+
+**修法**
+- `QB.Helpers.formatDate(prev.at)` 取正确实现；**全仓 `QB.<name>` 引用扫描**确认悬空仅此 1 处，
+  另 1 处 `QB.App` 由 `js/app.js` 在 DOM 启动时挂载（显式例外，见测试）。
+- `UI.openModal(html, onMount, onClose)` 增加可选第三参（既有 21 处调用不传，行为不变）；
+  `closeModal()` 在清理前一次性调用关闭钩子。`askDuplicate` 用 `settle` 防重并在关闭前置为已结算，
+  明确 **Esc = 跳过**（不写入、提示「已跳过」）；`showPreview` 的 Esc = **取消导入**（返回 `null`）。
+  按钮路径行为不变（先 `finish(value)` 再 `closeModal()`，钩子被 settle 拦截）。
+- 新增 `scripts/references.test.mjs`：导出集合**取自运行时 `QB`**（harness + 补载
+  `ui-renderer/dom-patch/bank-manager`，不手写符号白名单），剥离注释/字符串后递归扫描
+  `js/**/*.js`（71 文件、104 个不同引用名），悬空引用必须为 0；唯一例外 `QB.App` 显式列出原因，
+  且断言例外清单不漂移；扫描器自检（注释/字符串不误判）。
+
+**为什么上一轮 31 项接线断言没抓到**：它们覆盖 `runImport` 返回值、预览 Blob 契约、URL 二进制路径与
+文件名唯一，但从未执行 `data-io` 的判重入口（`askDuplicate` 内部依赖全局 `QB` 上的辅助函数），
+也没有静态引用对账；因此「名字存在但挂在错误的命名空间下」这类错误只能等真机暴露。
+
+**新增断言与「修复前会失败」证据（`git archive 510d881` 抽旧代码 + 新测试复跑）**
+- `assets.test.mjs` 路径级 **27 项**（150→177）：真实 `UIRenderer.openModal/closeModal` + 假 DOM 驱动
+  `commitImport`——弹窗渲染、三个 `data-action`、`Helpers.formatDate` 渲染、跳过（返回 null/无写入/toast）、
+  并存（预选 merge → 落库 total=1）、覆盖（预选 overwrite → total=1）、Esc=跳过（Promise 有终态、
+  无异常、返回 null、无写入）、预览 Esc=取消导入（返回 null）。
+  **修复前：157 通过 / 16 失败**（弹窗未渲染、动作不可达、Esc 项以 `__error` 结束；后置预览断言被
+  `if` 守卫跳过未计入）；修复后 **177/177**。
+- `references.test.mjs` **13 项**：**修复前 12 通过 / 1 失败**（悬空 `QB.formatDate`）；修复后 **13/13**。
+
+**验证数据（2026-11-03，本机 Node v24.14.0）**
+- `test-all`：**26 个运行项 0 失败**，断言 **4285/4285**（前 4245；assets +27、新增引用对账 +13）。
+- `bench --assert --expose-gc`：**53/53** 门禁通过；heapUsed **8.51 → 11.17 MB（+2.66 MB ≤ 40 MB）**；
+  分发 5k 观测：构建普通 **105.99 ms** / 含 manifest **137.14 ms**、解包 **13.21 ms**、导入 **174.79 ms**
+  （同机参考值，不设门禁；本轮未改该路径逻辑，差异为本机负载波动）。
+- `docs-check --static`：26 运行项 / 4285 断言 / 53 门禁一致；首屏 **293.3 KB gzip / 833.9 KB raw**。
+- 未新增依赖、未改既有公开签名（`openModal` 仅追加可选参数）、未放宽校验（checksum 不符仍只警告不阻断）。
+
+**风险 / 未验证（按本轮真机结果改准）**
+- **真机（Edge 151）已通过**：只读预览正文、URL `.qbk` 导入、同秒两次导出文件名唯一、
+  **含图片资产的分发包端到端**。
+- **本轮待复验**：三选一弹窗的三分支（跳过/并存/覆盖）与 Esc 语义——Node 路径级已覆盖，
+  但尚未再上真机；推送前需你复验通过。
+- **仍未验证**：api 模式下题包历史（`meta:pkgHistory` 仅本机）、>8MB 远端包的拒绝文案、
+  三选一弹窗在窄屏/触屏下的实际布局。
+- 引用对账的例外仅 `QB.App`；新增动态挂载必须显式登记，否则测试会失败（有意为之，避免白名单漂移）。
+
+---
+
 ## 9f706c4 · fix(package): 分发题包四缺陷（预览契约 / runImport meta / URL qbk / 文件名唯一）
 
 **缺陷根因（Edge 151 真机复现，代码定位一致）**
