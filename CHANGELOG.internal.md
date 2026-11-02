@@ -6,7 +6,7 @@
 
 ---
 
-## 待回填 · docs(bench): 明确耗时类数字口径（Phase F4）
+## 4358eb3 · docs(bench): 明确耗时类数字口径（Phase F4）
 
 **核心改动**
 - `README.md`「实测数据」段与 `docs/DEVELOPMENT.md` bench 段新增「**耗时口径（F4，2026-11-02）**」：
@@ -28,7 +28,7 @@
 
 ---
 
-## 待回填 · feat(backup): 旧客户端兼容备份导出（Phase F3）
+## 859b920 · feat(backup): 旧客户端兼容备份导出（Phase F3）
 
 **核心改动**
 - `js/utils/question-id.js`：新增 `QB.makeLegacyContentHash(q)`（`'2:' + FNV-1a 32 位`，与 v2 算法逐字节一致；
@@ -70,7 +70,7 @@
 
 ---
 
-## 待回填 · feat(migration): 迁移前自动全量备份与恢复入口（Phase F1）
+## c526531 · feat(migration): 迁移前自动全量备份与恢复入口（Phase F1）
 
 **核心改动**
 - `js/modules/migrate.js`：`doRun` 抢到迁移锁之后、`snapshotAll()` 与**任何写入之前**调用
@@ -118,7 +118,7 @@
 
 ---
 
-## 待回填 · feat(bench): 可选规模测量 --scale + 容量上限定档（Phase F2）
+## e46ef67 · feat(bench): 可选规模测量 --scale + 容量上限定档（Phase F2）
 
 **核心改动**
 - `scripts/bench.mjs` 新增可选 `--scale=<n>`（默认路径与门禁不变）：构造 n 题旧布局（v2 hash + 整表复习/日志）
