@@ -6,7 +6,7 @@
 
 ---
 
-## <待回填> · fix(package): 三选一不可达（QB.formatDate 悬空）与 Esc 悬挂；新增全仓引用对账
+## 6733726 · fix(import): 三选一不可达（QB.formatDate 悬空）与 Esc 悬挂；新增全仓引用对账
 
 **缺陷根因（真机 Edge 151）**
 1. **HIGH｜三选一永不出现**：`data-io.askDuplicate` 拼接文案时调用不存在的 `QB.formatDate`，
