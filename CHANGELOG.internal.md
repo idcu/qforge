@@ -6,6 +6,79 @@
 
 ---
 
+## f9abba2 · test(bench): 迁移门禁改回原始峰值并新增旧 LS 自动清理门禁（H2/H3）
+
+**核心改动**
+- `scripts/bench.mjs`：IDB 迁移门禁由「驻留峰值 ≤100MB」改为**原始峰值**（未强制 GC 的 `heapUsed` 高水位，与 v5 门禁
+  `instrumentHeapPeak` 同口径）；驻留峰值仅作参考输出。保留峰值逐 1000 次写 GC（G4 为每 20 次写，H1 为控制时长放宽，
+  **两轮驻留值不可直接比较**）。
+- 阈值：`20000 ≤120MB`（用户给定上限，实测 105.31MB，余量 12.2%）；`50000 ≤270MB`（实测 240.10MB，余量 11.1%，
+  且**低于**旧 G4 原始峰值 294.82MB——阈值本身即可否决「退回整库物化」的回归；未按 2.5× 题量线性外推到 300MB）。
+- 新增三档「旧 LS 自动清理」门禁：回收键数 >0、清理后 LS 业务占用为 0、IDB 题目数不变；门禁 49→53。
+- 文档数字同步：README/DEVELOPMENT 测试 3998→4017、idb 87→106、首屏 267.3→273.3KB gzip / 751.5→769.9KB raw、
+  门禁 49→53；`docs/DATABASE.md` §9.2 新增三档新旧对比、阈值依据与口径声明；`scripts/docs-baseline.json` 刷新。
+
+**验证数据（`node --expose-gc scripts/bench.mjs --assert`，2026-11-02 本机 Node v24.14.0，53/53 门禁通过）**
+- IDB 迁移：5000 **193.24ms**（G4 494.37ms）、原始峰值 **+65.70MB**（G4 +89.32MB）、驻留参考 +65.49MB；
+  20000 **733.77ms**（5719.22ms）、**+105.31MB**（217.74MB）、+99.53MB；
+  50000 **2065.16ms**（24765.73ms）、**+240.10MB**（294.82MB）、+155.31MB。
+- 自动清理回收：5000 **5054 键 / 4.80MB / 5ms**；20000 **20204 键 / 19.36MB / 22ms**；50000 **50354 键 / 43.81MB / 76ms**；
+  三档清理后 LS 业务占用 0、IDB 题目数不变。
+- `node scripts/docs-check.mjs --static`：**全部一致**（25 运行项 / 4017 断言 / 53 门禁 / 77 文件 / 273.3KB gzip）。
+
+**TODO/风险**
+- **浏览器真实配额/隐私模式/多标签 IDB 事务未验证**；IDB 占用仍为序列化估算（Node 无 `navigator.storage.estimate`）。
+- 5000 档此前独立探针（段间 GC）测得 +29.64MB，bench 无 GC 口径 +65.70MB（G4 +89.32MB）——差异来自进程既有堆与采样口径，
+  **以 bench 无 GC 口径为准**，未据此调低阈值。
+- 驻留峰值不作门禁，仅参考；跨轮次 GC 节奏变化使其与 G4 不可比。
+
+---
+
+## 30d513a · perf(storage): 迁移改流式分批+断点续传+进度订阅，校验后自动清理旧 LS（H1/H3/H4）
+
+**核心改动**
+- `js/data/store.js`：
+  - `migrateToIdb(source)` 改为**流式分批复写**：题目 200 题/片单独成批、其余小键 64 键/批；每批
+    「读 LS → 单事务写 IDB → `idbGetMany` 回读逐键 `deepEqual` → 释放在途批次」，任何时刻只保留在途批次。
+  - **断点续传**：每批完成写 `meta:migrationProgress`（`{phase,done,total,cursor,shardsDone,shardsTotal,percent,at}`）；
+    同键集合（`total` 一致）才复用断点，中断后从 `done` 继续；完成即清除。仍幂等（同名 key 覆盖写）。
+  - **进度订阅**：新增 `Store.onMigrationProgress(fn)`（返回取消订阅）与 `Store.migrationProgress()`。
+  - **自动清理（H3）**：`init()` 在 `lsBackupState==='retained'` 时先校验 IDB 题目数后调用 `cleanupLegacyLS()`，
+    清理后按 `BOOTSTRAP_KEYS` 重读 LS 覆写水合 records（避免陈旧 `lsBackupState`）；清理失败仅记录 error，不动任何一侧。
+  - `BOOTSTRAP_KEYS` 纳入 `meta:migrationProgress`。
+- `js/modules/backup.js`：`saveAutoBackup` 改为**原始 JSON 串分块**（100 键/条，`encoding:'chunked-raw-v1'`），
+  不再把全库解析成对象；写后回读逐串校验；无 IDB 时仍回落 LS 单信封。
+- `js/modules/migrate.js`：`snapshotAll/restoreAll` 保存原始 JSON 串；v1→v2 与 v4→v5 的 `mapShard` 就地改
+  `q.contentHash`（省一份题目对象图）；修复 v1→v2 题目数重复计数（`questions += renamed.size` 与逐题自增双计）。
+- `js/app.js`：`boot()` 订阅迁移进度并在状态栏显示「正在迁移存储到 IndexedDB X%（done/total）」，`finally` 取消。
+- `js/utils/storage.js`：`adoptStore` 在 IDB 模式把 `QB.Store.onWrite` 接到跨标签广播；迁移完成路径不带 records。
+- `scripts/_harness.mjs`：`localStorage.key(i)` 改缓存快照 + `invalidateKeys()`，修复 `lsKeys()` O(n²)
+  （50k 迁移 22s→~2s；属测试替身优化，非生产代码）。
+- `scripts/lib/idb-memory.mjs`：`cloneValue` 改为「对象/数组复制、**原始值（含字符串）共享**、非 JSON 型回落
+  `structuredClone`」，修正 Node 替身把浏览器堆外 IDB 数据计入 JS 堆的口径偏差。
+- `scripts/idb.test.mjs`：新增进度订阅、断点重入按业务键比较（`resumed/startAt/verified`）、H3 自动清理
+  （`removed>0`、`legacyLSUsedBytes()===0`、`lsBackupState==='cleaned'`、二次启动 `cleanup===null`）等，87→106 项。
+- 文档同 commit：`docs/ARCHITECTURE.md` §9.1/§9.4/§9.5；`docs/DATABASE.md` §3/§4/§9.3；`docs/user-guide.md` §9/§9.1。
+
+**验证数据（2026-11-02 本机 Node v24.14.0）**
+- `node scripts/test-all.mjs`：**25 运行项 / 0 失败 / 4017 断言**；`idb 106/106`、`migrate 151/151`。
+- 三档迁移（旧 → 新）：5000 **494.37 → 193.24ms**（原始峰值 +89.32 → **+65.70MB**）；
+  20000 **5719.22 → 733.77ms**（+217.74 → **+105.31MB**）；50000 **24765.73 → 2065.16ms**（+294.82 → **+240.10MB**）。
+- 断点续传验证：`idb.test` 在迁移中途注入失败（`failWrite`），断言错误携带 `resumeFrom`；重入后 `resumed=true`、
+  `startAt>0`，且按**业务键**逐键比对与一次跑完结果一致（含题目/复习状态/日志段）。
+- 自动清理：三档 `cleanup.removed` 均 >0、`legacyLSUsedBytes()===0`、IDB 题目数不变；二次启动不再重复清理。
+- 写入（H4）：单次评分 **0.03 / 0.06 / 0.04ms**、上行 **211 / 213 / 213B**（v5 基线 0.15ms / 213B，未回退）。
+
+**TODO/风险**
+- 50k 原始峰值仅降 **18.6%**：Node 内存 IDB 实现下 IDB 数据也在 JS 堆（全量回读克隆约 25MB），加上迁移前
+  备份原始串与 LS 源并存；**浏览器实机未验证**，不能据此外推浏览器内存。
+- 自动清理发生在「迁移完成后的下一次启动」；此后回退只能依赖全量备份（LS 退路已删除），UI 已同步说明。
+- 多标签并发仅持锁标签执行迁移；其余标签在 `initStore()` 时读 LS、刷新后切 IDB（未做多标签实机验证）。
+- 公共抽象：新增 `QB.Store.onMigrationProgress/migrationProgress`、`meta:migrationProgress`、`init().cleanup`；
+  `QB.Storage` / `QB.DB` / `QB.Backup` 既有调用签名不变（仅 `init()` 在 retained 状态多一步自动清理，已文档化）。
+
+---
+
 ## d01a12c · test(bench): Phase G 三档容量/写入/迁移 heap 门禁与文档数字同步（G4）
 
 **核心改动**
