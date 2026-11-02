@@ -1478,26 +1478,27 @@
   function registerSW() {
     const isHttp = location.protocol === 'https:' || location.protocol === 'http:';
     if (!isHttp || !('serviceWorker' in navigator)) return;
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js', { scope: './' }).then((reg) => {
-        // 已打开的页面：有新版本在等待 → 提示刷新
-        const promptUpdate = (worker) => {
-          if (!worker) return;
-          worker.addEventListener('statechange', () => {
-            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-              UI.toast('发现新版本，刷新页面即可更新', 'ok');
-            }
-          });
-        };
-        if (reg.waiting && navigator.serviceWorker.controller) {
-          UI.toast('发现新版本，刷新页面即可更新', 'ok');
-        }
-        promptUpdate(reg.installing);
-        reg.addEventListener('updatefound', () => promptUpdate(reg.installing));
-        // 不自动 reload：SW 安装时 skipWaiting 并立即接管（activate 清旧缓存），由用户手动刷新切换，
-        // 避免答题中刷新丢失进度；用户下次打开即为新版本。
-      }).catch(() => { /* 离线/受限环境忽略 */ });
-    });
+    // F3：注册不依赖 window 'load'——boot 常在 load 之后才执行（尤其冷启动迁移耗时），
+    // 此时再挂 load 监听永远不会触发，SW 就从未注册。脚本/DOM 就绪后直接 register() 即可，
+    // 浏览器会在空闲时完成安装；首次安装需要一次刷新才接管当前页，属 SW 正常语义。
+    navigator.serviceWorker.register('sw.js', { scope: './' }).then((reg) => {
+      // 已打开的页面：有新版本在等待 → 提示刷新
+      const promptUpdate = (worker) => {
+        if (!worker) return;
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            UI.toast('发现新版本，刷新页面即可更新', 'ok');
+          }
+        });
+      };
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        UI.toast('发现新版本，刷新页面即可更新', 'ok');
+      }
+      promptUpdate(reg.installing);
+      reg.addEventListener('updatefound', () => promptUpdate(reg.installing));
+      // 不自动 reload：SW 安装时 skipWaiting 并立即接管（activate 清旧缓存），由用户手动刷新切换，
+      // 避免答题中刷新丢失进度；用户下次打开即为新版本。
+    }).catch(() => { /* 离线/受限环境忽略 */ });
   }
 
   if (document.readyState === 'loading') {

@@ -217,4 +217,4 @@ node scripts/serve-api.mjs
 
 - `.xlsx` / `.docx` 解析依赖浏览器 `DecompressionStream`；过老浏览器可能不支持。
 - 存储：默认 IndexedDB（上限由浏览器按站点分配）；**IDB 不可用时回落 LocalStorage（通常 5–10MB）**，超大题库仍建议分库、或启用自建后端（§1.1）。
-- 应用支持 **PWA**：通过 http(s) 访问（如 GitHub Pages）时可用浏览器「安装到主屏幕/桌面」，Service Worker 缓存后可离线打开；`file://` 双击场景不启用离线缓存。检测到新版本时会提示「刷新页面即可更新」（不会在答题中自动刷新）。
+- 应用支持 **PWA**：通过 http(s) 访问（如 GitHub Pages）时可用浏览器「安装到主屏幕/桌面」，Service Worker 缓存后可离线打开；**首次访问注册 SW 后需刷新一次才由 SW 接管当前页**（Service Worker 正常语义，第二次及以后加载直接命中缓存）；`file://` 双击场景不启用离线缓存。检测到新版本时会提示「刷新页面即可更新」（不会在答题中自动刷新）。
