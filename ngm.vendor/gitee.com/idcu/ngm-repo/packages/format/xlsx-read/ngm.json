@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "name": "@idcu/format-xlsx-read",
+  "version": "0.3.0",
+  "runtime": "node",
+  "main": "./src/index.mjs",
+  "dependencies": [
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "packages/format/zip/v0.1.0",
+      "refType": "tag",
+      "path": "packages/format/zip"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "packages/format/xml-lite/v0.1.0",
+      "refType": "tag",
+      "path": "packages/format/xml-lite"
+    }
+  ]
+}

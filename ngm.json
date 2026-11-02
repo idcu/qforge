@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "name": "qforge",
+  "version": "1.0.0",
+  "runtime": "node",
+  "main": "./index.html",
+  "dependencies": [
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "packages/core/assets/v0.2.0",
+      "refType": "tag",
+      "path": "packages/core/assets"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "packages/core/util/v0.3.0",
+      "refType": "tag",
+      "path": "packages/core/util"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "packages/format/dsv/v0.3.0",
+      "refType": "tag",
+      "path": "packages/format/dsv"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "packages/format/xlsx-read/v0.3.0",
+      "refType": "tag",
+      "path": "packages/format/xlsx-read"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "packages/format/xml-lite/v0.2.0",
+      "refType": "tag",
+      "path": "packages/format/xml-lite"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "packages/format/zip/v0.2.0",
+      "refType": "tag",
+      "path": "packages/format/zip"
+    }
+  ],
+  "vendor": {
+    "mode": "local",
+    "linkMode": "copy"
+  }
+}

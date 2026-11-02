@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 2,
+  "name": "@idcu/format-xml-lite",
+  "version": "0.2.0",
+  "runtime": "node",
+  "main": "./src/index.mjs",
+  "dependencies": []
+}

@@ -45,6 +45,9 @@ new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modul
 const UI = QB.UIRenderer;
 const DP = QB.DomPatch;
 
+/* @idcu/core-assets 要求显式注入驱动；bench 用内存驱动（与测试同口径，不落真实 IDB） */
+QB.Assets.useDriver(QB.Assets.memoryDriver());
+
 /* ---------- 计时与内存工具 ---------- */
 const N = 10; // 每项重复次数，取中位数以抵消抖动
 function median(arr) {

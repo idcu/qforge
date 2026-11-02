@@ -17,6 +17,7 @@ const ROOT = path.resolve(__dirname, '..', '..');
 
 /** 依赖顺序与 index.html / scripts/_harness.mjs 一致，只取 hash 所需最小闭包 */
 const SOURCES = [
+  'ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/util/src/core.js',
   'js/utils/fnv.js',
   'js/utils/answer-normalize.js',
   'js/utils/judge-answer.js',
