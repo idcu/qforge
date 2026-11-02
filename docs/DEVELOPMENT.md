@@ -199,6 +199,8 @@ node scripts/task-timer.mjs report                      # 明细表 + 已完成�
 
 `.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 **24 个运行项（冒烟 + 23 套件）**。时区矩阵用于拦截自然日/到期时间断言的时区回归。
 
+**独立轻量 `docs-check` job**（`scripts/docs-check.mjs --static`）：只读 `scripts/docs-baseline.json` 的套件断言数/门禁数，实时读取运行项与首屏文件/gzip 体积后与 README、本文比对，**不 spawn 套件、不跑 bench**，不拖慢重腿（重腿仍 24 个运行项，本机 32.9s）。数字有意变化时本地 `node scripts/docs-check.mjs --write` 刷新基线并随代码同 commit 提交；默认 live 模式则实测跑一遍套件与 bench 复算（手动核对用）。
+
 ## 5. 扩展指南（最小改动路径）
 
 ### 5.1 加题型（以「配伍题」为例）

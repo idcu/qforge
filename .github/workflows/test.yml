@@ -10,6 +10,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  docs-check:
+    # 轻量独立 job：不 spawn 套件、不跑 bench（套件/断言/门禁用基线，运行项与首屏体积实时读取）
+    # 数字有意变化时在本地运行 `node scripts/docs-check.mjs --write` 刷新基线并同 commit 提交。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: 文档数字校验（静态基线；README / docs/DEVELOPMENT.md）
+        run: node scripts/docs-check.mjs --static
+
   logic-tests:
     runs-on: ubuntu-latest
     strategy:

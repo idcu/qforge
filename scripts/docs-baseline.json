@@ -1,0 +1,39 @@
+{
+  "generatedAt": "2026-11-02T07:18:51.584Z",
+  "runItems": 24,
+  "suiteFiles": 23,
+  "totalAssertions": 3860,
+  "gateCount": 35,
+  "counts": {
+    "smoke-test.mjs": 724,
+    "api-backend.test.mjs": 309,
+    "assets.test.mjs": 67,
+    "backup.test.mjs": 90,
+    "blueprint.test.mjs": 18,
+    "contract.test.mjs": 66,
+    "dom-patch.test.mjs": 40,
+    "editor.test.mjs": 72,
+    "exporter.test.mjs": 200,
+    "fsrs-opt.test.mjs": 114,
+    "fsrs.test.mjs": 136,
+    "migrate.test.mjs": 129,
+    "office-export.test.mjs": 1150,
+    "pwa.test.mjs": 85,
+    "review-queue.test.mjs": 51,
+    "rich-text.test.mjs": 66,
+    "shard.test.mjs": 115,
+    "source.test.mjs": 39,
+    "srs.test.mjs": 63,
+    "static-server.test.mjs": 29,
+    "storage.test.mjs": 39,
+    "sync-dav.test.mjs": 45,
+    "ui-renderer.test.mjs": 174,
+    "xml-lite.test.mjs": 39
+  },
+  "firstScreen": {
+    "scripts": 68,
+    "files": 76,
+    "rawKB": "690.5",
+    "gzipKB": "248.8"
+  }
+}
