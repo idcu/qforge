@@ -1263,13 +1263,23 @@
 
   const backup = {
     /** 全量数据载荷 { data }（未脱敏；备份文件外壳与脱敏由 QB.Backup 负责） */
-    export() { return { data: QB.Backup.readAllData() }; },
+    export() {
+      const data = QB.Backup.readAllData();
+      // IDB 模式：先把待写聚合成事务落盘（readAllData 读的是内存权威值，落盘只为持久性）
+      if (QB.Storage.mode === 'idb' && typeof QB.Storage.flush === 'function') {
+        return QB.Storage.flush().then(() => ({ data: data }));
+      }
+      return { data: data };
+    },
     /** 恢复数据载荷 { data }；mode = 'replace' | 'merge' */
     import(payload, mode) {
       const data = payload && payload.data;
       if (!data || typeof data !== 'object') throw new Error('backup.import 需要 { data } 载荷');
       const out = QB.Backup.applyData(data, mode);
       revlogRev += 1; // 备份可能替换 revlog，统计页派生数据失效（B3）
+      if (QB.Storage.mode === 'idb' && typeof QB.Storage.flush === 'function') {
+        return QB.Storage.flush().then(() => out);
+      }
       return out;
     }
   };

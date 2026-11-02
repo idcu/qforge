@@ -10,6 +10,7 @@ import path from 'node:path';
 const MODULES = [
   'js/data/sample-data.js',
   'js/config.js',
+  'js/data/store.js',
   'js/utils/helpers.js',
   'js/utils/time.js',
   'js/utils/rich-text.js',
@@ -76,8 +77,12 @@ const MODULES = [
 
 /**
  * @param {string} qbDir 工程根目录（含 js/ 的目录绝对路径）
- * @param {{raw?:Map<string,string>}} [opts] raw：共享底层 localStorage 存储（多标签测试用；
- *   两个 harness 传入同一 Map 即模拟两个标签共享磁盘，各自拥有独立的 Storage 内存缓存）。
+ * @param {{raw?:Map<string,string>, indexedDB?:Object, BroadcastChannel?:Function}} [opts]
+ *   raw：共享底层 localStorage 存储（多标签测试用；两个 harness 传入同一 Map 即模拟两个
+ *     标签共享磁盘，各自拥有独立的 Storage 内存缓存）。
+ *   indexedDB：注入 IDB 工厂（默认无，模拟不支持 IDB 的环境；测试用
+ *     `scripts/lib/idb-memory.mjs` 的 createMemoryIDB）。多个 harness 传同一工厂 = 同一 IDB。
+ *   BroadcastChannel：注入跨标签通道实现（默认无）。
  */
 export async function createHarness(qbDir, opts) {
   const o = opts || {};
@@ -92,11 +97,15 @@ export async function createHarness(qbDir, opts) {
   };
   const window = { localStorage, addEventListener() {}, removeEventListener() {}, console };
   window.window = window;
+  if (o.indexedDB) window.indexedDB = o.indexedDB;
+  if (o.BroadcastChannel) window.BroadcastChannel = o.BroadcastChannel;
 
   function load(rel) {
     const code = fs.readFileSync(path.join(qbDir, rel), 'utf8');
-    // 以 window 作为 global 执行 IIFE
-    new Function('window', 'globalThis', code)(window, window);
+    // 以 window 作为 global 执行 IIFE；同时把 indexedDB/BroadcastChannel 暴露为自由变量，
+    // 让 backup.js 这类直接引用裸 `indexedDB` 的模块在 Node 中与浏览器行为一致。
+    new Function('window', 'globalThis', 'indexedDB', 'BroadcastChannel', code)(
+      window, window, window.indexedDB, window.BroadcastChannel);
   }
 
   MODULES.forEach(load);

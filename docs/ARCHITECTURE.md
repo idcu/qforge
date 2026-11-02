@@ -55,7 +55,7 @@
 | `utils/helpers.js` | `QB.Helpers` | `debounce`（返回函数带 **`.cancel()`**，可丢弃挂起调用）/`throttle/cloneDeep/uid/escapeHtml/formatDate/formatDuration/calculateAccuracy` |
 | `utils/time.js` | `QB.Time` | 自然日公共抽象：`dayStart/dayIndex/isSameDay/endOfDay`（唯一实现；SRS 到期、复习队列、学习热力图共用，禁止各自 `setHours(0,0,0,0)`） |
 | `utils/rich-text.js` | `QB.RichText` | 模型内容上屏统一入口：`render()`（转义 + `^{}`/`_{}` 上下标 + **轻量公式子集 `\frac{}{}`/`\sqrt{}`/`\sqrt[n]{}`（CSS 排版，参数组可嵌套、内部递归渲染）**）、`toPlain()`（去记号，不转义）、`questionAssetIds()`（收集题内图片 id，含材料正文 `material` 与递归小问 `children`，供 qbk 打包/备份孤儿清理的引用集） |
-| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存，且支持 `registerMerge(match, merge)` 对指定键做按键合并（当前用于 `user:review:*` / `user:reviewRev:*`，复用 `QB.ReviewMerge`）；`getFresh()` 绕过缓存直读（写前重读）；visibility/beforeunload 落盘；`usageBytes()` |
+| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存，且支持 `registerMerge(match, merge)` 对指定键做按键合并（当前用于 `user:review:*` / `user:reviewRev:*`，复用 `QB.ReviewMerge`）；`getFresh()` 绕过缓存直读（写前重读）；visibility/beforeunload 落盘；`usageBytes()`。**双后端门面（v6）**：接口/同步读语义不变，后端由 `QB.Store` 决定——IDB 模式下写先更新缓存并聚合成**一个微任务 IDB 事务**（同调用栈内多次 `setSync` 原子提交，失败整体回滚并保留待写重试），确认落盘用 `await Storage.flush()`；引导标记仍同步写 LS |
 | `utils/fnv.js` | `QB.FNV` | FNV-1a 散列唯一实现：32 位 `hashString`（UTF-16 码元）/`hashBytes`/`toHex`（资产 id、来源/URL checksum），**64 位 `hashString64`/`hashBytes64`（BigInt，16 hex）**（contentHash v3、导出内容校验和）；question-id/assets/source/exporter 共用（serve-api 为 Node ESM 独立实现，等价性由 E2E 守护） |
 | `utils/random.js` | `QB.mulberry32` | 确定性 PRNG 唯一实现（`[0,1)`），供 `QB.shuffle`/`shuffleOptions` 与 FSRS fuzz 共用 |
 | `utils/answer-text.js` | `QB.AnswerText` | 填空答案拼接/回退与按题型答案行文本：`joinBlanks/blankAnswers/answerText`；exporter/share-page/question-editor/adapters/judge-answer 共用 |
@@ -81,6 +81,7 @@
 | `data/local-adapter.js` | 七个 Repository 的 LocalStorage 实现；`reviews.record` 为作答热路径（状态 + 评分日志一次提交，等价 save + append）；`insertMany` 是导入落库唯一入口。单库题目按 `LIMITS.QUESTIONS_SHARD_SIZE`（200）分片存 `questions:<bankId>:<i>` + 清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`），单题增删改只重写所在分片、列表按区间只解析覆盖分片；分片读写收敛为公共抽象 **`QB.QuestionShards`**（`readAll/readRange/count/writeAll/append/locate/clear/indexesOf/compact/invariant` 等，供 migrate 复用，双重实现者禁止各自复制）；其中切分规则（`plan`）、清单解析（`parseMeta`）、按序拼接（`concatShards`）为**纯函数**，额外供 `backup.js` 的跨布局转换复用（分片生成/重组不复制）。**删除任一导致分片清空的分片时统一调用 `compact` 按物理索引升序重建（重编号）**，`clear` 同时回收高位孤儿分片；`invariant` 为只读不变量自检（sizes 之和 = count = 实际可读、分片键连续无孤儿）。阶段 C 的 `reviews/revlog/weights` **直接读写 LocalStorage（唯一存储权威）**、`backup` 复用 `QB.Backup.readAllData/applyData`（纯存取，零算法复制）；领域模块反向经 `QB.DB.*` 委托本适配器——**不可双向委托**（否则「适配器 → 领域模块 → QB.DB → 适配器」成自递归死循环）；删库级联收敛为私有唯一入口 `cascadeDelete(bankId)`（题目分片 + 错题/收藏/复习/评分日志/权重 preset/历史/当前库）。**schema v5 布局**：复习状态按 hash 独立键 `user:review:<bankId>:<hash>` + 清单 `user:reviewMeta:<bankId>`（`{v:3,count,keys}`，含每库键集合内存缓存使写入 O(1)），读取合并旧整表（per-hash 优先）；评分日志分段 `user:revlogMeta`（`{v:2,segSize:200,first,last,count}`）+ `user:revlog:<i>`，单次评分只重写尾段，旧整表 `user:revlog` 仅兼容读；两套布局读写收敛为 `QB.ReviewStore`/`QB.RevlogStore`（适配器内部公共件，禁止第二条实现） |
 | `data/api-adapter.js` | REST 实现（照 `QB.CONTRACTS` 对接 `API-CONTRACT.md`）：`useFetch` 注入 + `AbortController` 超时（`NETWORK.API_TIMEOUT_MS`）+ 统一错误体（`.status/.code`）+ camelCase↔snake_case **wire 映射表**（`from` 方向委托 `QB.Wire`，见 `data/wire.js`）；**`count`/`reviews` 按库缓存、权重仓缓存**（写·级联·`backup.import` 后失效；`reviews.record` 成功后缓存刚提交的 map）、`revision()` 客户端写修订号、`assetDriver()` 实现资产驱动契约；**响应体一律消费**（含 204 空体，避免浏览器记 `net::ERR_ABORTED`） |
 | `data/db.js` | 门面：`init()` 按 `DATA_BACKEND` 选适配器并暴露 **7 个仓库**（banks/questions/progress/reviews/revlog/weights/backup）；**`loadQuestions(bankId)` 整库读缓存**（按 `bankId` + 适配器写修订号失效，供各视图按需装载，命中即复用同一数组、0 分片解析）；`buildIndex(bankId)` 复用该缓存建 contentHash 索引 |
+| `data/store.js` | **`QB.Store`：持久化引擎 + 后端切换唯一入口（schema v6）**。IndexedDB 对象仓 `qforge-kv/kv`（`keyPath=key`，索引 `by_bank`/`by_kind`/`by_bank_kind`/`by_kind_seq`）与 LocalStorage 两个后端实现**同一套方法**（`get/set/del/keys/batch/clear`），上层（`QB.Storage`、适配器、领域模块）不感知差异；`batch` 单事务、失败整体回滚，保证一次评分（状态 + 日志段）原子落盘。对外还有：`init()`（探测/水合/安全回落）、`query()`（按库/按 kind/按库取日志尾 N 条）、`logTail()`、`stats()/estimate()`、`migrateToIdb/verifyAgainstLS/cleanupLegacyLS/rollbackToLS/reenableIdb`、`isBootstrap/isBackupExcluded/tagOf`。**引导标记（后端标记/迁移标记/schema 版本/迁移锁/迁移备份）始终同步写 LocalStorage**（打开 IDB 之前就要可读、且跨标签协调） |
 | `data/sample-data.js` | `QB.SAMPLE`：18 道内置样例（判断/单选/多选/填空/简答各 3 + 不定项 3，覆盖六题型） |
 
 ### 3.4 导入器（importers）
@@ -262,6 +263,75 @@ Exporters.openFlow({kind, bank})
 | --- | --- |
 | file:// 限制 | 不使用 ES module / fetch 本地文件；导入走 `<input type=file>` + FileReader |
 | xlsx/docx 解析 | 依赖浏览器 `DecompressionStream`；老浏览器不支持时给出明确错误提示 |
-| LocalStorage 容量 | 通常 5–10MB；分库分键 + **题目分片**（200 题/片）存储，`usageBytes()` 可估算，超限提示导出 |
+| LocalStorage 容量 | schema v6 起业务数据默认存 IndexedDB（解除约 5MB 硬顶，见 §9）；IDB 不可用（隐私模式/配额拒绝）时**安全回落** LS，此时仍受 5–10MB 限制。LS 只保留极小引导标记 |
 | 序列化开销 | `Storage` 防抖批写（200ms）减少写放大；`beforeunload` 强制同步 |
 | 内容安全（CSP） | 页面 `index.html` meta 与 `scripts/lib/security-headers.mjs` 的 `CSP` 逐字符一致（pwa.test 守护）；`script-src 'self'`（无内联脚本/无 eval），`style-src 'unsafe-inline'`（渲染层内联样式），`img-src data: blob:`（IndexedDB 资产），`connect-src http: https:`（自建后端/WebDAV/URL 导入），各指令额外放行 `file:` 仅用于双击 `index.html` 直开；本地静态服务与参考后端对 HTML 另加 `frame-ancestors 'none'`/`X-Frame-Options: DENY`，所有静态响应加 `nosniff`/`Referrer-Policy: same-origin`。二次开发新增内联脚本会被拦截，须放外部文件 |
+
+## 9. 存储底座：LocalStorage → IndexedDB（Phase G / schema v6）
+
+### 9.1 为什么这样分层
+
+```
+业务模块 / 适配器 / 领域模块      ← 只经 QB.DB.* 与 QB.Storage（签名不变）
+        │
+   QB.Storage（同步门面）          ← 内存缓存 + 防抖/微任务事务；唯一对外读写入口
+        │
+   QB.Store（持久化引擎）          ← **唯一后端切换点**：lsBackend / idbBackend 同接口
+        ├── lsBackend  → localStorage（回落/旧版/受限环境）
+        └── idbBackend → IndexedDB 对象仓 qforge-kv/kv
+```
+
+- **一套接口、两条实现**：`QB.Store.get/set/del/keys/batch/clear` 对两后端行为一致；业务代码不写 `if (idb)`，领域模块（题库/SRS/错题/收藏/历史/计划/revlog）**禁止直连 `localStorage`**。禁止为 IDB 另写一套领域逻辑。
+- **同步门面不拆**：`QB.Storage` 的同步读（`get/getFresh/keys`）是上层大量同步调用的既有契约。IDB 模式用「启动时全量水合内存缓存」维持同步读；写走缓存 + 微任务聚合事务，`flush()` 确认真实落盘。
+- **原子性**：一次评分在同一调用栈里写「状态键 + 尾段日志 + 修订号」，IDB 模式下聚合成**一个事务**；事务失败整体回滚、待写保留、`onError` 通知并重试（不会出现状态写成功、日志丢一半）。
+- **O(改动数) 写入**：迁移只换后端，不换布局——题目仍 200 题/片、复习仍 per-hash 键、日志仍 200 条/段；单次评分只写 1 个状态键 + 1 个尾段（实测 0.15ms / 约 213B，见 [DATABASE.md](DATABASE.md) §9）。
+
+### 9.2 数据划分
+
+| 存放位置 | 键 | 理由 |
+| --- | --- | --- |
+| **IndexedDB**（业务数据） | `banks` / `questions:*`（分片 + 清单）/ `user:review:<bank>:<hash>` + `user:reviewMeta` / `user:revlogMeta` + `user:revlog:<i>` / 错题 / 收藏 / 历史 / 会话 / 权重 / 当前库 / 主题 / 开始偏好 / 题目图片资产索引 | 数据量随题量增长（50k 题约 45MB 估算），必须解除 LS 约 5MB 硬顶；IDB 配额按 origin 计算且通常远大于 LS |
+| **LocalStorage**（引导标记，`QB.Store.BOOTSTRAP_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:schemaVersion` / `meta:migrationLock` / `meta:migrationBackup` | **打开 IDB 之前就要同步可读**（决定用哪个后端）；迁移锁需跨标签同步原子；自动备份在 IDB 不可用时要有落点。这些都是极小状态，不占容量 |
+| 备份排除（`BACKUP_EXCLUDED_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` | 只描述「本设备当前用哪个后端」，换设备应重新探测；恢复 replace 时也不删除（否则会把新设备的后端选择一起删掉） |
+
+题目图片二进制沿用既有独立 IDB 库 `qforge/assets`（不属于本节的 KV 底座）。
+
+### 9.3 后端选择与安全回落
+
+后端标记 `meta:storageBackend` 取值：`null`（首次） / `'idb'` / `'ls'`（用户显式回退，不再自动升级） / `'ls-fallback'`（IDB 不可用或读失败）。
+
+启动路径（`js/app.js::boot` → `QB.Storage.initStore()` → `QB.Store.init()`）：
+
+1. 无 `indexedDB`（或探测打开失败/对象仓缺失）→ 写 `ls-fallback`，继续用 LS（**不白屏**）。
+2. 标记为 `'idb'` → 打开并 `readAll(true,true)` 全量水合；**打开失败、读取失败、或 IDB 无业务键而 LS 仍有业务键**（数据丢失）→ 写 `ls-fallback` 并回落 LS。
+3. 标记为 `null` → 保持 LS，由 Migration v6 持锁决定是否升级（`Migration.run` 内部 `migrateV5ToV6`）。
+4. 标记为 `'ls'` → 只走 LS（用户回退后的稳定状态，不自动再升级）。
+
+所有回落都保留原数据可读；`Store.detect()` 的失败原因（`no-indexeddb` / `QuotaExceededError` / 版本冲突等）写进标记并在备份弹窗展示。
+
+### 9.4 schema v6（LocalStorage → IndexedDB）每一步
+
+沿用 v5 迁移框架（同一 `Migration.run`、同一把锁、同一套快照/回滚），**不改数据形状**：
+
+1. 抢 `meta:migrationLock`（owner + 30s TTL）；抢不到说明其他标签在迁移，本标签继续用 LS 等待刷新。
+2. `saveAutoBackup` 迁移前全量备份（优先独立 IDB `qforge-backup/snapshots`；不可用时回落 `meta:migrationBackup`），失败即中止、不写任何数据。
+3. `Store.detect()`：IDB 不可用 → 写 `ls-fallback`，本次迁移按 LS 结束（业务可用）。
+4. `Store.migrateToIdb(lsSource())`：按 32 键/批复制非引导键到 IDB；每批 `batch` 单事务。**不删除 LS 旧数据**。
+5. 逐键完整性校验：分块回读 IDB，与 LS 源做深比对（题库/题目/复习/错题/收藏/日志全覆盖）；任一不一致即抛错，标记保持未迁移。
+6. 全部一致 → 写 `meta:storageBackend='idb'` + `lsMigratedAt`，`lsBackupState='retained'`；`QB.Storage.adoptStore({mode:'idb', records})` 切换门面（`records` 直接从 LS 源构建，避免额外整库回读克隆）。
+7. 版本戳 `meta:schemaVersion=6`，`await flush()` 确认落盘；释放锁。
+8. **退路保留**：LS 旧数据保持 `retained`，不自动删除；备份弹窗提供「清理旧 LocalStorage」（显式入口，`cleanupLegacyLS`）与「回退到 LocalStorage」。
+
+幂等/重入：迁移中途中断（标记仍非 `idb`）→ 下次启动重跑，同名记录覆盖写，最终收敛；多标签并发只有持锁标签执行，其余标签在 `initStore()` 时仍读 LS，刷新后切 IDB。
+
+### 9.5 回滚与降级路径
+
+| 场景 | 行为 | 数据影响 |
+| --- | --- | --- |
+| 显式回退（备份弹窗「回退到 LocalStorage」，默认 `current`） | 把当前 IDB 全量逐键写回 LS + 回读校验，成功才写 `ls` 标记；写满/校验失败**保持 IDB 并抛错，不半切** | 迁移后的新数据保留 |
+| 回退到迁移前快照（`snapshot`） | 直接写 `ls` 标记，改用保留的迁移前 LS 数据 | 迁移后新写入不保留（需用户明确选择） |
+| 回退后重新启用 | `reenableIdb` 重新探测 + `migrateToIdb` 逐键校验 | 以当前 LS 为准 |
+| IDB 在目标环境不可用 | 启动即 `ls-fallback`，业务继续用 LS | 无丢失；容量仍受 LS 限制 |
+| 想彻底释放 LS 空间 | `cleanupLegacyLS` 只保留 BOOTSTRAP_KEYS | 删除 LS 退路，此后回退只能靠备份 |
+
+回滚需要什么：① 保留的 LS 旧数据或一份全量备份；② 页面刷新后重新 `initStore`；③ 若 LS 空间不足以容纳 IDB 数据，回退会明确失败并保持 IDB（不会静默丢数据）。浏览器真实配额/隐私模式/多标签事务语义**未做浏览器实机验证**，Node 侧以内存实现验证语义（见 [DATABASE.md](DATABASE.md) §9 口径声明）。

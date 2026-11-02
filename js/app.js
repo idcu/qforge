@@ -1394,12 +1394,19 @@
   /* ---------------- 启动 ---------------- */
 
   async function boot() {
+    // 存储底座：有 'idb' 标记则把 IndexedDB 全量水合进 Storage 缓存；否则保持 LocalStorage
+    // （v5→v6 迁移会在 Migration.run 里持锁、先备份、逐键校验后切换）。
+    try { await QB.Storage.initStore(); } catch (e) { /* detect 已内部回落，启动不因 IDB 不可用失败 */ }
     QB.DB.init();
     // 刷新/切后台时冲刷会话防抖：考试中最后一次作答不在 500ms 窗口内也能恢复
     const flushSession = () => {
       try {
         const p = QB.ProgressSaver.flush();
         if (p && typeof p.catch === 'function') p.catch(() => { /* 尽力而为，不产生未处理拒绝 */ });
+      } catch (e) { /* 尽力而为 */ }
+      try {
+        const q = QB.Storage.flush();
+        if (q && typeof q.catch === 'function') q.catch(() => { /* IDB 异步落盘尽力而为 */ });
       } catch (e) { /* 尽力而为 */ }
     };
     if (window.addEventListener) window.addEventListener('pagehide', flushSession);

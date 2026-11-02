@@ -25,6 +25,7 @@ const ORDER = [
   'fsrs-opt.test.mjs',
   'srs.test.mjs',
   'storage.test.mjs',
+  'idb.test.mjs',
   'backup.test.mjs',
   'migrate.test.mjs',
   'shard.test.mjs',

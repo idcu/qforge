@@ -1,19 +1,33 @@
 /**
- * Storage —— LocalStorage 封装（公共抽象）
- * 特性：内存缓存 + 防抖批量写入（批量/导入路径）+ setSync 同步穿透（学习数据事务语义）
- *   + beforeunload/visibilitychange 强制落盘 + usageBytes() + 跨标签 storage 事件同步。
+ * Storage —— 同步门面（公共抽象）
  *
- * 失败语义（不再假成功）：
- *   - set 只更新内存与待写队列（合并高频写），真实落盘发生在 forceSync；
- *   - forceSync/setSync 捕获到配额等错误时：保留待写队列、记录 lastError、
- *     通知 onError 订阅方并重新抛出，调用方必须自行向用户提示；
- *   - remove 始终同步生效。
+ * 两套后端、一套接口（后端实现在 `js/data/store.js` 的 QB.Store）：
+ *   - LocalStorage 模式（默认 / IDB 不可用 / 显式回退）：完全保持原语义——
+ *     内存缓存 + 200ms 防抖批写 + setSync 同步穿透（失败即抛）+ forceSync 事务点。
+ *   - IndexedDB 模式（启动时经 QB.Store 水合后）：同步读仍走内存缓存（上层零改动），
+ *     写先更新缓存/待写队列，再在**微任务**里聚合成一个 IDB 事务批量落盘。
+ *     同一调用栈里的多次 setSync（如一次评分的状态 + 日志段 + 修订号）因此原子提交；
+ *     事务失败整体回滚，待写保留、onError 通知，并由下一次写入/flush 重试。
+ *     需要确认落盘时调用 `await Storage.flush()`（签名从同步改为异步只发生在 IDB 模式）。
+ *
+ * 运行期极小状态（后端标记/迁移标记/schema 版本/迁移锁/迁移备份）始终同步写
+ * LocalStorage（见 QB.Store.BOOTSTRAP_KEYS）：打开 IDB 之前就要可读，且跨标签原子协调。
+ *
+ * 失败语义（不假成功）：
+ *   - LS 模式：forceSync/setSync 捕获配额错误时保留待写、记录 lastError、通知 onError 并抛出；
+ *   - IDB 模式：异步失败无法同步抛出，改为记录 lastError + 通知 onError + 保留待写重试；
+ *   - remove 始终同步生效（LS）/ 入队删除（IDB）。
  */
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
   const PREFIX = (QB.CONFIG && (QB.CONFIG.STORAGE_PREFIX || (QB.CONFIG.STORAGE && QB.CONFIG.STORAGE.PREFIX))) || 'qb';
   const WRITE_DELAY = (QB.CONFIG && QB.CONFIG.STORAGE && QB.CONFIG.STORAGE.WRITE_DELAY_MS) || 200;
+
+  function fullKeyOf(key) { return PREFIX + ':' + key; }
+  function isBootstrapKey(key) {
+    return !!(QB.Store && typeof QB.Store.isBootstrap === 'function' && QB.Store.isBootstrap(key));
+  }
 
   const Storage = {
     _cache: new Map(),
@@ -22,51 +36,259 @@
     _errorListeners: [],
     _mergeHooks: [],
 
-    /** 全键名 */
+    /** 当前后端：'ls' | 'idb' */
+    mode: 'ls',
+    /** IDB 待写操作（key → {op,key,value}）与整表清理标记 */
+    _ops: new Map(),
+    _clearPending: false,
+    _flushScheduled: false,
+    _flushChain: Promise.resolve(),
+    _retryTimer: null,
+    _bc: null,
+    _bcName: 'qforge-store',
+
     _fullKey(key) {
-      return PREFIX + ':' + key;
+      return fullKeyOf(key);
+    },
+    _isIdb() { return this.mode === 'idb'; },
+
+    /* ---------------- 后端切换（唯一入口） ---------------- */
+
+    /**
+     * 启动初始化：由 `QB.Store` 探测/水合，成功后本门面切到对应后端。
+     * 其他标签正在迁移时（锁被占用）不会在这里迁移——迁移由 Migration v6 持锁执行。
+     * @returns {Promise<{mode:string, available:boolean, fallbackReason?:string}>}
+     */
+    async initStore() {
+      if (!QB.Store) return { mode: 'ls', available: false, fallbackReason: 'no-store' };
+      const info = await QB.Store.init();
+      this.adoptStore(info);
+      return info;
     },
 
-    /** 一次真实落盘（抛错方决定提示）；成功清空待写队列 */
+    /**
+     * 采用 QB.Store 的初始化结果（也供迁移完成/回退后重新绑定）。
+     * @param {{mode:string, records?:Map<string,*>, available?:boolean, fallbackReason?:string}} info
+     */
+    adoptStore(info) {
+      const i = info || {};
+      this._cancelSchedule();
+      if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+      this._ops = new Map();
+      this._clearPending = false;
+      this._flushScheduled = false;
+      this._flushChain = Promise.resolve();
+      this._pending.clear();
+      if (i.mode === 'idb' && i.records) {
+        this._cache = new Map(i.records);
+        this.mode = 'idb';
+        QB.Store.onWrite = (keys) => this._broadcastIdbWrite(keys);
+        this._subscribeBroadcast();
+      } else {
+        this.mode = 'ls';
+        this._cache = new Map(); // LS 模式惰性读取磁盘；启动时缓存本就为空
+        QB.Store.onWrite = null;
+      }
+      return this.mode;
+    },
+
+    /** 迁移/回退后刷新后端状态（不重读数据时使用；完整切换请重新 initStore/adoptStore） */
+    refreshMode() {
+      this.mode = (QB.Store && QB.Store.mode === 'idb') ? 'idb' : 'ls';
+      return this.mode;
+    },
+
+    _subscribeBroadcast() {
+      if (this._bc || typeof global.BroadcastChannel !== 'function') return;
+      try {
+        this._bc = new global.BroadcastChannel(this._bcName);
+        this._bc.onmessage = (ev) => {
+          const d = ev && ev.data;
+          if (d && d.type === 'write' && Array.isArray(d.keys)) {
+            this._handleIdbExternal(d).catch(() => { /* 跨标签同步失败不打断本标签 */ });
+          }
+        };
+        if (typeof this._bc.unref === 'function') this._bc.unref();
+      } catch (_) { this._bc = null; }
+    },
+
+    /** 本标签写入成功 → 广播键名，其他标签刷新缓存（不广播值，避免重复传输大分片） */
+    _broadcastIdbWrite(keys) {
+      if (!this._bc || !keys || !keys.length) return;
+      try { this._bc.postMessage({ type: 'write', keys: keys }); } catch (_) { /* ignore */ }
+    },
+
+    /**
+     * 其他标签写入后的缓存同步：按键重读 IDB；注册了合并策略的键按策略合并，
+     * 本地仍有待写值时把待写同步为合并结果（避免后续 flush 用旧值覆盖远端）。
+     */
+    async _handleIdbExternal(d) {
+      if (!this._isIdb() || !d || !Array.isArray(d.keys)) return;
+      const keys = d.keys.slice();
+      const values = {};
+      await Promise.all(keys.map((k) => QB.Store.get(k).then((v) => { values[k] = v; }, () => { values[k] = undefined; })));
+      keys.forEach((k) => {
+        const v = values[k];
+        const hook = this._mergeHookFor(k);
+        if (v === undefined) {
+          this._cache.delete(k);
+          this._pending.delete(k);
+        } else if (hook) {
+          const merged = hook.merge(this._cache.get(k), v);
+          this._cache.set(k, merged);
+          if (this._pending.has(k)) this._pending.set(k, merged);
+        } else {
+          this._cache.set(k, v);
+          this._pending.delete(k);
+        }
+      });
+    },
+
+    /* ---------------- 错误通知与待写落盘 ---------------- */
+
+    _notifyError(e) {
+      this.lastError = e;
+      this._errorListeners.forEach((fn) => { try { fn(e); } catch (_) { /* 忽略监听器异常 */ } });
+    },
+
+    /** LS 模式：一次真实落盘（抛错方决定提示）；成功清空待写队列 */
     _writeNow() {
       if (!this._pending.size) return;
       const snapshot = Array.from(this._pending.entries());
       try {
         snapshot.forEach(([key, value]) => {
-          global.localStorage.setItem(this._fullKey(key), JSON.stringify(value));
+          global.localStorage.setItem(fullKeyOf(key), JSON.stringify(value));
         });
         snapshot.forEach(([key]) => this._pending.delete(key));
       } catch (e) {
         // 落盘失败：待写队列保留（下次重试），错误可观测并上抛，不假装成功
-        this.lastError = e;
-        this._errorListeners.forEach((fn) => { try { fn(e); } catch (_) { /* 忽略监听器异常 */ } });
+        this._notifyError(e);
         throw e;
       }
     },
 
+    /** 把引导标记同步写 LocalStorage（IDB 模式下的迁移锁/后端标记依赖同步可见） */
+    _writeBootstrap(key, value) {
+      global.localStorage.setItem(fullKeyOf(key), JSON.stringify(value));
+      this._cache.set(key, value);
+      this._pending.delete(key);
+      return true;
+    },
+    _deleteBootstrap(key) {
+      global.localStorage.removeItem(fullKeyOf(key));
+      this._cache.delete(key);
+      this._pending.delete(key);
+    },
+
+    /** 入队一次写/删（IDB 模式；同一微任务内的多次调用合并为一个事务） */
+    _enqueue(op) {
+      if (op.op === 'clear') {
+        this._clearPending = true;
+        this._ops.clear();
+      } else {
+        this._ops.set(op.key, op);
+      }
+      if (!this._flushScheduled) {
+        this._flushScheduled = true;
+        queueMicrotask(() => {
+          this._flushScheduled = false;
+          this.flush().catch(() => { /* 失败已由 onError 通知；待写保留重试 */ });
+        });
+      }
+    },
+
+    /**
+     * 立即把待写数据落盘。LS 模式同步写入并返回已 resolve 的 Promise；
+     * IDB 模式串行化事务并返回落盘 Promise（失败时 reject）。
+     */
+    flush() {
+      this._cancelSchedule();
+      const run = () => this._flushOps();
+      this._flushChain = this._flushChain.then(run, run);
+      return this._flushChain;
+    },
+
+    _flushOps() {
+      if (!this._isIdb()) {
+        try {
+          this._writeNow();
+          return Promise.resolve();
+        } catch (e) {
+          return Promise.reject(e);
+        }
+      }
+      const ops = Array.from(this._ops.values());
+      const clear = this._clearPending;
+      if (!ops.length && !clear) return Promise.resolve();
+      this._ops = new Map();
+      this._clearPending = false;
+      const payload = (clear ? [{ op: 'clear' }] : []).concat(ops.map((op) => ({ op: op.op, key: op.key, value: op.value })));
+      return QB.Store.batch(payload).then(() => {
+        if (clear) this._pending.clear();
+        ops.forEach((op) => {
+          // 仅当待写值仍是这一批写入的值才出队；期间被覆盖的新值留给下一批
+          if (this._pending.has(op.key) && this._pending.get(op.key) === op.value) this._pending.delete(op.key);
+        });
+      }).catch((e) => {
+        // 事务已整体回滚：把这一批重新入队（同键更新的新操作优先）
+        ops.forEach((op) => { if (!this._ops.has(op.key)) this._ops.set(op.key, op); });
+        if (clear) this._clearPending = true;
+        this._notifyError(e);
+        this._scheduleRetry();
+        throw e;
+      });
+    },
+
+    _scheduleRetry() {
+      if (this._retryTimer) return;
+      this._retryTimer = setTimeout(() => {
+        this._retryTimer = null;
+        if (!this._isIdb() || (!this._ops.size && !this._clearPending)) return;
+        this.flush().catch(() => { /* onError 已通知；等下一次用户写入再重试 */ });
+      }, 1000);
+    },
+
     /**
      * 同步写穿透：立即落盘并在失败时抛错（事务语义）。
-     * 用于学习数据等关键单写（SRS 评分、权重保存、题库级联）。
+     * LS 模式：真实同步落盘，失败抛出。
+     * IDB 模式：更新缓存 + 入队微任务事务（同一调用栈内的多次写入合并为一个原子事务）；
+     *   异步失败经 onError 通知，`await flush()` 可确认落盘。
      */
     setSync(key, value) {
+      if (this._isIdb() && isBootstrapKey(key)) {
+        try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
+      }
       this._cache.set(key, value);
       this._pending.set(key, value);
+      if (this._isIdb()) {
+        this._enqueue({ op: 'set', key: key, value: value });
+        return true;
+      }
       this._cancelSchedule();
       this._writeNow();
       return true;
     },
 
     /**
-     * 防抖写入（批量路径用）：只更新内存并安排落盘；需要确认成功时调 forceSync。
+     * 防抖写入（批量路径用）：只更新内存并安排落盘；需要确认成功时调 forceSync/flush。
+     * IDB 模式下同样走微任务聚合（不额外等待 200ms）。
      */
     set(key, value) {
+      if (this._isIdb() && isBootstrapKey(key)) {
+        try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
+      }
       this._cache.set(key, value);
       this._pending.set(key, value);
+      if (this._isIdb()) {
+        this._enqueue({ op: 'set', key: key, value: value });
+        return true;
+      }
       this._scheduleFlush();
       return true;
     },
 
     _scheduleFlush() {
+      if (this._isIdb()) return;
       if (this._timer) return;
       this._timer = setTimeout(() => {
         this._timer = null;
@@ -74,7 +296,6 @@
           this._writeNow();
         } catch (e) {
           console.error('[Storage] 写入失败（配额不足？），数据保留在内存待重试：', e);
-          // 防抖后台失败不打断调用链，但安排一次重试让后续写入带动恢复
           this._scheduleFlush();
         }
       }, WRITE_DELAY);
@@ -97,30 +318,40 @@
     },
 
     /**
-     * 立即把待写数据落盘；失败抛错（备份/退出/关键事务前调用）。
+     * 立即把待写数据落盘；LS 失败抛错（备份/退出/关键事务前调用）。
+     * IDB 模式异步落盘，失败经 onError；需要等待时用 `flush()`。
      */
     forceSync() {
       this._cancelSchedule();
+      if (this._isIdb()) {
+        this.flush().catch(() => { /* onError 已通知；待写保留 */ });
+        return;
+      }
       this._writeNow();
     },
 
-    /**
-     * 删除（同步生效）；同样经缓存与跨标签事件。
-     */
+    /** 删除；LS 模式同步生效，IDB 模式入队删除（缓存立即失效） */
     remove(key) {
       this._cache.delete(key);
       this._pending.delete(key);
+      if (this._isIdb() && isBootstrapKey(key)) {
+        this._deleteBootstrap(key);
+        return;
+      }
+      if (this._isIdb()) {
+        this._enqueue({ op: 'del', key: key });
+        return;
+      }
       try {
-        global.localStorage.removeItem(this._fullKey(key));
+        global.localStorage.removeItem(fullKeyOf(key));
       } catch (e) {
-        this.lastError = e;
-        this._errorListeners.forEach((fn) => { try { fn(e); } catch (_) { } });
+        this._notifyError(e);
         throw e;
       }
     },
 
     /**
-     * 注册跨标签合并策略（公共抽象）：匹配键在 storage 事件时用 merge(local, incoming)
+     * 注册跨标签合并策略（公共抽象）：匹配键在外部变更时用 merge(local, incoming)
      * 合并而非整值覆盖。返回取消函数。用于复习调度表等「按键合并才不丢进度」的数据。
      */
     registerMerge(match, merge) {
@@ -142,12 +373,12 @@
 
     /**
      * 跨标签页 storage 事件：其他标签改动时同步/失效本地缓存（供测试直接调用）。
-     * 注册了合并策略的键（如 user:review:<bankId>）不整值覆盖，而是与本地缓存合并；
-     * 若本地尚有未落盘快照，把待写值同步为合并结果，避免防抖 flush 用旧值覆盖远端。
+     * IDB 模式下 LocalStorage 事件只承载引导标记（业务键走 BroadcastChannel）。
      */
     _handleExternalChange(ev) {
       if (!ev || !ev.key || ev.key.indexOf(PREFIX + ':') !== 0) return;
       const key = ev.key.slice(PREFIX.length + 1);
+      if (this._isIdb() && !isBootstrapKey(key)) return;
       if (ev.newValue === null) {
         this._cache.delete(key);
         this._pending.delete(key);
@@ -170,14 +401,16 @@
     },
 
     /**
-     * 从 localStorage 读取（带缓存）。
+     * 从存储读取（带缓存）。
      * defaultValue：原始值为 null/undefined 时返回（默认 undefined）。
      */
     get(key, defaultValue) {
       if (this._cache.has(key) || this._pending.has(key)) return this._cache.get(key);
+      // IDB 模式：启动已全量水合，缓存即权威；缺失就是缺失（不回读磁盘，避免同步 API 变异步）
+      if (this._isIdb()) return defaultValue;
       let value;
       try {
-        const raw = global.localStorage.getItem(this._fullKey(key));
+        const raw = global.localStorage.getItem(fullKeyOf(key));
         value = raw === null ? undefined : JSON.parse(raw);
       } catch (e) {
         console.warn('[Storage] 读取失败 key=' + key, e);
@@ -195,18 +428,21 @@
     },
 
     /**
-     * 绕过内存缓存直读 localStorage，并刷新缓存（供「写前重读最新快照」的合并写使用）。
-     * 本标签若对该键有未落盘的待写值，则以待写值为准（它比本标签磁盘快照更新；跨标签
-     * 外部改动已由 storage 事件先合并进缓存），避免防抖窗口内读不到自己刚写的数据。
+     * 「写前重读最新快照」：本标签有未落盘待写值时以待写值为准。
+     * LS 模式绕过缓存直读磁盘；IDB 模式读水合缓存（跨标签最新值由 BroadcastChannel 合并）。
      */
     getFresh(key, defaultValue) {
       if (this._pending.has(key)) {
         const pendingValue = this._cache.get(key);
         return pendingValue === undefined ? defaultValue : pendingValue;
       }
+      if (this._isIdb()) {
+        if (this._cache.has(key)) return this._cache.get(key);
+        return defaultValue;
+      }
       let value;
       try {
-        const raw = global.localStorage.getItem(this._fullKey(key));
+        const raw = global.localStorage.getItem(fullKeyOf(key));
         value = raw === null ? undefined : JSON.parse(raw);
       } catch (e) {
         this._cache.delete(key);
@@ -223,8 +459,14 @@
       return value;
     },
 
-    /** 列出所有逻辑键（合并磁盘与内存，避免防抖未落盘时漏键） */
+    /** 列出所有逻辑键（合并存储与内存，避免防抖未落盘时漏键） */
     keys() {
+      if (this._isIdb()) {
+        const out = new Set();
+        this._cache.forEach((v, k) => { if (v !== undefined) out.add(k); });
+        this._pending.forEach((v, k) => { if (v !== undefined) out.add(k); });
+        return Array.from(out);
+      }
       QB.Storage.forceSync();
       const out = new Set();
       try {
@@ -241,6 +483,16 @@
     },
 
     clearAll() {
+      if (this._isIdb()) {
+        // 保留引导标记（后端选择/迁移标记），业务键清空
+        const keep = new Map();
+        this._cache.forEach((v, k) => { if (isBootstrapKey(k)) keep.set(k, v); });
+        this._cache = keep;
+        this._pending.clear();
+        this._retryTimer = null;
+        this._enqueue({ op: 'clear' });
+        return;
+      }
       this._cache.clear();
       this._pending.clear();
       try {
@@ -255,12 +507,43 @@
 
     /** 估算当前占用字节数（键+值，UTF-16 近似：每个字符 2 字节） */
     usageBytes() {
+      if (this._isIdb()) {
+        let total = 0;
+        this._cache.forEach((v, k) => {
+          if (v === undefined) return;
+          total += (JSON.stringify(v).length + k.length + 2) * 2;
+        });
+        this._pending.forEach((v, k) => {
+          if (v === undefined || this._cache.has(k)) return;
+          total += (JSON.stringify(v).length + k.length + 2) * 2;
+        });
+        return total;
+      }
       let total = 0;
       this.keys().forEach((k) => {
-        const raw = global.localStorage.getItem(this._fullKey(k)) || '';
+        const raw = global.localStorage.getItem(fullKeyOf(k)) || '';
         total += (raw.length + k.length + 2) * 2;
       });
       return total;
+    },
+
+    /**
+     * 容量估算（异步）：IDB 模式读实际落盘统计 + 浏览器 estimate（若可用）；
+     * LS 模式返回同口径序列化估算。**Node/内存 IDB 下为估算口径**。
+     */
+    async estimate() {
+      if (QB.Store && this._isIdb()) {
+        try {
+          const e = await QB.Store.estimate();
+          return Object.assign({}, e, { pending: this._pending.size });
+        } catch (_) { /* 回落本地估算 */ }
+      }
+      const bytes = this.usageBytes();
+      return {
+        backend: this.mode, keys: this.keys().length, bytes: bytes,
+        pending: this._pending.size, browser: null,
+        source: 'serialized-estimate'
+      };
     }
   };
 
