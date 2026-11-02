@@ -345,4 +345,11 @@ LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务
 - **IDB 不可用（隐私模式/配额拒绝/版本冲突）→ 回落 LocalStorage**：回到 §9.1 口径，保守建议上限约 **2,900 题**（5MB/1.72KB），70% 告警线约 **2,000 题**；超过即应导出备份、改用 API 后端（`DATA_BACKEND='api'`）或分机存放。
 - UI 已有「本地存储」健康卡（`QB.UIRenderer.renderStorageHealth`）：≥70% 警告、≥85% 危险；写盘失败经 `Storage.onError` 全局提示。IDB 模式下该卡显示 `QB.Store.estimate()` 的估算值。
 - **双份占用自动收敛（H3）**：迁移完成当次保留 LS 旧数据（`lsBackupState='retained'`）作为退路；**下一次启动** `Store.init()` 先校验 IDB 可读（题目数 >0 且与分片清单一致），通过后自动清理 LS（只保留 `BOOTSTRAP_KEYS`）并写 `meta:lsCleanupAt` + `lsBackupState='cleaned'`。实测回收：5k **5,054 键 / 4.80 MB**（5ms）、20k **20,204 键 / 19.36 MB**（22ms）、50k **50,354 键 / 43.81 MB**（76ms）；清理后 LS 业务占用为 0、IDB 题目数不变。清理失败不删除任何一侧（IDB 完好，下次启动可重试），此后回退只能依赖全量备份；备份弹窗仍保留手动入口。
-- **仍属未验证/后续项**：浏览器真实 IDB 配额与清理策略、隐私模式下 `indexedDB.open` 的具体失败形态、多标签 IDB 事务/锁的浏览器实现差异——本阶段只以 Node 内存实现与单测覆盖语义，浏览器实机未跑。
+- **浏览器的剩余未验证项**：真实隐私模式下的具体失败形态（2026-11-02 的复现是用 CDP 注入 `indexedDB.open` 抛 `SecurityError`，不是真实无痕窗口）、多标签 IDB 事务的浏览器实现差异、长期使用后的配额回收策略。
+
+### 9.4 真实浏览器验证口径（Edge 151 / Chromium 151，2026-11-02）
+
+- **`estimate().usage` 不含 LocalStorage**：Chromium 的 `navigator.storage.estimate().usage` 只统计 IndexedDB（LevelDB 压缩后的磁盘占用），**不含 localStorage**。因此迁移前后 usage 可能不变（LS 旧数据在迁移完成当次仍保留），清理 LS 后 usage 也不下降——LS 占用必须用 `QB.Storage.usageBytes()` 或字符数单独统计，不能拿 usage 差判断 LS 是否清理。实测：bench5k 迁移后 usage 6,905,856（quota 3,228,131,328）；重启清理 LS（5,059 键 / 5,043,018B）前后 usage 相同。
+- **20k 全量夹具写不进真实 LocalStorage**：bench20k 全量载荷 8,130,165 字符 / 16,260,330B，写入第 **102** 个键 `qb:user:review:bank_mvz7bzr3nowiia`（2,176,585 字符，写入前 4,971,931 字符）时抛 `QuotaExceededError`。实测上限：单键 5,242,871 字符（10,485,742B UTF-16）、多键累计约 4,980,736 字符后失败；因此 v6 的 20k 浏览器验收使用精简夹具（4,153,248 字符）完成，真实 LS 无法承载 20k 全量是**预期结论**，不是迁移缺陷。
+- **Node 与真机偏差**：真机 `Migration.run` 完整耗时 bench5k **505.1ms**（Node 侧迁移打点 163.04ms，约 **3.10×**）、compact20k **496.7ms**（Node 218.86ms，约 **2.27×**）；仅 `migrateToIdb` 阶段为 358.9ms / 315.7ms（Node 163.04ms / 218.86ms）。差异来自浏览器结构化克隆、LevelDB 落盘与 CDP 插桩开销，Node 内存 IDB 只用于语义回归，不用于宣称真机性能。
+- **IDB usage 是压缩后磁盘占用**：IDB usage 与同数据字符数的比值实测约 **0.10×~1.37×**（如 5k 随机数据 5,043,018B 载荷对应 usage 6,905,856，20k 精简 9,049,574B 对应 4,972,544），不能按 UTF-16 字符数线性换算。
