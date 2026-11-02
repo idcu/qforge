@@ -281,6 +281,13 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 
 **迁移前自动备份（F1，2026-11-02）**：`Migration.run` 抢锁后、任何写入前调用 `QB.Backup.saveAutoBackup`，复用同一 `buildBackup`/`readAllData` 链路（不复制导出逻辑），信封字段 `{app:'qforge-backup', version, schemaVersion, exportedAt, data, progress:{purpose:'pre-migration', phase:'captured'|'migrated', fromVersion, toVersion, startedAt, doneAt}}`。存储优先 IndexedDB（库 `qforge-backup` / store `snapshots` / key `pre-migration`，不占 LocalStorage 配额），无 IndexedDB（Node 测试/受限环境）回落 `qb:meta:migrationBackup`；写入后**回读校验**，失败清理半写并抛错 → 迁移立即中止（未写入任何数据）。备份文件本身就是标准信封，可直接走 `applyBackup`（备份弹窗「恢复迁移前自动备份」按钮；恢复后提示刷新页面），与手动下载的全量备份同构、可被现有恢复流程读回。
 
+**跨版本降级恢复（F3，2026-11-02）**：默认备份信封 `schemaVersion: 5`。旧客户端（schema ≤4）的 `assertCompatible` 会**明确拒绝**并给出可读错误（「备份 schema v5 高于当前客户端 v4，请先升级 qforge 再恢复（未写入任何数据）」），不会静默半恢复（复习状态看似在、hash 被当新题）。若确需恢复到旧客户端，走备份弹窗「**下载兼容旧版备份（schema ≤4）**」→ `buildBackup(now, {legacy:true})` → `QB.Backup.toLegacyPayload`：
+- 题目分片折叠为旧单 blob `questions:<bankId>`（剔除清单与分片键）；
+- contentHash **v3→v2**（`QB.makeLegacyContentHash`，与旧算法逐字节一致，复用同一 `semanticPayload`，避免两套题面归一逻辑漂移）；复习整表键、错题 `questionKey`、收藏 `questionKey`、评分日志 `h` 同步降级（无对应题目的孤儿状态保留原值）；
+- `meta:schemaVersion` **固定写 4**（缺键时也不留空，避免旧客户端误判后重跑迁移）。
+
+**32 位 hash 冲突**：旧客户端只认 32 位 hash，两题碰撞会被静默合并为一题——因此导出阶段检测冲突（`v3→v2` 多对一）并**直接抛错中止**，不产出半可用文件；错误信息提示改用 API 后端或升级旧客户端。反向不支持「就地降级本地库」，仅提供兼容导出。新客户端恢复兼容备份后由 `applyBackup` → `Migration.run({force:true})` + `ensureLayout()` 重算 v3 并重映射复习/错题/收藏/日志，`scripts/backup.test.mjs` 覆盖「构造 v5 → 兼容导出 → 清空 → 恢复」逐项断言。
+
 ## 8. 数据访问契约（阶段 C，代码侧权威）
 
 LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务模块）与本子系统的存储都只经门面 `QB.DB` 的 7 组 Repository（`banks/questions/progress/reviews/revlog/weights/backup` + 资产驱动契约）。契约归属、异步形状与「禁止双向委托」的约束见 [API-CONTRACT.md](API-CONTRACT.md) §9 与 [SRS.md](SRS.md) §9.1。

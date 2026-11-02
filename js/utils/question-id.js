@@ -81,6 +81,28 @@
     return typeof h === 'string' && h.indexOf(HASH_VERSION + ':') === 0;
   };
 
+  /** FNV-1a 32 位散列 → 8 位十六进制（旧 v2 兼容导出专用，唯一实现见 utils/fnv.js） */
+  function fnv1a32(str) {
+    return QB.FNV.toHex(QB.FNV.hashString(str));
+  }
+
+  /**
+   * 旧客户端（schema ≤4）兼容 hash：与 v2 算法逐字节一致（`2:` + FNV-1a 32 位）。
+   * 仅供「降级兼容备份」导出使用；运行期判分/去重仍走 v3。
+   * 与 v3 同一语义负载，避免两套题面归一逻辑漂移。
+   */
+  QB.makeLegacyContentHash = function makeLegacyContentHash(q) {
+    const payload = semanticPayload(q);
+    if (payload.t === 'material') {
+      const material = normText((q && q.material) || '');
+      const children = ((q && Array.isArray(q.children) ? q.children : []))
+        .map((c) => JSON.stringify(semanticPayload(c)))
+        .join('||');
+      return '2:' + fnv1a32('material|' + payload.q + '||' + material + '||' + children);
+    }
+    return '2:' + fnv1a32(JSON.stringify(payload));
+  };
+
   /**
    * 旧版 hash 识别（迁移/双读去重使用）：
    *   '2:<8hex>' = v2；裸 8hex = v1。空/其它返回 null。

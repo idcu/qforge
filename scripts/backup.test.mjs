@@ -292,6 +292,86 @@ section('applyBackup 跨布局：api 后端 + 本地载荷（反向转换）');
   clearAll();
 }
 
+section('跨版本降级（F3）：v5 数据 → 旧客户端兼容导出 → 新客户端恢复归一');
+{
+  clearAll();
+  const bankId = (await QB.DB.banks.create({ name: '降级库' })).id;
+  await QB.DB.questions.insertMany(bankId, [
+    { type: 'single', question: '降级题一', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' },
+    { type: 'judge', question: '降级题二', options: [], answer: '正确' }
+  ], { dedupe: false });
+  const items = (await QB.DB.questions.list(bankId, {})).items;
+  eq(items.length, 2, '构造 2 道题');
+  ok(items.every((q) => QB.isCurrentHash(q.contentHash)), '源数据使用 v3 hash');
+  await QB.SRSStore.grade(bankId, items[0], QB.SRS.RATINGS.good, Date.now());
+  await QB.DB.progress.wrongAdd(bankId, items[1]);
+  await QB.DB.progress.favoriteToggle(bankId, items[1]);
+
+  // 默认导出：标记 v5，旧客户端（≤4）会明确拒绝，不会半恢复
+  const cur = await QB.Backup.buildBackup();
+  eq(cur.schemaVersion, QB.Migration.SCHEMA_VERSION, '默认导出信封为当前 schema v' + QB.Migration.SCHEMA_VERSION);
+  let highThrew = false, highMsg = '';
+  try {
+    await QB.Backup.applyBackup({ app: 'qforge-backup', version: 'x', schemaVersion: QB.Migration.SCHEMA_VERSION + 1, exportedAt: '', data: {} });
+  } catch (e) { highThrew = true; highMsg = e.message; }
+  ok(highThrew && highMsg.indexOf('高于当前客户端') >= 0, '高版本备份明确拒绝且错误可读（' + highMsg + '）');
+
+  // 兼容导出：schema 4 + v2 hash + 旧整表布局
+  const legacy = await QB.Backup.buildBackup(1700000000000, { legacy: true });
+  eq(legacy.schemaVersion, 4, '兼容导出信封 schemaVersion=4');
+  eq(legacy.data[QB.KEYS.metaSchema], 4, '载荷内 schema 标记降为 4');
+  eq(Object.keys(legacy.data).filter((k) => k.indexOf(QB.KEYS.questions(bankId) + ':') === 0).length, 0, '旧布局无分片/清单键');
+  const legacyList = legacy.data[QB.KEYS.questions(bankId)];
+  eq(legacyList.length, 2, '题目折叠为单 blob');
+  ok(legacyList.every((q) => /^2:[0-9a-f]{8}$/.test(q.contentHash)), '题目 hash 全部降级为 v2');
+  ok(legacyList.every((q) => q.contentHash === QB.makeLegacyContentHash(q)), 'v2 hash 与旧算法逐题一致');
+  const reviewTable = legacy.data[QB.KEYS.review(bankId)];
+  eq(Object.keys(reviewTable).length, 1, '复习整表 1 条');
+  ok(Object.keys(reviewTable).every((h) => /^2:[0-9a-f]{8}$/.test(h)), '复习状态 hash 降级为 v2');
+  const legacyWrong = legacy.data[QB.KEYS.wrong(bankId)];
+  eq(legacyWrong.length, 1, '错题 1 条');
+  ok(/^2:[0-9a-f]{8}$/.test(legacyWrong[0].questionKey), '错题键 hash 降级为 v2');
+  const legacyFav = legacy.data[QB.KEYS.favorite(bankId)];
+  ok(legacyFav.length === 1 && /^2:[0-9a-f]{8}$/.test(legacyFav[0].questionKey), '收藏键 hash 降级为 v2');
+  const legacyRl = legacy.data[QB.KEYS.revlog] || [];
+  ok(legacyRl.length >= 1 && legacyRl.every((e) => /^2:[0-9a-f]{8}$/.test(e.h)), '复习日志 hash 降级为 v2（' + legacyRl.length + ' 条）');
+  ok(!legacy.data[QB.KEYS.revlogMeta], '旧布局不含分段日志清单');
+  eq(legacy.data[QB.KEYS.reviewState(bankId, 'x')], undefined, '旧布局不含 per-hash 复习键');
+
+  // 清空后用兼容备份恢复：Migration 归一为 v3，复习/错题/收藏/日志逐项回位（无静默半恢复）
+  clearAll();
+  const restored = await QB.Backup.applyBackup(legacy);
+  eq(restored.keys, Object.keys(legacy.data).length, '恢复写入键数与备份一致');
+  eq((await QB.DB.banks.list()).length, 1, '题库恢复 1 个');
+  const rItems = (await QB.DB.questions.list(bankId, {})).items;
+  eq(rItems.length, 2, '题目恢复 2 道');
+  ok(rItems.every((q) => QB.isCurrentHash(q.contentHash)), '恢复后 Migration 归一为 v3 hash');
+  const rSrs = await QB.SRSStore.getState(bankId, rItems[0]);
+  ok(!!rSrs && rSrs.reps >= 1, 'SRS 状态随 hash 重映射恢复（reps=' + (rSrs && rSrs.reps) + '）');
+  eq((await QB.DB.progress.wrongList(bankId)).length, 1, '错题恢复 1 条');
+  eq((await QB.DB.progress.favoriteList(bankId)).length, 1, '收藏恢复 1 条');
+  eq(QB.DB.revlog.list().length, legacyRl.length, '复习日志恢复条数一致');
+}
+
+section('跨版本降级（F3）：32 位 hash 冲突拒绝导出');
+{
+  clearAll();
+  const bankId = (await QB.DB.banks.create({ name: '冲突库' })).id;
+  await QB.DB.questions.insertMany(bankId, [
+    { type: 'single', question: '冲突题一', options: [{ letter: 'A', text: '甲' }], answer: 'A' },
+    { type: 'single', question: '冲突题二', options: [{ letter: 'A', text: '乙' }], answer: 'B' }
+  ], { dedupe: false });
+  const orig = QB.makeLegacyContentHash;
+  QB.makeLegacyContentHash = () => '2:00000000'; // 模拟 32 位碰撞
+  let err = null;
+  try { QB.Backup.toLegacyPayload(QB.Backup.readAllData()); } catch (e) { err = e; }
+  QB.makeLegacyContentHash = orig;
+  ok(!!err && err.message.indexOf('32 位旧 hash 下冲突') >= 0, '冲突时拒绝导出（不产出半可用文件）');
+  ok(!!err && err.message.indexOf('升级旧客户端') >= 0, '错误信息给出可操作建议');
+  const again = QB.Backup.toLegacyPayload(QB.Backup.readAllData());
+  ok(again[QB.KEYS.questions(bankId)].every((q) => /^2:/.test(q.contentHash)), '恢复算法后正常导出');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

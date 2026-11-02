@@ -115,20 +115,112 @@
   }
 
   /**
+   * v5 备份载荷 → 旧客户端（schema ≤4）兼容载荷（纯函数，不改输入）。
+   * 降级内容：题目分片折叠为单 blob、contentHash v3→v2、复习整表键 / wrong / fav / revlog
+   * 的 hash 同步降级、`meta:schemaVersion` 置 4（旧客户端的当前版本）。
+   * 32 位旧 hash 若发生冲突，旧客户端会静默把两题并作一题 → **直接拒绝导出**，不产出半可用文件。
+   * @param {Object} data 已折叠的本地布局载荷
+   * @returns {Object}
+   */
+  function toLegacyPayload(data) {
+    const src = foldLayout(isPlainMap(data) ? data : {});
+    const out = {};
+    const banks = new Map(); // bankId -> { shards: [[i, list]], legacy: list|null }
+    const Q_PREFIX = QB.KEYS.questions('');
+
+    Object.keys(src).forEach((k) => {
+      if (k.indexOf(Q_PREFIX) !== 0) return;
+      const rest = k.slice(Q_PREFIX.length);
+      const cut = rest.indexOf(':');
+      const bankId = cut < 0 ? rest : rest.slice(0, cut);
+      const tail = cut < 0 ? '' : rest.slice(cut + 1);
+      if (!bankId || tail === 'meta') return; // 单 blob 布局无清单
+      const entry = banks.get(bankId) || { shards: [], legacy: null };
+      if (tail === '') {
+        if (Array.isArray(src[k])) entry.legacy = src[k];
+      } else if (/^\d+$/.test(tail) && Array.isArray(src[k])) {
+        entry.shards.push([Number(tail), src[k]]);
+      } else {
+        out[k] = src[k]; // 未知 questions 键不静默吞掉
+        return;
+      }
+      banks.set(bankId, entry);
+    });
+
+    const hashMap = new Map(); // v3 → v2
+    const reverse = new Map(); // v2 → v3（冲突检测）
+    const collisions = [];
+    const downgrade = (h) => hashMap.has(h) ? hashMap.get(h) : h; // 孤儿状态保留原值
+
+    banks.forEach((entry, bankId) => {
+      const list = entry.shards.length
+        ? entry.shards.sort((a, b) => a[0] - b[0]).reduce((acc, s) => acc.concat(s[1]), [])
+        : (entry.legacy || []);
+      out[QB.KEYS.questions(bankId)] = list.map((q) => {
+        const v3 = q && q.contentHash;
+        const v2 = QB.makeLegacyContentHash(q);
+        if (v3) {
+          const prev = reverse.get(v2);
+          if (prev && prev !== v3) collisions.push({ v2: v2, a: prev, b: v3 });
+          else reverse.set(v2, v3);
+          hashMap.set(v3, v2);
+        }
+        return Object.assign({}, q, { contentHash: v2 });
+      });
+    });
+
+    if (collisions.length) {
+      const c = collisions[0];
+      throw new Error('无法导出兼容旧版备份：' + collisions.length + ' 组题目在 32 位旧 hash 下冲突'
+        + '（' + c.v2 + '：' + c.a + ' / ' + c.b + '），旧客户端会静默合并。请改用 API 后端或升级旧客户端。');
+    }
+
+    const REVIEW_PREFIX = QB.KEYS.review('');
+    Object.keys(src).forEach((k) => {
+      if (k.indexOf(Q_PREFIX) === 0) return;
+      if (k.indexOf(REVIEW_PREFIX) === 0) {
+        const bankId = k.slice(REVIEW_PREFIX.length);
+        const table = src[k];
+        if (!bankId || bankId.indexOf(':') >= 0 || !isPlainMap(table)) { out[k] = table; return; }
+        const mapped = {};
+        Object.keys(table).forEach((h) => { mapped[downgrade(h)] = table[h]; });
+        out[k] = mapped;
+        return;
+      }
+      if (k.indexOf(QB.KEYS.wrong('')) === 0 || k.indexOf(QB.KEYS.favorite('')) === 0) {
+        out[k] = (Array.isArray(src[k]) ? src[k] : []).map((e) => Object.assign({}, e, { questionKey: downgrade(e.questionKey) }));
+        return;
+      }
+      if (k === QB.KEYS.revlog) {
+        out[k] = (Array.isArray(src[k]) ? src[k] : []).map((e) => Object.assign({}, e, { h: downgrade(e.h) }));
+        return;
+      }
+      if (k === QB.KEYS.metaSchema) return; // 统一在末尾固定写 4，避免缺键时旧客户端误判
+      out[k] = src[k];
+    });
+    out[QB.KEYS.metaSchema] = 4;
+    return out;
+  }
+
+  /**
    * 读取全部应用数据 → 备份对象（值为已解析的 JS 对象；敏感密码已脱敏）。
    * 载荷经 QB.DB.backup.export（local=LocalStorage / api=REST），故为异步。
    * @param {number} [now]
-   * @param {{progress?:Object}} [opts] progress：自动备份的进度标记（阶段/版本/时间戳）
+   * @param {{progress?:Object, legacy?:boolean}} [opts]
+   *   progress：自动备份的进度标记（阶段/版本/时间戳）；
+   *   legacy：导出兼容旧客户端（schema ≤4）的格式（v2 hash + 单 blob + 整表复习/日志）
    * @returns {Promise<Object>}
    */
   async function buildBackup(now, opts) {
     const payload = await QB.DB.backup.export();
+    const legacy = !!(opts && opts.legacy);
+    const rawData = (payload && payload.data) || {};
     const out = {
       app: MAGIC,
       version: QB.CONFIG.VERSION,
-      schemaVersion: QB.Migration ? QB.Migration.SCHEMA_VERSION : 0,
+      schemaVersion: legacy ? 4 : (QB.Migration ? QB.Migration.SCHEMA_VERSION : 0),
       exportedAt: new Date(now == null ? Date.now() : now).toISOString(),
-      data: redactSecrets((payload && payload.data) || {})
+      data: redactSecrets(legacy ? toLegacyPayload(rawData) : rawData)
     };
     const progress = opts && opts.progress;
     if (progress && typeof progress === 'object') out.progress = progress;
@@ -461,15 +553,16 @@
 
   /**
    * 有图片资产时打 ZIP 包；无资产返回 null（调用方走纯 JSON 旧路径，保持兼容）
+   * @param {Object} [payload] 已构建的备份对象（缺省按当前数据构建；降级导出复用同一打包链路）
    * @returns {Promise<{content:ArrayBuffer, assetCount:number}|null>}
    */
-  async function buildAssetBundle() {
+  async function buildAssetBundle(payload) {
     QB.Storage.forceSync();
     const assets = await QB.Assets.allEntries();
     if (!assets.length) return null;
-    const payload = await buildBackup();
+    const body = payload || await buildBackup();
     return {
-      content: QB.Qbk.buildBundle('backup.json', JSON.stringify(payload, null, 2), assets),
+      content: QB.Qbk.buildBundle('backup.json', JSON.stringify(body, null, 2), assets),
       assetCount: assets.length
     };
   }
@@ -494,16 +587,23 @@
 
   /* ---------------- 浏览器外壳 ---------------- */
 
-  async function download(filename) {
-    const bundle = await buildAssetBundle();
+  /**
+   * 下载备份文件。
+   * @param {string} [filename]
+   * @param {{legacy?:boolean}} [opts] legacy：导出兼容旧客户端（schema ≤4）的格式
+   */
+  async function download(filename, opts) {
+    const legacy = !!(opts && opts.legacy);
+    const payload = await buildBackup(undefined, { legacy: legacy });
+    const bundle = await buildAssetBundle(payload);
+    const suffix = legacy ? '-legacy' : '';
     let blob, name;
     if (bundle) {
       blob = new Blob([bundle.content], { type: 'application/zip' });
-      name = filename || ('qforge-backup-' + new Date().toISOString().slice(0, 10) + '.qfbk');
+      name = filename || ('qforge-backup' + suffix + '-' + new Date().toISOString().slice(0, 10) + '.qfbk');
     } else {
-      const payload = await buildBackup();
       blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-      name = filename || ('qforge-backup-' + new Date().toISOString().slice(0, 10) + '.json');
+      name = filename || ('qforge-backup' + suffix + '-' + new Date().toISOString().slice(0, 10) + '.json');
     }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -594,8 +694,10 @@
       '</div></div>' +
       '<p class="li-meta">备份包含全部题库、题目、错题、收藏、复习计划、历史记录、偏好与题目图片：无图时导出 .json，含图时自动打包为 .qfbk（ZIP）。可在另一台设备/浏览器恢复。</p>' +
       '<p class="li-meta" style="color:var(--text-light)">🔒 WebDAV 密码不会写入备份（地址/账号保留，恢复后需重新填写密码），备份文件可安全分享。</p>' +
+      '<p class="li-meta" style="color:var(--text-light)">兼容旧版备份会把 contentHash 降级为 32 位（v2）并折叠为旧布局；若发生 hash 冲突会直接拒绝导出（不产出半可用文件）。</p>' +
       '<div class="modal-actions" style="justify-content:flex-start;flex-wrap:wrap">' +
       '<button class="btn" data-bk="export">下载全量备份</button>' +
+      '<button class="btn btn-ghost" data-bk="export-legacy">下载兼容旧版备份（schema ≤4）</button>' +
       '<button class="btn btn-ghost" data-bk="import">从备份恢复</button>' +
       '<button class="btn btn-ghost" data-bk="auto-restore">恢复迁移前自动备份</button>' +
       '<button class="btn btn-ghost" data-bk="dav">☁ WebDAV 云备份</button>' +
@@ -606,6 +708,12 @@
         modal.querySelector('[data-bk="export"]').onclick = async () => {
           const r = await download();
           QB.UIRenderer.toast(r.assetCount ? '备份已生成（含图片 ' + r.assetCount + ' 张，.qfbk）' : '备份已生成（.json）', 'ok');
+        };
+        modal.querySelector('[data-bk="export-legacy"]').onclick = async () => {
+          try {
+            const r = await download(undefined, { legacy: true });
+            QB.UIRenderer.toast('已导出兼容旧版备份（schema ≤4）' + (r.assetCount ? '，含图片 ' + r.assetCount + ' 张' : ''), 'ok');
+          } catch (e) { QB.UIRenderer.toast('旧版兼容导出失败：' + e.message, 'err'); }
         };
         modal.querySelector('[data-bk="import"]').onclick = () => pickAndRestore();
         modal.querySelector('[data-bk="auto-restore"]').onclick = async () => {
@@ -642,6 +750,7 @@
 
   QB.Backup = {
     buildBackup, applyBackup, isBackup, redactSecrets, readAllData, applyData, foldLayout,
+    toLegacyPayload,
     isServerFormat, isLocalFormat, serverToLocal, localToServer,
     assertCompatible, saveAutoBackup, readAutoBackup, markAutoBackupDone, clearAutoBackup,
     buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,

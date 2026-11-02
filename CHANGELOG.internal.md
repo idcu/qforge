@@ -6,6 +6,48 @@
 
 ---
 
+## 待回填 · feat(backup): 旧客户端兼容备份导出（Phase F3）
+
+**核心改动**
+- `js/utils/question-id.js`：新增 `QB.makeLegacyContentHash(q)`（`'2:' + FNV-1a 32 位`，与 v2 算法逐字节一致；
+  复用同一 `semanticPayload`，材料题仍纳入材料与子问负载，避免两套题面归一逻辑漂移）；仅供兼容导出，运行期判分/去重仍走 v3。
+- `js/modules/backup.js`：
+  - 新增 `toLegacyPayload(data)`（纯函数）：题目分片折叠为旧单 blob `questions:<bankId>`；contentHash **v3→v2**；
+    复习整表键、错题/收藏 `questionKey`、评分日志 `h` 同步降级；`meta:schemaVersion` **固定写 4**（缺键也不留空）。
+  - `buildBackup(now, {legacy:true})`：信封 `schemaVersion` 固定为 4；`buildAssetBundle(payload?)` 复用已构建载荷
+    （含图时兼容包同样走 .qfbk ZIP）；`download(filename, {legacy:true})` 文件名加 `-legacy`。
+  - **32 位 hash 冲突拒绝导出**：`v3→v2` 多对一即抛错中止（「无法导出兼容旧版备份：N 组题目在 32 位旧 hash 下冲突…请改用 API 后端或升级旧客户端」），不产出半可用文件。
+  - 备份弹窗新增「下载兼容旧版备份（schema ≤4）」按钮（冲突时 toast 可读错误）；`QB.Backup` 导出面补 `toLegacyPayload`。
+- 文档同步：`docs/DATABASE.md` §7.1 新增「跨版本降级恢复（F3）」与「32 位 hash 冲突」段；`README.md`/`docs/DEVELOPMENT.md`
+  测试计数（backup 90→119、合计 3882→3911、首屏 250.8→252.5 KB gzip / 697.8→704.0 KB raw）；`scripts/docs-baseline.json` 刷新。
+
+**验证数据（2026-11-02 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/backup.test.mjs`：**119/119 通过**（原 90，+29）：
+  - 默认导出信封 `schemaVersion=5`；高版本备份（v6）恢复被拒绝且错误可读、未写入任何数据；
+  - 兼容导出：`schemaVersion=4`、载荷 `meta:schemaVersion=4`、无清单/分片键、题目折叠为单 blob、题目/复习表/错题/收藏/日志 hash 全部 `2:<8hex>` 且与 `makeLegacyContentHash` 逐题一致；
+  - 闭环：清空 → `applyBackup(legacy)` → `Migration.run(force)` 归一为 v3；题库 1 / 题目 2 / SRS `reps=1` / 错题 1 / 收藏 1 / 日志条数一致（无静默半恢复）；
+  - 冲突：monkey-patch 使两题 v2 hash 相同 → `toLegacyPayload` 抛「32 位旧 hash 下冲突」并给出可操作建议。
+- `node scripts/test-all.mjs`：**24 个运行项 / 0 失败 / 23.9s / 3911 断言**（原 3882）。
+- `node --expose-gc scripts/bench.mjs --assert`：**35/35 门禁通过**。
+  - schema v5 迁移（含迁移前自动备份）：1000 题 **25.53ms / heap 峰值 +15.44MB**、3000 题 **73.29ms / +47.02MB**、
+    20000 题 **574.06ms / +106.81MB**（门禁 120MB）；三档完整性 **1000/1000、3000/3000、20000/20000**。
+  - 迁移后 per-hash 单次评分本地写 **0.02 / 0.02 / 0.14ms**；heapUsed 增量 **+2.67MB**；API PATCH P95 **5.57ms**；导出体积 675.6KB。
+- `node scripts/docs-check.mjs --write`：24 运行项 / **3911 断言** / **35 门禁** / 76 文件（68 内联 js）/
+  **252.5 KB gzip · 704.0 KB raw**，基线已刷新。
+
+**公共抽象（新增/调整）**
+- 新增 `QB.makeLegacyContentHash`（v2 兼容 hash，复用 `semanticPayload`）；新增 `QB.Backup.toLegacyPayload`。
+- `QB.Backup.buildBackup` 新增可选参数 `{legacy}`；`download` 新增可选参数 `{legacy}`；`buildAssetBundle` 新增可选 `payload` 入参。
+- 以上均为**向后兼容扩展**：既有调用方（自动备份、普通导出、WebDAV、数据层 `backup.export`）签名与行为不变。
+
+**TODO/风险**
+- **旧客户端真机未验**：仓库内无 schema v4 客户端镜像，兼容包仅在新客户端「恢复归一」路径验证；「旧客户端能读回」依据算法与布局契约，未做跨版本真机联调。
+- 兼容导出仍携带图片资产（含图时同样打 ZIP），旧客户端若不含资产驱动将忽略图片；未单独验证。
+- hash 冲突检测为导出期一次性全量映射（O(n) 内存），与导出本身同阶，不构成额外风险。
+- 备份弹窗「下载兼容旧版备份」按钮未做浏览器点击验证（Node 无 DOM）；下载/打包下游与普通导出共用且已被既有测试覆盖。
+
+---
+
 ## 待回填 · feat(migration): 迁移前自动全量备份与恢复入口（Phase F1）
 
 **核心改动**

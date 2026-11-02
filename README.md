@@ -106,7 +106,7 @@ qb/
 | `node scripts/fsrs-opt.test.mjs` | FSRS 参数优化器测试（114 项断言：revlog/FIFO/按库隔离、四门控、留出集门控与历史最佳权重、确定性复训、preset 端到端；**增量重训：训练点记录 / `shouldRetrain` 阈值 / 热启动与 Worker 透传**；Worker 化 supported 判定/假 Worker 协议/自动回退/trainAsync 写盘） |
 | `node scripts/srs.test.mjs` | 到期判定、存储与 7 日预报测试（63 项断言，含时区无关、SM-2→FSRS 迁移、一次作答一条 revlog 契约、删库级联清理） |
 | `node scripts/storage.test.mjs` | 本地存储可靠性（**39** 项断言：setSync 即落盘/配额失败上抛与重试、跨标签 storage 事件、keys 合并待写、**`Helpers.debounce().cancel` 与「会话清空压过挂起防抖保存」竞态回归**、**跨标签复习状态按 ReviewMerge 合订 + 本地 record/patch 失败回滚**） |
-| `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（**90** 项断言：含失败快照回滚、WebDAV 密码脱敏、**备份载荷两种布局的识别与双向转换（本地 ⇄ 后端）**） |
+| `node scripts/backup.test.mjs` | 全量备份/覆盖/合并恢复测试（**119** 项断言：含失败快照回滚、WebDAV 密码脱敏、**备份载荷两种布局的识别与双向转换（本地 ⇄ 后端）**、**F3 跨版本降级：v5→旧客户端兼容导出（schema 4 + v2 hash + 旧整表布局）→ 新客户端恢复归一、32 位 hash 冲突拒绝导出**） |
 | `node scripts/migrate.test.mjs` | schema 迁移测试（**151** 项断言：v1→v5 全链路、contentHash v1/v2→v3（64 位）重映射与双读去重、复习表 per-hash 与分段日志转换、幂等 `force`、断点重入、中断回滚、多标签共享存储仅迁移一次、`ensureLayout`；**F1 迁移前自动备份：写前落盘/进度标记/备份恢复逐键一致、备份失败即中止且不写入**） |
 | `node scripts/shard.test.mjs` | 题目库分片存储测试（115 项断言：切分与清单、按需单页只解析覆盖分片、单题增删改只重写所在分片、空分片与高位回收、旧单 blob 兼容与写时迁移、删库级联清分片；**删除一致性：单删清空中间分片/批删整片后重编号且余题可读、孤儿分片 invariant 检出与 compact 修复、v3→v4 启动自检修复坏清单并幂等**；UI 级按需装载：count 直读清单零分片解析、loadQuestions 缓存命中同数组、buildIndex 复用缓存、写操作令修订号 +1 并使缓存失效重读） |
 | `node scripts/contract.test.mjs` | 数据契约层测试（66 项断言：`QB.CONTRACTS` 7 组方法清单、`QB.ASSET_DRIVER_CONTRACT`、`assertAdapter`/`assertDriver` 精确报缺；local-adapter 的 reviews/revlog/weights/backup 四组仓库读写语义与领域模块同源；**`historyAdd` 返回新增记录（与 api 同形）**；**删库级联唯一入口 `cascadeDelete`** 全键清理 + 非级联路径；**record 热路径（本地一次落状态+日志、日志题库归属、logged/saved 回执）**） |
@@ -126,7 +126,7 @@ qb/
 xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖），Node 直接跑全部断言，无需安装任何包。
 
 **实测数据（Node v24.14.0；测试矩阵与关键耗时为 2026-11-02 复跑，阶段 A 分片/DOM 条目保留历史基线，详见 `CHANGELOG.internal.md`）**：
-- **24 个逻辑层测试套件 3882 / 3882 通过**（2026-11-02 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖）：冒烟 **724**、XML 解析器 **39**、导出 **200**、Office 导出 1150、编辑器 **72**、**富文本 66**、**图片资产 67**、组卷 18、**UI 渲染器 174**、**DOM 增量 40**、来源/网络导入 **39**、**今日复习队列 51**、FSRS **136**、**FSRS 优化器 114**、SRS **63**、存储可靠性 **39**、备份 **90**、schema 迁移 **151**、**题目分片 115**、**数据契约 66**、**参考后端 E2E 309**、**WebDAV 45**、PWA **85**、**静态服务 29**。
+- **24 个逻辑层测试套件 3911 / 3911 通过**（2026-11-02 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖）：冒烟 **724**、XML 解析器 **39**、导出 **200**、Office 导出 1150、编辑器 **72**、**富文本 66**、**图片资产 67**、组卷 18、**UI 渲染器 174**、**DOM 增量 40**、来源/网络导入 **39**、**今日复习队列 51**、FSRS **136**、**FSRS 优化器 114**、SRS **63**、存储可靠性 **39**、备份 **119**、schema 迁移 **151**、**题目分片 115**、**数据契约 66**、**参考后端 E2E 309**、**WebDAV 45**、PWA **85**、**静态服务 29**。
 - **真实浏览器验收（2026-10-30，127.0.0.1:8777）**：导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题头出现 `⏱ 29:53` 且 3 秒内递减到 29:45；刷新后自动回到同一题、倒计时从 28:48 继续递减（未重置 30:00），PASS。
 - **CSP 真机验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**：首页渲染正常、控制台全程无 CSP 违规；选择示例题库 → 练习模式（单选 3 题）→ 出现「单选 第 1 / 3 题」→ 选择错误选项提交后出现「❌ 回答错误」、正确答案与解析，PASS。
 - **开始参数记忆真机验收（2026-10-31，`serve.mjs` 127.0.0.1:8777）**：选择示例题库 → 练习模式设置判断题 3 题 → 开始 → 结束练习 → 返回首页 → 再次打开练习模式，判断题数量仍为 3，控制台无错误，PASS。
@@ -137,7 +137,7 @@ xlsx/docx 解析走自研 `js/utils/xml-lite.js`（OOXML 子集，零依赖）�
 - 真实数据：541 题解析 → v3 去重后 **540**（3 组同题干中仅 1 组完全重复；另 2 组选项/答案不同，旧 v1 键会误并——评估报告高优先级#3）。
 - 真实问卷星题库（2026-10-27 验收）：**425 题**（判断 170/单选 210/多选 45，解析 425/425 非空）与 **30 题简答**（参考答案 30/30 非空），导入零警告零重复、contentHash 唯一；JSON/CSV/MD/XLSX/DOCX 五格式往返题量、contentHash 集合、解析/参考答案逐题一致。
 - 真实多列解题思路样本（2026-10-27 验收）：内容取自 21世纪教育网公开解析页《次北固山下》第 1 题，整理为 **1 道材料题 + 2 小问**，父子分别带独立的解析/解题思路/考点/释义四列（JSON/CSV/XLSX 三种载体）；三种导入零警告，合并顺序 `解析→思路→考点→释义`，五格式往返父子合并解析逐题一致。
-- 首屏静态体积（index.html + css + 68 个 index 内联 js + FSRS 训练 Worker + sw.js + manifest/icon，共 76 个文件，逐文件 `gzip -9` 合计；2026-11-02 复测）：**250.8 KB gzip / 697.8 KB raw**（图片字节存 IndexedDB，不计入首屏包）。
+- 首屏静态体积（index.html + css + 68 个 index 内联 js + FSRS 训练 Worker + sw.js + manifest/icon，共 76 个文件，逐文件 `gzip -9` 合计；2026-11-02 复测）：**252.5 KB gzip / 704.0 KB raw**（图片字节存 IndexedDB，不计入首屏包）。
 - 数据层分片（阶段 A）：单库题目按 200 题/片存 `questions:<bankId>:<i>`，清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`）——`sizes` 使区间读取免解析前置分片、`count` 使总数免解析全库。3000 题单库实测：**按需单页冷读 0.24ms** vs 全量冷读 3.70ms（约 15×）；**单题 update 0.38ms**（只重写所在分片，与库规模无关） vs 全量重写 38.49ms；`insertMany` 落库 11.32ms 以 v3 语义哈希重算为主。
 - UI 级按需加载（阶段 A）：`app.js::loadBankData` 改为视图感知——仅 home/search/stats 解析整库；答题/结果/历史视图不解析整库（总数走 `count` 直读清单）。**错题/收藏列表需按 contentHash 反查题目**，会经 `buildIndex` 复用 `QB.DB.loadQuestions` 整库缓存（首次装载一次，之后命中缓存），不是“完全不触库”。整库读取统一收敛到 `QB.DB.loadQuestions`（按 `bankId`+写修订号失效，`buildIndex`/question-editor 复用）。3000 题实测：装载缓存命中 **0.00ms**、答题交互视图装载 **0.00ms**，仅题库/题目变动后首次付 3.57ms；首屏/答题 HTML 构建 0.02/0.04ms 且与库规模无关。
 - DOM 增量更新（阶段 A）：`#view` 不再整块 `innerHTML` 重绘。渲染器新增 5 个区域数组变体（`renderQuizRegions`/`renderWrongListRegions`/`renderFavoritesListRegions`/`renderHistoryListRegions`/`renderSearchRegions`，每区域顶层带 `data-region="KEY"`），`QB.DomPatch.plan/patch` 对账：内容未变的区域**保留原 DOM 节点**（保住焦点/`<details>` 展开态/滚动），仅重建变化区域。**答题卡格级增量**：`quiz-card` 区域带 `frame`（仅结构，跨作答逐字节不变）+ `sub`（计数 + 逐格），帧未变时仅按 key 就地替换变化的子节点。实测对账 **0.00ms**：答题区勾选选项顶层仅重建 3/5 区域（占字节 15.6%），**整张答题卡 `<details>` 不重建**、仅替换 3/52 子节点（占整卡字节 2.0%，答题热路径重建量由细化前 95.6% 降至 15.6%）；错题本移除一条仅重建 1/22 区域（占字节 0.9%，20 个区域保持原节点）。浏览器实机验证：折叠答题卡后作答仍保持折叠、计数/格状态同步更新、控制台无报错。
