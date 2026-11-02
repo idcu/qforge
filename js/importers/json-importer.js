@@ -18,12 +18,13 @@
     }
     const res = QB.Adapters.sniffAndAdapt(json);
     const outWarnings = (res.warnings || []).slice();
-    // 本系统导出的 JSON/qbk 带 checksum：复核 questions 规范化 JSON，失败只警告不阻断（诚实提示）
+    // 本系统导出的 JSON/qbk 带 checksum：复核 questions 规范化 JSON，失败只警告不阻断（诚实提示）。
+    // 新导出为 v3（FNV-1a 64 位，前缀 '3:'）；旧文件的裸 8 位校验和仍接受，不误报警。
     const meta = { checksum: '', checksumOk: null };
-    if (json && typeof json.checksum === 'string' && Array.isArray(json.questions) && QB.Source && QB.Source.checksumText) {
-      const actual = QB.Source.checksumText(JSON.stringify(json.questions));
+    if (json && typeof json.checksum === 'string' && Array.isArray(json.questions) && QB.Source && QB.Source.verifyChecksum) {
+      const actual = QB.Source.checksumContent(JSON.stringify(json.questions));
       meta.checksum = json.checksum;
-      meta.checksumOk = actual === json.checksum;
+      meta.checksumOk = QB.Source.verifyChecksum(JSON.stringify(json.questions), json.checksum);
       if (!meta.checksumOk) {
         outWarnings.push('内容校验和不一致：文件可能被修改或传输损坏（导出 ' + json.checksum + '，实际 ' + actual + '）');
       }

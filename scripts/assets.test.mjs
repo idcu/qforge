@@ -171,9 +171,14 @@ section('导出器 qbk 格式');
   const back = JSON.parse(parsed.text);
   eq(back.questions[0].question, question.question, '占位标记随 JSON 往返保留');
   eq(parsed.assets[0].id, imgId, '导出包资产 id 一致');
-  ok(typeof back.checksum === 'string' && back.checksum.length === 8, 'qbk bank.json 含内容校验和（P4）');
+  ok(typeof back.checksum === 'string' && /^3:[0-9a-f]{16}$/.test(back.checksum), 'qbk bank.json 含内容校验和（v3：3:+16hex）');
   const qres = await QB.QbkImporter.parse({ arrayBuffer: built.content, fileName: 'c.qbk' });
   eq(qres.meta.checksumOk, true, 'qbk 导入：校验和一致（P4）');
+  // 旧版（v2 及更早）导出为裸 8 位 FNV-1a：导入必须继续接受，不误警/不阻断
+  const legacyChecksum = QB.Source.checksumText(parsed.text);
+  eq(legacyChecksum.length, 8, '旧 checksum 为 8 位');
+  eq(QB.Source.verifyChecksum(parsed.text, legacyChecksum), true, '导入接受旧 checksum（向后兼容）');
+  eq(QB.Source.verifyChecksum(parsed.text, 'deadbeef'), false, '旧 checksum 不匹配时如实判 false');
 
   let threw = false;
   try { QB.Exporters.buildContent('qbk', payload); } catch (e) { threw = true; }

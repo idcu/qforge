@@ -6,7 +6,50 @@
 
 ---
 
-## 3e6af9b · fix(bench,docs): 补齐性能门禁（SRS 写放大/API P95/导出体积）并对齐文档数字
+## （待回填） · feat(storage): schema v5 一次性迁移（hash 64 位 + per-hash 复习 + 分段日志）
+
+**核心改动（Phase D：D1–D4 合并为一个 schema 版本，只留一条兼容线）**
+- D1 迁移框架 `js/modules/migrate.js`：`SCHEMA_VERSION=5`，`run({force?})` 读旧 → 转换 → 校验 → 原子写 → 标记版本；返回 `{migrated, sharded, repaired, layout}`。
+  - 幂等/可重入：每库先把 `oldHash→newHash` 写入 `meta:hashMap:<bankId>`，中断重跑复用映射（不二次改写/不产生重复）；布局转换一律**先写新键再删旧键**。
+  - 失败回滚：进入前对全部逻辑键做内存快照，任一步抛错 `restoreAll`（`set` + `forceSync`）恢复后重新抛出。
+  - 多标签并发：`meta:migrationLock`（owner + at，30s TTL 陈锁可接管），同标签模块级 `inflight` 单飞；锁后二读确认 owner。
+  - 已是 v5：只做 `ensureLayout` 归一（补清单/折叠残留），不重写数据。
+- D2 复习表 per-hash `js/data/local-adapter.js`：`user:review:<bankId>` 整表 → `user:review:<bankId>:<hash>` + 清单 `user:reviewMeta:<bankId>`（`{v:3,count,keys}`，键集合内存缓存）；单次评分写 O(改动数)。读取经 `QB.ReviewStore` **双读**（旧整表 + per-hash，per 优先），对外分数/到期/历史语义不变。
+- D3 hash 位宽升级：`js/utils/fnv.js` 新增 64 位 `hashString64/hashBytes64`（BigInt）；`js/utils/question-id.js` 改 v3（`3:` + 16 hex），新增 `hashVersionOf/isLegacyHash`；`scripts/lib/question-hash.mjs` 通过加载同一客户端脚本自动继承 v3（服务端权威 hash 与原实现共用一份源码）。
+  - **选型**：FNV-1a 64（同步、零依赖、浏览器/Node 同一实现）而非 SHA-256（`crypto.subtle` 异步，无法用于同步判分/导出路径，Node 另需实现）；2 万题 32 位生日碰撞风险约 4.7%，64 位降至可忽略。
+  - **旧 v2 双读去重**：迁移按映射改写 `questions/review/wrong/fav/revlog`，同新键冲突时复习取 `last` 较大、错题计数相加、收藏取更早 `addedAt`（唯一实现 `js/utils/hash-remap.js`）。
+  - checksum：`js/modules/source.js` 新增 `checksumContent`（`3:`+64 位）与 `verifyChecksum`（接受 `3:` 新值与旧裸 8hex，不阻断导入/不误报）；`exporter.js` 导出写新值，`json-importer.js` 改走 `verifyChecksum`。
+  - 后端 `scripts/serve-api.mjs` / `api-adapter` 的 `content_hash` 走同一 `question-hash.mjs`，旧记录字段仍可读（32/18 字符均为字符串）。
+- D4 配套面：`backup.js` 新增 `foldLayout`（per-hash → 旧整表、分段 → 整表数组、剔除运行期元数据），恢复后 `Migration.run({force:true})` + `ensureLayout()`；`migrate.js` 哈希重映射覆盖 review/wrong/fav/revlog；`local-adapter` 的 stats/count/级联删除/`storage` 事件合并全部改走 `QB.ReviewStore`/`QB.RevlogStore`；`sw.js` 缓存版本 `qforge-v7`→**v8**（新增 `js/utils/hash-remap.js`）；`index.html` 增加该脚本。
+- 文档同步：`docs/DATABASE.md`（§2 `content_hash VARCHAR(18)`、§3 新键/schema=5、§4 v4→v5、§7.1 备份折叠）、`docs/ARCHITECTURE.md`、`docs/EXPORT-FORMAT.md`（checksum v3 + 旧值兼容）、`docs/SRS.md`（§2/§8.1/§9 分段与原位）、`README.md`、`docs/DEVELOPMENT.md`、本文件。
+
+**验证数据（2026-11-02 本机 Node v24.14.0，Asia/Shanghai）**
+- `node scripts/test-all.mjs`：24 个运行项 **3860/3860 通过，0 失败，30.0s**（上一轮 3782/3782、24.5s；增量 +78 断言，主因 `migrate.test` 57→129 项：三档迁移完整性、断点重入、多标签单锁/无覆盖、回滚、双读对照）。仍为 24 个运行项，未新增 CI 步骤。
+- `node --expose-gc scripts/bench.mjs --assert`：**35/35 门禁通过**，heapUsed **+2.67MB**（8.12→10.79）。
+  - schema v5 迁移（旧 v2 hash + 整表布局）：1000 题 **33.86ms / heap +13.80MB**、3000 题 **66.78ms / +42.31MB**、20000 题 **463.01ms / +89.22MB**；三档完整性 **1000/1000、3000/3000、20000/20000**（复习状态逐键相等、题目与 revlog hash 全 v3、旧整表键清理、`schema=5`）。
+  - 迁移后 per-hash 单次评分本地写：1000 **0.03ms** / 3000 **0.02ms** / 20000 **0.13ms**（O(1)，不随题量线性增长；对照上一轮整表 20000 题 **4.07ms**，约 31× 降低）。
+  - 单次评分上行 **253B**（整表 3000 状态 427.2KB → 增量 253B，**1728.9×**）。
+  - API `PATCH /reviews` P95 **7.59ms**（50 次）；SRS 本地评分落盘 **0.04ms**。
+- `node scripts/docs-check.mjs`（live）：24 个运行项 / **3860 项断言** / **35 项门禁** / 76 文件（68 内联 js）/ **248.8 KB gzip · 690.5 KB raw**，文档 **0 处漂移**。
+
+**公共抽象（新增/调整）**
+- 新增 `js/utils/hash-remap.js`（`QB.HashRemap.remapList/mergeWrong/mergeFav`）：键列表重映射唯一实现，migrate 与 backup 共用。
+- 新增 `QB.ReviewStore`（local-adapter 内部公共件，导出到 `QB`）：per-hash 复习状态读写/清单维护/双读合并唯一实现。
+- 新增 `QB.RevlogStore`（同上）：分段日志 list/append/replaceAll/clear/分段清单唯一实现。
+- 扩展 `QB.FNV`：`hashString64/hashBytes64`；`QB.makeContentHash` 升级 v3，新增 `hashVersionOf/isLegacyHash`。
+- 扩展 `QB.Migration`：`run({force?})`（返回值新增 `{migrated,sharded,repaired,layout}`，旧调用方无参数仍可用）+ `ensureLayout`。
+- 扩展 `QB.Source`：`checksumContent/verifyChecksum`（`checksumText/checksumBytes` 保留给 URL 来源快照，未改）。
+- 存储语义修正（`QB.Storage`）：`get`/`getFresh` 缺失键不再用默认值写缓存；`getFresh` 在本标签有待写值时以内存值为准。**影响调用方**：所有依赖「缺失即缓存默认值」的读取（此前只有测试断言受影响）；`keys()` 不再出现幽灵键。
+
+**TODO/风险**
+- 迁移内存：20000 题 heap 峰值 +89.22MB（门禁 120MB），主因迁移前全量键快照 + 重写题目分片；更大库（>5 万题）可能逼近 5MB LocalStorage 配额，未实测。
+- 旧整表布局保留双读，但**写路径不再产生旧键**；旧版本前端（v7）读新布局会丢失复习状态——回滚需同时回滚 `sw.js` 缓存与页面资源，不能只回退代码。
+- 多标签并发仅覆盖「本地 LocalStorage 同源标签」；跨设备并发仍走服务端 `review_rev`（B 阶段能力），两者不合并。
+- `schema=5` 为**实现版本**（用户口径「schema v3 一次性迁移」= 第 5 版结构）；文档已标注对应关系，避免版本号歧义。
+- 备份折叠后统一为旧整表形状，`foldLayout` 之后恢复再归一：若用户在旧版（v4）客户端恢复 v5 备份，复习状态可用，但题目 hash 仍是 v3（旧版会当新题）——跨版本降级恢复未支持，未验证。
+
+---
+
 
 **核心改动（对应 EVALUATION-2026-11-02 的 C1–C4）**
 - C1 `scripts/bench.mjs`：

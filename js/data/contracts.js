@@ -19,18 +19,30 @@
     questionShard: (bankId, i) => 'questions:' + bankId + ':' + i,
     wrong: (bankId) => 'user:wrong:' + bankId,
     favorite: (bankId) => 'user:fav:' + bankId,
+    // 旧整表布局（迁移前/旧备份）；schema v5 起仅作兼容读取来源，不再整体写入
     review: (bankId) => 'user:review:' + bankId,
+    // per-hash 布局（schema v5）：单题调度状态独立键，写入 O(1)；hash 为 contentHash（含 '3:' 前缀）
+    reviewState: (bankId, hash) => 'user:review:' + bankId + ':' + hash,
+    // per-hash 布局清单（版本/键数），不进入备份（备份折叠回 review 整表）
+    reviewMeta: (bankId) => 'user:reviewMeta:' + bankId,
     // 本地复习版本号（多标签合并/写前重读的单调版本；服务端对应 review_rev，仅本机同步元数据，不进备份）
     reviewRev: (bankId) => 'user:reviewRev:' + bankId,
     history: 'user:history',
     session: 'user:session',
+    // 旧整表评分日志（迁移前/旧备份）；schema v5 起为兼容读取来源
     revlog: 'user:revlog',
+    // 分段追加日志（schema v5）：user:revlog:meta + user:revlog:<i>，单次评分只重写尾段
+    revlogMeta: 'user:revlogMeta',
+    revlogSeg: (i) => 'user:revlog:' + i,
     metaFsrsWeights: 'meta:fsrsWeights',
     metaDav: 'meta:dav',
     metaCurrentBank: 'meta:currentBank',
     metaStartPrefs: 'meta:startPrefs',
     metaTheme: 'meta:theme',
-    metaSchema: 'meta:schemaVersion'
+    metaSchema: 'meta:schemaVersion',
+    // 迁移锁/旧→新 hash 映射（迁移日志，运行期元数据，不进备份）
+    metaMigrationLock: 'meta:migrationLock',
+    metaHashMap: (bankId) => 'meta:hashMap:' + bankId
   };
 
   /** 需实现的接口方法名（用于自检与文档一致性） */

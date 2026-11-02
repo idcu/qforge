@@ -71,6 +71,8 @@ section('题库隔离存储与今日抽题（FSRS 语义）');
   ok(!(await QB.SRSStore.getState(b2.id, qa)), '库2 查不到库1题目的调度');
 
   // 旧 SM-2 状态迁移：无 algo/stability 的旧状态，首次评分按 FSRS 新卡初始化
+  // schema v5 双读：per-hash 键优先于旧整表，故先移除 qa 的 per-hash 状态，模拟「仅旧整表」的老用户数据
+  QB.ReviewStore.removeHash(b1.id, QB.SRSStore.keyFor(qa));
   const legacyKey = QB.KEYS.review(b1.id);
   const legacyMap = QB.Storage.get(legacyKey) || {};
   legacyMap[QB.SRSStore.keyFor(qa)] = { due: T0, interval: 3, ease: 2.3, reps: 2, lapses: 0, last: T0 - 3 * DAY };
@@ -194,12 +196,13 @@ section('删库级联清理：复习状态/preset/按库 revlog 不残留（评�
   await QB.WrongBook.add(ca.id, qa);
   await QB.Favorites.toggle(ca.id, qa);
   await QB.FSRSOpt.saveWeights(QB.FSRS.DEFAULT_W.slice(), { samples: 1, scope: ca.id }, ca.id);
-  ok(!!QB.Storage.get(QB.KEYS.review(ca.id)), '前置：库A 有复习状态');
+  ok(QB.ReviewStore.count(ca.id) > 0, '前置：库A 有复习状态（per-hash 布局）');
   ok((await QB.FSRSOpt.readLog()).some((e) => e.b === ca.id), '前置：库A 有 revlog');
   ok(await QB.FSRSOpt.getWeightsMeta(ca.id), '前置：库A 有 preset');
 
   await QB.DB.banks.remove(ca.id);
-  ok(QB.Storage.get(QB.KEYS.review(ca.id)) == null, '删库：user:review:<id> 已清理（旧实现残留）');
+  eq(QB.ReviewStore.count(ca.id), 0, '删库：per-hash 复习状态已清理');
+  ok(QB.Storage.get(QB.KEYS.review(ca.id)) == null, '删库：旧整表 user:review:<id> 无残留');
   ok(QB.Storage.get(QB.KEYS.wrong(ca.id)) == null, '删库：wrong 键清理');
   ok(QB.Storage.get(QB.KEYS.favorite(ca.id)) == null, '删库：fav 键清理');
   eq(await QB.FSRSOpt.getWeightsMeta(ca.id), null, '删库：FSRS preset 清理');

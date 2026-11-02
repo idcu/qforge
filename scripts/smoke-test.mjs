@@ -137,7 +137,9 @@ const h4 = QB.makeContentHash({ type: 'judge', question: '下列哪种不是数�
 ok(h1 === h2, '题干相同（尾部空格）→ hash 相同');
 ok(h1 !== h3, '不同题干 → hash 不同');
 ok(h1 !== h4, '不同题型 → hash 不同');
-ok(h1.indexOf('2:') === 0, 'v2 hash 带版本前缀 2:');
+ok(h1.indexOf('3:') === 0, 'v3 hash 带版本前缀 3:');
+ok(/^3:[0-9a-f]{16}$/.test(h1), 'v3 hash 为 64 位（16 hex）');
+ok(QB.isCurrentHash(h1), 'makeContentHash 产出当前版本 hash');
 {
   const optA = [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }];
   const sameStem = '下列哪项是正确的？';

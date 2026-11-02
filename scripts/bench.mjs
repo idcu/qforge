@@ -421,12 +421,14 @@ row('SRS 写载荷（3000 状态：整表 vs 单键增量）', await timed(() =>
 }, 20), '整表 ' + (srsFullBytes / 1024).toFixed(1) + ' KB → 增量 ' + srsDeltaBytes + ' B（'
   + (srsFullBytes / srsDeltaBytes).toFixed(1) + '×）');
 
-QB.Storage.setSync(QB.KEYS.review(srsBank), srsFull); // 预置 3000 状态，确保量到的是整表落盘成本
-row('SRS 本地评分落盘（3000 状态，整表；B1 本地布局遗留）', await timed(async (i) => {
+QB.ReviewStore.clear(srsBank); // schema v5：per-hash 布局，预置 3000 个独立状态键（写入 O(1)）
+srsKeys.forEach((k) => QB.Storage.setSync(QB.KEYS.reviewState(srsBank, k), srsFull[k]));
+QB.ReviewStore.writeMeta(srsBank, srsKeys);
+row('SRS 本地评分落盘（3000 状态，per-hash；含落盘）', await timed(async (i) => {
   const d = {}; d[srsKey] = srsFull[srsKey];
   await QB.DB.reviews.patch(srsBank, d, [{ t: qNow + i, h: srsKey, r: 3, b: srsBank }]);
   QB.Storage.forceSync();
-}, 20), '服务端/上行已 O(改动数)，本地仍整表 O(n)');
+}, 20), '本地只写 1 个状态键 + 尾段日志（O(改动数)，与总状态数无关）');
 
 // API P95：起真实参考后端，用增量载荷打 PATCH /reviews（含 HTTP 与落盘）
 const apiTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qforge-bench-'));
@@ -521,7 +523,117 @@ row('FSRS 优化器 computeTrain（增量热启动 / ' + QB.FSRSTrainCore.WARM_I
   '起点=上次采纳权重，留出集改善 ' + (warmRes.improvement * 100).toFixed(2) + '%（gate=' + warmRes.gateBasis
   + '），较全量提速 ' + (fsTrainTriple.median / fsWarmTriple.median).toFixed(2) + '×');
 
-/* ---------- 汇总输出 ---------- */
+/* ---------- 12. schema v5 一次性迁移（1000/3000/20000）+ per-hash 写入复杂度 ---------- */
+/** 采样 storage 写操作期间的堆峰值（迁移主体为同步，定时器无法插入，改为按写入计数采样） */
+function instrumentHeapPeak() {
+  const st = QB.Storage;
+  const origSet = st.set;
+  const origSetSync = st.setSync;
+  const origRemove = st.remove;
+  const tracker = { peak: process.memoryUsage().heapUsed, n: 0 };
+  const sample = () => {
+    tracker.n += 1;
+    if (tracker.n % 100 === 0) tracker.peak = Math.max(tracker.peak, process.memoryUsage().heapUsed);
+  };
+  st.set = function (k, v) { sample(); return origSet.call(st, k, v); };
+  st.setSync = function (k, v) { sample(); return origSetSync.call(st, k, v); };
+  st.remove = function (k) { sample(); return origRemove.call(st, k); };
+  return {
+    tracker,
+    restore() { st.set = origSet; st.setSync = origSetSync; st.remove = origRemove; }
+  };
+}
+
+/** 构造旧布局（v2 hash + 整表复习 + 整表日志）并返回 {bankId, oldMap, questions} */
+async function buildLegacyBank(n, tier) {
+  QB.Storage.clearAll();
+  const bank = await QB.DB.banks.create({ name: '迁移压测库' + tier });
+  const questions = [];
+  const oldMap = {};
+  const oldLog = [];
+  for (let i = 0; i < n; i++) {
+    // 32 位乘法散列保证 8 hex 唯一（真实 v2 hash 形态），避免碰撞干扰完整性校验
+    const oldHash = '2:' + ((i * 2654435761) >>> 0).toString(16).padStart(8, '0');
+    const q = {
+      id: 'mq' + i, bankId: bank.id, type: 'single', question: '迁移题' + i + '？',
+      options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A',
+      category: 'c' + (i % 10), createdAt: 1, updatedAt: 1, contentHash: oldHash
+    };
+    questions.push(q);
+    oldMap[oldHash] = {
+      algo: 'fsrs', stability: 2 + (i % 100) * 0.1, difficulty: 4 + (i % 10) * 0.1,
+      due: 1 + i, reps: i % 7, lapses: i % 3, last: i
+    };
+    oldLog.push({ id: 'rl' + i, t: i, h: oldHash, r: 3 });
+  }
+  QB.QuestionShards.writeAll(bank.id, questions);
+  QB.Storage.setSync(QB.KEYS.review(bank.id), oldMap);
+  QB.Storage.setSync(QB.KEYS.revlog, oldLog);
+  return { bankId: bank.id, oldMap: oldMap, questions: questions };
+}
+
+const migrationRows = [];
+for (const tier of [1000, 3000, 20000]) {
+  const legacy = await buildLegacyBank(tier, tier);
+  const heap0 = (bestEffortGc(), process.memoryUsage().heapUsed);
+  const inst = instrumentHeapPeak();
+  const t0 = process.hrtime.bigint();
+  let migRes;
+  try {
+    migRes = await QB.Migration.run({ force: true });
+  } finally {
+    inst.restore();
+  }
+  const msMigrate = Number(process.hrtime.bigint() - t0) / 1e6;
+  const peakMb = (inst.tracker.peak - heap0) / 1024 / 1024;
+
+  // 逐条完整性：旧状态（按旧 hash）与迁移后状态（按确定性新 hash）逐字段一致
+  let same = 0;
+  let mismatch = [];
+  legacy.questions.forEach((q) => {
+    const nh = QB.makeContentHash(q);
+    const got = QB.ReviewStore.get(legacy.bankId, nh);
+    const want = legacy.oldMap[q.contentHash];
+    if (got && JSON.stringify(got) === JSON.stringify(want)) same++;
+    else if (mismatch.length < 3) mismatch.push({ hash: nh, got: got, want: want });
+  });
+  const questionsOk = QB.QuestionShards.readAll(legacy.bankId).every((q) => QB.isCurrentHash(q.contentHash));
+  const logs = QB.RevlogStore.list();
+  const revlogOk = logs.length === tier && logs.every((e) => QB.isCurrentHash(e.h));
+  const legacyGone = QB.Storage.get(QB.KEYS.review(legacy.bankId), null) == null
+    && QB.Storage.get(QB.KEYS.revlog, null) == null;
+  const versionOk = QB.Migration.currentVersion() === QB.Migration.SCHEMA_VERSION;
+
+  migrationRows.push({
+    tier, ms: msMigrate, peakMb, same, questionsOk, revlogOk, legacyGone, versionOk, mismatch
+  });
+  report.push({
+    name: 'schema v5 迁移（' + tier + ' 题，旧 v2 hash + 整表布局）',
+    median: msMigrate, min: msMigrate, max: msMigrate,
+    extra: '完整性 ' + same + '/' + tier + '，hash 全 v3=' + questionsOk
+      + '，revlog ' + logs.length + ' 条全 v3=' + revlogOk
+      + '，旧键清理=' + legacyGone + '，版本=' + (versionOk ? '5' : '异常')
+      + '，heap 峰值 +' + peakMb.toFixed(2) + ' MB'
+  });
+
+  // per-hash 写入复杂度：单次评分只写 1 个状态键 + 尾段日志
+  const lastQ = legacy.questions[tier - 1];
+  const writeKey = QB.makeContentHash(lastQ);
+  const w = await timed(async (i) => {
+    const d = {}; d[writeKey] = QB.ReviewStore.get(legacy.bankId, writeKey);
+    await QB.DB.reviews.patch(legacy.bankId, d, [{ t: 100000 + i, h: writeKey, r: 3, b: legacy.bankId }]);
+    QB.Storage.forceSync();
+  }, 20);
+  report.push({
+    name: 'per-hash 单次评分本地写（' + tier + ' 状态）',
+    median: w.median, min: w.min, max: w.max,
+    extra: '仅写 1 状态键 + 尾段，O(1)；对照上一轮整表 20000 题 4.07ms'
+  });
+  if (migRes && migRes.locked) console.log('  [bench] 迁移锁未释放（tier=' + tier + '）');
+}
+QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
+
+
 console.log('\n================ 性能打点报告 ================');
 console.log('环境：Node ' + process.version + '，采样 ' + N + ' 次取中位数，分片大小 ' + QB.QuestionShards.SHARD_SIZE + '\n');
 const pad = (s, n) => String(s) + ' '.repeat(Math.max(0, n - String(s).length));
@@ -579,6 +691,11 @@ if (process.argv.indexOf('--assert') >= 0) {
     ['FSRS.review 单次调度', 2],
     ['FSRS 优化器 computeTrain（4000', 20000],
     ['SRS 本地评分落盘', 20],
+    ['schema v5 迁移（1000', 200],
+    ['schema v5 迁移（3000', 400],
+    ['schema v5 迁移（20000', 2000],
+    ['per-hash 单次评分本地写（1000', 1],
+    ['per-hash 单次评分本地写（20000', 1],
     ['导出构建（JSON+CSV+MD+TXT', 60]
   ];
   const fails = [];
@@ -614,6 +731,32 @@ if (process.argv.indexOf('--assert') >= 0) {
   const expOk = isFinite(expKB) && expKB <= EXPORT_MAX_KB;
   console.log((expOk ? '  ✓ ' : '  ✗ ') + '导出体积（JSON+CSV+MD+TXT）：' + expKB.toFixed(1) + ' KB ≤ ' + EXPORT_MAX_KB + ' KB');
   if (!expOk) fails.push('导出体积 ' + expKB.toFixed(1) + 'KB > ' + EXPORT_MAX_KB + 'KB');
+
+  // 迁移门禁：逐档完整性 + 20000 题堆峰值 + per-hash 写入不随题量线性增长
+  const MIG_HEAP_MAX_MB = 120;
+  const mig20000 = migrationRows.find((r) => r.tier === 20000);
+  migrationRows.forEach((r) => {
+    const okAll = r.same === r.tier && r.questionsOk && r.revlogOk && r.legacyGone && r.versionOk;
+    console.log((okAll ? '  ✓ ' : '  ✗ ') + '迁移完整性 ' + r.tier + '：状态一致 ' + r.same + '/' + r.tier
+      + '，题目全 v3=' + r.questionsOk + '，日志全 v3=' + r.revlogOk + '，旧键清理=' + r.legacyGone + '，版本=' + r.versionOk);
+    if (!okAll) fails.push('迁移完整性 ' + r.tier);
+  });
+  if (mig20000) {
+    const heapOk = mig20000.peakMb <= MIG_HEAP_MAX_MB;
+    console.log((heapOk ? '  ✓ ' : '  ✗ ') + '迁移 heap 峰值（20000）：+' + mig20000.peakMb.toFixed(2) + ' MB ≤ ' + MIG_HEAP_MAX_MB + ' MB');
+    if (!heapOk) fails.push('迁移 heap 峰值 ' + mig20000.peakMb.toFixed(2) + 'MB > ' + MIG_HEAP_MAX_MB + 'MB');
+  } else {
+    fails.push('迁移 20000 打点缺失');
+  }
+  const w1k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（1000') === 0);
+  const w20k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（20000') === 0);
+  const w3k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（3000') === 0);
+  const writeOk = w1k && w20k && w3k && w20k.median <= 1
+    && w20k.median <= Math.max(w1k.median * 4, w3k.median * 3) + 0.2;
+  console.log((writeOk ? '  ✓ ' : '  ✗ ') + 'per-hash 写入复杂度：1000 ' + ms(w1k ? w1k.median : NaN)
+    + ' / 3000 ' + ms(w3k ? w3k.median : NaN) + ' / 20000 ' + ms(w20k ? w20k.median : NaN)
+    + '（20000 ≤ 1.00 ms 且 ≤ max(4×1000, 3×3000)+0.2）');
+  if (!writeOk) fails.push('per-hash 写入复杂度不达标');
   console.log('-------------------------------------------');
   if (fails.length) {
     fails.forEach((f) => console.log('  - ' + f));

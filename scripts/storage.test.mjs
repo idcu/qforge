@@ -178,9 +178,13 @@ section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
   eq(Number(S.get(QB.KEYS.reviewRev(b), 0)), 1, '写入后本地 review_rev=1');
 
   // 失败回滚：日志写失败时调度状态恢复到调用前快照
+  // schema v5 起日志为分段布局（user:revlogMeta + user:revlog:<i>），热路径只写尾段
   const rawSet = ls.setItem.bind(ls);
+  const segPrefix = 'qb:user:revlog:';
   ls.setItem = (k, v) => {
-    if (k === 'qb:' + QB.KEYS.revlog) { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+    if (k.indexOf(segPrefix) === 0 || k === 'qb:' + QB.KEYS.revlogMeta) {
+      const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e;
+    }
     return rawSet(k, v);
   };
   let threw = null;
@@ -189,7 +193,7 @@ section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
   ok(threw !== null, '日志写失败时 record 抛错（不假成功）');
   const after = QB.DB.reviews.list(b);
   ok(after.h1 && after.h2 && !after.h3, '调度状态回滚到调用前快照（h3 未半写）');
-  eq((S.get(QB.KEYS.revlog, []) || []).length, 1, '评分日志未被本次失败追加');
+  eq(QB.DB.revlog.list().length, 1, '评分日志未被本次失败追加');
   eq(Number(S.get(QB.KEYS.reviewRev(b), 0)), 1, 'review_rev 回滚到写入前版本');
   S.clearAll();
 }

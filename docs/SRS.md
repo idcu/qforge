@@ -17,7 +17,7 @@
 
 ## 2. 状态模型
 
-每道题在每个题库下维护一条状态（`qb:user:review:<bankId>` 中以 contentHash 为键）：
+每道题在每个题库下维护一条状态（schema v5 起为单键 `qb:user:review:<bankId>:<hash>`，见 §9；旧整表 `qb:user:review:<bankId>` 仍兼容读）：
 
 ```js
 {
@@ -176,7 +176,7 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 
 ### 8.1 数据采集
 
-- 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳, b:bankId}` 到 `qb:user:revlog`：**经契约层 `QB.DB.reviews.record(bankId, map, [entry])` 一次提交**（本地等价 `save + revlog.append`；api 模式同一 `PUT /reviews` 落盘，补 id/时间戳与 FIFO 裁剪在实现侧完成）。
+- 每次评分追加 revlog 一条 `{id, h:contentHash, r:rating(1-4), t:时间戳, b:bankId}`：**经契约层 `QB.DB.reviews.record(bankId, map, [entry])` 一次提交**（本地等价 `save + revlog.append`；api 模式同一 `PUT /reviews` 落盘，补 id/时间戳与 FIFO 裁剪在实现侧完成）。**本地日志按段存（schema v5）**：`qb:user:revlogMeta`（`{v:2,segSize:200,first,last,count}`）+ `qb:user:revlog:<i>`（每段 ≤200 条），单次评分只重写尾段（写放大 O(1) 而非 O(全日志)）；旧整表 `qb:user:revlog` 由 `QB.RevlogStore.list` 兼容读（清单缺失才回退）。
 - **FIFO 上限 20,000 条**（约 0.8MB），超限丢最旧；常量唯一来源为 `QB.LocalAdapter.REVLOG_MAX`，`FSRSOpt.LOG_LIMIT` 再导出同值（不重复定义）。
 - **作用域隔离（评估报告中优先级#4 修复）**：按题库训练只读取 `b === 当前库` 的日志；全局训练读取全部。2026-10 前的旧日志无 `b`，只参与全局训练（不静默归入任何题库）；v1→v2 迁移时，题目仍唯一归属某库的旧日志会自动回填 `b`（见 [DATABASE.md](DATABASE.md) §4）。
 
@@ -244,8 +244,12 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 
 | 键 | 内容 | 对应表（见 DATABASE.md） |
 | --- | --- | --- |
-| `qb:user:review:<bankId>` | contentHash → 状态对象 | `review_schedule` |
-| `qb:user:revlog` | 全局 FIFO 评分日志 `{id,h,r,t,b?}[]`（`b`=bankId，按库训练过滤用） | `review_log` |
+| `qb:user:review:<bankId>:<hash>` | 单题状态对象（per-hash，评分只写改动键） | `review_schedule` |
+| `qb:user:reviewMeta:<bankId>` | `{v:3,count,keys}` per-hash 键清单（枚举/统计/清理） | `review_schedule` |
+| `qb:user:review:<bankId>` | 旧整表 `contentHash → 状态对象`；**仅兼容读**（迁移前/中断/旧备份导入），`QB.ReviewStore` 双读合并、per 优先 | `review_schedule` |
+| `qb:user:revlogMeta` | `{v:2,segSize:200,first,last,count}` 分段清单 | `review_log` |
+| `qb:user:revlog:<i>` | 第 i 段评分日志 `{id,h,r,t,b?}[]`（≤200 条） | `review_log` |
+| `qb:user:revlog` | 旧整表全局 FIFO 日志；**仅兼容读**，清单缺失时回退 | `review_log` |
 | `qb:meta:fsrsWeights` | 全局/按题库权重与训练元数据 | 前端偏好（后端可置 user 设置） |
 
 ### 9.1 阶段 C：SRS 已纳入数据层契约（异步存取）
@@ -261,6 +265,7 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 - **只暴露存储原语**（读/写某键）：FSRS 调度、留出门控、到期桶计算、SM-2 迁移等算法**仍在**本子系统，不进契约层。
 - **读写均为异步**：`local-adapter` 返回值是普通值（`await` 零额外开销，local 行为逐字节等价），`api-adapter` 返回 Promise；调用点一律 `await`，故「切到后端后 UI 零改动」。
 - **禁止双向委托**：`local-adapter.reviews/revlog/weights` 必须直读写 LocalStorage，**不得**反向调用 `SRSStore`/`FSRSOpt`（否则与「领域模块 → `QB.DB.*`」互为委托成自递归）。`QB.Weights.normalizeStore`（纯函数，utils/weights.js）是 `{global,banks}` 归一结构的唯一实现，被 `local-adapter.weights`/`api-adapter.weights` 复用（`FSRSOpt.normalizeStore` 为兼容导出）。
+- **schema v5 布局迁移（已实现）**：`QB.Migration.run({force?})` 在启动时把旧整表复习/日志迁到 per-hash + 分段（幂等、断点重入、失败快照回滚、多标签单锁），返回 `{migrated, sharded, repaired, layout}`。读路径由 `QB.ReviewStore`/`QB.RevlogStore` 统一（旧整表双读、per-hash 优先），**对 `SRSStore` 的 API 与对外语义不变**（分数、到期、历史逐位一致，`scripts/migrate.test.mjs` 含新旧布局对照断言）；备份恢复后同样跑一次 `Migration.run({force:true})` + `ensureLayout()` 归一。
 - 纯函数（`ratingForResult`/`collectGraded`/`keyFor`/`fsrsRating`/`dayIndex`/桶计算）保持同步。
 - **api 模式缓存与热路径（已实现）**：`api-adapter.reviews.list` 按库缓存，并同时缓存响应里的 `rev`（`reviewRevCache`）；`save`/`remove`/`banks.remove`/`backup.import` 一律失效两份缓存；`reviews.record` 成功后缓存刚提交的 map 与新 `rev`。权重仓同样缓存（`write` 后命中、`remove`/`banks.remove`/`backup.import` 失效）。实测作答写路径由「GET reviews + GET weights + PUT reviews + POST revlog」收敛为首次 3 请求、热态/批量 1 请求（错误题额外 1 条错题记录）。
 - **多端复习进度冲突合并（已实现）**：服务端每库维护单调递增 `review_rev`（`PUT` 成功 +1，`DELETE` 同样递增）；`record` 携带缓存的 `base_rev`。另一设备先写导致版本过期时，服务端返回 `409 CONFLICT` + `current` 且不落盘；客户端用 `QB.ReviewMerge.mergeMaps(local, current)` 合并（**同 contentHash 保留 `last` 更大者**，缺失/非法 `last` 视为 0，相同保留服务端）后带新 `base_rev` 重试一次，成功返回 `{..., merged:true}`，评分日志只提交一次。二次仍冲突或非冲突错误 → 清空双缓存并抛出。`revlog`/`weights` 仍为整仓写入（多端并发属后续项）。

@@ -411,19 +411,23 @@
         if (!loc) continue;
         if (loc.legacy) {
           const list = QuestionShards.readAll(b.id);
+          const oldHash = list[loc.pos].contentHash;
           const merged = Object.assign({}, list[loc.pos], patch, { id: id, bankId: b.id, updatedAt: now() });
           merged.contentHash = QB.makeContentHash(merged);
           list[loc.pos] = merged;
           QuestionShards.writeAll(b.id, list); // 旧单 blob：一次性迁移为分片
           bumpRev();
+          if (oldHash && oldHash !== merged.contentHash) remapUserData(b.id, oldHash, merged.contentHash);
           return merged;
         }
         const shard = QuestionShards.shardOf(b.id, loc.idx);
+        const oldHash = shard[loc.pos].contentHash;
         const merged = Object.assign({}, shard[loc.pos], patch, { id: id, bankId: b.id, updatedAt: now() });
         merged.contentHash = QB.makeContentHash(merged);
         shard[loc.pos] = merged;
         QuestionShards.setShard(b.id, loc.idx, shard); // 只重写所在分片
         bumpRev();
+        if (oldHash && oldHash !== merged.contentHash) remapUserData(b.id, oldHash, merged.contentHash);
         return merged;
       }
       throw new Error('题目不存在: ' + id);
@@ -649,34 +653,473 @@
    * api 适配器以同名方法对应 docs/API-CONTRACT.md §6–§8 端点。
    */
   const REVLOG_MAX = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000; // revlog FIFO 上限
+  const REVLOG_SEG_SIZE = 200; // 分段追加日志每段条数（单次评分只重写尾段）
+  const REVLOG_LAYOUT_VERSION = 2;
   let revlogRev = 0; // 本地 revlog 写修订号（供统计页派生数据缓存失效；B3）
+
+  /* ---------------- 复习状态 per-hash 布局（公共抽象 QB.ReviewStore） ----------------
+   * schema v5：调度状态从单键整表 map 改为「每个 contentHash 一个独立键」+ 清单键。
+   *   - 写：单次评分只 setSync 一个状态键（O(1)），不再序列化整库；
+   *   - 读：readMap 仍返回整表 map（对外语义不变），get(bankId, hash) 供单题 O(1) 读取；
+   *   - 兼容：旧整表键 user:review:<bankId> 继续参与合并读取（迁移前/迁移中断/旧备份导入）。
+   * 唯一实现，migrate 与适配器内部均复用之，禁止各自复制 per-hash 解析。
+   */
+  const REVIEW_LAYOUT_VERSION = 3;
+
+  function reviewStateKey(bankId, hash) { return K.reviewState(bankId, hash); }
+
+  /** per-bank hash 集合缓存（写路径 O(1)）：随清单对象替换自动失效（跨标签 meta 变更后重载） */
+  const reviewKeySets = new Map();
+  function reviewKeySetOf(bankId, meta) {
+    let entry = reviewKeySets.get(bankId);
+    if (!entry || entry.meta !== meta || (!meta && !entry.set.size)) {
+      entry = { meta: meta, set: new Set(meta ? meta.keys : ReviewStore.stateKeys(bankId)) };
+      reviewKeySets.set(bankId, entry);
+    }
+    return entry.set;
+  }
+
+  function legacyReviewMap(bankId) {
+    const m = Storage.getFresh(K.review(bankId), null);
+    return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
+  }
+
+  const ReviewStore = {
+    LAYOUT_VERSION: REVIEW_LAYOUT_VERSION,
+    stateKey: reviewStateKey,
+    legacyMap: legacyReviewMap,
+
+    /** 清单 {v, count, keys}；旧布局/缺失返回 null（同标签写经 setSync 更新缓存，跨标签由 storage 事件同步） */
+    meta(bankId) {
+      const m = Storage.get(K.reviewMeta(bankId), null);
+      return (m && m.v === REVIEW_LAYOUT_VERSION && Array.isArray(m.keys)) ? m : null;
+    },
+
+    writeMeta(bankId, keys) {
+      const meta = {
+        v: REVIEW_LAYOUT_VERSION,
+        count: keys.length,
+        keys: keys.slice()
+      };
+      Storage.setSync(K.reviewMeta(bankId), meta);
+      return meta;
+    },
+
+    /** 物理状态键的 hash 列表（无清单时兼容枚举；迁移完成后只读清单） */
+    stateKeys(bankId) {
+      const meta = ReviewStore.meta(bankId);
+      if (meta) return meta.keys.slice();
+      const prefix = K.review(bankId) + ':';
+      return Storage.keys()
+        .filter((k) => k.indexOf(prefix) === 0)
+        .map((k) => k.slice(prefix.length));
+    },
+
+    /** 整表合并视图（per-hash 优先；同 last 保留 per-hash，语义与 ReviewMerge 一致） */
+    readMap(bankId) {
+      const legacy = legacyReviewMap(bankId);
+      const per = {};
+      ReviewStore.stateKeys(bankId).forEach((h) => {
+        const st = Storage.getFresh(reviewStateKey(bankId, h), null);
+        if (st && typeof st === 'object') per[h] = st;
+      });
+      if (!Object.keys(legacy).length) return per;
+      return QB.ReviewMerge.mergeMaps(legacy, per);
+    },
+
+    /** 单题状态（O(1)；退化为旧整表命中） */
+    get(bankId, hash) {
+      const own = Storage.getFresh(reviewStateKey(bankId, hash), null);
+      if (own && typeof own === 'object') return own;
+      return legacyReviewMap(bankId)[hash] || null;
+    },
+
+    /** 状态键数量（O(1) 清单直读；旧整表额外条目计入） */
+    count(bankId) {
+      const meta = ReviewStore.meta(bankId);
+      if (!meta) return Object.keys(ReviewStore.readMap(bankId)).length;
+      const legacy = legacyReviewMap(bankId);
+      const extra = Object.keys(legacy).filter((h) => meta.keys.indexOf(h) < 0).length;
+      return meta.count + extra;
+    },
+
+    /** 写入单键并维护清单（返回 key 是否新增）；已存在的键为 O(1)，不复制整份清单 */
+    put(bankId, hash, state) {
+      const meta = ReviewStore.meta(bankId);
+      const keySet = reviewKeySetOf(bankId, meta);
+      const isNew = !keySet.has(hash);
+      Storage.setSync(reviewStateKey(bankId, hash), state);
+      if (isNew || !meta) {
+        keySet.add(hash);
+        const nextMeta = ReviewStore.writeMeta(bankId, Array.from(keySet));
+        reviewKeySets.set(bankId, { meta: nextMeta, set: keySet });
+      }
+      return isNew;
+    },
+
+    /** 删除单键（同时清旧整表条目与清单），返回是否有改动 */
+    removeHash(bankId, hash) {
+      let changed = false;
+      const cached = reviewKeySets.get(bankId);
+      if (cached) cached.set.delete(hash);
+      const stateKey = reviewStateKey(bankId, hash);
+      if (Storage.getFresh(stateKey, null) != null) { Storage.remove(stateKey); changed = true; }
+      const legacy = legacyReviewMap(bankId);
+      if (Object.prototype.hasOwnProperty.call(legacy, hash)) {
+        delete legacy[hash];
+        if (Object.keys(legacy).length) Storage.setSync(K.review(bankId), legacy);
+        else Storage.remove(K.review(bankId));
+        changed = true;
+      }
+      const meta = ReviewStore.meta(bankId);
+      if (meta) {
+        const idx = meta.keys.indexOf(hash);
+        if (idx >= 0) { meta.keys.splice(idx, 1); ReviewStore.writeMeta(bankId, meta.keys); changed = true; }
+      }
+      return changed;
+    },
+
+    /** 清空该库所有复习状态（per-hash + 旧整表 + 清单） */
+    clear(bankId) {
+      reviewKeySets.delete(bankId);
+      ReviewStore.stateKeys(bankId).forEach((h) => Storage.remove(reviewStateKey(bankId, h)));
+      Storage.remove(K.review(bankId));
+      Storage.remove(K.reviewMeta(bankId));
+    },
+
+    /**
+     * 旧整表布局 → per-hash 布局（幂等；迁移/旧备份导入共用）。
+     * 顺序：先补写缺失的状态键 → 写清单 → 最后删旧整表键。
+     * 任一步中断后重跑都会收敛到同一结果，不会重复或丢状态。
+     * @returns {{converted:number, kept:number}} converted=本次从旧整表补写的键数
+     */
+    convertLegacy(bankId) {
+      const legacy = legacyReviewMap(bankId);
+      const meta = ReviewStore.meta(bankId);
+      const keys = meta ? meta.keys.slice() : ReviewStore.stateKeys(bankId);
+      const known = new Set(keys);
+      let converted = 0;
+      Object.keys(legacy).forEach((h) => {
+        const own = Storage.getFresh(reviewStateKey(bankId, h), null);
+        const val = (own && typeof own === 'object')
+          ? QB.ReviewMerge.mergeMaps({ s: legacy[h] }, { s: own }).s
+          : legacy[h];
+        if (!own || JSON.stringify(own) !== JSON.stringify(val)) {
+          Storage.setSync(reviewStateKey(bankId, h), val);
+          converted++;
+        }
+        if (!known.has(h)) { keys.push(h); known.add(h); }
+      });
+      if (keys.length || meta) ReviewStore.writeMeta(bankId, keys);
+      if (Object.keys(legacy).length) Storage.remove(K.review(bankId));
+      return { converted: converted, kept: keys.length };
+    },
+
+    /** 数据中出现的全部复习状态键所属题库（迁移/备份折叠用；旧整表键优先） */
+    bankIds() {
+      const ids = new Set();
+      Storage.keys().forEach((k) => {
+        if (k.indexOf('user:reviewMeta:') === 0) { ids.add(k.slice('user:reviewMeta:'.length)); return; }
+        if (k.indexOf(K.review('')) !== 0) return;
+        const rest = k.slice(K.review('').length);
+        const cut = rest.indexOf(':');
+        ids.add(cut < 0 ? rest : rest.slice(0, cut));
+      });
+      return Array.from(ids).filter(Boolean);
+    },
+
+    /**
+     * oldHash → newHash 重映射（唯一实现：题目改题、schema v5 迁移共用）。
+     * 同新键冲突按 ReviewMerge（last 大者优先，平局保留已存在的新键）。
+     * @param {Map<string,string>} mapping
+     * @returns {number} 重映射的状态条数
+     */
+    remap(bankId, mapping) {
+      if (!mapping || !mapping.size) return 0;
+      let n = 0;
+      let perChanged = false;
+      const meta = ReviewStore.meta(bankId);
+      const keys = meta ? meta.keys.slice() : ReviewStore.stateKeys(bankId);
+      const keySet = new Set(keys);
+      keys.forEach((h) => {
+        if (!mapping.has(h)) return;
+        const state = Storage.getFresh(reviewStateKey(bankId, h), null);
+        if (!state || typeof state !== 'object') return;
+        const nh = mapping.get(h);
+        const prev = Storage.getFresh(reviewStateKey(bankId, nh), null);
+        const merged = (prev && typeof prev === 'object')
+          ? QB.ReviewMerge.mergeMaps({ s: state }, { s: prev }).s
+          : state;
+        Storage.setSync(reviewStateKey(bankId, nh), merged);
+        Storage.remove(reviewStateKey(bankId, h));
+        keySet.delete(h); keySet.add(nh);
+        perChanged = true;
+        n++;
+      });
+      const legacy = legacyReviewMap(bankId);
+      let legacyChanged = false;
+      Object.keys(legacy).forEach((h) => {
+        if (!mapping.has(h)) return;
+        const nh = mapping.get(h);
+        const prev = legacy[nh];
+        legacy[nh] = prev ? QB.ReviewMerge.mergeMaps({ s: legacy[h] }, { s: prev }).s : legacy[h];
+        delete legacy[h];
+        legacyChanged = true;
+        n++;
+      });
+      if (legacyChanged) {
+        if (Object.keys(legacy).length) Storage.setSync(K.review(bankId), legacy);
+        else Storage.remove(K.review(bankId));
+      }
+      if (meta || perChanged) ReviewStore.writeMeta(bankId, Array.from(keySet));
+      return n;
+    }
+  };
+
+  /* ---------------- 评分日志分段追加布局（公共抽象 QB.RevlogStore） ----------------
+   * 旧布局 user:revlog 为单数组（每次追加重写全量，O(n)）。
+   * schema v5：user:revlog:meta {v,segSize,first,last,count} + user:revlog:<i> 分段数组。
+   * 追加只读写尾段（O(segSize)，与总条数无关）；FIFO 裁剪只动首段；list 仍返回整表。
+   */
+  function revlogMetaOf() {
+    const m = Storage.getFresh(K.revlogMeta, null);
+    return (m && m.v === REVLOG_LAYOUT_VERSION &&
+      typeof m.first === 'number' && typeof m.last === 'number' &&
+      typeof m.count === 'number') ? m : null;
+  }
+
+  function revlogSegOf(i) {
+    const v = Storage.getFresh(K.revlogSeg(i), null);
+    return Array.isArray(v) ? v : [];
+  }
+
+  /** 补 id/时间戳 + 只保留可序列化字段（追加与整表重建共用） */
+  function normalizeLogEntries(entries, t0) {
+    const out = [];
+    (entries || []).forEach((e) => {
+      if (!e) return;
+      const entry = { id: QB.uid('rl'), t: e.t || t0, h: e.h, r: e.r };
+      if (e.b) entry.b = e.b;
+      out.push(entry);
+    });
+    return out;
+  }
+
+  const RevlogStore = {
+    SEG_SIZE: REVLOG_SEG_SIZE,
+    MAX: REVLOG_MAX,
+
+    meta: revlogMetaOf,
+    seg: revlogSegOf,
+
+    /** 整表读取（旧整表键存在时仍可读；迁移后走分段） */
+    list() {
+      const meta = revlogMetaOf();
+      if (!meta) {
+        const legacy = Storage.getFresh(K.revlog, null);
+        return Array.isArray(legacy) ? legacy : [];
+      }
+      let out = [];
+      for (let i = meta.first; i <= meta.last; i++) out = out.concat(revlogSegOf(i));
+      return out;
+    },
+
+    count() {
+      const meta = revlogMetaOf();
+      if (meta) return meta.count;
+      const legacy = Storage.getFresh(K.revlog, null);
+      return Array.isArray(legacy) ? legacy.length : 0;
+    },
+
+    /** 把旧整表数组转为分段（幂等；先写分段再写清单，最后删旧键） */
+    convertLegacy() {
+      if (revlogMetaOf()) {
+        // 清单已存在：旧整表键只可能是历史残留（list 以清单为准），直接清除避免双份数据
+        if (Storage.getFresh(K.revlog, null) !== null) Storage.remove(K.revlog);
+        return false;
+      }
+      const legacy = Storage.getFresh(K.revlog, null);
+      const list = Array.isArray(legacy) ? legacy.slice(-REVLOG_MAX) : [];
+      const segs = [];
+      for (let i = 0; i < list.length; i += REVLOG_SEG_SIZE) segs.push(list.slice(i, i + REVLOG_SEG_SIZE));
+      segs.forEach((seg, i) => Storage.setSync(K.revlogSeg(i), seg));
+      Storage.setSync(K.revlogMeta, {
+        v: REVLOG_LAYOUT_VERSION, segSize: REVLOG_SEG_SIZE,
+        first: 0, last: segs.length - 1, count: list.length
+      });
+      if (legacy !== undefined) Storage.remove(K.revlog);
+      return true;
+    },
+
+    /** 清空全部分段键、清单与旧整表键（整表重建/删库用） */
+    clear() {
+      Storage.keys().forEach((k) => {
+        if (k === K.revlogMeta) return;
+        if (k.indexOf('user:revlog:') === 0 && /^\d+$/.test(k.slice('user:revlog:'.length))) Storage.remove(k);
+      });
+      Storage.remove(K.revlogMeta);
+      Storage.remove(K.revlog);
+    },
+
+    /** 用完整列表重建分段（备份恢复/迁移重映射用；O(n) 但非热路径） */
+    replaceAll(list) {
+      const src = (Array.isArray(list) ? list : []).slice(-REVLOG_MAX);
+      RevlogStore.clear();
+      const segs = [];
+      for (let i = 0; i < src.length; i += REVLOG_SEG_SIZE) segs.push(src.slice(i, i + REVLOG_SEG_SIZE));
+      segs.forEach((seg, i) => Storage.setSync(K.revlogSeg(i), seg));
+      Storage.setSync(K.revlogMeta, {
+        v: REVLOG_LAYOUT_VERSION, segSize: REVLOG_SEG_SIZE,
+        first: 0, last: segs.length - 1, count: src.length
+      });
+      revlogRev += 1;
+    },
+
+    /**
+     * 追加（热路径）：只读写尾段 + 必要时裁剪首段。
+     * 返回 {added, rollback}：调用方（状态+日志一次提交）失败时用 rollback 恢复日志。
+     */
+    appendInternal(entries) {
+      const t0 = now();
+      const normalized = normalizeLogEntries(entries, t0);
+      if (!normalized.length) return { added: 0, rollback: function () {} };
+      RevlogStore.convertLegacy();
+      const prevMeta = revlogMetaOf();
+      const touched = new Map();
+      const touch = (i) => {
+        if (!touched.has(i)) touched.set(i, Storage.getFresh(K.revlogSeg(i), null));
+      };
+      const meta = Object.assign({}, prevMeta);
+      let idx = meta.count ? meta.last : 0;
+      if (!meta.count) { meta.first = 0; meta.last = 0; }
+      const rollback = function () {
+        // 回滚只改内存/待写队列，最后统一落盘：配额失败时逐个 setSync 会在第一个键再次抛错，
+        // 导致后续键没来得及回滚（状态半写）。set 不立即落盘，forceSync 失败由调用方兜底。
+        touched.forEach((value, i) => {
+          if (value === null || value === undefined) Storage.remove(K.revlogSeg(i));
+          else Storage.set(K.revlogSeg(i), value);
+        });
+        if (prevMeta) Storage.set(K.revlogMeta, prevMeta);
+        else Storage.remove(K.revlogMeta);
+      };
+      try {
+        let seg = revlogSegOf(idx).slice(); // 副本：失败时不能污染 touched 中用于回滚的旧数组
+        touch(idx);
+        normalized.forEach((entry) => {
+          if (seg.length >= REVLOG_SEG_SIZE) {
+            Storage.setSync(K.revlogSeg(idx), seg);
+            idx += 1;
+            seg = revlogSegOf(idx).slice();
+            touch(idx);
+          }
+          seg.push(entry);
+        });
+        Storage.setSync(K.revlogSeg(idx), seg);
+        meta.last = idx;
+        meta.count += normalized.length;
+
+        // FIFO：只裁首段
+        let overflow = meta.count - REVLOG_MAX;
+        while (overflow > 0) {
+          const first = revlogSegOf(meta.first).slice();
+          touch(meta.first);
+          if (!first.length) { meta.first += 1; continue; }
+          if (first.length <= overflow) {
+            overflow -= first.length;
+            Storage.remove(K.revlogSeg(meta.first));
+            meta.first += 1;
+          } else {
+            first.splice(0, overflow);
+            Storage.setSync(K.revlogSeg(meta.first), first);
+            overflow = 0;
+          }
+        }
+        if (meta.count > REVLOG_MAX) meta.count = REVLOG_MAX;
+        if (meta.first > meta.last) { meta.first = 0; meta.last = -1; meta.count = 0; }
+        Storage.setSync(K.revlogMeta, meta);
+        revlogRev += 1;
+        return { added: normalized.length, rollback: rollback };
+      } catch (e) {
+        // 写入中途失败：appendInternal 自己先回滚本次改动再抛，调用方无需也无法拿到 rollback
+        rollback();
+        throw e;
+      }
+    },
+
+    /** h 字段重映射（只重写含命中条目的分段；旧整表布局就地重写） */
+    remap(mapping) {
+      if (!mapping || !mapping.size) return 0;
+      const meta = revlogMetaOf();
+      if (!meta) {
+        const legacy = Storage.getFresh(K.revlog, null);
+        if (!Array.isArray(legacy)) return 0;
+        let n = 0;
+        const next = legacy.map((e) => {
+          if (!e || !mapping.has(e.h)) return e;
+          n++;
+          return Object.assign({}, e, { h: mapping.get(e.h) });
+        });
+        if (n) { Storage.setSync(K.revlog, next); revlogRev += 1; }
+        return n;
+      }
+      let n = 0;
+      for (let i = meta.first; i <= meta.last; i++) {
+        const seg = revlogSegOf(i);
+        let changed = false;
+        const next = seg.map((e) => {
+          if (!e || !mapping.has(e.h)) return e;
+          changed = true; n++;
+          return Object.assign({}, e, { h: mapping.get(e.h) });
+        });
+        if (changed) Storage.setSync(K.revlogSeg(i), next);
+      }
+      if (n) revlogRev += 1;
+      return n;
+    },
+
+    /** 删库级联：移除该库（b === bankId）的日志，旧无 b 记录保留 */
+    removeBank(bankId) {
+      const list = RevlogStore.list();
+      const kept = list.filter((e) => !e || e.b !== bankId);
+      if (kept.length === list.length) return 0;
+      RevlogStore.replaceAll(kept); // replaceAll 内已自增 revlogRev
+      return list.length - kept.length;
+    }
+  };
+
+  /**
+   * 单题内容变化后的用户数据重映射（错题/收藏/复习状态/评分日志）。
+   * 唯一入口：题目 update 与迁移都走这里，禁止各自复制键列表合并规则。
+   */
+  function remapUserData(bankId, oldHash, newHash) {
+    if (!oldHash || !newHash || oldHash === newHash) return 0;
+    const mapping = new Map([[oldHash, newHash]]);
+    const st = ReviewStore.remap(bankId, mapping);
+    QB.HashRemap.remapList(K.wrong(bankId), mapping, QB.HashRemap.mergeWrong);
+    QB.HashRemap.remapList(K.favorite(bankId), mapping, QB.HashRemap.mergeFav);
+    const log = RevlogStore.remap(mapping);
+    return st + log;
+  }
+
   const revlog = {
-    list() { return Storage.get(K.revlog, []) || []; },
+    list() { return RevlogStore.list(); },
     /** revlog 写修订号（同步数值；append/record/cascade/backup 后自增） */
     revision() { return revlogRev; },
     /**
      * 构造追加后的新数组（纯函数，不落盘）：补 id/时间戳 + FIFO 裁剪。
-     * append 与 reviews.record 共用，避免「状态+日志」热路径各写一份实现。
+     * 保留为公共纯函数（测试/历史调用方）；热路径改用 RevlogStore.appendInternal。
      */
     build(base, entries) {
       const list = Array.isArray(base) ? base.slice() : [];
       if (!entries || !entries.length) return list;
-      const t0 = now();
-      entries.forEach((e) => {
-        const entry = { id: QB.uid('rl'), t: e.t || t0, h: e.h, r: e.r };
-        if (e.b) entry.b = e.b; // 题库归属；旧链路无 b 时不写（全局日志/历史数据）
-        list.push(entry);
-      });
+      list.push.apply(list, normalizeLogEntries(entries, now()));
       if (list.length > REVLOG_MAX) list.splice(0, list.length - REVLOG_MAX);
       return list;
     },
-    /** 追加条目（本层负责补 id/时间戳与 FIFO 裁剪），返回追加后的完整日志 */
+    /** 追加并返回整表（对外契约不变；内部热路径不调用，避免 O(n) 物化） */
     append(entries) {
-      if (!entries || !entries.length) return revlog.list();
-      const list = revlog.build(revlog.list(), entries);
-      Storage.setSync(K.revlog, list);
-      revlogRev += 1;
-      return list;
+      RevlogStore.appendInternal(entries);
+      return RevlogStore.list();
     }
   };
 
@@ -693,54 +1136,95 @@
   /**
    * 复习写入公共实现：record（整表）与 patch（增量）共用同一合并/回滚语义。
    * - 写前直读最新落盘快照，按 QB.ReviewMerge 合并（同键取 last 大者），避免「先读后写」期间
-   *   另一标签的评分被覆盖；状态/日志/版本号三键同快照提交，任一步失败按调用前快照回滚。
+   *   另一标签的评分被覆盖；状态/日志/版本号同快照提交，任一步失败按调用前快照回滚。
    * - full=true 时 saved 返回合并后总键数（整表语义）；增量时返回本次改动键数。
    */
   function commitReview(bankId, delta, entries, full) {
-    const key = K.review(bankId);
     const keyRev = K.reviewRev(bankId);
-    const prevMap = Storage.getFresh(key, null);
-    const prevLog = Storage.getFresh(K.revlog, []);
-    const prevRev = Number(Storage.getFresh(keyRev, 0)) || 0;
+    const prevRev = reviewRevOf(bankId);
     const incoming = delta || {};
-    // null 值表示删除该 content_hash（PATCH 契约），先剔除再合并
-    const upserts = {};
-    const deletes = [];
-    Object.keys(incoming).forEach((k) => {
-      if (incoming[k] === null) deletes.push(k);
-      else upserts[k] = incoming[k];
-    });
-    const merged = (prevMap && typeof prevMap === 'object')
-      ? QB.ReviewMerge.mergeMaps(upserts, prevMap)
-      : upserts;
-    deletes.forEach((k) => { delete merged[k]; });
-    const nextLog = revlog.build(prevLog, entries || []);
-    const logged = Array.isArray(entries) ? entries.length : 0;
+    const touched = new Map(); // stateKey -> 旧值（null=不存在）
+    const prevLegacy = Storage.getFresh(K.review(bankId), null);
+    const prevMeta = Storage.get(K.reviewMeta(bankId), null);
+    let logRollback = null;
     try {
-      Storage.setSync(key, merged);
-      Storage.setSync(K.revlog, nextLog);
+      Object.keys(incoming).forEach((hash) => {
+        const st = incoming[hash];
+        if (st === null) {
+          ReviewStore.removeHash(bankId, hash);
+          return;
+        }
+        const key = reviewStateKey(bankId, hash);
+        if (!touched.has(key)) touched.set(key, Storage.getFresh(key, null));
+        const existing = ReviewStore.get(bankId, hash);
+        const merged = existing ? QB.ReviewMerge.mergeMaps({ s: st }, { s: existing }).s : st;
+        ReviewStore.put(bankId, hash, merged);
+      });
+      const log = RevlogStore.appendInternal(entries || []);
+      logRollback = log.rollback;
       Storage.setSync(keyRev, prevRev + 1);
+      const logged = Array.isArray(entries) ? entries.length : 0;
+      return {
+        saved: full ? ReviewStore.count(bankId) : Object.keys(incoming).length,
+        logged: logged,
+        rev: prevRev + 1
+      };
     } catch (e) {
-      // 回滚（尽力而为）：恢复到调用前快照，避免状态/日志半写
-      try { Storage.setSync(key, prevMap || {}); } catch (_) { /* lastError 已记录 */ }
-      try { Storage.setSync(K.revlog, prevLog); } catch (_) { /* lastError 已记录 */ }
-      try { Storage.setSync(keyRev, prevRev); } catch (_) { /* lastError 已记录 */ }
+      // 回滚（尽力而为）：先恢复内存/待写队列（set 不会立即抛错，避免第一个键失败导致半回滚），
+      // 最后统一 forceSync；落盘若仍失败，待写队列保留正确旧值，由后续防抖重试。
+      try {
+        touched.forEach((value, key) => {
+          if (value == null) Storage.remove(key);
+          else Storage.set(key, value);
+        });
+        if (prevLegacy == null) Storage.remove(K.review(bankId));
+        else Storage.set(K.review(bankId), prevLegacy);
+        if (prevMeta == null) Storage.remove(K.reviewMeta(bankId));
+        else Storage.set(K.reviewMeta(bankId), prevMeta);
+        if (logRollback) logRollback();
+        Storage.set(keyRev, prevRev);
+        Storage.forceSync();
+      } catch (_) { /* lastError 已记录；待写队列保留正确旧值 */ }
       throw e;
     }
-    if (logged) revlogRev += 1;
-    return { saved: full ? Object.keys(merged).length : Object.keys(incoming).length, logged: logged, rev: prevRev + 1 };
   }
 
   const reviews = {
-    /** 该库调度状态 map（contentHash → state）；无记录返回 {} */
-    list(bankId) { return Storage.get(K.review(bankId)) || {}; },
-    /** 整表落盘（一次评分/整卷结算后提交），失败即抛；本地版本号随之递增 */
+    /** 该库调度状态 map（contentHash → state）；无记录返回 {}（逐题读取请用 get） */
+    list(bankId) { return ReviewStore.readMap(bankId); },
+    /** 单题状态 O(1)（迁移后）；无记录 null */
+    get(bankId, hash) { return ReviewStore.get(bankId, hash); },
+    /** 整表落盘（替换该库全部状态），失败即抛；本地版本号随之递增 */
     save(bankId, map) {
-      Storage.setSync(K.review(bankId), map || {});
-      bumpReviewRev(bankId);
+      const prev = ReviewStore.readMap(bankId);
+      const prevMeta = Storage.getFresh(K.reviewMeta(bankId), null);
+      const prevLegacy = Storage.getFresh(K.review(bankId), null);
+      const prevRev = reviewRevOf(bankId);
+      try {
+        ReviewStore.clear(bankId);
+        const keys = [];
+        Object.keys(map || {}).forEach((hash) => {
+          if (map[hash] == null) return;
+          Storage.setSync(reviewStateKey(bankId, hash), map[hash]);
+          keys.push(hash);
+        });
+        ReviewStore.writeMeta(bankId, keys);
+        bumpReviewRev(bankId);
+      } catch (e) {
+        try {
+          ReviewStore.clear(bankId);
+          Object.keys(prev).forEach((hash) => Storage.set(reviewStateKey(bankId, hash), prev[hash]));
+          if (Object.keys(prev).length) ReviewStore.writeMeta(bankId, Object.keys(prev));
+          if (prevMeta != null) Storage.set(K.reviewMeta(bankId), prevMeta);
+          if (prevLegacy != null) Storage.set(K.review(bankId), prevLegacy);
+          Storage.set(K.reviewRev(bankId), prevRev);
+          Storage.forceSync();
+        } catch (_) { /* 尽力回滚 */ }
+        throw e;
+      }
     },
     remove(bankId) {
-      Storage.remove(K.review(bankId));
+      ReviewStore.clear(bankId);
       bumpReviewRev(bankId);
     },
     /**
@@ -751,8 +1235,8 @@
       return commitReview(bankId, map, entries, true);
     },
     /**
-     * 作答热路径（增量，B1）：只提交本批改动的 content_hash 状态（api 上行 O(改动数)）。
-     * 注：本地仍按单键 map 整表落盘（LocalStorage 布局未改，见 CHANGELOG 的 B1 遗留说明）。
+     * 作答热路径（增量，B1）：只提交本批改动的 content_hash 状态。
+     * schema v5 起本地也只写改动键（O(1)），不再整表序列化。
      */
     patch(bankId, delta, entries) {
       return commitReview(bankId, delta, entries, false);
@@ -804,9 +1288,7 @@
     Storage.remove(K.reviewRev(id)); // 本地复习版本号随库删除一并清理
     weights.remove(id); // 该库 FSRS preset（meta:fsrsWeights.banks[bankId]）
     // 该库评分日志（revlog 条目 b=bankId，F4 起记录；旧无 b 日志保留）
-    const log = revlog.list();
-    const kept = log.filter((e) => !e || e.b !== id);
-    if (kept.length !== log.length) { Storage.setSync(K.revlog, kept); revlogRev += 1; }
+    RevlogStore.removeBank(id);
     const hist = Storage.get(K.history, []).filter((h) => h.bankId !== id);
     Storage.setSync(K.history, hist);
     const cur = Storage.get(K.metaCurrentBank, null);
@@ -819,17 +1301,62 @@
    * 相同保留远端）；Storage 层保持通用，不硬编码复习语义。
    */
   if (typeof Storage.registerMerge === 'function') {
+    const REVIEW_PREFIX = K.review(''); // 'user:review:'
+    // 旧整表键：user:review:<bankId>（前缀后不含 ':'）
     Storage.registerMerge(
-      (key) => key.indexOf(K.review('')) === 0,
+      (key) => key.indexOf(REVIEW_PREFIX) === 0 && key.indexOf(':', REVIEW_PREFIX.length) < 0,
       (local, incoming) => QB.ReviewMerge.mergeMaps(local || {}, incoming || {})
+    );
+    // per-hash 状态键：user:review:<bankId>:<hash>（同键按 last 合并，不让整值覆盖丢评分）
+    Storage.registerMerge(
+      (key) => key.indexOf(REVIEW_PREFIX) === 0 && key.indexOf(':', REVIEW_PREFIX.length) >= 0,
+      (local, incoming) => {
+        if (local == null) return incoming;
+        if (incoming == null) return local;
+        return QB.ReviewMerge.mergeMaps({ s: local }, { s: incoming }).s;
+      }
     );
     Storage.registerMerge(
       (key) => key.indexOf(K.reviewRev('')) === 0,
       (local, incoming) => Math.max(Number(local) || 0, Number(incoming) || 0)
     );
+    // revlog 分段：按条目 id 并集，避免另一标签的追加被整段覆盖
+    const SEG_PREFIX = 'user:revlog:';
+    Storage.registerMerge(
+      (key) => key.indexOf(SEG_PREFIX) === 0 && /^\d+$/.test(key.slice(SEG_PREFIX.length)),
+      (local, incoming) => {
+        if (!Array.isArray(local)) return incoming;
+        if (!Array.isArray(incoming)) return local;
+        const seen = new Set(local.map((e) => e && e.id));
+        const out = local.slice();
+        incoming.forEach((e) => { if (!e || !seen.has(e.id)) out.push(e); });
+        return out;
+      }
+    );
+    Storage.registerMerge(
+      (key) => key === K.revlogMeta,
+      (local, incoming) => {
+        if (!local || typeof local !== 'object') return incoming;
+        if (!incoming || typeof incoming !== 'object') return local;
+        return {
+          v: Math.max(local.v || 0, incoming.v || 0),
+          segSize: incoming.segSize || local.segSize,
+          first: Math.min(local.first || 0, incoming.first || 0),
+          last: Math.max(local.last == null ? -1 : local.last, incoming.last == null ? -1 : incoming.last),
+          count: Math.max(local.count || 0, incoming.count || 0)
+        };
+      }
+    );
   }
 
   // REVLOG_MAX：revlog FIFO 上限的唯一常量定义源，fsrs-opt 的 LOG_LIMIT 再导出此处
-  QB.LocalAdapter = { banks, questions, progress, reviews, revlog, weights, backup, REVLOG_MAX: REVLOG_MAX };
-  QB.QuestionShards = QuestionShards; // 分片读写公共抽象（migrate 等复用，避免重复实现）
+  QB.LocalAdapter = {
+    banks, questions, progress, reviews, revlog, weights, backup,
+    REVLOG_MAX: REVLOG_MAX
+  };
+  QB.QuestionShards = QuestionShards;   // 分片读写公共抽象（migrate 等复用，避免重复实现）
+  QB.ReviewStore = ReviewStore;          // 复习状态 per-hash 布局（migrate/backup 复用）
+  QB.RevlogStore = RevlogStore;          // 评分日志分段追加布局（migrate/backup 复用）
+  QB.REVIEW_LAYOUT_VERSION = REVIEW_LAYOUT_VERSION;
+  QB.REVLOG_LAYOUT_VERSION = REVLOG_LAYOUT_VERSION;
 })(window);

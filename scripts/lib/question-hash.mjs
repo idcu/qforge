@@ -4,7 +4,7 @@
  * 唯一实现仍是浏览器侧 `js/utils/question-id.js`：本模块只负责在 Node 中按依赖顺序
  * 加载经典脚本（fnv → answer-normalize → judge-answer → question-id），并导出
  * `makeContentHash` / `isCurrentHash`。禁止在 serve-api 内另写一份 hash 逻辑，
- * 否则服务端与客户端会静默漂移（客户端靠 `QB.isCurrentHash` 判定 v2）。
+ * 否则服务端与客户端会静默漂移（客户端靠 `QB.isCurrentHash` 判定 v3）。
  *
  * 两侧一致性由 api-backend.test 的断言守护（服务端重算结果 == `QB.makeContentHash`）。
  */
@@ -41,12 +41,12 @@ function load() {
   return runtime;
 }
 
-/** 与客户端逐字节等价的 content_hash（v2：题型+题干+选项+答案，材料题含子问题） */
+/** 与客户端逐字节等价的 content_hash（v3：`3:`+FNV-1a 64 位；题型+题干+选项+答案，材料题含子问题） */
 export function makeContentHash(q) {
   return load().makeContentHash(q);
 }
 
-/** 是否当前版本 hash（v2 带「2:」前缀） */
+/** 是否当前版本 hash（v3 带「3:」前缀，后接 16 位十六进制） */
 export function isCurrentHash(h) {
   return load().isCurrentHash(h);
 }

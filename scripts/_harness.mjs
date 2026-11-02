@@ -29,6 +29,7 @@ const MODULES = [
   'js/utils/assets.js',
   'js/utils/weights.js',
   'js/utils/review-merge.js',
+  'js/utils/hash-remap.js',
   'js/data/contracts.js',
   'js/data/wire.js',
   'js/data/local-adapter.js',
@@ -75,9 +76,12 @@ const MODULES = [
 
 /**
  * @param {string} qbDir 工程根目录（含 js/ 的目录绝对路径）
+ * @param {{raw?:Map<string,string>}} [opts] raw：共享底层 localStorage 存储（多标签测试用；
+ *   两个 harness 传入同一 Map 即模拟两个标签共享磁盘，各自拥有独立的 Storage 内存缓存）。
  */
-export async function createHarness(qbDir) {
-  const raw = new Map();
+export async function createHarness(qbDir, opts) {
+  const o = opts || {};
+  const raw = o.raw instanceof Map ? o.raw : new Map();
   const localStorage = {
     get length() { return raw.size; },
     key(i) { return Array.from(raw.keys())[i]; },

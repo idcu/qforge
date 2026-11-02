@@ -26,13 +26,37 @@
    * 热路径提交：适配器支持 patch 时只上行本批改动键（B1），否则回退整表 record。
    * 返回形状 { saved, logged, rev? }，调用方当前均忽略返回值。
    */
-  async function commitGraded(bankId, delta, fullMap, entries) {
+  async function commitGraded(bankId, delta, entries) {
     const repo = QB.DB.reviews;
     if (typeof repo.patch === 'function') return await repo.patch(bankId, delta, entries);
-    return await repo.record(bankId, fullMap, entries);
+    // 旧第三方适配器：无 patch 时读整表、加上本批改动后整表提交（行为不变）
+    const map = await readMap(bankId);
+    Object.keys(delta || {}).forEach((k) => {
+      if (delta[k] === null) delete map[k];
+      else map[k] = delta[k];
+    });
+    return await repo.record(bankId, map, entries);
   }
 
   function keyFor(q) { return q.contentHash || QB.makeContentHash(q); }
+
+  /** 单题状态读取：适配器支持 get 时 O(1)，否则回退整表 list（第三方适配器兼容） */
+  async function stateFor(bankId, key) {
+    const repo = QB.DB.reviews;
+    if (typeof repo.get === 'function') return await repo.get(bankId, key);
+    const map = await readMap(bankId);
+    return map[key] || null;
+  }
+
+  /** 批量按 key 取状态（支持 get 时并发单键读，避免整表反序列化） */
+  async function statesFor(bankId, keys) {
+    const repo = QB.DB.reviews;
+    const uniq = Array.from(new Set(keys));
+    if (typeof repo.get !== 'function') return await readMap(bankId);
+    const out = {};
+    await Promise.all(uniq.map(async (k) => { out[k] = await repo.get(bankId, k); }));
+    return out;
+  }
 
   /** 应用层评分 0–3（again/hard/good/easy）→ FSRS 评分 1–4；已是 1–4 原样透传 */
   function fsrsRating(rating) {
@@ -75,20 +99,18 @@
 
   /** 取某题状态（无记录返回 null） */
   async function getState(bankId, q) {
-    const map = await readMap(bankId);
-    return map[keyFor(q)] || null;
+    return await stateFor(bankId, keyFor(q));
   }
 
   /** 应用一次评分，返回新状态并落盘（同时写 revlog 供参数优化） */
   async function grade(bankId, q, rating, now) {
     const ts = now == null ? Date.now() : now;
-    const map = await readMap(bankId);
     const k = keyFor(q);
     const fr = fsrsRating(rating);
-    const next = QB.FSRS.review(map[k], fr, ts, await QB.FSRSOpt.getActiveWeights(bankId));
-    map[k] = next;
+    const cur = await stateFor(bankId, k);
+    const next = QB.FSRS.review(cur, fr, ts, await QB.FSRSOpt.getActiveWeights(bankId));
     // 热路径：状态 + 评分日志一次提交；api 模式只上行本批改动键（patch），一个请求
-    await commitGraded(bankId, { [k]: next }, map, [{ t: ts, h: k, r: fr, b: bankId }]);
+    await commitGraded(bankId, { [k]: next }, [{ t: ts, h: k, r: fr, b: bankId }]);
     return next;
   }
 
@@ -96,18 +118,20 @@
   async function gradeMany(bankId, entries, now) {
     if (!entries || !entries.length) return;
     const ts = now == null ? Date.now() : now;
-    const map = await readMap(bankId);
+    const keys = entries.map((e) => keyFor(e.question));
+    const stateMap = await statesFor(bankId, keys);
     const w = await QB.FSRSOpt.getActiveWeights(bankId);
     const logs = [];
     const delta = {};
     entries.forEach((e) => {
       const k = keyFor(e.question);
       const fr = fsrsRating(e.rating);
-      map[k] = QB.FSRS.review(map[k], fr, ts, w);
-      delta[k] = map[k];
+      const next = QB.FSRS.review(stateMap[k] || null, fr, ts, w);
+      delta[k] = next;
+      stateMap[k] = next;
       logs.push({ t: ts, h: k, r: fr, b: bankId });
     });
-    await commitGraded(bankId, delta, map, logs);
+    await commitGraded(bankId, delta, logs);
   }
 
   /** 今日到期题目（未学过的题也算到期） */

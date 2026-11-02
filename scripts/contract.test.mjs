@@ -23,6 +23,11 @@ function throws(fn, re, l) {
   try { fn(); } catch (e) { ok(re.test(String(e.message)), l, '（异常：' + e.message + '）'); return; }
   ok(false, l, '（期望抛出但未抛）');
 }
+/** schema v5：日志分段布局，清空需同时删旧整表键与全部分段键 */
+function clearRevlog() {
+  QB.Storage.remove(QB.KEYS.revlog);
+  QB.RevlogStore.clear();
+}
 
 section('契约表结构');
 {
@@ -57,7 +62,7 @@ section('assertDriver（资产驱动契约校验）');
 section('reviews 仓库（本地）');
 {
   const b = 'ct-bank-reviews';
-  QB.Storage.remove(QB.KEYS.review(b));
+  QB.DB.reviews.remove(b);
   eq(JSON.stringify(QB.DB.reviews.list(b)), '{}', '无记录返回空 map');
   const map = { 'hash1': { algo: 'fsrs', stability: 2.3065, due: 1 } };
   QB.DB.reviews.save(b, map);
@@ -68,8 +73,8 @@ section('reviews 仓库（本地）');
 
   // record：一次调用同时落调度状态与评分日志（作答热路径）
   const rb = 'ct-bank-record';
-  QB.Storage.remove(QB.KEYS.review(rb));
-  QB.Storage.remove(QB.KEYS.revlog);
+  QB.DB.reviews.remove(rb);
+  clearRevlog();
   const map2 = { hash2: { algo: 'fsrs', stability: 3.1 } };
   const rec = QB.DB.reviews.record(rb, map2, [{ t: 200, h: 'hash2', r: 3, b: rb }]);
   eq(QB.DB.reviews.list(rb).hash2.stability, 3.1, 'record 落调度状态（与 save 同源）');
@@ -78,12 +83,12 @@ section('reviews 仓库（本地）');
   eq(rec.logged, 1, 'record 返回 logged 条数');
   eq(rec.saved, 1, 'record 返回 saved 状态数');
   QB.DB.reviews.remove(rb);
-  QB.Storage.remove(QB.KEYS.revlog);
+  clearRevlog();
 }
 
 section('revlog 仓库（本地，委托 fsrs-opt）');
 {
-  QB.Storage.remove(QB.KEYS.revlog);
+  clearRevlog();
   const out = QB.DB.revlog.append([{ t: 100, h: 'h1', r: 3 }, { h: 'h2', r: 1 }]);
   eq(out.length, 2, 'append 返回追加后的完整日志');
   ok(out[0].id && out[0].t === 100, '条目自动补 id，显式 t 保留');
@@ -194,7 +199,7 @@ section('删库级联（唯一入口 cascadeDelete）');
   QB.Storage.remove(QB.KEYS.wrong(B.id));
   QB.Storage.remove(QB.KEYS.favorite(A.id));
   QB.Storage.remove(QB.KEYS.history);
-  QB.Storage.remove(QB.KEYS.revlog);
+  clearRevlog();
   QB.Storage.remove(QB.KEYS.metaFsrsWeights);
 }
 

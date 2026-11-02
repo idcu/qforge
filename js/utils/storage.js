@@ -183,16 +183,27 @@
         console.warn('[Storage] 读取失败 key=' + key, e);
         value = undefined;
       }
-      if (value === undefined) value = defaultValue;
+      // 缺失时不要用默认值填充缓存：否则 keys() 会把「不存在的键」当成存在，
+      // 且以 null 为默认值的读取会污染后续 get(key, [])（返回 null 而非空数组）
+      if (value === undefined) {
+        this._cache.delete(key);
+        this._pending.delete(key);
+        return defaultValue;
+      }
       this._cache.set(key, value);
       return value;
     },
 
     /**
      * 绕过内存缓存直读 localStorage，并刷新缓存（供「写前重读最新快照」的合并写使用）。
-     * 注意：会丢弃同键的待写标记——调用方通常即将写入合并后的新快照。
+     * 本标签若对该键有未落盘的待写值，则以待写值为准（它比本标签磁盘快照更新；跨标签
+     * 外部改动已由 storage 事件先合并进缓存），避免防抖窗口内读不到自己刚写的数据。
      */
     getFresh(key, defaultValue) {
+      if (this._pending.has(key)) {
+        const pendingValue = this._cache.get(key);
+        return pendingValue === undefined ? defaultValue : pendingValue;
+      }
       let value;
       try {
         const raw = global.localStorage.getItem(this._fullKey(key));
@@ -201,7 +212,12 @@
         this._cache.delete(key);
         value = undefined;
       }
-      if (value === undefined) value = defaultValue;
+      // 缺失时不要用默认值填充缓存：否则 keys() 会把「不存在的键」当成存在（默认值可能是 null）
+      if (value === undefined) {
+        this._cache.delete(key);
+        this._pending.delete(key);
+        return defaultValue;
+      }
       this._cache.set(key, value);
       this._pending.delete(key);
       return value;

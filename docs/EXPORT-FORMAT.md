@@ -38,7 +38,7 @@
   "exportedAt": "2026-10-13T10:00:00.000Z",
   "kind": "bank | wrong | favorites",
   "bank": { "name": "…", "description": "", "category": "" },
-  "checksum": "ab12cd34",
+  "checksum": "3:9f1c0a7d2b5e4f68",
   "questions": [
     { "type": "single", "question": "…", "options": [{"letter":"A","text":"…"}],
       "answer": "B", "blanks": [], "reference_answer": "",
@@ -53,7 +53,7 @@
   ]
 }
 ```
-> **内容校验和（P4）**：`checksum` 对 `questions` 的规范化 JSON 计算 FNV-1a 32 位（8 位十六进制）；导出→导入时核对，不一致给警告并在预览展示。仅用于检测传输损坏/手工误改，**不是密码学签名**，不防恶意重算。
+> **内容校验和（P4，v3）**：`checksum` 对 `questions` 的规范化 JSON 计算 **FNV-1a 64 位并加版本前缀 `3:`**（共 18 字符：`3:` + 16 位十六进制），实现对 `QB.Source.checksumContent`；导出一律写新值，**版本由前缀自标注**（无独立版本字段）。导入时经 `QB.Source.verifyChecksum` 复核：`3:` 前缀按 64 位重算；旧导出/手工数据的裸 8 位十六进制按 FNV-1a 32 位重算；两者都接受，**不因格式升级而阻断导入或误报**，仅在校验值真正不一致时给警告并在预览展示。仅用于检测传输损坏/手工误改，**不是密码学签名**，不防恶意重算。URL 来源快照的 `source_checksum` 仍是 32 位（8 位十六进制，`checksumText`），与内容校验和分开——改它会让已存「远端文件是否变化」的记录全部误判。
 > 错题导出时题目附带 `wrongCount`（再导入时被适配器忽略，不影响题面）。
 > 材料题（`type=material`）以 `material` + `children` **嵌套**导出（M1 起），JSON/.qbk 全字段无损；小问题目复用各题型字段，但不携带 `category/difficulty/tags`（继承父题，见 [SPEC-material.md](SPEC-material.md) §2.1）。
 

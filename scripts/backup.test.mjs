@@ -31,7 +31,27 @@ eq(backup.app, 'qforge-backup', '备份标识正确');
 ok(!!backup.exportedAt && backup.version, '含时间戳与版本');
 const dataKeys = Object.keys(backup.data);
 ok(dataKeys.indexOf('banks') >= 0, '备份含 banks');
-ok(QB.Storage.keys().every((k) => dataKeys.indexOf(k) >= 0), '备份覆盖全部逻辑键');
+// schema v5 备份布局折叠：per-hash 状态 → user:review:<bank> 整表，分段日志 → user:revlog 数组；
+// 运行期元数据（reviewRev/清单/日志清单/迁移锁/断点映射）不进备份。逐键检查无遗漏。
+const REVIEW_PREFIX = QB.KEYS.review('');
+const uncovered = QB.Storage.keys().filter((k) => {
+  if (dataKeys.indexOf(k) >= 0) return false;
+  if (k === QB.KEYS.revlogMeta) return false;
+  if (k.indexOf('user:reviewRev:') === 0) return false;
+  if (k.indexOf(QB.KEYS.metaHashMap('')) === 0) return false;
+  if (k === QB.KEYS.metaMigrationLock) return false;
+  if (k.indexOf('user:reviewMeta:') === 0) return false;
+  if (k.indexOf(REVIEW_PREFIX) === 0) {
+    const rest = k.slice(REVIEW_PREFIX.length);
+    const cut = rest.indexOf(':');
+    if (cut < 0) return true; // 旧整表键本身必须在备份里
+    return dataKeys.indexOf(QB.KEYS.review(rest.slice(0, cut))) < 0; // per-hash 状态须折叠为整表
+  }
+  if (k.indexOf('user:revlog:') === 0) return dataKeys.indexOf(QB.KEYS.revlog) < 0;
+  if (k === QB.KEYS.revlog) return true;
+  return true;
+});
+ok(uncovered.length === 0, '备份覆盖全部逻辑键（per-hash/分段已折叠，无遗漏：' + (uncovered.join(',') || '无') + '）');
 const bankKey = Object.keys(backup.data).find((k) => k.indexOf('questions:') === 0 || k.indexOf('review:') >= 0);
 ok(!!bankKey, '备份含题库/SRS 数据键');
 

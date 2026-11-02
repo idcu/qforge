@@ -55,7 +55,7 @@ CREATE TABLE questions (
   tags             TEXT,                            -- 字符串数组：["法规","合同"]
   material         TEXT,                            -- 仅 material：共享材料文本；子问题在 children JSON
   children         TEXT,                            -- 仅 material：标准子题目数组 JSON（2–10 个，不可再嵌套）
-  content_hash     VARCHAR(16)  NOT NULL,           -- v2：'2:'+FNV-1a（题型|题干|选项|答案）；material 含材料+子问题语义归一
+  content_hash     VARCHAR(18)  NOT NULL,           -- v3：'3:'+16 hex（FNV-1a 64 位；题型|题干|选项|答案），material 含材料+子问题语义归一
   created_at       BIGINT       NOT NULL,
   updated_at       BIGINT       NOT NULL
 );
@@ -71,7 +71,7 @@ CREATE TABLE wrong_questions (
   user_id        VARCHAR(32),                        -- 多用户时 NOT NULL
   bank_id        VARCHAR(32) NOT NULL REFERENCES banks(id) ON DELETE CASCADE,
   question_id    VARCHAR(32) REFERENCES questions(id) ON DELETE SET NULL,
-  content_hash   VARCHAR(16) NOT NULL,               -- 键与题目对齐，跨导入稳定
+  content_hash   VARCHAR(18) NOT NULL,               -- 键与题目对齐（v3 `3:`+16 hex），跨导入稳定
   wrong_count    INT         NOT NULL DEFAULT 1,
   last_at        BIGINT      NOT NULL,
   created_at     BIGINT      NOT NULL
@@ -86,7 +86,7 @@ CREATE TABLE favorites (
   user_id      VARCHAR(32),
   bank_id      VARCHAR(32) NOT NULL REFERENCES banks(id) ON DELETE CASCADE,
   question_id  VARCHAR(32) REFERENCES questions(id) ON DELETE SET NULL,
-  content_hash VARCHAR(16) NOT NULL,
+  content_hash VARCHAR(18) NOT NULL,
   created_at   BIGINT      NOT NULL
 );
 CREATE UNIQUE INDEX uq_fav_user_bank_hash ON favorites(user_id, bank_id, content_hash);
@@ -134,7 +134,7 @@ CREATE TABLE review_schedule (
   id          VARCHAR(32) PRIMARY KEY,
   user_id     VARCHAR(32),
   bank_id     VARCHAR(32) REFERENCES banks(id) ON DELETE CASCADE,
-  content_hash VARCHAR(16) NOT NULL,             -- 与题目去重键一致
+  content_hash VARCHAR(18) NOT NULL,             -- 与题目去重键一致（v3 `3:`+16 hex）
   due_at      BIGINT NOT NULL,                   -- 下次到期时间戳
   algo        VARCHAR(8) NOT NULL DEFAULT 'fsrs',-- 算法标记（旧数据为 SM-2 行，首次评分自动迁移）
   stability   REAL NOT NULL DEFAULT 0,           -- FSRS 稳定度（天）；0=未初始化
@@ -145,7 +145,7 @@ CREATE TABLE review_schedule (
   UNIQUE INDEX uq_review_user_bank_hash (user_id, bank_id, content_hash)
 );
 ```
-> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last,learning?}`；`learning={step,mode:'new'|'review'}` 表示新卡/遗忘卡处于 1m/10m 学习步骤（分钟级 due，毕业后续长期间隔）。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。
+> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last,learning?}`；`learning={step,mode:'new'|'review'}` 表示新卡/遗忘卡处于 1m/10m 学习步骤（分钟级 due，毕业后续长期间隔）。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。**本地布局（schema v5）**：按 hash 独立键 `user:review:<bankId>:<hash>`（单次评分只写改动题）+ 清单 `user:reviewMeta:<bankId>`（`{v:3,count,keys}`，供枚举与统计），旧整表 `user:review:<bankId>` 仅兼容读（`QB.ReviewStore` 双读合并、per-hash 优先）；后端仍落本表单行，映射时把 per-hash 键展开为行。
 
 ### 2.8 review_log（FSRS 评分日志，参数优化用）
 ```sql
@@ -153,14 +153,14 @@ CREATE TABLE review_log (
   id          VARCHAR(32) PRIMARY KEY,
   user_id     VARCHAR(32),
   bank_id     VARCHAR(32),                      -- 评分所属题库（按库训练隔离；旧数据可空）
-  content_hash VARCHAR(16) NOT NULL,
+  content_hash VARCHAR(18) NOT NULL,
   rating      TINYINT NOT NULL,                  -- 1 again | 2 hard | 3 good | 4 easy
   reviewed_at BIGINT NOT NULL,
   INDEX idx_revlog_user_time (user_id, reviewed_at),
   INDEX idx_revlog_bank (bank_id)
 );
 ```
-> 前端 FIFO 上限 20,000 条，存 `qb:user:revlog`，元素 `{id,h,r,t,b?}`（`b`=bankId，2026-10 起记录）。优化器把同题相邻两次评分组成样本（间隔 + 评分档位），用伯努利负对数似然拟合 17 个权重。个性化权重存 `qb:meta:fsrsWeights`，结构 `{global?:{w[],trainedAt,samples,defaultLoss,loss,improvement,scope}, banks?:{[bankId]: 同结构}}`；活动权重按「题库 preset → 全局 → 官方默认」回退；旧版本单组 `{w[]}` 读取时自动归一为 global。**训练样本与权重作用域一致**：按库训练只用该库 revlog（`readLogForScope`），全局训练用全部日志；无 `b` 的旧日志只参与全局训练，不静默归入任何题库；v1→v2 迁移时单库归属的旧日志自动回填 `b`（见 §4）。
+> 前端 FIFO 上限 20,000 条，**本地按段存**：清单 `qb:user:revlogMeta`（`{v:2,segSize:200,first,last,count}`）+ 段键 `qb:user:revlog:<i>`（每段 ≤200 条，单次评分只重写尾段），旧整表 `qb:user:revlog` 仅兼容读（`QB.RevlogStore` 以清单为准，清单缺失才回退整表）；元素 `{id,h,r,t,b?}`（`b`=bankId，2026-10 起记录）。优化器把同题相邻两次评分组成样本（间隔 + 评分档位），用伯努利负对数似然拟合 21 个权重。个性化权重存 `qb:meta:fsrsWeights`，结构 `{global?:{w[],trainedAt,samples,defaultLoss,loss,improvement,scope}, banks?:{[bankId]: 同结构}}`；活动权重按「题库 preset → 全局 → 官方默认」回退；旧版本单组 `{w[]}` 读取时自动归一为 global。**训练样本与权重作用域一致**：按库训练只用该库 revlog（`readLogForScope`），全局训练用全部日志；无 `b` 的旧日志只参与全局训练，不静默归入任何题库；v1→v2 迁移时单库归属的旧日志自动回填 `b`（见 §4）。
 
 ### 2.9 assets（题目图片资产，本期落 IndexedDB）
 ```sql
@@ -183,26 +183,33 @@ CREATE TABLE assets (
 | `qb:questions:<bankId>` | `questions`（旧单 blob） | 分片前形态（单数组）；读取时回退，任一写操作触发写时迁移为分片并删除本键 |
 | `qb:user:wrong:<bankId>` | `wrong_questions` | `{questionKey, wrongCount, lastAt}` |
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
-| `qb:user:review:<bankId>` | `review_schedule` | contentHash → `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}` |
+| `qb:user:review:<bankId>:<hash>` | `review_schedule` | **schema v5 主布局**：单题一项 `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}`，评分只写改动键（O(改动数)） |
+| `qb:user:reviewMeta:<bankId>` | `review_schedule`（清单） | `{v:3, count, keys:[...]}`；per-hash 键集合，供枚举/统计/清理（写入路径带内存键集合缓存） |
+| `qb:user:review:<bankId>` | `review_schedule`（旧整表） | 兼容读：迁移前/迁移中断/旧备份导入；`QB.ReviewStore` 合并旧整表与 per-hash（per 优先），写路径不再产生此键 |
 | `qb:user:reviewRev:<bankId>` | 本地同步元数据 | 单调递增的本地复习版本号（服务端 `review_rev` 的本地对应物）；用于 storage 事件按版本合并与写前重读，不进备份 |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
 | `qb:user:session` | `sessions` | 单条会话快照 |
-| `qb:user:revlog` | `review_log` | 全局 FIFO 评分日志，元素 `{id,h,r,t,b?}`（`b`=bankId） |
+| `qb:user:revlogMeta` | `review_log`（分段清单） | `{v:2, segSize:200, first, last, count}`；单次评分只重写尾段 |
+| `qb:user:revlog:<i>` | `review_log`（分段） | 第 i 段 ≤200 条，元素 `{id,h,r,t,b?}`（`b`=bankId） |
+| `qb:user:revlog` | `review_log`（旧整表） | 兼容读：清单缺失时回退整表；写路径不再产生此键 |
 | `qb:meta:fsrsWeights` | —（前端偏好） | 个性化 FSRS 权重与训练元数据 |
 | `qb:meta:dav` | —（前端偏好） | WebDAV 配置（目录 URL/账号/应用密码/上次同步时间），仅本机 |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |
 | `qb:meta:startPrefs` | —（前端偏好） | 最近一次练习/考试开始参数（各题型数量/分值、分类、时长、计时/乱序开关），仅本机 |
+| `qb:meta:migrationLock` | —（迁移运行期） | `{owner, at}` 多标签迁移锁；TTL 30s，陈锁可接管；迁移完成即释放，不进备份 |
+| `qb:meta:hashMap:<bankId>` | —（迁移运行期） | `{oldHash: newHash}` 断点续跑的哈希映射；迁移成功后保留到最后一步再移除，供中断重入复用，不进备份 |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
-| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 4（v2 contentHash + v3 题目分片 + v4 分片一致修复），启动时由 `Migration.run` 幂等升级（v1→v2→v3→v4 链式） |
+| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 **5**（v2 contentHash → v3 题目分片 → v4 分片一致修复 → v5 hash 64 位 + per-hash 复习 + 分段日志），启动时由 `Migration.run({force?})` 幂等升级（v1→…→v5 链式；已是 5 仅做 `ensureLayout` 归一） |
 
 **字段命名转换**：前端 camelCase（`contentHash`/`createdAt`）↔ 数据库 snake_case（`content_hash`/`created_at`）。迁移脚本按此映射批量 POST 到 `/api/banks/{id}/questions/batch`。
 
 ## 4. 索引与去重策略
 
-- **去重唯一键**：`UNIQUE(bank_id, content_hash)`。`content_hash` 由前端 `QB.makeContentHash(q)` 计算：**v2（当前，前缀 `2:`）= FNV-1a(题型 + 规范化题干 + 选项文本集合 + 正确答案语义)**，选择类答案取选中文本（对选项乱序/字母重映射不变），判断取布尔语义，填空取各空答案，简答取参考答案；分类/难度/标签/解析等组织属性不进 hash。题干仅尾部空格/标点差异视为同题；**通用题干但选项或答案不同的题不再误并**（v1 仅 `type|题干` 的缺陷修复，评估报告高优先级#3）。
+- **去重唯一键**：`UNIQUE(bank_id, content_hash)`。`content_hash` 由前端 `QB.makeContentHash(q)` 计算：**v3（当前，前缀 `3:` + 16 位十六进制）= FNV-1a 64 位(题型 + 规范化题干 + 选项文本集合 + 正确答案语义)**，选择类答案取选中文本（对选项乱序/字母重映射不变），判断取布尔语义，填空取各空答案，简答取参考答案；分类/难度/标签/解析等组织属性不进 hash。题干仅尾部空格/标点差异视为同题；**通用题干但选项或答案不同的题不再误并**（v1 仅 `type|题干` 的缺陷修复，评估报告高优先级#3）。**位宽选型**：v2 的 32 位在 2 万题量级有可见生日碰撞风险（约 4.7%），64 位降至可忽略（≈1e-8 量级）；选 FNV-1a 64（BigInt 实现、零依赖、同步、浏览器/Node 同源码）而非 SHA-256（异步 `crypto.subtle` 无法在同步判分/导出路径复用、Node 侧需额外实现）。旧 v2（`2:`+8hex）/v1（裸 8hex）仍可被 `QB.hashVersionOf` 识别（双读去重依据）。
 - **v1→v2 存量迁移**：`js/modules/migrate.js` 在启动时按 `meta:schemaVersion` 幂等执行：题目 hash 重算后，`review/wrong/fav/revlog` 中以 contentHash 为键/字段的数据同步重映射（冲突时复习状态取最近、错题计数相加）；旧 `.qbk`/手工数据携带的裸 hash 落库时强制重算。
 - **v2→v3 题目分片（阶段 A）**：单库题目由「单 blob 数组」改为「分片 + 清单」——写放大 O(全库)→O(分片)，读按需只解析覆盖区间分片。迁移由同一 `Migration.run` 幂等完成：遍历形如 `questions:<bankId>`（不含后续冒号段）的旧 blob，用公共抽象 `QB.QuestionShards.writeAll` 切片；已存在清单则跳过（幂等，大库 450 题切 200/200/50 二次运行逐字节不变）。运行时另有**双重读兼容**：旧单 blob 在 `readAll/readRange/count/locate` 中回退读取，任一写操作（create/update/remove/insertMany）触发一次性写时迁移并删除旧键。
 - **v3→v4 分片一致修复（2026-10-29）**：v3 的删除路径在「中间分片被清空」时只移除分片键并收缩 `sizes`，未对后续分片重编号，导致清单索引与物理分片错位——`count` 有数、`list` 为空，余题成为不可达孤儿（导出亦随之丢失）。v4 在启动时逐库调用 `QB.QuestionShards.invariant` 自检；不通过则用 `QB.QuestionShards.compact` 按**物理分片键升序**拼接后重新切片（可恢复已产生的孤儿题），满足不变量则跳过 → 幂等。此后单题删除/批删在清空任一分片时统一走 `compact` 重编号，禁止各自 `sizes.splice`。
+- **v4→v5 一次性迁移（hash 64 + per-hash 复习 + 分段日志）**：同一版本内完成三件事，只留一条兼容线——① 题目 `contentHash` 由 `2:`+8hex 升级为 `3:`+16hex，按 `meta:hashMap:<bankId>` 重映射 `review/wrong/fav/revlog`；② 复习状态整表拆为 `user:review:<bankId>:<hash>` + `user:reviewMeta:<bankId>`；③ 评分日志整表拆为 `user:revlogMeta` + `user:revlog:<i>`（200/段）。可靠性：每库先持久化哈希映射再改数据（中断重入复用映射，不二次改写/不重复）；布局转换**先写新键再删旧键**；进入前对全部逻辑键做内存快照，任一步抛错 `restoreAll` 回滚；`meta:migrationLock`（owner + 30s TTL）保证多标签只跑一次，同标签模块级单飞；已是 v5 时 `ensureLayout` 只做归一（补清单/折叠残留），不重写数据。旧整表布局保留**双读**（迁移前/中断/旧备份导入），对外读语义（分数、到期、历史）与旧实现逐位一致（`scripts/migrate.test.mjs` 对照断言）。
 - **查询索引**：`(bank_id, type)`、`(bank_id, category)` 支撑列表筛选；`attempts(bank_id, created_at)` 支撑历史分页。
 - **UI 级按需装载（阶段 A）**：`Questions.count(bankId)` 直读清单 `count` 字段（O(1)，不解析分片）；`Questions.revision()` 为全库写修订号，任一题目写操作 +1，供门面 `QB.DB.loadQuestions(bankId)` 的整库读缓存做失效判定（机制上避免"忘记手动失效"读到旧数据）。`app.js` 依视图按需装载，`question-editor`/`buildIndex` 复用同一缓存。
 - **导入幂等**：`insertMany` 的 `mode=merge` 依赖上述唯一键跳过重复；`mode=overwrite` 先清库再写。更新来源题库时同题干的**答案修正**因 hash 变化会作为新题插入（旧题保留），不做静默覆盖。
@@ -262,12 +269,14 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 | --- | --- | --- |
 | 题库 | `banks`（数组，`createdAt/updatedAt`） | `banks`（数组，`created_at/updated_at`） |
 | 题目 | `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`）+ `questions:<bankId>:<i>`（分片）；旧兼容 `questions:<bankId>` 单 blob | `questions`（`{ bankId: [题目] }`，题目带 `bank_id/created_at/updated_at/content_hash`） |
-| 错题 / 收藏 / 复习计划 | `user:wrong:<bankId>`（`{questionKey,wrongCount,lastAt}`）/ `user:fav:<bankId>`（`{questionKey,addedAt}`）/ `user:review:<bankId>`（`contentHash → state` map）+ `user:reviewRev:<bankId>`（本地版本号） | `progress`（`{ bankId: { wrong:[{question_key,wrong_count,last_at}], favorite:[{question_key,added_at}], review:{} } }`，`review_rev` 在服务端进度文件中） |
+| 错题 / 收藏 / 复习计划 | `user:wrong:<bankId>`（`{questionKey,wrongCount,lastAt}`）/ `user:fav:<bankId>`（`{questionKey,addedAt}`）/ 复习为 per-hash（`user:review:<bankId>:<hash>` + `user:reviewMeta:<bankId>`）+ `user:reviewRev:<bankId>`（本地版本号）；**备份前经 `foldLayout` 折叠为旧整表 `user:review:<bankId>`（contentHash → state），并剔除清单/版本号** | `progress`（`{ bankId: { wrong:[{question_key,wrong_count,last_at}], favorite:[{question_key,added_at}], review:{} } }`，`review_rev` 在服务端进度文件中） |
 | 历史 | `user:history`（`bankId/bankName/byType/durationMs/focusLeaves/createdAt`） | `history`（`bank_id/bank_name/by_type/duration_ms/focus_leaves/created_at`） |
-| 会话 / 评分日志 / 权重 | `user:session` / `user:revlog` / `meta:fsrsWeights` | `session` / `revlog` / `weights` |
-| 本机专有偏好 | `meta:dav` / `meta:theme` / `meta:currentBank` / `meta:schemaVersion` / `meta:startPrefs` | **无对应键**（后端布局不含本机偏好） |
+| 会话 / 评分日志 / 权重 | `user:session` / 评分日志分段（`user:revlogMeta` + `user:revlog:<i>`；**备份前折叠为 `user:revlog` 数组**）/ `meta:fsrsWeights` | `session` / `revlog` / `weights` |
+| 本机专有偏好 | `meta:dav` / `meta:theme` / `meta:currentBank` / `meta:schemaVersion` / `meta:startPrefs`；迁移运行期键（`meta:migrationLock` / `meta:hashMap:<bankId>`）**不进备份** | **无对应键**（后端布局不含本机偏好/运行期元数据） |
 
-转换规则（`serverToLocal`）：题目按 `bankId` 展开为分片 + 清单（切分复用 `QB.QuestionShards.plan`），进度按库拆成三个前缀键，历史/会话/日志/权重落到对应本地键；`meta:*` 本机专有偏好**原样直通**，本地布局残留键（缓存产物，如空的 `questions:<id>`/`<id>:meta`）**丢弃**以免覆盖转换结果。反向（`localToServer`）按上面 `banks` 列表重组分片（拼接复用 `QB.QuestionShards.concatShards`）后输出后端 7 键；本机专有 meta 偏好不透传（后端无对应语义）。恢复时若本端布局载荷缺本机专有偏好，`applyBackup` 保留 LocalStorage 现值（避免「恢复一次丢主题/WebDAV 配置」）。
+转换规则（`serverToLocal`）：题目按 `bankId` 展开为分片 + 清单（切分复用 `QB.QuestionShards.plan`），进度按库拆成三个前缀键，历史/会话/日志/权重落到对应本地键（日志先落旧整表 `user:revlog`，恢复后由迁移归一为分段）；`meta:*` 本机专有偏好**原样直通**，本地布局残留键（缓存产物，如空的 `questions:<id>`/`<id>:meta`）**丢弃**以免覆盖转换结果。反向（`localToServer`）按上面 `banks` 列表重组分片（拼接复用 `QB.QuestionShards.concatShards`）后输出后端 7 键；本机专有 meta 偏好不透传（后端无对应语义）。恢复时若本端布局载荷缺本机专有偏好，`applyBackup` 保留 LocalStorage 现值（避免「恢复一次丢主题/WebDAV 配置」）。
+
+**schema v5 备份口径**：`readAllData`（前端备份与 `backup.export` 共用）先 `foldLayout` —— per-hash 复习状态折叠为旧整表 `user:review:<bank>`（旧整表与 per-hash 同键按 `last` 合并、per 优先），分段日志折叠为 `user:revlog` 数组（清单优先、无清单按物理段号升序拼接），并剔除运行期元数据（迁移锁/哈希映射 `meta:hashMap`/本地复习版本号 `user:reviewRev`/复习清单/日志清单/段键）。因此**备份文件格式保持单一整表形状**，旧版本与跨设备都能吃；本地恢复后立即 `Migration.run({force:true})` + `ensureLayout()` 归一为新布局（`force` 因版本戳可能被一并恢复为最新而载荷仍是旧 hash/旧布局），失败按 `applyData` 快照回滚。
 
 ## 8. 数据访问契约（阶段 C，代码侧权威）
 

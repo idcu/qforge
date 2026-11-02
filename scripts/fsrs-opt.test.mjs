@@ -24,7 +24,9 @@ const O = QB.FSRSOpt;
 let STRONG_LOG = null; // 强信号合成夹具（留出集门控可采纳），作用域 section 复用
 
 function clearOpt() {
+  // schema v5：日志为分段布局（user:revlog:<i>），仅删旧整表键不再清空数据
   QB.Storage.remove(QB.KEYS.revlog);
+  QB.RevlogStore.clear();
   QB.Storage.remove(QB.KEYS.metaFsrsWeights);
 }
 

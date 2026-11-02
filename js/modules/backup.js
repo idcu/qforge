@@ -29,12 +29,88 @@
     return out;
   }
 
+  const REVIEW_PREFIX = QB.KEYS.review('');      // 'user:review:'
+  const REVIEW_META_PREFIX = QB.KEYS.reviewMeta(''); // 'user:reviewMeta:'
+  const SEG_PREFIX = 'user:revlog:';
+
+  /** 运行期元数据：不进入备份（迁移锁/断点映射/本地同步版本号） */
+  function isRuntimeKey(k) {
+    return k === QB.KEYS.metaMigrationLock ||
+      k === QB.KEYS.revlogMeta ||
+      k.indexOf(QB.KEYS.metaHashMap('')) === 0 ||
+      k.indexOf('user:reviewRev:') === 0 ||
+      k.indexOf(REVIEW_META_PREFIX) === 0 ||
+      (k.indexOf(SEG_PREFIX) === 0 && /^\d+$/.test(k.slice(SEG_PREFIX.length)));
+  }
+
+  /** per-hash 复习状态键所属题库（'user:review:<bankId>:<hash>'） */
+  function reviewBankOf(k) {
+    if (k.indexOf(REVIEW_PREFIX) !== 0) return null;
+    const rest = k.slice(REVIEW_PREFIX.length);
+    const cut = rest.indexOf(':');
+    return cut < 0 ? null : rest.slice(0, cut);
+  }
+
+  /**
+   * 备份布局折叠（schema v5 → 旧整表形状）：per-hash 复习状态折叠为 user:review:<bank> 整表，
+   * 分段 revlog 折叠为 user:revlog 数组，并剔除运行期元数据。
+   * 目的：备份格式保持单一（跨设备/旧版本恢复都能吃），恢复后再由 Migration 归一布局。
+   * 纯函数，不改输入。
+   */
+  function foldLayout(data) {
+    const src = (data && typeof data === 'object') ? data : {};
+    const out = {};
+    const reviewBanks = new Set();
+    const perStates = {};
+
+    Object.keys(src).forEach((k) => {
+      if (isRuntimeKey(k)) return;
+      const bank = reviewBankOf(k);
+      if (bank) {
+        reviewBanks.add(bank);
+        perStates[bank] = perStates[bank] || {};
+        perStates[bank][k.slice((REVIEW_PREFIX + bank + ':').length)] = src[k];
+        return;
+      }
+      out[k] = src[k];
+    });
+
+    reviewBanks.forEach((bank) => {
+      const legacy = isPlainMap(src[QB.KEYS.review(bank)]) ? src[QB.KEYS.review(bank)] : {};
+      const per = perStates[bank] || {};
+      const merged = Object.keys(per).length ? QB.ReviewMerge.mergeMaps(legacy, per) : legacy;
+      if (Object.keys(merged).length) out[QB.KEYS.review(bank)] = merged;
+      else delete out[QB.KEYS.review(bank)];
+    });
+
+    // 分段 revlog → 数组（清单优先；无清单时按物理分段索引升序拼接）
+    const hasSegs = Object.keys(src).some((k) => k.indexOf(SEG_PREFIX) === 0 && /^\d+$/.test(k.slice(SEG_PREFIX.length)));
+    if (hasSegs) {
+      const meta = src[QB.KEYS.revlogMeta];
+      let list = [];
+      if (meta && typeof meta.first === 'number' && typeof meta.last === 'number') {
+        for (let i = meta.first; i <= meta.last; i++) {
+          const seg = src[QB.KEYS.revlogSeg(i)];
+          if (Array.isArray(seg)) list = list.concat(seg);
+        }
+      } else {
+        Object.keys(src)
+          .filter((k) => k.indexOf(SEG_PREFIX) === 0 && /^\d+$/.test(k.slice(SEG_PREFIX.length)))
+          .map((k) => Number(k.slice(SEG_PREFIX.length)))
+          .sort((a, b) => a - b)
+          .forEach((i) => { list = list.concat(src[QB.KEYS.revlogSeg(i)] || []); });
+      }
+      out[QB.KEYS.revlog] = list;
+    }
+    return out;
+  }
+
   /** 读取全部应用数据键 → {key: value}（唯一实现：buildBackup 与数据层 backup.export 共用） */
   function readAllData() {
     QB.Storage.forceSync(); // 确保防抖写入的数据已落盘
     const data = {};
     QB.Storage.keys().forEach((k) => { data[k] = QB.Storage.get(k); });
-    return data;
+    return foldLayout(data);
   }
 
   /**
@@ -128,8 +204,18 @@
           if (v != null) data[k] = v;
         }
       });
+    } else {
+      // 本地布局：防御性折叠（旧版备份可能带 per-hash/分段残留），保证单一整表形状
+      data = foldLayout(data);
     }
-    return await QB.DB.backup.import({ data: data }, mode);
+    const result = await QB.DB.backup.import({ data: data }, mode);
+    if (QB.DB.backend !== 'api') {
+      // 旧备份的 hash 可能是 v1/v2、复习状态可能是整表布局：恢复后统一归一为新 schema
+      // （force：版本戳可能被一并恢复为最新，但载荷仍是旧 hash/旧布局）
+      await QB.Migration.run({ force: true });
+      QB.Migration.ensureLayout();
+    }
+    return result;
   }
 
   /* ---------------- 跨布局转换（本地布局 ⇄ 后端布局） ----------------
@@ -206,7 +292,8 @@
    * 只处理后端 importData 认识的那 7 个键（本地专有 meta 偏好与后端无关，不透传）。
    */
   function localToServer(data) {
-    const src = isPlainMap(data) ? data : {};
+    // 防御性折叠：调用方可能直接传入未折叠的新布局载荷（per-hash/分段残留）
+    const src = foldLayout(isPlainMap(data) ? data : {});
     const banks = (src[QB.KEYS.banks] || []).map((b) => QB.Wire.bank.to(b));
     const out = {
       banks: banks,
@@ -420,7 +507,7 @@
   }
 
   QB.Backup = {
-    buildBackup, applyBackup, isBackup, redactSecrets, readAllData, applyData,
+    buildBackup, applyBackup, isBackup, redactSecrets, readAllData, applyData, foldLayout,
     isServerFormat, isLocalFormat, serverToLocal, localToServer,
     buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,
     confirmRestore,

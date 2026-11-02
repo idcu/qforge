@@ -1,11 +1,9 @@
 /**
- * FNV-1a 32 位散列（公共抽象，零依赖）
+ * FNV-1a 散列（公共抽象，零依赖）
  *
- * 用途：
- *   - 题目去重键 contentHash（question-id）
- *   - 图片资产内容寻址 id（assets）
- *   - 题库来源/导入内容校验和（source）
- * 三处曾各自实现一份；本模块为浏览器运行时唯一实现。
+ * 32 位：历史接口，图片资产内容寻址 id、URL 来源快照校验和沿用（不改变既有 id/checksum）。
+ * 64 位：题目 contentHash v3 与题库内容校验和（64 位显著降低 32 位生日碰撞概率）。
+ *
  * 注意：scripts/serve-api.mjs 是 Node ESM，无法加载经典脚本，保留独立实现；
  * 两侧等价性由 api-backend.test 的「资产 FNV id 与服务端一致」断言守护。
  *
@@ -18,6 +16,9 @@
 
   const OFFSET = 0x811c9dc5;
   const PRIME = 0x01000193;
+  const OFFSET64 = 0xcbf29ce484222325n;
+  const PRIME64 = 0x100000001b3n;
+  const MASK64 = 0xffffffffffffffffn;
 
   /** 字节序列 → 32 位无符号散列 */
   function hashBytes(bytes) {
@@ -46,5 +47,27 @@
     return (n >>> 0).toString(16).padStart(8, '0');
   }
 
-  QB.FNV = { OFFSET, PRIME, hashBytes, hashString, toHex };
+  /** 字符串（UTF-16 码元）→ FNV-1a 64 位散列（16 位小写十六进制） */
+  function hashString64(str) {
+    let h = OFFSET64;
+    const s = String(str == null ? '' : str);
+    for (let i = 0; i < s.length; i++) {
+      h ^= BigInt(s.charCodeAt(i));
+      h = (h * PRIME64) & MASK64;
+    }
+    return h.toString(16).padStart(16, '0');
+  }
+
+  /** 字节序列 → FNV-1a 64 位散列（16 位小写十六进制） */
+  function hashBytes64(bytes) {
+    let h = OFFSET64;
+    const b = bytes || [];
+    for (let i = 0; i < b.length; i++) {
+      h ^= BigInt(b[i]);
+      h = (h * PRIME64) & MASK64;
+    }
+    return h.toString(16).padStart(16, '0');
+  }
+
+  QB.FNV = { OFFSET, PRIME, hashBytes, hashString, toHex, hashString64, hashBytes64 };
 })(typeof window !== 'undefined' ? window : globalThis);

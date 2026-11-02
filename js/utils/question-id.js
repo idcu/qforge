@@ -11,12 +11,12 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  /** hash 版本前缀；旧版（v1，仅题型+题干）无此前缀，由 Migration 一次性重算 */
-  const HASH_VERSION = '2';
+  /** hash 版本前缀；v3 = FNV-1a 64 位（16 hex）。旧 v2（'2:'+8hex）与 v1（裸 8hex）由 Migration 一次性重算 */
+  const HASH_VERSION = '3';
 
-  /** FNV-1a 32 位散列 → 8 位十六进制（唯一实现见 utils/fnv.js） */
+  /** FNV-1a 64 位散列 → 16 位十六进制（唯一实现见 utils/fnv.js） */
   function fnv1a(str) {
-    return QB.FNV.toHex(QB.FNV.hashString(str));
+    return QB.FNV.hashString64(str);
   }
 
   function normText(s) {
@@ -76,10 +76,31 @@
     return HASH_VERSION + ':' + fnv1a(JSON.stringify(payload));
   };
 
-  /** 是否当前版本 hash（v2 带「2:」前缀；旧 v1 为裸 8 位十六进制） */
+  /** 是否当前版本 hash（v3 带「3:」前缀；v2 为「2:」+8hex，v1 为裸 8hex） */
   QB.isCurrentHash = function isCurrentHash(h) {
     return typeof h === 'string' && h.indexOf(HASH_VERSION + ':') === 0;
   };
+
+  /**
+   * 旧版 hash 识别（迁移/双读去重使用）：
+   *   '2:<8hex>' = v2；裸 8hex = v1。空/其它返回 null。
+   */
+  QB.hashVersionOf = function hashVersionOf(h) {
+    if (typeof h !== 'string' || !h) return null;
+    if (h.indexOf(HASH_VERSION + ':') === 0 && /^3:[0-9a-f]{16}$/i.test(h)) return 3;
+    if (h.indexOf('2:') === 0) return 2;
+    if (/^[0-9a-f]{8}$/i.test(h)) return 1;
+    return null;
+  };
+
+  /** 是否为可被迁移的旧版 hash（v1/v2） */
+  QB.isLegacyHash = function isLegacyHash(h) {
+    const v = QB.hashVersionOf(h);
+    return v === 1 || v === 2;
+  };
+
+  /** 当前 hash 版本号（供服务端/迁移日志记录） */
+  QB.HASH_VERSION = Number(HASH_VERSION);
 
   /** 稳定键：用于错题本/收藏夹索引（跨导入保持稳定） */
   QB.makeQuestionKey = function makeQuestionKey(q) {

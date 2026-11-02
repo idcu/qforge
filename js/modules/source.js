@@ -48,7 +48,7 @@
     return { ok: true, url: u, ext: ext };
   }
 
-  /** 文本/字节 → 8 位 FNV-1a 校验和（唯一实现见 utils/fnv.js） */
+  /** 文本/字节 → 8 位 FNV-1a 校验和（唯一实现见 utils/fnv.js；URL 快照沿用旧格式） */
   function checksumText(text) {
     return QB.FNV.toHex(QB.FNV.hashString(text));
   }
@@ -56,6 +56,26 @@
   function checksumBytes(buf) {
     const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array((buf && buf.buffer) || 0);
     return QB.FNV.toHex(QB.FNV.hashBytes(bytes));
+  }
+
+  /**
+   * 题库内容校验和（v3）：FNV-1a 64 位 + 版本前缀，导出写入新值。
+   * 与 URL 快照 checksumText（32 位）分开：后者用于「同源文件是否变化」的本地比较，
+   * 改格式会让已存来源记录全部误判为已更新。
+   */
+  function checksumContent(text) {
+    return '3:' + QB.FNV.hashString64(text);
+  }
+
+  /**
+   * 校验导入文件的内容校验和：接受 v3 新格式，也接受旧版裸 8 位 FNV-1a（v2 及更早导出）。
+   * @returns {boolean}
+   */
+  function verifyChecksum(text, expected) {
+    if (typeof expected !== 'string' || !expected) return false;
+    if (expected.indexOf('3:') === 0) return checksumContent(text) === expected;
+    if (/^[0-9a-f]{8}$/i.test(expected)) return checksumText(text) === expected.toLowerCase();
+    return false;
   }
 
   /** 拉取网络文件快照（默认 fetch 可注入，便于测试与替换） */
@@ -107,6 +127,6 @@
 
   QB.Source = {
     KINDS, URL_LIMIT_BYTES, URL_TIMEOUT_MS,
-    normalize, makeSource, validateUrl, checksumText, checksumBytes, fetchSnapshot
+    normalize, makeSource, validateUrl, checksumText, checksumBytes, checksumContent, verifyChecksum, fetchSnapshot
   };
 })(window);
