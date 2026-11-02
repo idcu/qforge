@@ -1428,7 +1428,26 @@
       });
     } catch (e) { /* 进度展示失败不影响迁移 */ }
     try {
-      if (QB.Migration && QB.DB.backend !== 'api') await QB.Migration.run();
+      if (QB.Migration && QB.DB.backend !== 'api') {
+        const runRes = await QB.Migration.run();
+        if (QB.Storage.mode === 'idb') QB.Storage.announceBackend('idb');
+        const markerIdb = QB.Store && typeof QB.Store.readMarker === 'function' && QB.Store.readMarker() === 'idb';
+        // F2：另一标签持锁迁移，或它已在本次启动期间完成切换（本标签仍停在 LS），都要等待/切换。
+        // 本标签不写 LocalStorage（会被迁移后的清理当旧数据删除），期间写入进内存队列，切换后补写 IDB。
+        if (runRes && (runRes.locked || (markerIdb && QB.Storage.mode !== 'idb'))) {
+          const st = document.getElementById('status-text');
+          if (st) st.textContent = '另一标签正在迁移存储，本页等待切换…';
+          UI.toast('另一标签正在迁移存储，本页写入将暂存，完成切换后自动保存', 'ok');
+          const waitRes = await QB.Storage.waitForMigrationSwitch({ timeoutMs: 30000 });
+          if (waitRes.switched) {
+            UI.toast('存储迁移完成，已切换到新版本地存储', 'ok');
+          } else if (waitRes.timeout) {
+            UI.toast('迁移耗时较长，本页写入已暂存在内存；请保持页面打开，完成后自动保存', 'err');
+          } else {
+            UI.toast('本页暂无法切换到新版存储，写入继续暂存（不落旧存储）', 'err');
+          }
+        }
+      }
     } catch (e) {
       // F1：迁移中任何失败（典型：隐私模式/策略禁用导致 IndexedDB open 抛 SecurityError，
       // 进而自动备份失败）都必须**可见但不打断**：记录错误、提示已回退，继续启动。

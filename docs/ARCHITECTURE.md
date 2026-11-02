@@ -313,7 +313,7 @@ Exporters.openFlow({kind, bank})
 
 沿用 v5 迁移框架（同一 `Migration.run`、同一把锁、同一套快照/回滚），**不改数据形状**；迁移过程改为**流式分批 + 断点续传**，任何时刻只保留在途批次：
 
-1. 抢 `meta:migrationLock`（owner + 30s TTL）；抢不到说明其他标签在迁移，本标签继续用 LS 等待刷新。
+1. 抢 `meta:migrationLock`（owner + 30s TTL）；抢不到说明其他标签在迁移，本标签**进入等待**（`QB.Storage.waitForMigrationSwitch`）：轮询 `meta:storageBackend`（200ms）+ 复用 `BroadcastChannel` 的 `{type:'backend'}` 广播，期间读写仍走内存缓存但**写入只排队、不落 LocalStorage**（否则会被迁移后的自动清理当旧数据删除）；切换完成后再水合 IDB 并把等待期写入/删除补写进 IDB。超时同样不落 LS（继续缓冲），由 UI 提示保持页面打开。
 2. `saveAutoBackup` 迁移前全量备份：分块保存**原始 JSON 串**（100 键/条，不解析成对象）；优先独立 IDB `qforge-backup/snapshots`，不可用时回落 `meta:migrationBackup`；写后回读逐串校验，失败即中止、不写任何数据。
 3. `Store.detect()`：IDB 不可用 → 写 `ls-fallback`，本次迁移按 LS 结束（业务可用）。
 4. `Store.migrateToIdb(lsSource())`：按分片流式复制非引导键——题目 **200 题/片**（与存储分片对齐），其余前缀键 **64 键/批**；每批「读 LS → 单事务写 IDB → 分块回读深比对 → 释放中间引用」，不把全库物化到内存。
@@ -324,7 +324,7 @@ Exporters.openFlow({kind, bank})
 9. 版本戳 `meta:schemaVersion=6`，`await flush()` 确认落盘；释放锁。
 10. **自动清理窗口**：下一次启动 `Store.init()` 检测 `lsBackupState==='retained'` → 先校验 IDB 可读（题目数 >0 且与分片清单一致）→ 自动 `cleanupLegacyLS()`：只保留 BOOTSTRAP_KEYS，写 `meta:lsCleanupAt` 并把 `lsBackupState` 置为 `'cleaned'`；清理后按 BOOTSTRAP_KEYS 重读 LS 刷新缓存。清理失败不删除任何一侧（IDB 数据完好，下次启动可重试），回退仍可走全量备份；备份弹窗仍保留手动「清理旧 LocalStorage」入口。
 
-幂等/重入：迁移中途中断（标记仍非 `idb`）→ 下次启动按 `meta:migrationProgress.done` 从断点续跑，同名记录覆盖写，最终收敛；多标签并发只有持锁标签执行，其余标签在 `initStore()` 时仍读 LS，刷新后切 IDB。
+幂等/重入：迁移中途中断（标记仍非 `idb`）→ 下次启动按 `meta:migrationProgress.done` 从断点续跑，同名记录覆盖写，最终收敛；多标签并发只有持锁标签执行，未持锁标签**等待切换**（见步骤 1），切换后补写等待期写入，避免「写 LS 后被清理」的静默丢数据（Node 回归：败者写收藏 21 条 → 清理 → 仍 21）。
 
 ### 9.5 回滚与降级路径
 

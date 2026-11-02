@@ -46,6 +46,11 @@
     _retryTimer: null,
     _bc: null,
     _bcName: 'qforge-store',
+    /** F2：本标签未拿到迁移锁，进入等待切换；期间写入只进内存队列（不落 LS） */
+    _awaiting: false,
+    _awaitDeletes: new Set(),
+    _awaitWaiters: [],
+    _awaitTimer: null,
 
     _fullKey(key) {
       return fullKeyOf(key);
@@ -79,6 +84,8 @@
       this._flushScheduled = false;
       this._flushChain = Promise.resolve();
       this._pending.clear();
+      this._awaiting = false;
+      this._awaitDeletes.clear();
       if (i.mode === 'idb') {
         // 启动水合带 records；迁移完成路径不带 records —— 调用方已保证现有缓存包含全部业务键，
         // 直接沿用可避免整库再解析一遍（少一份全量克隆，降低迁移峰值）。
@@ -106,12 +113,115 @@
         this._bc = new global.BroadcastChannel(this._bcName);
         this._bc.onmessage = (ev) => {
           const d = ev && ev.data;
-          if (d && d.type === 'write' && Array.isArray(d.keys)) {
+          if (!d) return;
+          // F2：迁移赢家切换完成后广播；等待中的标签据此提前结束轮询（200ms 轮询仍作兜底）
+          if (d.type === 'backend') {
+            if (d.mode === 'idb') this._wakeAwaiters();
+            return;
+          }
+          if (d.type === 'write' && Array.isArray(d.keys)) {
             this._handleIdbExternal(d).catch(() => { /* 跨标签同步失败不打断本标签 */ });
           }
         };
         if (typeof this._bc.unref === 'function') this._bc.unref();
       } catch (_) { this._bc = null; }
+    },
+
+    /** 迁移赢家切换到 IDB 后广播（复用现有 BroadcastChannel，不新造跨标签机制） */
+    announceBackend(mode) {
+      if (!this._bc && mode === 'idb') this._subscribeBroadcast();
+      try { if (this._bc) this._bc.postMessage({ type: 'backend', mode: mode }); } catch (_) { /* ignore */ }
+    },
+
+    /* ---------------- F2：多标签迁移等待 ---------------- */
+
+    /**
+     * 进入等待（本标签未拿到迁移锁）。
+     * 等待期写入只进内存缓存/待写队列，**不写 LocalStorage**——否则迁移完成后这些键会被
+     * 自动清理当旧数据删除，形成静默丢数据。
+     */
+    beginAwaitingMigration() {
+      this._awaiting = true;
+      this._cancelSchedule();
+      this._subscribeBroadcast(); // LS 模式也需要接收赢家的 backend 广播
+    },
+
+    _wakeAwaiters() {
+      const list = this._awaitWaiters;
+      this._awaitWaiters = [];
+      if (this._awaitTimer) { clearTimeout(this._awaitTimer); this._awaitTimer = null; }
+      list.forEach((fn) => { try { fn(); } catch (_) { /* ignore */ } });
+    },
+
+    _waitTick(ms) {
+      return new Promise((resolve) => {
+        this._awaitWaiters.push(resolve);
+        this._awaitTimer = setTimeout(() => this._wakeAwaiters(), ms);
+      });
+    },
+
+    _backendReady() {
+      return !!(QB.Store && typeof QB.Store.readMarker === 'function' && QB.Store.readMarker() === 'idb');
+    },
+
+    /**
+     * 等待另一标签完成迁移后切换后端。
+     * - 轮询 `meta:storageBackend === 'idb'`（200ms）+ 接收赢家的 `{type:'backend'}` 广播；
+     * - 切换时把等待期的写入/删除补写进 IDB（先水合再回放，避免旧缓存覆盖）；
+     * - 超时**不落 LS**（迁移可能已复制快照，事后写入会被清理丢弃），继续内存缓冲，
+     *   由 UI 提示用户保持页面打开。
+     * @param {{timeoutMs?:number}} [opts]
+     * @returns {Promise<{switched:boolean, timeout?:boolean, buffered?:number}>}
+     */
+    async waitForMigrationSwitch(opts) {
+      const timeoutMs = (opts && opts.timeoutMs) || 30000;
+      const POLL_MS = 200;
+      this.beginAwaitingMigration();
+      const startedAt = Date.now();
+      let switched = false;
+      while (true) {
+        if (this._backendReady()) { switched = true; break; }
+        if (Date.now() - startedAt >= timeoutMs) break;
+        await this._waitTick(POLL_MS);
+      }
+      if (!switched) {
+        return { switched: false, timeout: true, buffered: this._pending.size, deletes: this._awaitDeletes.size };
+      }
+      const ok = await this._completeMigrationSwitch();
+      if (!ok) return { switched: false, mode: this.mode, buffered: this._pending.size };
+      return { switched: true, mode: this.mode, buffered: 0 };
+    },
+
+    async _completeMigrationSwitch() {
+      const pending = new Map(this._pending);
+      const deletes = new Set(this._awaitDeletes);
+      const clear = this._clearPending;
+      this._awaitDeletes.clear();
+      this._clearPending = false;
+      await this.initStore(); // marker=idb：水合 IDB（含启动自动清理），并重置待写
+      if (!this._isIdb()) {
+        // 本标签仍打不开 IDB（并发下的策略差异）：继续缓冲，不回写 LS
+        pending.forEach((value, key) => {
+          this._cache.set(key, value);
+          this._pending.set(key, value);
+        });
+        this._awaiting = true;
+        return false;
+      }
+      pending.forEach((value, key) => {
+        this._cache.set(key, value);
+        this._pending.set(key, value);
+        this._enqueue({ op: 'set', key: key, value: value });
+      });
+      deletes.forEach((key) => {
+        this._cache.delete(key);
+        this._pending.delete(key);
+        this._enqueue({ op: 'del', key: key });
+      });
+      if (clear) this._clearPending = true;
+      if (pending.size || deletes.size || clear) await this.flush();
+      this._awaiting = false;
+      return true;
     },
 
     /** 本标签写入成功 → 广播键名，其他标签刷新缓存（不广播值，避免重复传输大分片） */
@@ -155,6 +265,7 @@
 
     /** LS 模式：一次真实落盘（抛错方决定提示）；成功清空待写队列 */
     _writeNow() {
+      if (this._awaiting) return; // F2：等待迁移期间不写 LS（切换后统一补写 IDB）
       if (!this._pending.size) return;
       const snapshot = Array.from(this._pending.entries());
       try {
@@ -211,6 +322,7 @@
     },
 
     _flushOps() {
+      if (this._awaiting) return Promise.resolve(); // F2：等待期不落 LS，切换后统一补写
       if (!this._isIdb()) {
         try {
           this._writeNow();
@@ -262,6 +374,7 @@
       }
       this._cache.set(key, value);
       this._pending.set(key, value);
+      if (this._awaiting) return true; // F2：只排队，不落 LS
       if (this._isIdb()) {
         this._enqueue({ op: 'set', key: key, value: value });
         return true;
@@ -281,6 +394,7 @@
       }
       this._cache.set(key, value);
       this._pending.set(key, value);
+      if (this._awaiting) return true; // F2：只排队，不落 LS
       if (this._isIdb()) {
         this._enqueue({ op: 'set', key: key, value: value });
         return true;
@@ -290,7 +404,7 @@
     },
 
     _scheduleFlush() {
-      if (this._isIdb()) return;
+      if (this._isIdb() || this._awaiting) return;
       if (this._timer) return;
       this._timer = setTimeout(() => {
         this._timer = null;
@@ -325,6 +439,7 @@
      */
     forceSync() {
       this._cancelSchedule();
+      if (this._awaiting) return; // F2：等待期强制落盘也保持内存缓冲（避免写入将被清理的 LS）
       if (this._isIdb()) {
         this.flush().catch(() => { /* onError 已通知；待写保留 */ });
         return;
@@ -336,6 +451,10 @@
     remove(key) {
       this._cache.delete(key);
       this._pending.delete(key);
+      if (this._awaiting) {
+        this._awaitDeletes.add(key); // F2：记入待删，切换后补删 IDB
+        return;
+      }
       if (this._isIdb() && isBootstrapKey(key)) {
         this._deleteBootstrap(key);
         return;
@@ -408,6 +527,8 @@
      */
     get(key, defaultValue) {
       if (this._cache.has(key) || this._pending.has(key)) return this._cache.get(key);
+      // F2：等待迁移期间删除的键不能再从 LS 读回旧值
+      if (this._awaiting && this._awaitDeletes.has(key)) return defaultValue;
       // IDB 模式：启动已全量水合，缓存即权威；缺失就是缺失（不回读磁盘，避免同步 API 变异步）
       if (this._isIdb()) return defaultValue;
       let value;
@@ -494,6 +615,14 @@
     },
 
     clearAll() {
+      if (this._awaiting) {
+        // F2：等待期清空只作用于内存；切换后由 _completeMigrationSwitch 补发 clear 到 IDB
+        this._cache.clear();
+        this._pending.clear();
+        this._awaitDeletes.clear();
+        this._clearPending = true;
+        return;
+      }
       if (this._isIdb()) {
         // 保留引导标记（后端选择/迁移标记），业务键清空
         const keep = new Map();

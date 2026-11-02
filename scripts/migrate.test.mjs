@@ -7,6 +7,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createMemoryIDB } from './lib/idb-memory.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -540,6 +541,54 @@ section('F1 SecurityError：IndexedDB open 抛错 → 迁移中止、回落 LS�
   eq(B.Storage.get('f1-probe').ok, true, '迁移中止后写入仍可用');
   ok(!B.Storage.keys().includes(B.KEYS.metaMigrationLock), '迁移锁已释放');
   ok(!B.Storage.keys().includes(B.KEYS.metaMigrationBackup), '未在 LS 留下半写备份键');
+}
+
+section('F2 多标签：败者等待切换，等待期写入不被清理丢弃（21→21）');
+{
+  const raw = new Map();
+  const idb = createMemoryIDB();
+  const BC = globalThis.BroadcastChannel;
+  const opts = { raw: raw, indexedDB: idb, BroadcastChannel: BC };
+  const A = await createHarness(ROOT, opts);
+  A.QB.DB.init();
+  const bank = await A.QB.DB.banks.create({ name: '并发库' });
+  await A.QB.DB.questions.insertMany(bank.id, [q1()], { dedupe: false });
+  const favKey = A.QB.KEYS.favorite(bank.id);
+  const fav20 = Array.from({ length: 20 }, (_, i) => ({ questionKey: 'k' + i, addedAt: i }));
+  A.QB.Storage.setSync(favKey, fav20);
+  A.QB.Storage.setSync(A.QB.KEYS.metaSchema, 5);
+
+  const B = await createHarness(ROOT, opts);
+  B.QB.DB.init();
+  await B.QB.Storage.initStore();
+  eq(B.QB.Storage.mode, 'ls', '败者启动时仍是 LS');
+
+  // 拦住赢家真正切换，确保败者在「等待期」写入（而不是迁移完成后的普通写）
+  const origMigrate = A.QB.Store.migrateToIdb;
+  let release = null;
+  const gate = new Promise((r) => { release = r; });
+  A.QB.Store.migrateToIdb = async function (src) { await gate; return origMigrate.call(this, src); };
+
+  const aRun = A.QB.Migration.run(); // tryLock 同步执行，锁已落盘
+  const bRes = await B.QB.Migration.run();
+  eq(bRes.locked, true, '败者拿到 locked（不重复迁移）');
+  const waitP = B.QB.Storage.waitForMigrationSwitch({ timeoutMs: 5000 });
+  const fav21 = fav20.concat([{ questionKey: 'k20', addedAt: 20 }]);
+  B.QB.Storage.set(favKey, fav21);
+  eq(JSON.parse(raw.get('qb:' + favKey)).length, 20, '等待期写入不落 LS（仍 20，避免被迁移后清理）');
+  eq(B.QB.Storage.get(favKey).length, 21, '本页读取看到暂存的 21 条');
+
+  release();
+  await aRun;
+  const waitRes = await waitP;
+  eq(waitRes.switched, true, '赢家完成后败者切换到 IDB');
+  eq(B.QB.Storage.mode, 'idb', '败者门面为 idb');
+  eq((await B.QB.DB.progress.favoriteList(bank.id)).length, 21, '败者收藏 21 条全部保留（21→21）');
+  ok(!raw.has('qb:' + favKey), '旧 LS 收藏已在切换时自动清理');
+
+  await B.QB.Storage.initStore(); // 模拟下一次启动
+  eq((await B.QB.DB.progress.favoriteList(bank.id)).length, 21, '清理后再次启动计数仍为 21');
+  A.QB.Store.migrateToIdb = origMigrate;
 }
 
 console.log('\n================ 汇总 ================');
