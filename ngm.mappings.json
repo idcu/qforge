@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "mappings": [
+    {
+      "from": "gitee:idcu/ngm-repo",
+      "to": "./ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read",
+      "path": "packages/format/xlsx-read",
+      "main": "./src/index.mjs"
+    },
+    {
+      "from": "gitee:idcu/ngm-repo",
+      "to": "./ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xml-lite",
+      "path": "packages/format/xml-lite",
+      "main": "./src/index.mjs"
+    },
+    {
+      "from": "gitee:idcu/ngm-repo",
+      "to": "./ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/zip",
+      "path": "packages/format/zip",
+      "main": "./src/index.mjs"
+    }
+  ]
+}

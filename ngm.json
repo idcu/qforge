@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "name": "qforge",
+  "version": "1.0.0",
+  "runtime": "node",
+  "main": "./index.html",
+  "dependencies": [
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "d7dfe1889de73fd09f1743ce660747c59a37d812",
+      "refType": "commit",
+      "path": "packages/format/xlsx-read"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "d7dfe1889de73fd09f1743ce660747c59a37d812",
+      "refType": "commit",
+      "path": "packages/format/xml-lite"
+    },
+    {
+      "name": "gitee:idcu/ngm-repo",
+      "ref": "d7dfe1889de73fd09f1743ce660747c59a37d812",
+      "refType": "commit",
+      "path": "packages/format/zip"
+    }
+  ],
+  "vendor": {
+    "mode": "local",
+    "linkMode": "copy"
+  }
+}
