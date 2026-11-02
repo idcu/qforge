@@ -6,7 +6,7 @@
 
 ---
 
-## `<提交 hash 待回填>` · feat(package): .qbk 分发题包（manifest/校验/重复导入/只读预览）
+## 2a03e92 · feat(package): .qbk 分发题包（manifest/校验/重复导入/只读预览）
 
 **核心改动**
 - **新增 `js/modules/package.js`（`QB.Package`，清单唯一实现）**：`makeManifest`（packageId=题库 id 的
