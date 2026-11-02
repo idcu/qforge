@@ -6,7 +6,7 @@
 
 ---
 
-## <待回填> · fix(package): 分发题包四缺陷（预览契约 / runImport meta / URL qbk / 文件名唯一）
+## 9f706c4 · fix(package): 分发题包四缺陷（预览契约 / runImport meta / URL qbk / 文件名唯一）
 
 **缺陷根因（Edge 151 真机复现，代码定位一致）**
 1. **只读预览整页 `[object Object]`**：`QB.SharePage.build()` 的契约是
