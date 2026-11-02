@@ -364,7 +364,7 @@ section('迁移 v3 → v4：启动自检修复坏清单');
   QB.Storage.set(K.questionsMeta(badBank.id), { v: 3, shardSize: SHARD, count: SHARD, sizes: [SHARD] });
   QB.Storage.set(K.metaSchema, 3);
   const res = await QB.Migration.run();
-  eq(res.version, 5, 'schema 升到 5（v3→v4 修复后接续 v4→v5）');
+  eq(res.version, 6, 'schema 升到 6（v3→v4 修复后接续 v4→v5→v6）');
   eq(res.repaired.repaired, 1, '修复 1 个题库');
   eq(res.repaired.questions, SHARD, '恢复 ' + SHARD + ' 题');
   const meta = QB.Storage.get(K.questionsMeta(badBank.id));
@@ -373,7 +373,7 @@ section('迁移 v3 → v4：启动自检修复坏清单');
   eq((await QB.DB.questions.list(badBank.id, {})).items.length, SHARD, '修复后可读');
   ok(QB.QuestionShards.invariant(badBank.id).ok, '修复后不变量成立');
   const again = await QB.Migration.run();
-  eq(again.version, 5, '再次运行为空操作（幂等）');
+  eq(again.version, 6, '再次运行为空操作（幂等）');
 }
 
 console.log('\n================ 汇总 ================');

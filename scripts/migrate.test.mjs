@@ -19,9 +19,12 @@ function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failure
 function eq(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
 function section(t) { console.log('\n== ' + t + ' =='); }
 function snap() {
-  // 自动备份键是运行期元数据（F1），不参与「迁移前数据逐字节一致」比对
-  const skip = QB.KEYS.metaMigrationBackup;
-  return JSON.stringify(QB.Storage.keys().filter((k) => k !== skip).sort().map((k) => [k, QB.Storage.get(k)]));
+  // 运行期元数据（F1 自动备份键、迁移锁、后端选择标记）不参与「迁移前数据逐字节一致」比对
+  const skip = new Set([QB.KEYS.metaMigrationBackup, QB.KEYS.metaMigrationLock]);
+  return JSON.stringify(QB.Storage.keys()
+    .filter((k) => !skip.has(k) && !(QB.Store && QB.Store.isBackupExcluded(k)))
+    .sort()
+    .map((k) => [k, QB.Storage.get(k)]));
 }
 
 const DAY = 24 * 3600 * 1000;
@@ -51,17 +54,17 @@ section('布局版本常量');
   eq(QB.RevlogStore.SEG_SIZE, 200, '日志分段 200 条/段');
 }
 
-section('全新环境：空迁移并写版本号 5');
+section('全新环境：空迁移并写版本号 6');
 {
   eq(QB.Migration.currentVersion(), 0, '无版本标记视为 0');
   const r = await QB.Migration.run();
   eq(r.fromVersion, 0, 'fromVersion=0');
-  eq(r.version, 5, '迁到 5（schema v3 一次性迁移的实现版本）');
+  eq(r.version, 6, '迁到 6（含 v5→v6 存储底座）');
   eq(r.migrated.questions, 0, '无存量题目');
   eq(r.sharded.banks, 0, '无存量库可分片');
   eq(r.repaired.repaired, 0, '无存量坏分片');
   eq(r.layout.banks, 0, '无用户数据需布局转换');
-  eq(QB.Migration.currentVersion(), 5, '版本号已写入');
+  eq(QB.Migration.currentVersion(), 6, '版本号已写入');
 }
 
 section('v1→v5：hash 64 + 复习 per-hash + 日志分段，用户数据全部跟随');
@@ -100,7 +103,7 @@ section('v1→v5：hash 64 + 复习 per-hash + 日志分段，用户数据全部
   eq(QB.DB.revlog.list().length, 3, '迁移前旧整表日志可双读');
 
   const r = await QB.Migration.run();
-  eq(r.version, 5, '迁到 5');
+  eq(r.version, 6, '迁到 6');
   eq(r.migrated.questions, 2, 'hash 升级 2 题');
   eq(r.migrated.states, 2, '随题重映射 2 条状态');
   eq(r.sharded.banks, 1, '同一次 run 内接续完成分片');
@@ -169,13 +172,13 @@ section('幂等：普通 run 为空操作，force run 逐字节不变');
 {
   const before = snap();
   const r2 = await QB.Migration.run();
-  eq(r2.fromVersion, 5, '第二次 fromVersion=5');
+  eq(r2.fromVersion, 6, '第二次 fromVersion=6');
   ok(r2.migrated === undefined && r2.layout === undefined, '已是最新，无迁移字段');
   eq(snap(), before, '存储内容逐字节不变');
 
   // force：模拟「版本戳与载荷不一致」（旧备份恢复）时的自愈路径
   const r3 = await QB.Migration.run({ force: true });
-  eq(r3.version, 5, 'force 仍收敛到 5');
+  eq(r3.version, 6, 'force 仍收敛到 6');
   eq(r3.layout.verified, 2, 'force 重跑完整性校验仍通过');
   eq(snap(), before, 'force 重跑后存储仍逐字节不变（无二次改写）');
 }
@@ -183,7 +186,7 @@ section('幂等：普通 run 为空操作，force run 逐字节不变');
 section('升级后同题干异答案题可共存（评估报告高优先级#3 端到端）');
 {
   QB.Storage.clearAll();
-  QB.Storage.set(QB.KEYS.metaSchema, 5); // 已是新 schema，仅验证去重算法
+  QB.Storage.set(QB.KEYS.metaSchema, 6); // 已是新 schema，仅验证去重算法
   const bank = await QB.DB.banks.create({ name: '去重库' });
   const stem = '下列哪项是正确的？';
   const a = { type: 'single', question: stem, options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' };
@@ -196,7 +199,7 @@ section('升级后同题干异答案题可共存（评估报告高优先级#3 �
 section('旧版裸 hash 数据经 create 强制升级');
 {
   QB.Storage.clearAll();
-  QB.Storage.set(QB.KEYS.metaSchema, 5);
+  QB.Storage.set(QB.KEYS.metaSchema, 6);
   const bank = await QB.DB.banks.create({ name: '旧qbk库' });
   const created = await QB.DB.questions.create(bank.id, {
     type: 'single', question: '旧包导入题？',
@@ -229,7 +232,7 @@ section('v2→v5：旧单 blob 分片 + 450 条日志分段（幂等）');
 
   const r = await QB.Migration.run();
   eq(r.fromVersion, 2, 'fromVersion=2');
-  eq(r.version, 5, '迁到 5');
+  eq(r.version, 6, '迁到 6');
   ok(r.migrated === undefined, 'v1→v2 不重复执行');
   eq(r.sharded.banks, 1, '分片迁移 1 个库');
   eq(r.sharded.questions, 450, '分片迁移 450 题');
@@ -299,7 +302,7 @@ section('迁移中断：抛错回滚到迁移前快照，重入后数据正确')
 
   // 重入：从头安全重跑
   const r = await QB.Migration.run();
-  eq(r.version, 5, '重入后迁到 5');
+  eq(r.version, 6, '重入后迁到 6');
   eq(r.layout.questions, 1, '重入后升级 1 题');
   const n = (await QB.DB.questions.list(bank.id, {})).items[0];
   eq(n.contentHash, newHash, '题目 hash 已升级');
@@ -333,7 +336,7 @@ section('断点重入：映射已落盘、题目未改写、版本戳未更新')
   QB.Storage.set(QB.KEYS.metaSchema, 4);
 
   const r = await QB.Migration.run();
-  eq(r.version, 5, '断点重入后完成到 5');
+  eq(r.version, 6, '断点重入后完成到 6');
   eq(r.layout.collisions, 0, '映射一致，无歧义碰撞');
   const items = (await QB.DB.questions.list(bank.id, {})).items;
   eq(items[0].contentHash, n1hash, 'q1 按已存映射改写（不重算漂移）');
@@ -384,7 +387,7 @@ section('多标签并发：共享磁盘，只迁移一次且无覆盖');
 
   // 最终磁盘状态（由持锁标签写入，另一标签的缓存不参与）
   const owner = didWork[0] === ra ? A : B;
-  eq(owner.QB.Migration.currentVersion(), 5, '持锁标签写入 schema=5');
+  eq(owner.QB.Migration.currentVersion(), 6, '持锁标签写入 schema=6');
   const q = (await owner.QB.DB.questions.list(bank.id, {})).items;
   eq(q.length, 2, '题目仍 2 道（无重复/丢失）');
   q.forEach((item) => ok(QB.isCurrentHash(item.contentHash), 'hash 已升级到 v3：' + item.id));
@@ -439,7 +442,7 @@ section('F1 迁移前自动备份：write 前落盘、进度标记、可从备�
 
   const auto = await QB.Backup.readAutoBackup();
   ok(QB.Backup.isBackup(auto), '自动备份是标准备份信封（可交给恢复流程）');
-  eq(auto.schemaVersion, 5, '备份带 schema 版本 5');
+  eq(auto.schemaVersion, 6, '备份带 schema 版本 6');
   eq(auto.progress.purpose, 'pre-migration', '备份带用途标记');
   eq(auto.progress.phase, 'migrated', '迁移完成后进度标记为 migrated');
   eq(auto.progress.fromVersion, 4, '备份记录迁移前版本 4');

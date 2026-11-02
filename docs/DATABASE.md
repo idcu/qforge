@@ -175,6 +175,8 @@ CREATE TABLE assets (
 
 ## 3. LocalStorage ↔ 数据库映射
 
+**schema v6 起**：下列逻辑键默认落在 IndexedDB 对象仓 `qforge-kv/kv`（`keyPath=key`，值 = 原逻辑值，键名完全不变），LocalStorage 只保留 §3 末尾标注的极小引导标记；IDB 不可用时整体回落 LocalStorage（同一套键名/布局，业务无分叉）。后端切换与迁移见 [ARCHITECTURE.md](ARCHITECTURE.md) §9。
+
 | LocalStorage 逻辑键（含前缀 `qb:`） | 对应表 | 说明 |
 | --- | --- | --- |
 | `qb:banks` | `banks` | 数组，元素即一行 |
@@ -200,7 +202,11 @@ CREATE TABLE assets (
 | `qb:meta:migrationBackup` | —（迁移运行期回落） | **F1 迁移前自动全量备份**（标准备份信封 + `progress` 进度标记）；仅当 IndexedDB 不可用时回落本键，不进备份、恢复入口见 §7.1 |
 | `qb:meta:hashMap:<bankId>` | —（迁移运行期） | `{oldHash: newHash}` 断点续跑的哈希映射；迁移成功后保留到最后一步再移除，供中断重入复用，不进备份 |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
-| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 **5**（v2 contentHash → v3 题目分片 → v4 分片一致修复 → v5 hash 64 位 + per-hash 复习 + 分段日志），启动时由 `Migration.run({force?})` 幂等升级（v1→…→v5 链式；已是 5 仅做 `ensureLayout` 归一） |
+| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 **6**（v2 contentHash → v3 题目分片 → v4 分片一致修复 → v5 hash 64 位 + per-hash 复习 + 分段日志 → **v6 存储底座迁 IndexedDB**），启动时由 `Migration.run({force?})` 幂等升级（v1→…→v6 链式；已是 6 且后端已切换时为空操作） |
+| `qb:meta:storageBackend` | —（运行期引导标记，**始终 LocalStorage**） | 后端选择：`'idb'` / `'ls'`（用户显式回退，不再自动升级）/ `'ls-fallback'`（IDB 不可用或读失败）/ 缺失（首次，仍用 LS 待 v6 迁移）。不进备份、恢复 replace 不删除 |
+| `qb:meta:lsMigratedAt` | —（运行期引导标记，**始终 LocalStorage**） | LS→IDB 迁移完成时间（ISO）；用于展示与诊断，不进备份 |
+| `qb:meta:lsBackupState` | —（运行期引导标记，**始终 LocalStorage**） | LS 旧数据处置状态：`retained`（迁移后保留退路，默认）/ `cleaned`（已显式清理）/ `rollback-current` / `rollback-snapshot` / `idb-unavailable`；不进备份 |
+| `qb:meta:lsCleanupAt` | —（运行期引导标记，**始终 LocalStorage**） | 显式清理 LS 旧数据的时间（ISO）；不进备份 |
 
 **字段命名转换**：前端 camelCase（`contentHash`/`createdAt`）↔ 数据库 snake_case（`content_hash`/`created_at`）。迁移脚本按此映射批量 POST 到 `/api/banks/{id}/questions/batch`。
 
@@ -211,6 +217,7 @@ CREATE TABLE assets (
 - **v2→v3 题目分片（阶段 A）**：单库题目由「单 blob 数组」改为「分片 + 清单」——写放大 O(全库)→O(分片)，读按需只解析覆盖区间分片。迁移由同一 `Migration.run` 幂等完成：遍历形如 `questions:<bankId>`（不含后续冒号段）的旧 blob，用公共抽象 `QB.QuestionShards.writeAll` 切片；已存在清单则跳过（幂等，大库 450 题切 200/200/50 二次运行逐字节不变）。运行时另有**双重读兼容**：旧单 blob 在 `readAll/readRange/count/locate` 中回退读取，任一写操作（create/update/remove/insertMany）触发一次性写时迁移并删除旧键。
 - **v3→v4 分片一致修复（2026-10-29）**：v3 的删除路径在「中间分片被清空」时只移除分片键并收缩 `sizes`，未对后续分片重编号，导致清单索引与物理分片错位——`count` 有数、`list` 为空，余题成为不可达孤儿（导出亦随之丢失）。v4 在启动时逐库调用 `QB.QuestionShards.invariant` 自检；不通过则用 `QB.QuestionShards.compact` 按**物理分片键升序**拼接后重新切片（可恢复已产生的孤儿题），满足不变量则跳过 → 幂等。此后单题删除/批删在清空任一分片时统一走 `compact` 重编号，禁止各自 `sizes.splice`。
 - **v4→v5 一次性迁移（hash 64 + per-hash 复习 + 分段日志）**：同一版本内完成三件事，只留一条兼容线——① 题目 `contentHash` 由 `2:`+8hex 升级为 `3:`+16hex，按 `meta:hashMap:<bankId>` 重映射 `review/wrong/fav/revlog`；② 复习状态整表拆为 `user:review:<bankId>:<hash>` + `user:reviewMeta:<bankId>`；③ 评分日志整表拆为 `user:revlogMeta` + `user:revlog:<i>`（200/段）。可靠性：每库先持久化哈希映射再改数据（中断重入复用映射，不二次改写/不重复）；布局转换**先写新键再删旧键**；进入前对全部逻辑键做内存快照，任一步抛错 `restoreAll` 回滚；`meta:migrationLock`（owner + 30s TTL）保证多标签只跑一次，同标签模块级单飞；已是 v5 时 `ensureLayout` 只做归一（补清单/折叠残留），不重写数据。旧整表布局保留**双读**（迁移前/中断/旧备份导入），对外读语义（分数、到期、历史）与旧实现逐位一致（`scripts/migrate.test.mjs` 对照断言）。
+- **v5→v6 存储底座（LocalStorage → IndexedDB，Phase G）**：**不转换数据形状**，只换承载后端——沿用同一 `Migration.run`：持 `meta:migrationLock` → `saveAutoBackup` 全量备份（失败即中止）→ 探测 IDB（不可用写 `ls-fallback` 并继续 LS）→ 按 32 键/批复制非引导键到 `qforge-kv/kv`（每批单事务）→ **逐键深比对**旧库与新库（题库/题目/复习/错题/收藏/日志全覆盖）→ 全部一致才写 `meta:storageBackend='idb'`。**LS 旧数据保留**（`lsBackupState='retained'`）作为退路，不立即删除；幂等（中断重跑同名记录覆盖）、多标签单锁、失败按迁移快照回滚。索引：`by_bank`（按库取分片）、`by_bank_kind` + `by_kind_seq`（按 hash 取复习状态 / 按库取日志尾 N 条）、`by_kind`。写入仍为 O(改动数)（1 状态键 + 尾段日志聚合 1 个事务）。
 - **查询索引**：`(bank_id, type)`、`(bank_id, category)` 支撑列表筛选；`attempts(bank_id, created_at)` 支撑历史分页。
 - **UI 级按需装载（阶段 A）**：`Questions.count(bankId)` 直读清单 `count` 字段（O(1)，不解析分片）；`Questions.revision()` 为全库写修订号，任一题目写操作 +1，供门面 `QB.DB.loadQuestions(bankId)` 的整库读缓存做失效判定（机制上避免"忘记手动失效"读到旧数据）。`app.js` 依视图按需装载，`question-editor`/`buildIndex` 复用同一缓存。
 - **导入幂等**：`insertMany` 的 `mode=merge` 依赖上述唯一键跳过重复；`mode=overwrite` 先清库再写。更新来源题库时同题干的**答案修正**因 hash 变化会作为新题插入（旧题保留），不做静默覆盖。
@@ -219,7 +226,7 @@ CREATE TABLE assets (
 
 1. 后端建表（本文 §2）。
 2. 前端导出：`QB.Exporters.collect('bank', bank)` 取载荷后 `QB.Exporters.buildContent('json', payload)` 生成标准 JSON（旧 `DataIO.exportBank` 已删除，所有导出统一走 Exporters 注册表，见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md)）。
-3. 迁移脚本读取 `qb:*` 全量键 → 按映射转换字段名 → `POST /api/banks`、`/api/banks/{id}/questions/batch`、`/api/history`；SRS 三键（review/revlog/weights）见 §2.7–2.8 与 [SRS.md](SRS.md) §9，图片资产为 IndexedDB `assets` 库（§2.9），需单独导出/上传。
+3. 迁移脚本读取全量逻辑键（IDB 模式下同样经 `QB.Backup.readAllData`，不直连 IndexedDB/LocalStorage）→ 按映射转换字段名 → `POST /api/banks`、`/api/banks/{id}/questions/batch`、`/api/history`；SRS 三键（review/revlog/weights）见 §2.7–2.8 与 [SRS.md](SRS.md) §9，图片资产为 IndexedDB `assets` 库（§2.9），需单独导出/上传。
 4. 校验：比对 `banks`/`questions` 行数与 `content_hash` 集合。
 5. 前端 `config.js` 切 `DATA_BACKEND='api'`。
 
@@ -277,11 +284,11 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 
 转换规则（`serverToLocal`）：题目按 `bankId` 展开为分片 + 清单（切分复用 `QB.QuestionShards.plan`），进度按库拆成三个前缀键，历史/会话/日志/权重落到对应本地键（日志先落旧整表 `user:revlog`，恢复后由迁移归一为分段）；`meta:*` 本机专有偏好**原样直通**，本地布局残留键（缓存产物，如空的 `questions:<id>`/`<id>:meta`）**丢弃**以免覆盖转换结果。反向（`localToServer`）按上面 `banks` 列表重组分片（拼接复用 `QB.QuestionShards.concatShards`）后输出后端 7 键；本机专有 meta 偏好不透传（后端无对应语义）。恢复时若本端布局载荷缺本机专有偏好，`applyBackup` 保留 LocalStorage 现值（避免「恢复一次丢主题/WebDAV 配置」）。
 
-**schema v5 备份口径**：`readAllData`（前端备份与 `backup.export` 共用）先 `foldLayout` —— per-hash 复习状态折叠为旧整表 `user:review:<bank>`（旧整表与 per-hash 同键按 `last` 合并、per 优先），分段日志折叠为 `user:revlog` 数组（清单优先、无清单按物理段号升序拼接），并剔除运行期元数据（迁移锁/自动备份/哈希映射 `meta:hashMap`/本地复习版本号 `user:reviewRev`/复习清单/日志清单/段键）。因此**备份文件格式保持单一整表形状**，旧版本与跨设备都能吃；本地恢复后立即 `Migration.run({force:true})` + `ensureLayout()` 归一为新布局（`force` 因版本戳可能被一并恢复为最新而载荷仍是旧 hash/旧布局），失败按 `applyData` 快照回滚。
+**schema v6 备份口径**：`readAllData`（前端备份与 `backup.export` 共用）先 `foldLayout` —— per-hash 复习状态折叠为旧整表 `user:review:<bank>`（旧整表与 per-hash 同键按 `last` 合并、per 优先），分段日志折叠为 `user:revlog` 数组（清单优先、无清单按物理段号升序拼接），并剔除运行期元数据（迁移锁/自动备份/哈希映射 `meta:hashMap`/本地复习版本号 `user:reviewRev`/复习清单/日志清单/段键）与**后端运行期标记**（`meta:storageBackend`/`meta:lsMigratedAt`/`meta:lsCleanupAt`/`meta:lsBackupState`，见 `QB.Store.isBackupExcluded`）。因此**备份文件格式保持单一整表形状，v5→v6 不改变 `data` 结构**，只有信封 `schemaVersion` 从 5 升到 6；旧版本与跨设备都能吃。本地恢复后立即 `Migration.run({force:true})` + `ensureLayout()` 归一为新布局（`force` 因版本戳可能被一并恢复为最新而载荷仍是旧 hash/旧布局），失败按 `applyData` 快照回滚。
 
 **迁移前自动备份（F1，2026-11-02）**：`Migration.run` 抢锁后、任何写入前调用 `QB.Backup.saveAutoBackup`，复用同一 `buildBackup`/`readAllData` 链路（不复制导出逻辑），信封字段 `{app:'qforge-backup', version, schemaVersion, exportedAt, data, progress:{purpose:'pre-migration', phase:'captured'|'migrated', fromVersion, toVersion, startedAt, doneAt}}`。存储优先 IndexedDB（库 `qforge-backup` / store `snapshots` / key `pre-migration`，不占 LocalStorage 配额），无 IndexedDB（Node 测试/受限环境）回落 `qb:meta:migrationBackup`；写入后**回读校验**，失败清理半写并抛错 → 迁移立即中止（未写入任何数据）。备份文件本身就是标准信封，可直接走 `applyBackup`（备份弹窗「恢复迁移前自动备份」按钮；恢复后提示刷新页面），与手动下载的全量备份同构、可被现有恢复流程读回。
 
-**跨版本降级恢复（F3，2026-11-02）**：默认备份信封 `schemaVersion: 5`。旧客户端（schema ≤4）的 `assertCompatible` 会**明确拒绝**并给出可读错误（「备份 schema v5 高于当前客户端 v4，请先升级 qforge 再恢复（未写入任何数据）」），不会静默半恢复（复习状态看似在、hash 被当新题）。若确需恢复到旧客户端，走备份弹窗「**下载兼容旧版备份（schema ≤4）**」→ `buildBackup(now, {legacy:true})` → `QB.Backup.toLegacyPayload`：
+**跨版本降级恢复（F3，2026-11-02）**：默认备份信封 `schemaVersion: 6`（v6 只换存储底座，`data` 结构与 v5 相同）。旧客户端（schema ≤5）的 `assertCompatible` 会**明确拒绝**并给出可读错误（「备份 schema v6 高于当前客户端 v5，请先升级 qforge 再恢复（未写入任何数据）」），不会静默半恢复。若确需恢复到旧客户端，走备份弹窗「**下载兼容旧版备份（schema ≤4）**」→ `buildBackup(now, {legacy:true})` → `QB.Backup.toLegacyPayload`：
 - 题目分片折叠为旧单 blob `questions:<bankId>`（剔除清单与分片键）；
 - contentHash **v3→v2**（`QB.makeLegacyContentHash`，与旧算法逐字节一致，复用同一 `semanticPayload`，避免两套题面归一逻辑漂移）；复习整表键、错题 `questionKey`、收藏 `questionKey`、评分日志 `h` 同步降级（无对应题目的孤儿状态保留原值）；
 - `meta:schemaVersion` **固定写 4**（缺键时也不留空，避免旧客户端误判后重跑迁移）。
@@ -292,11 +299,17 @@ Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样
 
 LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务模块）与本子系统的存储都只经门面 `QB.DB` 的 7 组 Repository（`banks/questions/progress/reviews/revlog/weights/backup` + 资产驱动契约）。契约归属、异步形状与「禁止双向委托」的约束见 [API-CONTRACT.md](API-CONTRACT.md) §9 与 [SRS.md](SRS.md) §9.1。
 
-## 9. 容量上限与规模实测（F2，2026-11-02）
+## 9. 容量上限与规模实测（F2 + Phase G，2026-11-02）
 
-**口径声明（重要）**：Node harness 的 localStorage 是内存 Map，**没有浏览器配额约束**，因此以下是「按 `QB.Storage.usageBytes` 同口径的 UTF-16 估算字节」（另附 UTF-8 参考），**不是浏览器真实配额占用**。浏览器配额计数方式因实现而异（常见 5MB/origin，按字符计约等于 10MB 字节），故下表相对 `CONFIG.STORAGE.QUOTA_BYTES=5MB` 的占比是**保守估算**，实际可容纳量可能约为表中 2 倍。
+**口径声明（重要，禁止外推为浏览器实测）**：
+- Node 无原生 IndexedDB，IDB 侧使用零依赖内存实现 `scripts/lib/idb-memory.mjs`（只覆盖本项目用到的 API：对象仓/索引/事务/`getAll`/批量写）。
+- 「IDB 占用」= `QB.Store.estimate()` 的**序列化字节估算（UTF-16 口径）**；Node 无 `navigator.storage.estimate`，**不是浏览器真实配额占用**。
+- 「heap 驻留峰值」= 迁移全程每 500ms `bestEffortGc()` 后采样的 `heapUsed` 峰值（需 `--expose-gc`）；仍含 Node 内存后端把 localStorage/IndexedDB 数据放在 JS 堆的偏差。「原始峰值」为未强制 GC 的 `heapUsed` 峰值（含未回收临时对象），仅作参考。「浏览器口径估算」= 驻留峰值 − 全量回读一次 IDB 的克隆增量（该拷贝在浏览器不在 JS 堆）。
+- **浏览器真实配额、隐私模式行为、多标签 IDB 事务语义：未验证**。
 
-复现：`node --expose-gc scripts/bench.mjs --scale=5000`（`--scale=<n>` 为可选规模测量，不进默认门禁）。
+复现：`node --expose-gc scripts/bench.mjs --assert`（三档 5000/20000/50000 已进默认门禁）。
+
+### 9.1 v5 LocalStorage 布局基线（迁移到 IDB 之前的参考）
 
 | 规模（题 + 复习状态 + 日志） | 迁移前（旧整表布局） | 迁移后（per-hash + 分段） | 迁移耗时 | heap 峰值 |
 | --- | --- | --- | --- | --- |
@@ -304,11 +317,24 @@ LocalStorage 键与后端 JSON 均只由**适配器**读写；上层（UI/业务
 | 50,000 | 254 键 / **37.56 MB**（UTF-8 19.35 MB） | 50,356 键 / **80.27 MB**（UTF-8 41.19 MB） | **1,759.73 ms** | **+204.13 MB** |
 
 - 单题成本：迁移前 **0.76–0.77 KB/题**，迁移后 **1.64–1.72 KB/题**（per-hash 布局为每个复习状态独立成键，键前缀重复导致约 **2.2×** 空间放大，换取 O(1) 单题写入）。
-- 50,000 题下 **复习状态 50000/50000 逐键一致**、题目与日志 hash 全 v3；评分日志按设计 FIFO 保留最近 **20,000 条**（`REVLOG_MAX`，非丢数据）。
-- 相对 5MB 估算配额：5,000 题迁移后 **167.8%**、50,000 题 **1605.5%**——**明确超限**，不是「可能有问题」。
+- 相对 5MB 估算配额：5,000 题迁移后 **167.8%**、50,000 题 **1605.5%**——**LS 模式下明确超限**，不是「可能有问题」。
 
-**降级/容量策略（当前已落地的部分）**
-- UI 已有「本地存储」健康卡（`QB.UIRenderer.renderStorageHealth`）：按 `usageBytes()/QUOTA_BYTES` 显示占用条，**≥70% 警告、≥85% 危险**并引导「备份与恢复」；写盘失败经 `Storage.onError` 全局提示。本次实测后该提示口径不变，仍是唯一用户可见的容量防线。
-- 按保守口径推导的单浏览器建议上限（迁移后布局）：5MB/1.72KB ≈ **约 2,900 题**；70% 告警线 ≈ **约 2,000 题**，85% 危险线 ≈ **约 2,500 题**。旧整表布局约 **6,600 题**。
-- **建议**：单浏览器超过约 2,000 题即应导出备份并改用 API 后端（`DATA_BACKEND='api'`，数据落自托管后端）或分机存放；50,000 题不适用于 LocalStorage 模式。
-- **未实现（如实标注）**：复习状态/题目改用 IndexedDB 主存储、或把 per-hash 状态再分段（降低键数与前缀重复）——两者都会改变写放大/迁移语义（分段写从 O(1) 退回 O(段长)），本阶段不做，仅记录为后续选项。
+### 9.2 v6 IndexedDB 后端实测（Phase G / G4）
+
+| 规模 | IDB 估算占用 | 同数据 LS UTF-16 | 迁移耗时 | heap 驻留峰值（GC 后） | 原始峰值（未 GC） | 浏览器口径估算 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 5,000 | **4.96 MB** | 3.84 MB | **494.37 ms** | **+15.41 MB** | +89.32 MB | +10.12 MB |
+| 20,000 | **19.97 MB** | 15.50 MB | **5,719.22 ms** | **+60.82 MB** | +217.74 MB | +39.62 MB |
+| 50,000 | **45.35 MB** | 38.94 MB | **24,765.73 ms** | **+136.33 MB** | +294.82 MB | +90.14 MB |
+
+- **容量结论**：50,000 题的 IDB 估算占用 **45.35 MB ≈ 5MB 的 9.1×**，同数据在 LS 布局为 38.94 MB（远超 5MB）——**50k 已不再受 LocalStorage 5MB 硬顶限制**；仍受浏览器 IndexedDB 配额约束（通常按 origin 且远大于 5MB，**浏览器真实值未验证**）。
+- **写入**：单次评分（1 状态键 + 尾段日志，聚合 1 个事务后 `flush`）中位数 **5,000 = 0.05ms / 20000 = 0.15ms / 50000 = 0.14ms**，上行为 **211 / 213 / 213 B**；对照 v5 per-hash LS 基线 **0.14ms @20000**——后端切换后写入耗时与载荷**不随题量线性增长**（仍 O(改动数)）。
+- **完整性**：三档均 **逐键一致**（5000/5000、20000/20000、50000/50000），题目 hash 全 v3；评分日志按设计 FIFO 保留最近 **20,000 条**（`REVLOG_MAX`，非丢数据）；迁移后 LS 旧数据仍在（`LS 保留=true`）。
+- **门禁**（`bench --assert`）：IDB 写入 ≤1ms（三档）、20000 迁移 heap 驻留峰值 ≤100MB、50000 容量 ≤100MB 且 >LS 5MB、逐档完整性全通过。
+
+### 9.3 降级/容量策略
+
+- **IDB 可用（默认）**：首页「本地存储」健康卡按 IDB 估算/配额展示；容量的真正上限由浏览器 IDB 配额决定（未验证具体数值）。建议仍定期备份。
+- **IDB 不可用（隐私模式/配额拒绝/版本冲突）→ 回落 LocalStorage**：回到 §9.1 口径，保守建议上限约 **2,900 题**（5MB/1.72KB），70% 告警线约 **2,000 题**；超过即应导出备份、改用 API 后端（`DATA_BACKEND='api'`）或分机存放。
+- UI 已有「本地存储」健康卡（`QB.UIRenderer.renderStorageHealth`）：≥70% 警告、≥85% 危险；写盘失败经 `Storage.onError` 全局提示。IDB 模式下该卡显示 `QB.Store.estimate()` 的估算值。
+- **仍属未验证/后续项**：浏览器真实 IDB 配额与清理策略、隐私模式下 `indexedDB.open` 的具体失败形态、多标签 IDB 事务/锁的浏览器实现差异——本阶段只以 Node 内存实现与单测覆盖语义，浏览器实机未跑。

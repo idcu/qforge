@@ -5,12 +5,15 @@
  *   v1 → v2（历史）：contentHash 从「题型+题干」升级为「题型+题干+选项+正确答案」。
  *   v2 → v3（分片）：题目单 blob questions:<bankId> → questions:<bankId>:<i> + 清单。
  *   v3 → v4（修复）：分片删除重编号不变量自检与重建。
- *   v4 → v5（本轮一次性迁移，两条旧遗留合并）：
+ *   v4 → v5（一次性迁移，两条旧遗留合并）：
  *     1) hash 位宽 32→64：contentHash 由 '2:'+8hex 升级为 '3:'+16hex（FNV-1a 64 位）；
  *     2) 复习状态布局：user:review:<bankId> 整表 → user:review:<bankId>:<hash> per-hash
  *        + user:reviewMeta:<bankId> 清单；
  *     3) 评分日志布局：user:revlog 整表 → user:revlogMeta + user:revlog:<i> 分段追加。
  *     旧布局仍可双读（迁移中断 / 旧备份导入），对外读语义不变。
+ *   v5 → v6（存储底座）：LocalStorage → IndexedDB（`QB.Store` 统一接口）。
+ *     不做数据形状转换：分批复制 → 逐键深比对 → 最后写 'idb' 标记；LS 旧数据保留为退路。
+ *     IDB 不可用（隐私模式/配额拒绝/版本冲突）时写 'ls-fallback' 标记并继续用 LS（不白屏）。
  *
  * 可靠性设计：
  *   - **幂等/可重入**：每库先把 oldHash→newHash 映射写入 meta:hashMap:<bankId>，再改题目与
@@ -23,7 +26,7 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const SCHEMA_VERSION = 5;
+  const SCHEMA_VERSION = 6;
   const LOCK_TTL_MS = 30000;
   let inflight = null;
 
@@ -56,7 +59,13 @@
   function restoreAll(snap) {
     if (!snap) return;
     const current = QB.Storage.keys();
-    current.forEach((k) => { if (snap.keys.indexOf(k) < 0) QB.Storage.remove(k); });
+    // 引导标记（后端选择/迁移标记/schema 版本/锁）不参与「快照外删除」：
+    // 它们描述「当前该用哪个后端」，回滚旧业务数据不应把后端选择也退回去。
+    current.forEach((k) => {
+      if (snap.keys.indexOf(k) >= 0) return;
+      if (QB.Store && QB.Store.isBootstrap(k)) return;
+      QB.Storage.remove(k);
+    });
     // 先恢复内存/待写队列再统一落盘：迁移失败常因配额，逐个 setSync 会在第一个键再次抛错
     // 导致后续键没回滚；set 不立即落盘，最后 forceSync 一次性提交（仍失败则待写队列保留旧值重试）。
     snap.values.forEach((pair) => {
@@ -327,6 +336,41 @@
     return { banks: ids.length, converted: converted, revlog: revlogConverted };
   }
 
+  /* ---------------- v5 → v6：LocalStorage → IndexedDB（存储底座） ---------------- */
+
+  /**
+   * 把全部逻辑键从 LocalStorage 复制到 IndexedDB（`QB.Store.migrateToIdb`：
+   * 分批写 + 逐键深比对 + 最后写 'idb' 标记，**不删 LS 旧数据**），成功后把
+   * `QB.Storage` 门面切到 IDB（缓存水合），此后业务写入直接进 IDB。
+   *
+   * - 幂等/可中断重入：中断时标记不变，下次启动同一路径重跑，覆盖同名键后收敛；
+   * - IDB 不可用：写 'ls-fallback' 标记并继续用 LS（不白屏、数据可见）；
+   * - 用户显式回退（marker='ls'）不再自动升级，需走「重新启用 IndexedDB」入口。
+   * @returns {Promise<{backend:'ls'|'idb', skipped?:string, fallback?:string, migrated?:Object}>}
+   */
+  async function migrateV5ToV6() {
+    const Store = QB.Store;
+    if (!Store) return { backend: 'ls', skipped: 'no-store' };
+    if (Store.marker === 'ls') return { backend: 'ls', skipped: 'user-rollback' };
+    if (Store.marker === 'idb' && Store.mode === 'idb' && QB.Storage.mode === 'idb') {
+      return { backend: 'idb', skipped: 'already' };
+    }
+    const det = await Store.detect();
+    Store.available = det.ok;
+    if (!det.ok) {
+      Store.markFallback(det.reason);
+      return { backend: 'ls', fallback: det.reason };
+    }
+    const src = Store.lsSource();
+    const migrated = await Store.migrateToIdb(src);
+    // 直接复用 LS 源水合内存缓存（含引导标记），不再整库回读 IDB 一次：
+    // 迁移刚完成时两侧内容已逐键校验一致，多一次 txGetAll 只会多一份全库克隆（抬高峰值）。
+    const records = new Map();
+    src.keys().forEach((k) => records.set(k, src.get(k)));
+    QB.Storage.adoptStore({ mode: 'idb', records: records });
+    return { backend: 'idb', migrated: migrated };
+  }
+
   /* ---------------- 入口 ---------------- */
 
   /**
@@ -379,8 +423,9 @@
       if (fromVersion < 3) result.sharded = await migrateV2ToV3();
       if (fromVersion < 4) result.repaired = await migrateV3ToV4();
       result.layout = await migrateV4ToV5();
+      result.backend = await migrateV5ToV6();
       QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
-      QB.Storage.forceSync();
+      await QB.Storage.flush();
       try { await backup.markAutoBackupDone(); } catch (_) { /* 进度标记失败不影响迁移结果 */ }
       releaseLock(owner);
       return result;
@@ -393,7 +438,7 @@
 
   QB.Migration = {
     SCHEMA_VERSION, run, currentVersion, ensureLayout,
-    migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5,
+    migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6,
     LOCK_TTL_MS
   };
 })(typeof window !== 'undefined' ? window : globalThis);

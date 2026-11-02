@@ -33,9 +33,10 @@
   const REVIEW_META_PREFIX = QB.KEYS.reviewMeta(''); // 'user:reviewMeta:'
   const SEG_PREFIX = 'user:revlog:';
 
-  /** 运行期元数据：不进入备份（迁移锁/断点映射/本地同步版本号/迁移前自动备份） */
+  /** 运行期元数据：不进入备份（迁移锁/断点映射/本地同步版本号/迁移前自动备份/后端选择标记） */
   function isRuntimeKey(k) {
     return k === QB.KEYS.metaMigrationLock ||
+      (QB.Store && typeof QB.Store.isBackupExcluded === 'function' && QB.Store.isBackupExcluded(k)) ||
       k === QB.KEYS.metaMigrationBackup ||
       k === QB.KEYS.revlogMeta ||
       k.indexOf(QB.KEYS.metaHashMap('')) === 0 ||
@@ -212,6 +213,10 @@
    * @returns {Promise<Object>}
    */
   async function buildBackup(now, opts) {
+    // IDB 模式：确认待写已落盘后再读（readAllData 本身读内存权威值，这里只为持久性）
+    if (QB.Storage.mode === 'idb' && typeof QB.Storage.flush === 'function') {
+      try { await QB.Storage.flush(); } catch (_) { /* 落盘失败由 onError 通知，不阻断导出 */ }
+    }
     const payload = await QB.DB.backup.export();
     const legacy = !!(opts && opts.legacy);
     const rawData = (payload && payload.data) || {};
@@ -372,6 +377,7 @@
       });
       QB.Storage.forceSync();
       oldKeys.filter((k) => !Object.prototype.hasOwnProperty.call(data, k))
+        .filter((k) => !(QB.Store && typeof QB.Store.isBootstrap === 'function' && QB.Store.isBootstrap(k)))
         .forEach((k) => QB.Storage.remove(k));
       QB.Storage.forceSync();
     } catch (e) {
@@ -681,17 +687,36 @@
     });
   }
 
-  /** 备份/恢复管理弹窗（含容量显示） */
+  /** 备份/恢复管理弹窗（含容量显示与存储后端退路入口） */
   function openFlow() {
     const used = QB.Storage.usageBytes();
     const KB = Math.round(used / 1024);
-    const warn = used > 4 * 1024 * 1024;
+    const isIdb = QB.Storage.mode === 'idb';
+    const warn = !isIdb && used > 4 * 1024 * 1024;
+    const store = QB.Store;
+    const marker = store ? store.marker : null;
+    const legacyBytes = (isIdb && store) ? store.legacyLSUsedBytes() : 0;
+    const backendLabel = isIdb ? 'IndexedDB' : 'LocalStorage';
+    const backendNote = isIdb
+      ? '（IndexedDB 模式：容量不再受 LocalStorage 约 5MB 限制；旧 LocalStorage 数据已保留为退路）'
+      : (marker === 'ls-fallback'
+        ? '（IndexedDB 不可用，已安全回落到 LocalStorage）'
+        : '（LocalStorage 模式：容量受浏览器约 5MB 限制，建议分库）');
+    const legacyBtn = (isIdb && marker === 'idb' && legacyBytes > 0)
+      ? '<button class="btn btn-ghost" data-bk="cleanup-ls">清理旧 LocalStorage（' + Math.round(legacyBytes / 1024) + ' KB）</button>'
+      : '';
+    const rollbackBtn = (isIdb && marker === 'idb')
+      ? '<button class="btn btn-ghost" data-bk="rollback-ls">回退到 LocalStorage</button>'
+      : '';
+    const reenableBtn = (marker === 'ls' || marker === 'ls-fallback')
+      ? '<button class="btn btn-ghost" data-bk="reenable-idb">重新启用 IndexedDB</button>'
+      : '';
     QB.UIRenderer.openModal(
       '<h3>备份与恢复</h3>' +
-      '<div class="card" style="margin:10px 0"><div class="li-meta">本地存储占用</div>' +
+      '<div class="card" style="margin:10px 0"><div class="li-meta">本地存储占用（' + backendLabel + '）</div>' +
       '<div style="font-size:20px;font-weight:600;margin:4px 0">' + KB + ' KB' +
       (warn ? ' <span style="color:var(--warning);font-size:13px">（已超约 4MB，建议尽快备份并分库）</span>' : '') +
-      '</div></div>' +
+      '</div><div class="li-meta">' + backendNote + '</div></div>' +
       '<p class="li-meta">备份包含全部题库、题目、错题、收藏、复习计划、历史记录、偏好与题目图片：无图时导出 .json，含图时自动打包为 .qfbk（ZIP）。可在另一台设备/浏览器恢复。</p>' +
       '<p class="li-meta" style="color:var(--text-light)">🔒 WebDAV 密码不会写入备份（地址/账号保留，恢复后需重新填写密码），备份文件可安全分享。</p>' +
       '<p class="li-meta" style="color:var(--text-light)">兼容旧版备份会把 contentHash 降级为 32 位（v2）并折叠为旧布局；若发生 hash 冲突会直接拒绝导出（不产出半可用文件）。</p>' +
@@ -702,6 +727,7 @@
       '<button class="btn btn-ghost" data-bk="auto-restore">恢复迁移前自动备份</button>' +
       '<button class="btn btn-ghost" data-bk="dav">☁ WebDAV 云备份</button>' +
       '<button class="btn btn-ghost" data-bk="gc">清理未引用图片</button>' +
+      legacyBtn + rollbackBtn + reenableBtn +
       '<button class="btn btn-ghost" data-bk="close">关闭</button></div>',
       (modal) => {
         modal.querySelector('[data-bk="close"]').onclick = () => QB.UIRenderer.closeModal();
@@ -743,6 +769,42 @@
             const removed = await QB.Assets.removeOrphans(referenced);
             QB.UIRenderer.toast('已清理 ' + removed.length + ' 张未引用图片', 'ok');
           } catch (e) { QB.UIRenderer.toast('清理失败：' + e.message, 'err'); }
+        };
+        const cleanupBtn = modal.querySelector('[data-bk="cleanup-ls"]');
+        if (cleanupBtn) cleanupBtn.onclick = async () => {
+          try {
+            const ok = await QB.UIRenderer.confirmDialog(
+              '删除 LocalStorage 中保留的旧数据（约 ' + Math.round(legacyBytes / 1024) + ' KB）？'
+              + 'IndexedDB 数据不受影响；删除后无法用旧快照直接回退，但仍可先导出备份。', '删除'
+            );
+            if (!ok) return;
+            const r = QB.Store.cleanupLegacyLS();
+            QB.UIRenderer.toast('已清理 ' + r.removed + ' 个旧 LocalStorage 键', 'ok');
+            QB.UIRenderer.closeModal();
+          } catch (e) { QB.UIRenderer.toast('清理失败：' + e.message, 'err'); }
+        };
+        const rollbackBtnEl = modal.querySelector('[data-bk="rollback-ls"]');
+        if (rollbackBtnEl) rollbackBtnEl.onclick = async () => {
+          try {
+            const ok = await QB.UIRenderer.confirmDialog(
+              '把当前 IndexedDB 数据写回 LocalStorage 并切回 LocalStorage？'
+              + '若数据量超过 LocalStorage 约 5MB 上限，回退会失败并保持 IndexedDB（不会半切）。', '回退'
+            );
+            if (!ok) return;
+            const r = await QB.Store.rollbackToLS('current');
+            QB.Storage.adoptStore({ mode: 'ls' });
+            QB.UIRenderer.toast('已回退 ' + r.keys + ' 个键到 LocalStorage，刷新页面生效', 'ok');
+            if (typeof location !== 'undefined' && location.reload) location.reload();
+          } catch (e) { QB.UIRenderer.toast('回退失败：' + e.message, 'err'); }
+        };
+        const reenableBtnEl = modal.querySelector('[data-bk="reenable-idb"]');
+        if (reenableBtnEl) reenableBtnEl.onclick = async () => {
+          try {
+            const r = await QB.Store.reenableIdb();
+            await QB.Storage.initStore();
+            QB.UIRenderer.toast('已切换到 IndexedDB（迁移 ' + r.keys + ' 个键，校验通过），刷新页面生效', 'ok');
+            if (typeof location !== 'undefined' && location.reload) location.reload();
+          } catch (e) { QB.UIRenderer.toast('启用 IndexedDB 失败：' + e.message, 'err'); }
         };
       }
     );

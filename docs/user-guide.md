@@ -194,7 +194,9 @@ node scripts/serve-api.mjs
 
 ## 9. 数据存放
 
-数据保存在浏览器本地（LocalStorage，前缀 `qb:`）。首页「本地存储」卡片实时显示占用量与 5MB 配额进度：≥70% 变橙提示适时备份，≥85% 变红提示尽快导出。清理浏览器数据会清空题库与学习记录，请及时用「导出」备份。
+数据保存在浏览器本地：**默认使用 IndexedDB**（容量上限由浏览器按站点分配，远大于 LocalStorage 的约 5MB），LocalStorage 只保留极小的版本/迁移状态。若浏览器禁用 IndexedDB（如部分隐私模式）或配额被拒绝，应用会**自动回落到 LocalStorage** 并继续可用，此时仍受约 5MB 限制。首页「本地存储」卡片实时显示占用量与进度：≥70% 变橙提示适时备份，≥85% 变红提示尽快导出。清理浏览器数据会清空题库与学习记录，请及时用「导出」备份。
+
+> **首次启动的存储迁移**：从旧版本升级时，应用会自动把 LocalStorage 里的数据搬到 IndexedDB，并逐键校验；**迁移成功后旧 LocalStorage 数据会保留一段时间作为退路**（不自动删除）。可在「备份与恢复」弹窗查看迁移状态、手动「清理旧 LocalStorage」腾出空间，或「回退到 LocalStorage」（会先校验空间，失败则保持 IndexedDB、不会半切）。
 
 ### 9.0 打印 / 另存 PDF
 
@@ -207,12 +209,12 @@ node scripts/serve-api.mjs
 - **下载全量备份**：得到单文件，建议定期保存；换设备/换浏览器时用它迁移。无图为 `.json`，含图片自动打包为 `.qfbk`（ZIP）。**WebDAV 密码不写入备份**（地址/账号保留，恢复后重新填密码），备份文件可安全分享。
 - **从备份恢复**：选择备份文件（.json/.qfbk 自动识别），可选「覆盖恢复」（清空现有数据与图片后写入，推荐）或「合并恢复」（同名逻辑键覆盖；备份未包含的键与图片保留。注意：`banks/history/revlog` 若在备份中会整体替换，不是按 id 合并）。恢复后刷新页面。**备份载荷会自动适配当前后端**：本机是本地模式而备份来自 `DATA_BACKEND=api` 的后端（或反过来）时，题目/进度/历史等会按当前后端口径自动转换后落库，无需手工处理；后端布局不含本机专有偏好（主题/当前库/WebDAV 配置/schema 版本），覆盖恢复时会**保留本机现值**而不是清空。
 - **☁ WebDAV 云备份**：配置 WebDAV 目录（坚果云/Nextcloud/群晖等）后一键 PUT 上传全量备份、GET 拉取并走同一恢复确认；固定对象名 `qforge-backup-latest.bin`，账号密码仅存本机 LocalStorage，**上传的备份包已脱敏密码**（换机恢复后需重填）。**CORS 限制**：浏览器要求 WebDAV 服务允许本站跨域，坚果云等公共服务默认可能被拦截（报错属浏览器/服务端策略），自建服务通常可配置。**自测真机**：仓库自带本地验证端点 `node scripts/serve-webdav.mjs`（127.0.0.1:8899，账号/密码 `u`/`p`，已开 CORS，仅用于验证 WebDAV 链路；见 [DEVELOPMENT.md](DEVELOPMENT.md) §1）。
-- 弹窗显示本地存储占用，超过约 4MB 会提示尽快备份、分库；图片在 IndexedDB 不占用该配额。
+- 弹窗显示当前后端（IndexedDB / LocalStorage）与本地存储占用；LocalStorage 模式超过约 4MB 会提示尽快备份、分库（图片在 IndexedDB 不占用该配额）。迁移后如需回收旧 LocalStorage 空间，可点「清理旧 LocalStorage」。
 
 > WebDAV 是手动触发的异步备份，不是实时多端同步；真正的账号化实时同步走 `DATA_BACKEND=api` 后端契约（见 §1.1 与 [DATABASE.md](DATABASE.md)、[API-CONTRACT.md](API-CONTRACT.md)）。
 
 ## 10. 已知限制
 
 - `.xlsx` / `.docx` 解析依赖浏览器 `DecompressionStream`；过老浏览器可能不支持。
-- LocalStorage 容量有限（通常 5–10MB），超大题库建议分库、或启用自建后端（§1.1）。
+- 存储：默认 IndexedDB（上限由浏览器按站点分配）；**IDB 不可用时回落 LocalStorage（通常 5–10MB）**，超大题库仍建议分库、或启用自建后端（§1.1）。
 - 应用支持 **PWA**：通过 http(s) 访问（如 GitHub Pages）时可用浏览器「安装到主屏幕/桌面」，Service Worker 缓存后可离线打开；`file://` 双击场景不启用离线缓存。检测到新版本时会提示「刷新页面即可更新」（不会在答题中自动刷新）。
