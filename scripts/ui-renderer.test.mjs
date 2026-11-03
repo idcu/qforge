@@ -465,6 +465,11 @@ section('复习计划卡 / 难卡标记 / 本题历史（P2）');
   const head = regions.find((r) => r.key === 'quiz-head').html;
   ok(head.indexOf('leech-badge') >= 0, 'lapses≥8 显示难卡标记');
   ok(head.indexOf('累计遗忘 9 次') >= 0, '难卡 title 含遗忘次数');
+  const taggedHead = UI.renderQuizRegions(engine, {
+    favorited: false, reviewState: { lapses: 2, leech: true }, settings: { leechThreshold: 8 }
+  }).find((r) => r.key === 'quiz-head').html;
+  ok(taggedHead.indexOf('leech-badge') >= 0, 'leech=true（阈值未达）仍显示已标记徽标');
+  ok(taggedHead.indexOf('已标记为难卡') >= 0, '已标记徽标 title 明示动作结果');
   const hist = regions.find((r) => r.key === 'quiz-history').html;
   ok(hist.indexOf('评分 3 次') >= 0 && hist.indexOf('又忘 1') >= 0 && hist.indexOf('良好 2') >= 0, '历史含次数与四档分布');
   ok(hist.indexOf('最近') >= 0, '历史含最近一次时间');

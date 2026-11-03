@@ -455,6 +455,47 @@ section('二期 easyDays：七天权重 / 0 权重 / 单日 100% / maxDays 钳�
   deep(QB.Wire.bank.from(w).sched.easyDays, [100, 0, 50, 100, 100, 100, 100], 'Wire.from：easy_days 数组');
 }
 
+section('二期 leech 动作：默认仅徽标 / tag 可配置');
+{
+  eq(S.DEFAULTS.leechAction, 'none', '默认 leechAction=none（仅徽标）');
+  eq(S.normalize(null).leechAction, 'none', 'normalize(null)：仅徽标');
+  eq(S.normalize({ leechAction: 'tag' }).leechAction, 'tag', 'tag 原样保留');
+  eq(S.normalize({ leechAction: 'suspend' }).leechAction, 'none', '不支持的 suspend 回落 none');
+  eq(S.normalize({ leechAction: 1 }).leechAction, 'none', '非法类型回落 none');
+  ok(S.validate(Object.assign({}, S.normalize(null), { leechAction: 'suspend' }))
+    .some((m) => /难卡动作/.test(m)), '非法难卡动作就地报错');
+
+  const tagSched = S.normalize({ leechThreshold: 2, leechAction: 'tag' });
+  const prev = { algo: 'fsrs', due: T0 - DAY, stability: 5, difficulty: 6, reps: 4, lapses: 1, last: T0 - 3 * DAY };
+  const tagged = QB.FSRS.review(prev, R.again, T0, W, { sched: tagSched });
+  eq(tagged.lapses, 2, 'again 后 lapses=2');
+  eq(tagged.leech, undefined, 'FSRS 纯函数不打 leech 标记（动作在 SRSStore 层）');
+
+  const noneSched = S.normalize({ leechThreshold: 2 });
+  const notTagged = QB.FSRS.review(prev, R.again, T0, W, { sched: noneSched });
+  eq(notTagged.leech, undefined, '默认 none：不写 leech 字段');
+
+  const bank = await QB.DB.banks.create({ name: 'leech 动作库' });
+  const q = { type: 'judge', question: 'leech 题', answer: '正确' };
+  await QB.DB.questions.insertMany(bank.id, [q], { dedupe: false });
+  const qq = (await QB.DB.questions.list(bank.id, {})).items[0];
+  const key = QB.SRSStore.keyFor(qq);
+  const start = { algo: 'fsrs', due: T0 - DAY, stability: 5, difficulty: 6, reps: 4, lapses: 1, last: T0 - 3 * DAY };
+  S.invalidate(bank.id);
+  await S.save(bank, { leechThreshold: 2, leechAction: 'tag' });
+  await QB.SRSStore.writeMap(bank.id, { [key]: start });
+  const g1 = await QB.SRSStore.grade(bank.id, qq, QB.SRS.RATINGS.again, T0);
+  eq(g1.leech, true, 'tag：lapses 达阈值时写入 leech=true');
+  await S.save(bank, { leechThreshold: 2, leechAction: 'none' });
+  await QB.SRSStore.writeMap(bank.id, { [key]: start });
+  const g2 = await QB.SRSStore.grade(bank.id, qq, QB.SRS.RATINGS.again, T0);
+  eq(g2.leech, undefined, 'none：不写 leech 字段（默认行为不变）');
+
+  const local = { id: 'l', name: 'l', sched: { leechAction: 'tag' } };
+  eq(QB.Wire.bank.to(local).sched.leech_action, 'tag', 'Wire.to：leech_action');
+  eq(QB.Wire.bank.from(QB.Wire.bank.to(local)).sched.leechAction, 'tag', 'Wire.from：leech_action');
+}
+
 section('二期 参数校验：非法值就地报错（不静默丢弃）');
 {
   const base = S.normalize(null);

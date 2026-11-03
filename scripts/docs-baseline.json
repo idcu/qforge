@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-03T05:37:03.164Z",
+  "generatedAt": "2026-11-03T05:44:42.049Z",
   "runItems": 30,
   "suiteFiles": 29,
-  "totalAssertions": 4796,
+  "totalAssertions": 4811,
   "gateCount": 55,
   "counts": {
     "smoke-test.mjs": 724,
@@ -26,20 +26,20 @@
     "references.test.mjs": 13,
     "review-queue.test.mjs": 51,
     "rich-text.test.mjs": 66,
-    "sched.test.mjs": 174,
+    "sched.test.mjs": 187,
     "shard.test.mjs": 115,
     "source.test.mjs": 39,
     "srs.test.mjs": 63,
     "static-server.test.mjs": 29,
     "storage.test.mjs": 39,
     "sync-dav.test.mjs": 45,
-    "ui-renderer.test.mjs": 178,
+    "ui-renderer.test.mjs": 180,
     "xml-lite.test.mjs": 39
   },
   "firstScreen": {
     "scripts": 81,
     "files": 89,
-    "rawKB": "930.0",
-    "gzipKB": "329.0"
+    "rawKB": "931.9",
+    "gzipKB": "329.6"
   }
 }

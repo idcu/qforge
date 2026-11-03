@@ -17,7 +17,7 @@
     newPerDay: 'new_per_day', reviewPerDay: 'review_per_day',
     requestRetention: 'request_retention', maximumIntervalDays: 'maximum_interval_days',
     learningSteps: 'learning_steps', leechThreshold: 'leech_threshold',
-    fuzz: 'fuzz', fuzzMaxDays: 'fuzz_max_days', easyDays: 'easy_days'
+    fuzz: 'fuzz', fuzzMaxDays: 'fuzz_max_days', easyDays: 'easy_days', leechAction: 'leech_action'
   };
 
   /** 本地 sched → wire（只输出已定义键；learningSteps 秒数组浅拷贝） */
@@ -43,7 +43,8 @@
       leechThreshold: w.leech_threshold,
       fuzz: w.fuzz,
       fuzzMaxDays: w.fuzz_max_days,
-      easyDays: Array.isArray(w.easy_days) ? w.easy_days.slice() : w.easy_days
+      easyDays: Array.isArray(w.easy_days) ? w.easy_days.slice() : w.easy_days,
+      leechAction: w.leech_action
     };
   }
 

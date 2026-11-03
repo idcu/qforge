@@ -6,6 +6,29 @@
 
 ---
 
+## 待回填 · feat(srs): leech 动作可配置（默认仅徽标，不 suspend）
+
+**Commit**：`待回填`（收尾 docs 提交回填）
+
+**核心改动点**
+- `bank.sched.leechAction`（wire `sched.leech_action`）取值 `'none'`（默认）/ `'tag'`；`normalize` 对未知值（含 `'suspend'`）回落 `'none'` 并保留未知键。
+- 规则重写：`leechThreshold` 恒控徽标（旧语义不变），新增动作默认关闭；**显式决策不实现 suspend**（跨队列过滤/撤销/多端恢复缺闭环）。
+- `SRSStore.applyLeechAction` 为唯一动作实现，仅 `grade/gradeMany` 调用；`tag` 命中阈值写 `state.leech=true`（只置位、不清除）。FSRS 纯函数不掺入该字段。
+- 复习页徽标支持 `leech=true`（阈值未达也显示「已标记为难卡」，title 明示动作结果）。
+- 设置弹窗新增「难卡命中后动作」下拉；`validate` 对非法动作就地报错。
+
+**实测数据（2026-11-03，本机 Asia/Shanghai）**
+- 红→绿：实现前 sched 测试 3 条失败（`leechAction` 未归一/未校验），ui-renderer 测试 2 条失败（无已标记徽标）；实现后 sched **187 / 187**（+13）、ui-renderer **180 / 180**（+2）。
+- 行为实测：`tag` + `leechThreshold:2`、`lapses:1` 再评 `again` → `lapses=2`、`state.leech=true`；`none` 或默认设置 → 不写 `leech` 字段；`FSRS.review` 自身不写 `leech`。
+- Wire 双向 `leech_action` 通过；`Docs` 同步 SRS/DATABASE/ARCHITECTURE/user-guide。
+- 门禁：`test-all` 30 运行项 0 失败、断言 **4811 / 4811**（+15）；`bench --assert --expose-gc` 全绿：heapUsed 增量 **2.69 MB ≤ 40MB**、`grade` 比值 **2.68 ≤ 2.90**、`gradeMany` 比值 **4.98 ≤ 5.35**、PATCH P95 **8.03 ms ≤ 50ms**；首屏 **329.6 KB gzip / 931.9 KB raw**（较切片 B +0.6 KB gzip / +1.9 KB raw，来自下拉控件与徽标文案）。
+
+**遗留 TODO / 风险**
+- api 模式后端 `review` 表无 `leech` 列，未知键是否持久**未验证**（本仓库无后端实现）；默认关闭 + 仅本地可用，风险受限。
+- `state.leech` 只置位、不提供取消入口（随设置回退或手动编辑状态清除）；suspend 未实现。
+
+---
+
 ## 待回填 · feat(srs): easyDays 七天权重（默认全 100 不生效）
 
 **Commit**：`待回填`（收尾 docs 提交回填）
@@ -20,8 +43,8 @@
 - 红→绿：实现前 `applyEasyDays is not a function`，17 条断言失败/中断；实现后 sched.test **174 / 174**（原 157，+17）。
 - 边界实测：全 0 → 1 天；命中日 0% → 1 天；命中日 50% → `round(ivl·0.5)`；命中日 100% 且其余 0% → 间隔不变；`maxDays=5` + stability 5000 → due ≤5 天；1 天间隔不被压到 0。
 - 全 100 与缺省 deep-equal；Wire 双向数组映射通过。
-- 门禁：`test-all` 30 运行项 0 失败、断言 **4796 / 4796**（+17）；`bench --assert --expose-gc` 全绿：heapUsed 增量、`gradeMany` 比值、PATCH P95 实测见提交回填；新增观测行「轻松日权重 50%」中位 **0.00 ms**（200 次）。
-- 首屏：实测见提交前 `docs-check --write` 回填（新增 7 个数字输入与说明文案）。
+- 门禁：`test-all` 30 运行项 0 失败、断言 **4796 / 4796**（+17）；`bench --assert --expose-gc` 全绿：heapUsed 增量 **2.69 MB ≤ 40MB**、`gradeMany` 比值 **4.93 ≤ 5.35**、PATCH P95 **7.01 ms ≤ 50ms**；新增观测行「轻松日权重 50%」中位 **0.00 ms**（200 次）。
+- 首屏：**329.0 KB gzip / 930.0 KB raw**（+1.1 KB gzip / +3.1 KB raw，来自 7 个权重输入与说明文案）。
 
 **遗留 TODO / 风险**
 - 只压缩一次、不迭代到下一个轻松日（与 Anki 的择日策略不同）；若压缩后再次落到降权日，本轮不再继续压缩。

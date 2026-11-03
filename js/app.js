@@ -1112,6 +1112,11 @@
       '<input type="text" id="sched-steps" aria-label="学习步骤（秒）" value="' + s.learningSteps.join(',') + '" /></div>' +
       '<div><label class="qe-label">难卡阈值（0=关闭）</label>' +
       '<input type="number" min="0" max="9999" id="sched-leech" aria-label="难卡阈值" value="' + s.leechThreshold + '" /></div>' +
+      '<div><label class="qe-label">难卡命中后动作</label>' +
+      '<select id="sched-leech-action" aria-label="难卡命中后动作">' +
+      '<option value="none"' + (s.leechAction === 'none' ? ' selected' : '') + '>仅徽标（默认）</option>' +
+      '<option value="tag"' + (s.leechAction === 'tag' ? ' selected' : '') + '>标记为难卡</option>' +
+      '</select></div>' +
       '<div><label class="qe-label">间隔模糊（默认关闭）</label>' +
       '<label style="display:flex;align-items:center;gap:6px">' +
       '<input type="checkbox" id="sched-fuzz"' + (s.fuzz ? ' checked' : '') + ' aria-label="间隔模糊开关" /> 开启</label></div>' +
@@ -1130,6 +1135,7 @@
       '<p class="li-meta">默认：新题 ' + D.newPerDay + ' / 复习 ' + D.reviewPerDay + ' / 保留率 ' +
       D.requestRetention + ' / 最大 ' + D.maximumIntervalDays + ' 天 / 步骤 ' + D.learningSteps.join(',') +
       ' 秒 / 难卡 ' + D.leechThreshold + ' / 模糊 ' + (D.fuzz ? '开' : '关') +
+      ' / 难卡动作 ' + (D.leechAction === 'tag' ? '标记' : '仅徽标') +
       ' / 轻松日 ' + D.easyDays.join(',') +
       '。<strong>调度参数只影响之后的评分与到期，不会重排已有到期时间。</strong>' +
       '设置存于题库记录，local / api / 备份三端一致。</p>' +
@@ -1150,7 +1156,8 @@
               leechThreshold: parseInt(modal.querySelector('#sched-leech').value, 10),
               fuzz: modal.querySelector('#sched-fuzz').checked,
               fuzzMaxDays: parseInt(modal.querySelector('#sched-fuzzmax').value, 10),
-              easyDays: Array.from({ length: 7 }, (_, i) => parseInt(modal.querySelector('#sched-ed' + i).value, 10))
+              easyDays: Array.from({ length: 7 }, (_, i) => parseInt(modal.querySelector('#sched-ed' + i).value, 10)),
+              leechAction: modal.querySelector('#sched-leech-action').value
             };
             const errEl = modal.querySelector('#sched-err');
             const problems = QB.SchedSettings.validate(patch);

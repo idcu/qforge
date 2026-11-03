@@ -28,7 +28,8 @@
   reps: 7,               // 累计评分次数
   lapses: 1,             // 遗忘（again）次数
   last: 1728864000000,   // 上次评分时间
-  learning: { step: 1, mode: 'new' }  // 可空；存在=处于分钟级学习步骤
+  learning: { step: 1, mode: 'new' }, // 可空；存在=处于分钟级学习步骤
+  leech: true            // 可选；仅 sched.leechAction='tag' 且 lapses 达阈值时写入（只置位）
 }
 ```
 
@@ -277,9 +278,9 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 | 模块 | 关键导出 |
 | --- | --- |
 | `fsrs.js` | `QB.FSRS.review(state, rating, now, weights, opts?)`（`opts.sched.fuzz` 或 `opts.fuzzSeed` 启用 fuzz）、`initialState(now)`、`isLearning(state)`、`DEFAULT_W`（21）、`DECAY`/`FACTOR`/`REQUEST_RETENTION`/`STABILITY_MIN`/`MAX_INTERVAL_DAYS`/`SAME_DAY_LIMIT_DAYS`/`FUZZ_RANGES`、`decayOf`/`factorOf`/`powerDecay`/`retrievability`、`initStability`/`initDifficulty`/`nextStability`/`nextDifficulty`、`recallStability`/`forgetStability`/`stabilityShortTerm`、`nextIntervalDays`/`applyFuzz(intervalDays, rand, maxDeltaDays?)`/`applyEasyDays(intervalDays, fromTs, weights)` |
-| `sched-settings.js` | `QB.SchedSettings.normalize`（唯一归一，保留未知键）、`normalizeEasyDays`、`validate`（表单非法值就地报错）、`ofBank`/`ofBankId`（按库缓存）、`invalidate`/`save`；`DEFAULTS` 含 `fuzz:false`/`fuzzMaxDays:0`/`easyDays:[100×7]` |
+| `sched-settings.js` | `QB.SchedSettings.normalize`（唯一归一，保留未知键）、`normalizeEasyDays`、`validate`（表单非法值就地报错）、`LEECH_ACTIONS`、`ofBank`/`ofBankId`（按库缓存）、`invalidate`/`save`；`DEFAULTS` 含 `fuzz:false`/`fuzzMaxDays:0`/`easyDays:[100×7]`/`leechAction:'none'` |
 | `srs.js` | `QB.SRS.RATINGS`、`isDue`、`isDueToday`、`dueQuestions` |
-| `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear`（**均 async，经 `QB.DB.reviews`**；0–3→1–4 映射、SM-2 迁移；`sched.fuzz` 开启时按 `bankId|contentHash|reps` 派生确定性 seed）；同步纯函数 `keyFor`/`ratingForResult`/`collectGraded` |
+| `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear`（**均 async，经 `QB.DB.reviews`**；0–3→1–4 映射、SM-2 迁移；`sched.fuzz` 开启时按 `bankId|contentHash|reps` 派生确定性 seed）；同步纯函数 `keyFor`/`ratingForResult`/`collectGraded`；leech 动作唯一实现 `applyLeechAction`（仅 grade/gradeMany 调用） |
 | `fsrs-opt.js` | revlog/权重**存取层**（经 `QB.DB.revlog/weights`，**均 async**）：`appendLog`、`readLogForScope`、`diagnose`、`train`（async 存储包装）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights`、**`shouldRetrain`/`warmWeightsFor`**（增量重训）；纯函数 `normalizeStore`（归一唯一实现，local-adapter 复用）；常量 `LOG_LIMIT`/`WARM_ITERATIONS`/`RETRAIN_MIN_NEW` |
 | `fsrs-train-core.js` | 纯计算：`computeTrain(revlog,opts)`（`initWeights` 门控基线 / `startWeights` 优化起点）、`diagnose`、`buildSequences/loss/gradient/optimize`、门控/边界常量（Worker 与主线程共用） |
 | `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,opts)`（Worker 优先、自动回退；训练参数含增量热启动 `startWeights`/`iterations` 一并透传，可注入测试） |
@@ -290,7 +291,9 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 ## 11. 已知边界（设计取舍）
 
 - fuzz（间隔抖动）已实现且与官方 `FUZZ_RANGES` 一致，但**默认关闭**（题库级 `sched.fuzz` 或旧 opt-in `review(..., { fuzzSeed })`）；`sched.fuzzMaxDays` 只能收紧官方 δ，不允许放大。生产默认保持确定性以便「间隔反解 R=目标保留率」成立、且同数据可复现。
-- **easyDays 已实现且默认不生效**（7 项全 100）：命中降权日按比例压缩间隔，0% 压到 1 天；只压缩一次、不迭代择日，且不越 `maximumIntervalDays`。无 lapses 手动重学卡的「提前毕业」微调。
+- **easyDays 已实现且默认不生效**（7 项全 100）：命中降权日按比例压缩间隔，0% 压到 1 天；只压缩一次、不迭代择日，且不越 `maximumIntervalDays`。
+- **leech 动作已显式决策**：`leechThreshold` 仍恒控徽标；新增 `sched.leechAction` 默认 `'none'`（仅徽标，行为与旧版完全一致），可选 `'tag'`（命中阈值后写持久 `state.leech=true`，只置位不清除）。**不实现 suspend**：跨队列过滤、撤销、多端同步与「如何恢复」都缺少闭环，风险大于收益。`tag` 在 local 模式随状态 JSON 持久；api 模式后端 `review` 表无该列，未知键是否保留**未验证**，因此默认关闭、按需开启。
+- 无 lapses 手动重学卡的「提前毕业」微调。
 - 优化器只做离线批训练（手动一键），不做在线增量更新；http(s) 下计算在专用 Worker、file:// 回退主线程（无共享内存/进度百分比，30s 超时保险）。单次训练成本（21 权重数值梯度）实测中位约 **3.89s** / 3200 样本 / 150 迭代；**增量重训热启动**将其降至约 **1.55s**（2.51×，见 §8.7 与 `scripts/bench.mjs`），均在 30s Worker 超时内。
 - 历史评分不回填：升级前没有 revlog，需从升级后积累样本。
 - 不做多用户/云协同权重；权重随全量备份迁移（`meta:fsrsWeights`），revlog 同理。

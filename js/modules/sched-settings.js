@@ -9,10 +9,11 @@
  *   requestRetention              FSRS 目标保留率（0.70–0.97，默认 0.90）
  *   maximumIntervalDays           长期间隔上限（1–36500，默认 36500）
  *   learningSteps                 学习/重学步骤（**秒**存储，内部转毫秒；1–4 个、升序、默认 [60,600]）
- *   leechThreshold                难卡徽标阈值（默认 8，0=关闭；仅展示，不做 suspend/tag）
+ *   leechThreshold                难卡阈值（默认 8，0=关闭；徽标恒生效，动作见 leechAction）
  *   fuzz                          间隔模糊开关（默认 false；幅度公式沿用 FSRS 官方 FUZZ_RANGES）
  *   fuzzMaxDays                   模糊幅度上限（天数，0=不额外收紧；只能小于官方幅度，不能放大）
  *   easyDays                      七天权重（周日→周六，0–100%，全 100=不生效；命中降权日按比例压缩间隔）
+ *   leechAction                   leech 命中后的动作：'none'（默认，仅徽标）| 'tag'（写 state.leech 标记）
  *
  * 未知键一律原样保留：老客户端保存时不会清掉新版本写入的字段（前向兼容）。
  * 默认值唯一来源：本文件 DEFAULTS（禁止在 UI / 调度层散落常量）。
@@ -31,8 +32,10 @@
     leechThreshold: 8,
     fuzz: false,
     fuzzMaxDays: 0,
-    easyDays: [100, 100, 100, 100, 100, 100, 100]
+    easyDays: [100, 100, 100, 100, 100, 100, 100],
+    leechAction: 'none'
   };
+  const LEECH_ACTIONS = ['none', 'tag'];
   const MAX_PER_GROUP = 9999;
   const RETENTION_MIN = 0.70;
   const RETENTION_MAX = 0.97;
@@ -40,7 +43,7 @@
   const MAX_INTERVAL_MAX = 36500;
   const STEPS_MAX = 4;
   const KNOWN_KEYS = ['newPerDay', 'reviewPerDay', 'requestRetention', 'maximumIntervalDays',
-    'learningSteps', 'leechThreshold', 'fuzz', 'fuzzMaxDays', 'easyDays'];
+    'learningSteps', 'leechThreshold', 'fuzz', 'fuzzMaxDays', 'easyDays', 'leechAction'];
 
   function toBool(v, fallback) {
     if (typeof v === 'boolean') return v;
@@ -94,7 +97,8 @@
       leechThreshold: toInt(src.leechThreshold, DEFAULTS.leechThreshold),
       fuzz: toBool(src.fuzz, DEFAULTS.fuzz),
       fuzzMaxDays: toInt(src.fuzzMaxDays, DEFAULTS.fuzzMaxDays, 0, MAX_INTERVAL_MAX),
-      easyDays: normalizeEasyDays(src.easyDays)
+      easyDays: normalizeEasyDays(src.easyDays),
+      leechAction: LEECH_ACTIONS.indexOf(src.leechAction) >= 0 ? src.leechAction : DEFAULTS.leechAction
     };
     Object.keys(src).forEach((k) => { if (KNOWN_KEYS.indexOf(k) < 0) out[k] = src[k]; });
     return out;
@@ -128,6 +132,7 @@
       errs.push('学习步骤需为 1–' + STEPS_MAX + ' 个 ≥1 的秒数');
     }
     if (typeof src.fuzz !== 'boolean') errs.push('模糊开关必须为开/关（布尔值）');
+    if (LEECH_ACTIONS.indexOf(src.leechAction) < 0) errs.push('难卡动作只能为「仅徽标」或「标记」');
     const ed = src.easyDays;
     if (!Array.isArray(ed) || ed.length !== 7
       || ed.some((x) => { const n = Number(x); return !isFinite(n) || Math.round(n) !== n || n < 0 || n > 100; })) {
@@ -175,7 +180,7 @@
   }
 
   QB.SchedSettings = {
-    DEFAULTS, MAX_PER_GROUP, RETENTION_MIN, RETENTION_MAX, MAX_INTERVAL_MIN, MAX_INTERVAL_MAX,
+    DEFAULTS, LEECH_ACTIONS, MAX_PER_GROUP, RETENTION_MIN, RETENTION_MAX, MAX_INTERVAL_MIN, MAX_INTERVAL_MAX,
     normalize, normalizeSteps, normalizeEasyDays, validate, toBool, toInt, ofBank, ofBankId, invalidate, save
   };
 })(typeof window !== 'undefined' ? window : globalThis);

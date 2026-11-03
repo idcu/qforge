@@ -123,10 +123,10 @@
 | `modules/fsrs-train-client.js` | 训练执行选择器：`supported(env)` 判定（http(s)+Worker）、`run(revlog,opts)` 消息往返（30s 超时）并透传训练参数（含热启动 `startWeights`）、构造/运行失败自动回退主线程；env/createWorker/compute 可注入测试 |
 | `workers/fsrs-worker.js` | 训练 Worker（不经 index.html）：importScripts fsrs.js + train-core，收 `train`（`initWeights` 基线 / `startWeights?` 热启动）回 `done/error`；SW 预缓存，离线可用 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
-| `modules/sched-settings.js` | `QB.SchedSettings`：按题库调度设置（`bank.sched`）**唯一归一实现**——`newPerDay/reviewPerDay/requestRetention/maximumIntervalDays/learningSteps（秒）/leechThreshold/fuzz/fuzzMaxDays/easyDays`；`normalize` 钳制范围、步骤升序去重并保留未知键（老客户端保存不清空新字段）；`validate` 是设置弹窗**唯一表单校验**（非法值就地报错，不静默丢弃）；`ofBank/ofBankId` 按库缓存（save 后更新），复用 banks 仓库（local/api/备份同语义）。默认值唯一来源 `DEFAULTS`（每日限额仍与 `CONFIG.LIMITS` 同值） |
+| `modules/sched-settings.js` | `QB.SchedSettings`：按题库调度设置（`bank.sched`）**唯一归一实现**——`newPerDay/reviewPerDay/requestRetention/maximumIntervalDays/learningSteps（秒）/leechThreshold/leechAction/fuzz/fuzzMaxDays/easyDays`；`normalize` 钳制范围、步骤升序去重并保留未知键（老客户端保存不清空新字段）；`validate` 是设置弹窗**唯一表单校验**（非法值就地报错，不静默丢弃）；`ofBank/ofBankId` 按库缓存（save 后更新），复用 banks 仓库（local/api/备份同语义）。默认值唯一来源 `DEFAULTS`（每日限额仍与 `CONFIG.LIMITS` 同值） |
 | `modules/start-prefs.js` | `QB.StartPrefs`：练习/考试开始弹窗上次参数（各题型数量/分值、分类、时长、计时/乱序开关）归一与存取；本机偏好 `meta:startPrefs`，不参与跨设备备份转换 |
 | `modules/review-queue.js` | `QB.ReviewQueue`：今日复习队列纯函数——learning（分钟级已到期）→ 到期复习（逾期在前，封顶 `reviewPerDay-learning`）→ 新题（封顶 `newPerDay`）；`dailyFromLog(log,bankId,now)` 从 revlog 推导今日已引入新卡/已复习次数，实现**跨会话每日累计额度**；返回 `{questions, counts, settings}`，不碰存储/DOM |
-| `modules/srs-store.js` | SRS 状态按题库存取（`user:review:<bank>`，contentHash 键）**经 `QB.DB.reviews`（异步）**：`grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear` 均 `async`；评分提交优先 `reviews.patch`（api 增量上行，B1），无 patch 的适配器回退 `record` 整表；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（同步纯函数，一次作答一条 revlog 契约） |
+| `modules/srs-store.js` | SRS 状态按题库存取（`user:review:<bank>`，contentHash 键）**经 `QB.DB.reviews`（异步）**：`grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear` 均 `async`；评分提交优先 `reviews.patch`（api 增量上行，B1），无 patch 的适配器回退 `record` 整表；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（同步纯函数，一次作答一条 revlog 契约）；`applyLeechAction` 是 leech 动作唯一实现（仅 grade/gradeMany 调用，默认 `none` 不写字段） |
 | `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire,countUp})`：倒计时（考试，到期 `onExpire` 自动交卷）与正计时（练习 `countUp=true`，从 0 累加不结束）共用同一实现，`onTick` 统一回调「剩余/已用毫秒」 |
 | `modules/source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入测试） |
 | `modules/data-io.js` | 文件/粘贴/拖拽/**URL** 导入编排，统一「解析→预览→insertMany→记录来源」；`refreshUrlFlow` 按 checksum 刷新 |
@@ -149,7 +149,8 @@
 | `requestRetention` | 0.70–0.97 浮点 | **0.90** | 目标留存率，只进 `nextIntervalDays` 入参（越高 → 间隔越短） |
 | `maximumIntervalDays` | 1–36500 整数 | **36500** | 新算间隔上限，只压未来 due，不重排已有 due |
 | `learningSteps` | 1–4 个正整数（**秒**），升序去重 | **[60, 600]** | 新卡/重学步骤；内部转毫秒；长度 1 时 `good` 直接毕业 |
-| `leechThreshold` | 0–9999 整数（0=关闭） | **8** | 仅控制难卡徽标（`lapses ≥ 阈值`），不做 suspend/tag |
+| `leechThreshold` | 0–9999 整数（0=关闭） | **8** | 难卡阈值；徽标恒生效 |
+| `leechAction` | `none` / `tag` | **none** | 默认仅徽标；`tag` 命中后写 `state.leech=true`（不 suspend） |
 | `fuzz` | 布尔 | **false** | 间隔模糊开关；关闭时与金样本逐字段一致 |
 | `fuzzMaxDays` | 0–36500 整数（0=官方规则） | **0** | 只收紧官方 fuzz δ，不放大 |
 | `easyDays` | 7 × 0–100 整数（周日→周六） | **全 100** | 命中降权日按比例压缩间隔；全 100 不生效 |
@@ -159,7 +160,8 @@
 - **只对未来的卡生效**：参数不重排已有到期时间、不批量改写 learning 状态；读取 `learning.step` 时钳到 `[0, len-1]`。
 - **fuzz 已接入**（默认关闭）：`SRSStore` 只在 `sched.fuzz` 开启时按 `bankId|contentHash|reps` 派生确定性 seed，经 `opts.fuzzSeed` 交给 `FSRS.review`；`fuzzMaxDays` 仅收紧官方 δ。
 - **easyDays 已接入**（默认全 100 = 不生效）：`FSRS.longTermDue` 在 fuzz 之后按目标到期日的本地周几权重压缩间隔，0% → 1 天、恒 ≥1 且不越 maxDays；只压缩一次、不迭代择日。
-- **明确不做**：leech 动作（suspend/tag）、独立 relearning steps。不新增「可配但不起作用」的字段。
+- **leech 动作已显式决策**：默认 `none`（仅徽标，旧行为不变），可选 `tag`（`SRSStore.applyLeechAction` 唯一实现，仅 grade/gradeMany 调用，写持久 `state.leech=true`）；**不实现 suspend**（跨队列/撤销/多端恢复无闭环）。
+- **明确不做**：独立 relearning steps。不新增「可配但不起作用」的字段。
 
 ### 3.7 无障碍与焦点管理约定（门禁化）
 

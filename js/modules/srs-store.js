@@ -66,6 +66,20 @@
     return QB.FNV.hashString(String(bankId || '') + '|' + String(key || '') + '|' + (Number(reps) || 0));
   }
 
+  /**
+   * leech 动作唯一实现（仅 grade/gradeMany 调用，禁止在 app/renderer 另写）：
+   * 'none'（默认）= 仅徽标；'tag' = 命中阈值后写持久 state.leech=true（只置位、不清除）。
+   * suspend 未实现：跨队列/撤销/多端语义风险过高（决策见 docs/SRS.md §11）。
+   */
+  function applyLeechAction(next, sched) {
+    if (!next) return next;
+    const threshold = Number(sched && sched.leechThreshold);
+    if (sched && sched.leechAction === 'tag' && threshold > 0 && next.lapses >= threshold) {
+      next.leech = true;
+    }
+    return next;
+  }
+
   /** 应用层评分 0–3（again/hard/good/easy）→ FSRS 评分 1–4；已是 1–4 原样透传 */
   function fsrsRating(rating) {
     const r = Math.round(Number(rating));
@@ -122,7 +136,7 @@
       QB.SchedSettings.ofBankId(bankId)
     ]);
     const seed = sched.fuzz ? fuzzSeedFor(bankId, k, cur && cur.reps) : undefined;
-    const next = QB.FSRS.review(cur, fr, ts, w, { sched: sched, fuzzSeed: seed });
+    const next = applyLeechAction(QB.FSRS.review(cur, fr, ts, w, { sched: sched, fuzzSeed: seed }), sched);
     // 热路径：状态 + 评分日志一次提交；api 模式只上行本批改动键（patch），一个请求
     await commitGraded(bankId, { [k]: next }, [{ t: ts, h: k, r: fr, b: bankId }]);
     return next;
@@ -145,7 +159,7 @@
       const fr = fsrsRating(e.rating);
       const cur = stateMap[k] || null;
       const seed = sched.fuzz ? fuzzSeedFor(bankId, k, cur && cur.reps) : undefined;
-      const next = QB.FSRS.review(cur, fr, ts, w, { sched: sched, fuzzSeed: seed });
+      const next = applyLeechAction(QB.FSRS.review(cur, fr, ts, w, { sched: sched, fuzzSeed: seed }), sched);
       delta[k] = next;
       stateMap[k] = next;
       logs.push({ t: ts, h: k, r: fr, b: bankId });

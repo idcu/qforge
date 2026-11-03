@@ -44,7 +44,8 @@ CREATE TABLE banks (
 | `requestRetention` | `request_retention` | 浮点 0.70–0.97 | `0.90` | 目标留存率；只影响新算出的间隔（越高越短） |
 | `maximumIntervalDays` | `maximum_interval_days` | 整数 1–36500 | `36500` | 新间隔上限；不重排已有 due |
 | `learningSteps` | `learning_steps` | 1–4 个正整数（**秒**），升序去重 | `[60, 600]` | 新卡/重学步骤；内部转毫秒 |
-| `leechThreshold` | `leech_threshold` | 整数（0=关闭） | `8` | 仅难卡徽标阈值，不做 suspend/tag |
+| `leechThreshold` | `leech_threshold` | 整数（0=关闭） | `8` | 难卡阈值；徽标恒生效 |
+| `leechAction` | `leech_action` | `none` / `tag` | `none` | 默认仅徽标；`tag` 命中后写 `state.leech=true`（不 suspend） |
 | `fuzz` | `fuzz` | 布尔 | `false` | 间隔模糊开关；默认关闭时调度与金样本逐字段一致 |
 | `fuzzMaxDays` | `fuzz_max_days` | 整数 0–36500（0=官方规则） | `0` | 只收紧官方 fuzz δ，不能放大 |
 | `easyDays` | `easy_days` | 7 个 0–100 整数（周日→周六） | `[100,100,100,100,100,100,100]` | 命中降权日按比例压缩间隔；全 100 不生效 |
@@ -159,7 +160,7 @@ CREATE TABLE review_schedule (
   UNIQUE INDEX uq_review_user_bank_hash (user_id, bank_id, content_hash)
 );
 ```
-> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last,learning?}`；`learning={step,mode:'new'|'review'}` 表示新卡/遗忘卡处于 1m/10m 学习步骤（分钟级 due，毕业后续长期间隔）。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。**本地布局（schema v5）**：按 hash 独立键 `user:review:<bankId>:<hash>`（单次评分只写改动题）+ 清单 `user:reviewMeta:<bankId>`（`{v:3,count,keys}`，供枚举与统计），旧整表 `user:review:<bankId>` 仅兼容读（`QB.ReviewStore` 双读合并、per-hash 优先）；后端仍落本表单行，映射时把 per-hash 键展开为行。
+> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last,learning?,leech?}`；`leech` 仅在 `sched.leechAction='tag'` 命中阈值时写入（只置位、不清除；后端 `review` 表无该列，api 模式保留性**未验证**）；`learning={step,mode:'new'|'review'}` 表示新卡/遗忘卡处于 1m/10m 学习步骤（分钟级 due，毕业后续长期间隔）。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。**本地布局（schema v5）**：按 hash 独立键 `user:review:<bankId>:<hash>`（单次评分只写改动题）+ 清单 `user:reviewMeta:<bankId>`（`{v:3,count,keys}`，供枚举与统计），旧整表 `user:review:<bankId>` 仅兼容读（`QB.ReviewStore` 双读合并、per-hash 优先）；后端仍落本表单行，映射时把 per-hash 键展开为行。
 
 ### 2.8 review_log（FSRS 评分日志，参数优化用）
 ```sql

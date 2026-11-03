@@ -389,10 +389,13 @@
     const leechThreshold = opts.settings && isFinite(Number(opts.settings.leechThreshold))
       ? Math.max(0, Math.round(Number(opts.settings.leechThreshold)))
       : QB.SchedSettings.DEFAULTS.leechThreshold;
+    const leechHit = opts.reviewState && (opts.reviewState.leech === true
+      || (leechThreshold > 0 && opts.reviewState.lapses >= leechThreshold));
     regions.push({ key: 'quiz-head', html: '<div class="quiz-head" data-region="quiz-head">' +
       '<div><span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span> ' +
-      (leechThreshold > 0 && opts.reviewState && opts.reviewState.lapses >= leechThreshold
-        ? '<span class="type-badge leech-badge" title="累计遗忘 ' + opts.reviewState.lapses + ' 次，建议拆分或重学">难卡</span> '
+      (leechHit
+        ? '<span class="type-badge leech-badge" title="' + (opts.reviewState.leech === true
+          ? '已标记为难卡（累计遗忘 ' : '累计遗忘 ') + opts.reviewState.lapses + ' 次，建议拆分或重学">难卡</span> '
         : '') +
       '<span class="q-progress">第 ' + prog.current + ' / ' + prog.total + ' 题</span>' +
       (q.category ? ' <span class="q-progress">· ' + esc(q.category) + '</span>' : '') + '</div>' +
