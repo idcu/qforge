@@ -27,6 +27,8 @@ jobs:
         run: node scripts/check-modules.mjs
       - name: 结构性删除的账本
         run: node scripts/check-deletions.mjs
+      - name: 变更档案分卷（索引 ↔ 卷 双向）
+        run: node scripts/check-changelog.mjs
 
   logic-tests:
     runs-on: ubuntu-latest

@@ -4,6 +4,10 @@
 > **为什么单独成文**：它是每次改动都要看一遍的表，与环境/CI 不是同一节奏；留在 DEVELOPMENT.md 会让那份文档 60KB。
 > **读数口径**：本文里的数字由 `scripts/docs-check.mjs` 复算校验（它同时读 README / DEVELOPMENT / 本文）。
 
+> **变更档案的分卷也有判据**：`node scripts/check-changelog.mjs` 检查每卷 ≤60KB/600 行，
+> 且索引表与 `docs/changelog/` 下的卷**双向一致**（新卷忘了加索引、索引写了却没文件，都会红）。
+> 这份档案只增不改，是唯一"拆分做过一次、但会悄悄长回去"的文档。
+
 > **装配顺序也算一条判据**：这个项目没有打包器，`index.html` 里 81 个 `<script>` 的**顺序就是依赖图**。
 > `node scripts/check-modules.mjs` 守四条：入口 `js/app.js` 最后、`js/config.js` 最先、每个 `js/**`
 > 都被引用（`js/workers/` 除外）、引用的文件都存在。顺序错不会在启动时报错，
