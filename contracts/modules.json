@@ -1,0 +1,583 @@
+{
+  "schemaVersion": 1,
+  "description": "装配清单：index.html 里 classic <script> 的**声明式顺序**。\n这个项目没有打包器，加载顺序就是依赖图；顺序错了不会在启动时报错，\n只在某个功能第一次用到时才 undefined。\n规则：index.html 的 src 序列必须与 modules 数组逐条相等（不多不少、不改变顺序）；\n加脚本、删脚本、调整顺序都要同时改这里，否则 scripts/check-modules.mjs 会红。\nrequires 是可选的显式前置依赖（填了就必须排在本条之前）；留空不表示\"没有依赖\"，\n只表示\"顺序由数组本身表达\"——不去猜一张猜不准的逐文件依赖图。",
+  "layers": [
+    "sample",
+    "config",
+    "data",
+    "utils",
+    "vendor",
+    "modules",
+    "importers",
+    "entry"
+  ],
+  "modules": [
+    {
+      "id": "data.sample-data",
+      "file": "js/data/sample-data.js",
+      "layer": "sample",
+      "at": 1,
+      "requires": []
+    },
+    {
+      "id": "config",
+      "file": "js/config.js",
+      "layer": "config",
+      "at": 2,
+      "requires": []
+    },
+    {
+      "id": "data.store",
+      "file": "js/data/store.js",
+      "layer": "data",
+      "at": 3,
+      "requires": []
+    },
+    {
+      "id": "utils.helpers",
+      "file": "js/utils/helpers.js",
+      "layer": "utils",
+      "at": 4,
+      "requires": []
+    },
+    {
+      "id": "vendor.core.util.core",
+      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/util/src/core.js",
+      "layer": "vendor",
+      "at": 5,
+      "requires": []
+    },
+    {
+      "id": "utils.time",
+      "file": "js/utils/time.js",
+      "layer": "utils",
+      "at": 6,
+      "requires": []
+    },
+    {
+      "id": "utils.rich-text",
+      "file": "js/utils/rich-text.js",
+      "layer": "utils",
+      "at": 7,
+      "requires": []
+    },
+    {
+      "id": "utils.storage",
+      "file": "js/utils/storage.js",
+      "layer": "utils",
+      "at": 8,
+      "requires": []
+    },
+    {
+      "id": "utils.fnv",
+      "file": "js/utils/fnv.js",
+      "layer": "utils",
+      "at": 9,
+      "requires": []
+    },
+    {
+      "id": "utils.random",
+      "file": "js/utils/random.js",
+      "layer": "utils",
+      "at": 10,
+      "requires": []
+    },
+    {
+      "id": "utils.shuffle",
+      "file": "js/utils/shuffle.js",
+      "layer": "utils",
+      "at": 11,
+      "requires": []
+    },
+    {
+      "id": "utils.answer-normalize",
+      "file": "js/utils/answer-normalize.js",
+      "layer": "utils",
+      "at": 12,
+      "requires": []
+    },
+    {
+      "id": "utils.answer-text",
+      "file": "js/utils/answer-text.js",
+      "layer": "utils",
+      "at": 13,
+      "requires": []
+    },
+    {
+      "id": "utils.judge-answer",
+      "file": "js/utils/judge-answer.js",
+      "layer": "utils",
+      "at": 14,
+      "requires": []
+    },
+    {
+      "id": "utils.result-policy",
+      "file": "js/utils/result-policy.js",
+      "layer": "utils",
+      "at": 15,
+      "requires": []
+    },
+    {
+      "id": "utils.question-id",
+      "file": "js/utils/question-id.js",
+      "layer": "utils",
+      "at": 16,
+      "requires": []
+    },
+    {
+      "id": "vendor.format.zip.zip",
+      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/zip/src/vendor/zip.js",
+      "layer": "vendor",
+      "at": 17,
+      "requires": []
+    },
+    {
+      "id": "vendor.format.xml-lite.xml-lite",
+      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xml-lite/src/vendor/xml-lite.js",
+      "layer": "vendor",
+      "at": 18,
+      "requires": []
+    },
+    {
+      "id": "vendor.format.xlsx-read.xlsx",
+      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js",
+      "layer": "vendor",
+      "at": 19,
+      "requires": []
+    },
+    {
+      "id": "vendor.format.xlsx-read.core",
+      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js",
+      "layer": "vendor",
+      "at": 20,
+      "requires": []
+    },
+    {
+      "id": "vendor.core.assets.core",
+      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/assets/src/core.js",
+      "layer": "vendor",
+      "at": 21,
+      "requires": []
+    },
+    {
+      "id": "vendor.format.dsv.dsv",
+      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/dsv/src/vendor/dsv.js",
+      "layer": "vendor",
+      "at": 22,
+      "requires": []
+    },
+    {
+      "id": "utils.crc32",
+      "file": "js/utils/crc32.js",
+      "layer": "utils",
+      "at": 23,
+      "requires": []
+    },
+    {
+      "id": "utils.zip-reader",
+      "file": "js/utils/zip-reader.js",
+      "layer": "utils",
+      "at": 24,
+      "requires": []
+    },
+    {
+      "id": "utils.sqlite-reader",
+      "file": "js/utils/sqlite-reader.js",
+      "layer": "utils",
+      "at": 25,
+      "requires": []
+    },
+    {
+      "id": "utils.zip-writer",
+      "file": "js/utils/zip-writer.js",
+      "layer": "utils",
+      "at": 26,
+      "requires": []
+    },
+    {
+      "id": "utils.xml-lite",
+      "file": "js/utils/xml-lite.js",
+      "layer": "utils",
+      "at": 27,
+      "requires": []
+    },
+    {
+      "id": "utils.assets",
+      "file": "js/utils/assets.js",
+      "layer": "utils",
+      "at": 28,
+      "requires": []
+    },
+    {
+      "id": "utils.weights",
+      "file": "js/utils/weights.js",
+      "layer": "utils",
+      "at": 29,
+      "requires": []
+    },
+    {
+      "id": "utils.review-merge",
+      "file": "js/utils/review-merge.js",
+      "layer": "utils",
+      "at": 30,
+      "requires": []
+    },
+    {
+      "id": "utils.hash-remap",
+      "file": "js/utils/hash-remap.js",
+      "layer": "utils",
+      "at": 31,
+      "requires": []
+    },
+    {
+      "id": "data.contracts",
+      "file": "js/data/contracts.js",
+      "layer": "data",
+      "at": 32,
+      "requires": []
+    },
+    {
+      "id": "data.wire",
+      "file": "js/data/wire.js",
+      "layer": "data",
+      "at": 33,
+      "requires": []
+    },
+    {
+      "id": "data.local-adapter",
+      "file": "js/data/local-adapter.js",
+      "layer": "data",
+      "at": 34,
+      "requires": []
+    },
+    {
+      "id": "data.api-adapter",
+      "file": "js/data/api-adapter.js",
+      "layer": "data",
+      "at": 35,
+      "requires": []
+    },
+    {
+      "id": "data.db",
+      "file": "js/data/db.js",
+      "layer": "data",
+      "at": 36,
+      "requires": []
+    },
+    {
+      "id": "modules.package",
+      "file": "js/modules/package.js",
+      "layer": "modules",
+      "at": 37,
+      "requires": []
+    },
+    {
+      "id": "modules.qbk",
+      "file": "js/modules/qbk.js",
+      "layer": "modules",
+      "at": 38,
+      "requires": []
+    },
+    {
+      "id": "importers.adapters",
+      "file": "js/importers/adapters.js",
+      "layer": "importers",
+      "at": 39,
+      "requires": []
+    },
+    {
+      "id": "importers.json-importer",
+      "file": "js/importers/json-importer.js",
+      "layer": "importers",
+      "at": 40,
+      "requires": []
+    },
+    {
+      "id": "importers.csv-importer",
+      "file": "js/importers/csv-importer.js",
+      "layer": "importers",
+      "at": 41,
+      "requires": []
+    },
+    {
+      "id": "importers.line-parser",
+      "file": "js/importers/line-parser.js",
+      "layer": "importers",
+      "at": 42,
+      "requires": []
+    },
+    {
+      "id": "importers.xlsx-importer",
+      "file": "js/importers/xlsx-importer.js",
+      "layer": "importers",
+      "at": 43,
+      "requires": []
+    },
+    {
+      "id": "importers.docx-importer",
+      "file": "js/importers/docx-importer.js",
+      "layer": "importers",
+      "at": 44,
+      "requires": []
+    },
+    {
+      "id": "importers.qbk-importer",
+      "file": "js/importers/qbk-importer.js",
+      "layer": "importers",
+      "at": 45,
+      "requires": []
+    },
+    {
+      "id": "importers.md-importer",
+      "file": "js/importers/md-importer.js",
+      "layer": "importers",
+      "at": 46,
+      "requires": []
+    },
+    {
+      "id": "importers.anki-package",
+      "file": "js/importers/anki-package.js",
+      "layer": "importers",
+      "at": 47,
+      "requires": []
+    },
+    {
+      "id": "importers.anki-importer",
+      "file": "js/importers/anki-importer.js",
+      "layer": "importers",
+      "at": 48,
+      "requires": []
+    },
+    {
+      "id": "importers.quizlet-importer",
+      "file": "js/importers/quizlet-importer.js",
+      "layer": "importers",
+      "at": 49,
+      "requires": []
+    },
+    {
+      "id": "importers.registry",
+      "file": "js/importers/registry.js",
+      "layer": "importers",
+      "at": 50,
+      "requires": []
+    },
+    {
+      "id": "modules.quiz-engine",
+      "file": "js/modules/quiz-engine.js",
+      "layer": "modules",
+      "at": 51,
+      "requires": []
+    },
+    {
+      "id": "modules.wrong-book",
+      "file": "js/modules/wrong-book.js",
+      "layer": "modules",
+      "at": 52,
+      "requires": []
+    },
+    {
+      "id": "modules.favorites",
+      "file": "js/modules/favorites.js",
+      "layer": "modules",
+      "at": 53,
+      "requires": []
+    },
+    {
+      "id": "modules.history",
+      "file": "js/modules/history.js",
+      "layer": "modules",
+      "at": 54,
+      "requires": []
+    },
+    {
+      "id": "modules.statistics",
+      "file": "js/modules/statistics.js",
+      "layer": "modules",
+      "at": 55,
+      "requires": []
+    },
+    {
+      "id": "modules.search-filter",
+      "file": "js/modules/search-filter.js",
+      "layer": "modules",
+      "at": 56,
+      "requires": []
+    },
+    {
+      "id": "modules.fsrs",
+      "file": "js/modules/fsrs.js",
+      "layer": "modules",
+      "at": 57,
+      "requires": []
+    },
+    {
+      "id": "modules.fsrs-train-core",
+      "file": "js/modules/fsrs-train-core.js",
+      "layer": "modules",
+      "at": 58,
+      "requires": []
+    },
+    {
+      "id": "modules.fsrs-opt",
+      "file": "js/modules/fsrs-opt.js",
+      "layer": "modules",
+      "at": 59,
+      "requires": []
+    },
+    {
+      "id": "modules.fsrs-train-client",
+      "file": "js/modules/fsrs-train-client.js",
+      "layer": "modules",
+      "at": 60,
+      "requires": []
+    },
+    {
+      "id": "modules.srs",
+      "file": "js/modules/srs.js",
+      "layer": "modules",
+      "at": 61,
+      "requires": []
+    },
+    {
+      "id": "modules.srs-store",
+      "file": "js/modules/srs-store.js",
+      "layer": "modules",
+      "at": 62,
+      "requires": []
+    },
+    {
+      "id": "modules.sched-settings",
+      "file": "js/modules/sched-settings.js",
+      "layer": "modules",
+      "at": 63,
+      "requires": []
+    },
+    {
+      "id": "modules.start-prefs",
+      "file": "js/modules/start-prefs.js",
+      "layer": "modules",
+      "at": 64,
+      "requires": []
+    },
+    {
+      "id": "modules.review-queue",
+      "file": "js/modules/review-queue.js",
+      "layer": "modules",
+      "at": 65,
+      "requires": []
+    },
+    {
+      "id": "modules.progress-saver",
+      "file": "js/modules/progress-saver.js",
+      "layer": "modules",
+      "at": 66,
+      "requires": []
+    },
+    {
+      "id": "modules.exam-timer",
+      "file": "js/modules/exam-timer.js",
+      "layer": "modules",
+      "at": 67,
+      "requires": []
+    },
+    {
+      "id": "modules.ui-renderer",
+      "file": "js/modules/ui-renderer.js",
+      "layer": "modules",
+      "at": 68,
+      "requires": []
+    },
+    {
+      "id": "modules.dom-patch",
+      "file": "js/modules/dom-patch.js",
+      "layer": "modules",
+      "at": 69,
+      "requires": []
+    },
+    {
+      "id": "modules.bank-manager",
+      "file": "js/modules/bank-manager.js",
+      "layer": "modules",
+      "at": 70,
+      "requires": []
+    },
+    {
+      "id": "modules.question-editor",
+      "file": "js/modules/question-editor.js",
+      "layer": "modules",
+      "at": 71,
+      "requires": []
+    },
+    {
+      "id": "modules.source",
+      "file": "js/modules/source.js",
+      "layer": "modules",
+      "at": 72,
+      "requires": []
+    },
+    {
+      "id": "modules.data-io",
+      "file": "js/modules/data-io.js",
+      "layer": "modules",
+      "at": 73,
+      "requires": []
+    },
+    {
+      "id": "modules.office-writer",
+      "file": "js/modules/office-writer.js",
+      "layer": "modules",
+      "at": 74,
+      "requires": []
+    },
+    {
+      "id": "modules.share-page",
+      "file": "js/modules/share-page.js",
+      "layer": "modules",
+      "at": 75,
+      "requires": []
+    },
+    {
+      "id": "modules.exporter",
+      "file": "js/modules/exporter.js",
+      "layer": "modules",
+      "at": 76,
+      "requires": []
+    },
+    {
+      "id": "modules.backup",
+      "file": "js/modules/backup.js",
+      "layer": "modules",
+      "at": 77,
+      "requires": []
+    },
+    {
+      "id": "modules.migrate",
+      "file": "js/modules/migrate.js",
+      "layer": "modules",
+      "at": 78,
+      "requires": []
+    },
+    {
+      "id": "modules.sync-dav",
+      "file": "js/modules/sync-dav.js",
+      "layer": "modules",
+      "at": 79,
+      "requires": []
+    },
+    {
+      "id": "modules.blueprint",
+      "file": "js/modules/blueprint.js",
+      "layer": "modules",
+      "at": 80,
+      "requires": []
+    },
+    {
+      "id": "app",
+      "file": "js/app.js",
+      "layer": "entry",
+      "at": 81,
+      "requires": []
+    }
+  ]
+}
