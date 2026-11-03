@@ -47,6 +47,7 @@ CREATE TABLE banks (
 | `leechThreshold` | `leech_threshold` | 整数（0=关闭） | `8` | 仅难卡徽标阈值，不做 suspend/tag |
 | `fuzz` | `fuzz` | 布尔 | `false` | 间隔模糊开关；默认关闭时调度与金样本逐字段一致 |
 | `fuzzMaxDays` | `fuzz_max_days` | 整数 0–36500（0=官方规则） | `0` | 只收紧官方 fuzz δ，不能放大 |
+| `easyDays` | `easy_days` | 7 个 0–100 整数（周日→周六） | `[100,100,100,100,100,100,100]` | 命中降权日按比例压缩间隔；全 100 不生效 |
 
 > 归一唯一实现 `QB.SchedSettings.normalize`（钳制/升序去重/幂等/保留未知键）；写路径 `banks.update({sched})`，读路径按库缓存。参数**只对未来的评分与到期生效**，不批量改写已有复习状态。
 

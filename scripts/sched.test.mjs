@@ -405,6 +405,56 @@ section('二期 fuzz：默认关闭等价补充断言 / Wire 映射');
   eq(back.sched.fuzzMaxDays, 3, 'Wire.from：fuzz_max_days → fuzzMaxDays');
 }
 
+section('二期 easyDays：七天权重 / 0 权重 / 单日 100% / maxDays 钳制');
+{
+  eq(JSON.stringify(S.DEFAULTS.easyDays), JSON.stringify([100, 100, 100, 100, 100, 100, 100]), '默认七天全 100');
+  deep(S.normalize(null).easyDays, S.DEFAULTS.easyDays, 'normalize(null)：easyDays 全 100');
+  deep(S.normalize({ easyDays: [0, 100] }).easyDays, S.DEFAULTS.easyDays, '非 7 项回落默认');
+  deep(S.normalize({ easyDays: [100, 100, -1, 100, 200, 100, 'x'] }).easyDays,
+    [100, 100, 0, 100, 100, 100, 100], '逐项钳制 0–100 / 非法回落 100');
+  eq(S.normalize({ easyDays: [100, 100, 100, 100, 100, 100, 100] }).easyDays === S.DEFAULTS.easyDays, false,
+    '返回新数组，不与 DEFAULTS 共享引用');
+
+  const base = T0 + 10 * DAY;
+  deep(snap2(QB.FSRS.review({ algo: 'fsrs', due: base - DAY, stability: 20, difficulty: 5, reps: 5, lapses: 0, last: T0 },
+    R.good, base, W, { sched: S.normalize({ easyDays: [100, 100, 100, 100, 100, 100, 100] }) })),
+    snap2(QB.FSRS.review({ algo: 'fsrs', due: base - DAY, stability: 20, difficulty: 5, reps: 5, lapses: 0, last: T0 },
+      R.good, base, W)), '全 100 权重与缺省严格相等');
+
+  // applyEasyDays 纯函数：以本地周几为准
+  const baseDue = QB.FSRS.review({ algo: 'fsrs', due: base - DAY, stability: 20, difficulty: 5, reps: 5, lapses: 0, last: T0 },
+    R.good, base, W);
+  const baseIvl = Math.round((baseDue.due - base) / DAY);
+  const targetDow = new Date(base + baseIvl * DAY).getDay();
+  eq(QB.FSRS.applyEasyDays(baseIvl, base, [100, 100, 100, 100, 100, 100, 100]), baseIvl, '全 100 不改间隔');
+  eq(QB.FSRS.applyEasyDays(baseIvl, base, [0, 0, 0, 0, 0, 0, 0]), 1, '全 0 权重 → 至少 1 天');
+  const single = [0, 0, 0, 0, 0, 0, 0]; single[targetDow] = 100;
+  eq(QB.FSRS.applyEasyDays(baseIvl, base, single), baseIvl, '命中日 100% 且其余 0%：命中日不压缩');
+  const zeroDay = [100, 100, 100, 100, 100, 100, 100]; zeroDay[targetDow] = 0;
+  eq(QB.FSRS.applyEasyDays(baseIvl, base, zeroDay), 1, '命中日 0%：压到 1 天');
+  const half = [100, 100, 100, 100, 100, 100, 100]; half[targetDow] = 50;
+  eq(QB.FSRS.applyEasyDays(baseIvl, base, half), Math.max(1, Math.round(baseIvl * 50 / 100)),
+    '命中日 50%：按比例压缩并取整');
+  eq(QB.FSRS.applyEasyDays(baseIvl, base, undefined), baseIvl, '无权重不改间隔');
+  eq(QB.FSRS.applyEasyDays(1, base, [0, 0, 0, 0, 0, 0, 0]), 1, '1 天间隔不被压到 0');
+
+  // 经 review + sched：0 权重日提前到 1 天，且不越 maxDays
+  const zeroAll = S.normalize({ easyDays: [0, 0, 0, 0, 0, 0, 0] });
+  const zr = QB.FSRS.review({ algo: 'fsrs', due: base - DAY, stability: 20, difficulty: 5, reps: 5, lapses: 0, last: T0 },
+    R.good, base, W, { sched: zeroAll });
+  eq(Math.round((zr.due - base) / DAY), 1, '全 0 权重：经 sched 到期提前到 1 天');
+  const capSched = S.normalize({ maximumIntervalDays: 5 });
+  const capped = QB.FSRS.review({
+    algo: 'fsrs', due: base - DAY, stability: 5000, difficulty: 5, reps: 5, lapses: 0, last: T0
+  }, R.good, base, W, { sched: capSched });
+  ok(Math.round((capped.due - base) / DAY) <= 5, 'maxDays=5：长稳定度也不越上限');
+
+  const local = { id: 'e', name: 'e', sched: { easyDays: [100, 0, 50, 100, 100, 100, 100] } };
+  const w = QB.Wire.bank.to(local);
+  deep(w.sched.easy_days, [100, 0, 50, 100, 100, 100, 100], 'Wire.to：easy_days 数组');
+  deep(QB.Wire.bank.from(w).sched.easyDays, [100, 0, 50, 100, 100, 100, 100], 'Wire.from：easy_days 数组');
+}
+
 section('二期 参数校验：非法值就地报错（不静默丢弃）');
 {
   const base = S.normalize(null);

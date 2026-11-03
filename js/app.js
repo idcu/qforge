@@ -1118,11 +1118,19 @@
       '<div><label class="qe-label">模糊幅度上限（天，0=官方规则）</label>' +
       '<input type="number" min="0" max="' + QB.SchedSettings.MAX_INTERVAL_MAX + '" step="1" id="sched-fuzzmax" ' +
       'aria-label="模糊幅度上限（天）" value="' + s.fuzzMaxDays + '" /></div>' +
+      '<div style="grid-column:1/-1"><label class="qe-label">轻松日权重（周日→周六，100=不压缩）</label>' +
+      '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">' +
+      ['日', '一', '二', '三', '四', '五', '六'].map((n, i) =>
+        '<label class="li-meta" style="display:flex;flex-direction:column;gap:2px">周' + n +
+        '<input type="number" min="0" max="100" step="1" id="sched-ed' + i + '" aria-label="周' + n +
+        '轻松日权重" value="' + s.easyDays[i] + '" /></label>').join('') +
+      '</div></div>' +
       '</div>' +
       '<p class="li-meta" id="sched-err" role="alert" style="color:var(--danger);display:none"></p>' +
       '<p class="li-meta">默认：新题 ' + D.newPerDay + ' / 复习 ' + D.reviewPerDay + ' / 保留率 ' +
       D.requestRetention + ' / 最大 ' + D.maximumIntervalDays + ' 天 / 步骤 ' + D.learningSteps.join(',') +
       ' 秒 / 难卡 ' + D.leechThreshold + ' / 模糊 ' + (D.fuzz ? '开' : '关') +
+      ' / 轻松日 ' + D.easyDays.join(',') +
       '。<strong>调度参数只影响之后的评分与到期，不会重排已有到期时间。</strong>' +
       '设置存于题库记录，local / api / 备份三端一致。</p>' +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
@@ -1141,7 +1149,8 @@
               learningSteps: stepsRaw,
               leechThreshold: parseInt(modal.querySelector('#sched-leech').value, 10),
               fuzz: modal.querySelector('#sched-fuzz').checked,
-              fuzzMaxDays: parseInt(modal.querySelector('#sched-fuzzmax').value, 10)
+              fuzzMaxDays: parseInt(modal.querySelector('#sched-fuzzmax').value, 10),
+              easyDays: Array.from({ length: 7 }, (_, i) => parseInt(modal.querySelector('#sched-ed' + i).value, 10))
             };
             const errEl = modal.querySelector('#sched-err');
             const problems = QB.SchedSettings.validate(patch);

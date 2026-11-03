@@ -6,6 +6,29 @@
 
 ---
 
+## 待回填 · feat(srs): easyDays 七天权重（默认全 100 不生效）
+
+**Commit**：`待回填`（收尾 docs 提交回填）
+
+**核心改动点**
+- `bank.sched.easyDays`（wire `sched.easy_days`）7 项 0–100%，顺序 **周日→周六**，与 `Date.getDay()` 对齐；默认全 100，缺省调度与金样本逐字段一致。
+- `FSRS.applyEasyDays(intervalDays, fromTs, weights)` 纯函数：命中目标到期日的本地周几权重 <100 时按 `round(ivl·w/100)` 压缩；0% → 1 天；恒 ≥1；不迭代择日。
+- `FSRS.longTermDue` 顺序：基础间隔 → fuzz（可选）→ easyDays（可选）→ `[1, maxDays]` 钳制；`schedEasyDays` 用 WeakMap 缓存，全 100 返回 null（默认路径零周几计算）。
+- 设置弹窗新增 7 个权重输入（周日→周六）；`validate` 对「非 7 项 / 非整数 / 越界」就地报错。
+
+**实测数据（2026-11-03，本机 Asia/Shanghai）**
+- 红→绿：实现前 `applyEasyDays is not a function`，17 条断言失败/中断；实现后 sched.test **174 / 174**（原 157，+17）。
+- 边界实测：全 0 → 1 天；命中日 0% → 1 天；命中日 50% → `round(ivl·0.5)`；命中日 100% 且其余 0% → 间隔不变；`maxDays=5` + stability 5000 → due ≤5 天；1 天间隔不被压到 0。
+- 全 100 与缺省 deep-equal；Wire 双向数组映射通过。
+- 门禁：`test-all` 30 运行项 0 失败、断言 **4796 / 4796**（+17）；`bench --assert --expose-gc` 全绿：heapUsed 增量、`gradeMany` 比值、PATCH P95 实测见提交回填；新增观测行「轻松日权重 50%」中位 **0.00 ms**（200 次）。
+- 首屏：实测见提交前 `docs-check --write` 回填（新增 7 个数字输入与说明文案）。
+
+**遗留 TODO / 风险**
+- 只压缩一次、不迭代到下一个轻松日（与 Anki 的择日策略不同）；若压缩后再次落到降权日，本轮不再继续压缩。
+- 周几按**本地时区**判定；跨时区旅行会改变命中日（与 Anki 的本地日语义一致）。
+
+---
+
 ## 待回填 · feat(srs): 题库级 fuzz 开关与幅度上限（默认关闭）
 
 **Commit**：`待回填`（收尾 docs 提交回填）

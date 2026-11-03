@@ -199,6 +199,31 @@
     return isFinite(v) && v > 0 ? Math.round(v) : 0;
   }
 
+  /**
+   * easyDays：命中降权日（本地 Date.getDay()，周日→周六）时按比例压缩间隔。
+   * 0% → 1 天；>0 按 round(ivl·w/100)；结果恒 ≥1；全 100 时返回 null 表示不生效。
+   * 只压缩一次，不迭代到下一个“轻松日”（避免跨日震荡；与 Anki 的择日策略不同，见 SRS.md）。
+   */
+  const EASY_CACHE = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function schedEasyDays(sched) {
+    if (!sched || !Array.isArray(sched.easyDays) || sched.easyDays.length !== 7) return null;
+    if (EASY_CACHE && EASY_CACHE.has(sched)) return EASY_CACHE.get(sched);
+    const w = sched.easyDays.map((x) => clamp(Math.round(Number(x)), 0, 100));
+    const active = w.some((x) => x !== 100) ? w : null;
+    if (EASY_CACHE) EASY_CACHE.set(sched, active);
+    return active;
+  }
+
+  /** 纯函数：按目标到期日的本地周几权重压缩间隔（不迭代、不越 0、不小于 1 天） */
+  function applyEasyDays(intervalDays, fromTs, weights) {
+    if (!Array.isArray(weights) || weights.length !== 7) return intervalDays;
+    const ivl = Math.max(1, Math.round(Number(intervalDays) || 1));
+    const w = Number(weights[new Date(fromTs + ivl * DAY).getDay()]);
+    if (!isFinite(w) || w >= 100) return ivl;
+    if (w <= 0) return 1;
+    return Math.max(1, Math.round(ivl * w / 100));
+  }
+
   /** learningSteps 以秒存储 → 毫秒（长度 1–4；非法/空回落默认两步）。按 sched 对象缓存，热路径避免每次分配 */
   const stepsCache = typeof WeakMap === 'function' ? new WeakMap() : null;
   function schedSteps(sched) {
@@ -276,6 +301,8 @@
     const maxDays = schedMaxDays(sched);
     let ivl = nextIntervalDays(s, schedRetention(sched), w, maxDays);
     if (fuzzRand) ivl = clamp(applyFuzz(ivl, fuzzRand, schedFuzzCap(sched)), 1, maxDays);
+    const easy = schedEasyDays(sched);
+    if (easy) ivl = clamp(applyEasyDays(ivl, now, easy), 1, maxDays);
     return Math.round(now + ivl * DAY);
   }
 
@@ -430,6 +457,7 @@
     stabilityShortTerm,
     nextIntervalDays,
     applyFuzz,
+    applyEasyDays,
     powerDecay,
     retrievability
   };

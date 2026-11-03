@@ -532,6 +532,10 @@ const fsSchedFuzz = QB.SchedSettings.normalize({ fuzz: true });
 row('FSRS.review 题库 fuzz 开关（sched.fuzz）', await timed(() => {
   QB.FSRS.review(fsGrad, QB.FSRS.RATINGS.good, fsAnchor + 20 * FS_DAY, FW, { sched: fsSchedFuzz });
 }, 200), '唯一解析点产物；未传 seed 用确定性 0');
+const fsSchedEasy = QB.SchedSettings.normalize({ easyDays: [50, 50, 50, 50, 50, 50, 50] });
+row('FSRS.review 轻松日权重（sched.easyDays 50%）', await timed(() => {
+  QB.FSRS.review(fsGrad, QB.FSRS.RATINGS.good, fsAnchor + 20 * FS_DAY, FW, { sched: fsSchedEasy });
+}, 200), '命中日按 50% 压缩，含本地周几计算');
 row('FSRS.review 新卡首次评分', await timed(() => {
   QB.FSRS.review(null, QB.FSRS.RATINGS.good, fsAnchor, FW);
 }, 200), '含指数式 D₀ / S₀ 初始化');
