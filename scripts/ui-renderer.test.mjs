@@ -466,10 +466,22 @@ section('复习计划卡 / 难卡标记 / 本题历史（P2）');
   ok(head.indexOf('leech-badge') >= 0, 'lapses≥8 显示难卡标记');
   ok(head.indexOf('累计遗忘 9 次') >= 0, '难卡 title 含遗忘次数');
   const taggedHead = UI.renderQuizRegions(engine, {
-    favorited: false, reviewState: { lapses: 2, leech: true }, settings: { leechThreshold: 8 }
+    favorited: false, reviewState: { lapses: 2, leech: true }, settings: { leechThreshold: 8, leechAction: 'tag' }
   }).find((r) => r.key === 'quiz-head').html;
   ok(taggedHead.indexOf('leech-badge') >= 0, 'leech=true（阈值未达）仍显示已标记徽标');
-  ok(taggedHead.indexOf('已标记为难卡') >= 0, '已标记徽标 title 明示动作结果');
+  ok(taggedHead.indexOf('已标记为难卡') >= 0, 'tag 动作徽标 title 明示动作结果');
+  // 动作切回 none：state.leech 历史数据保留，但文案必须按当前动作渲染
+  const staleHead = UI.renderQuizRegions(engine, {
+    favorited: false, reviewState: { lapses: 2, leech: true }, settings: { leechThreshold: 8, leechAction: 'none' }
+  }).find((r) => r.key === 'quiz-head').html;
+  ok(staleHead.indexOf('leech-badge') >= 0, 'none 动作：历史 leech=true 仍显示难卡徽标');
+  ok(staleHead.indexOf('已标记为难卡') < 0 && staleHead.indexOf('累计遗忘 2 次，建议拆分或重学') >= 0,
+    'none 动作：title 回到「累计遗忘 N 次，建议拆分或重学」');
+  const defaultHead = UI.renderQuizRegions(engine, {
+    favorited: false, reviewState: { lapses: 2, leech: true }
+  }).find((r) => r.key === 'quiz-head').html;
+  ok(defaultHead.indexOf('已标记为难卡') < 0 && defaultHead.indexOf('累计遗忘 2 次') >= 0,
+    '未配置动作（默认 none）：不渲染「已标记为难卡」');
   const hist = regions.find((r) => r.key === 'quiz-history').html;
   ok(hist.indexOf('评分 3 次') >= 0 && hist.indexOf('又忘 1') >= 0 && hist.indexOf('良好 2') >= 0, '历史含次数与四档分布');
   ok(hist.indexOf('最近') >= 0, '历史含最近一次时间');

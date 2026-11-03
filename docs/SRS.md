@@ -136,7 +136,7 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 
 > **与 FSRS-4.5 的关键差异（本次升级）**：权重 17→21；衰减改为可学习（`DECAY=-w20`）；初始难度改指数式；难度更新加线性阻尼、均值回归目标改为**未钳制的 D₀(4)**；遗忘稳定度加 `S/e^(w17·w18)` 上限；新增同日 short-term 稳定度；稳定度统一钳制下限 0.001；**不再对 S/D 做 2 位小数取整**。旧 17 维 FSRS-4.5 权重与 6.x 不兼容：`fsrs-opt` 按长度自动拒绝并回落官方默认（§8.5），无需手工迁移。
 
-> **fuzz（间隔抖动）为 opt-in**：题库级开关 `bank.sched.fuzz`（wire `sched.fuzz`，默认 `false`），可用 `fuzzMaxDays`（wire `sched.fuzz_max_days`，默认 `0` = 官方规则）**只收紧、不放大**官方幅度；算法与官方 `FUZZ_RANGES`（2.5/7/20 天分段，factor 0.15/0.10/0.05）一致，取 `round(min_ivl + rand·(max_ivl−min_ivl))`；随机源为确定性 mulberry32，seed 由 `bankId|contentHash|reps` 经 FNV-1a 派生（同库同题同 reps 可复现）。仍保留 `review(..., { fuzzSeed })` 旧 opt-in（`sched.fuzz` 开启但未给 seed 时用确定性 seed 0）。**默认关闭**以保证「间隔反解 R=目标保留率」定义成立。Anki 默认开启且用 `(card_id+reps)→ChaCha12`，本实现不复刻其逐位分布。
+> **fuzz（间隔抖动）为 opt-in**：题库级开关 `bank.sched.fuzz`（wire `sched.fuzz`，默认 `false`），可用 `fuzzMaxDays`（wire `sched.fuzz_max_days`，合法区间 **0–36500**，默认 `0`）**只收紧、不放大**官方幅度。**语义固定**：`0 = 仅用官方 δ，不额外收紧`（`applyFuzz(ivl, rand, 0)` 与不带 cap 的官方路径逐值相等，`sched.test.mjs` 有断言锁定）；`>0 = 把单步抖动上限收紧到该天数`（`delta = min(官方 δ, round(cap))`）。`0` / `999` 均属合法值、不报错。算法与官方 `FUZZ_RANGES`（2.5/7/20 天分段，factor 0.15/0.10/0.05）一致，取 `round(min_ivl + rand·(max_ivl−min_ivl))`；随机源为确定性 mulberry32，seed 由 `bankId|contentHash|reps` 经 FNV-1a 派生（同库同题同 reps 可复现）。仍保留 `review(..., { fuzzSeed })` 旧 opt-in（`sched.fuzz` 开启但未给 seed 时用确定性 seed 0）。**默认关闭**以保证「间隔反解 R=目标保留率」定义成立。Anki 默认开启且用 `(card_id+reps)→ChaCha12`，本实现不复刻其逐位分布。
 
 > **easyDays（轻松日权重）默认全 100（不生效）**：`bank.sched.easyDays`（wire `easy_days`）是**周日→周六** 7 项 0–100%（与 `Date.getDay()` 对齐，便于本地时区直接命中）。目标到期日落在权重 <100 的周几时，间隔按 `round(ivl·w/100)` 压缩；**0% → 1 天**，结果恒 ≥1 且不越 `maximumIntervalDays`。只压缩一次、不迭代到下一个轻松日（避免跨日震荡；这一点与 Anki 的择日策略不同）。fuzz 与 easyDays 同时开启时先 fuzz 再按压缩日计算，`fuzzMaxDays` 仍只收紧官方 δ。
 
@@ -286,13 +286,13 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 | `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,opts)`（Worker 优先、自动回退；训练参数含增量热启动 `startWeights`/`iterations` 一并透传，可注入测试） |
 | `js/workers/fsrs-worker.js` | Worker 入口：importScripts fsrs.js + core，消息 `train`（`initWeights` 基线 / `startWeights?` 热启动起点）→ `done/error`（不经 index.html 加载） |
 
-测试（2026-11-03 实跑全绿）：`fsrs.test.mjs` **136** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **63** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **114** 项（优化器 67 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5；含 23 项增量重训）。`sched.test.mjs` **215** 项（含二期金样本 `fsrs-sched-golden2.json`：fuzz 同 seed 复现 / 0 权重 / maxDays 钳制 / 默认关闭等价）。全套件 **30** 项（29 套件 + smoke）**4839** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
+测试（2026-11-03 实跑全绿）：`fsrs.test.mjs` **136** 项（含 py-fsrs 6.3.2 黄金对照：S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f=1.391987、同日 S′_s 3.051249/10/10/15.534308；衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term、learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz 区间/分布/确定性）、`srs.test.mjs` **63** 项（自然日时区无关、7 日预报、迁移、分钟级队列、一次作答一条 revlog、删库级联清理）、`fsrs-opt.test.mjs` **114** 项（优化器 67 + Worker 化 33 + 按库隔离 9 + 留出门控/最佳快照 5；含 23 项增量重训）。`sched.test.mjs` **217** 项（含二期金样本 `fsrs-sched-golden2.json`：fuzz 同 seed 复现 / 0 权重 / maxDays 钳制 / 默认关闭等价；**fuzzMaxDays=0 与仅官方 δ 逐值相等、>0 只收紧不放大**）。全套件 **30** 项（29 套件 + smoke）**4853** 断言在 UTC 与 Asia/Shanghai 双时区均 0 失败。
 
 ## 11. 已知边界（设计取舍）
 
 - fuzz（间隔抖动）已实现且与官方 `FUZZ_RANGES` 一致，但**默认关闭**（题库级 `sched.fuzz` 或旧 opt-in `review(..., { fuzzSeed })`）；`sched.fuzzMaxDays` 只能收紧官方 δ，不允许放大。生产默认保持确定性以便「间隔反解 R=目标保留率」成立、且同数据可复现。
 - **easyDays 已实现且默认不生效**（7 项全 100）：命中降权日按比例压缩间隔，0% 压到 1 天；只压缩一次、不迭代择日，且不越 `maximumIntervalDays`。
-- **leech 动作已显式决策**：`leechThreshold` 仍恒控徽标；新增 `sched.leechAction` 默认 `'none'`（仅徽标，行为与旧版完全一致），可选 `'tag'`（命中阈值后写持久 `state.leech=true`，只置位不清除）。**不实现 suspend**：跨队列过滤、撤销、多端同步与「如何恢复」都缺少闭环，风险大于收益。`tag` 在 local 模式随状态 JSON 持久；api 模式后端 `review` 表无该列，未知键是否保留**未验证**，因此默认关闭、按需开启。
+- **leech 动作已显式决策**：`leechThreshold` 仍恒控徽标；新增 `sched.leechAction` 默认 `'none'`（仅徽标，行为与旧版完全一致），可选 `'tag'`（命中阈值后写持久 `state.leech=true`，只置位不清除，历史数据不批量清洗）。**徽标文案按当前动作渲染**（`ui-renderer.js` 唯一判断点）：`leechAction='none'` 时标题恒为「累计遗忘 N 次，建议拆分或重学」，即使历史 `state.leech=true`；仅 `leechAction='tag'` 且 `state.leech=true` 时显示「已标记为难卡（累计遗忘 N 次，建议拆分或重学」。**不实现 suspend**：跨队列过滤、撤销、多端同步与「如何恢复」都缺少闭环，风险大于收益。`tag` 在 local 模式随状态 JSON 持久；api 模式后端 `review` 表无该列，未知键是否保留**未验证**，因此默认关闭、按需开启。
 - 无 lapses 手动重学卡的「提前毕业」微调。
 - 优化器只做离线批训练（手动一键），不做在线增量更新；http(s) 下计算在专用 Worker、file:// 回退主线程（无共享内存/进度百分比，30s 超时保险）。单次训练成本（21 权重数值梯度）实测中位约 **3.89s** / 3200 样本 / 150 迭代；**增量重训热启动**将其降至约 **1.55s**（2.51×，见 §8.7 与 `scripts/bench.mjs`），均在 30s Worker 超时内。
 - 历史评分不回填：升级前没有 revlog，需从升级后积累样本。

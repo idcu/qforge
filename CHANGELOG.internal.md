@@ -6,6 +6,31 @@
 
 ---
 
+## （待回填）· fix(a11y): 复习设置弹窗横向溢出 + 11 控件 44px 热区 + 难卡文案按当前动作
+
+**Commit**：`（待回填）`
+
+**核心改动点**
+- 弹窗布局根因修复：新增 `.sched-grid` 作用域；flex 子项 `min-width: 0`；轻松日 `repeat(7, minmax(0, 1fr))`；数字输入 `width: 100%; min-width: 0`；≤560px 改 4 列（4+3 分行）。**未使用 `overflow-x: hidden`**。
+- 触摸热区：`:root` 新增 `--tap-min: 44px`（唯一尺寸令牌）；弹窗 number/select `min-height: 44px`；checkbox 由 `label.sched-check` 撑到 44px 高（实际点击矩形以 label 为准）。样式仅 `.sched-grid` 作用域，不改全站表单。
+- 难卡徽标文案按当前动作：`ui-renderer.js` 单一判断点；`leechAction='none'` 时恒为「累计遗忘 N 次，建议拆分或重学」，仅 `tag` + `state.leech=true` 显示「已标记为难卡（…」。`state.leech` 历史数据保留、不批量清洗。
+- 规格锁定：`fuzzMaxDays` 合法 0–36500；`0 = 仅官方 δ（不额外收紧）`、`>0 = 收紧到该天数`；新增断言 `applyFuzz(ivl, rand, 0) === applyFuzz(ivl, rand)` 与「cap>0 不放大」。
+- 门禁补盲区：`a11y-browser.mjs` 新增复习设置弹窗审计（三档宽度内容溢出、11 控件矩形、Space/↓ 键盘、Esc 回焦）；静态门禁新增作用域/令牌/minmax/热区/无裁剪断言。
+
+**实测数据（2026-11-03，本机 Asia/Shanghai，Node v24.14.0）**
+- 红（修复前，同一口径）：`a11y-browser` 374 断言 / 12 失败；弹窗内容 `scrollWidth/clientWidth`：360 = **567/313（+254px）**、768 = **567/560（+7px）**、1280 = **567/560（+7px）**；11 控件全不达标：`#sched-fuzz` label **131.5×24**、`#sched-fuzzmax` **87×21**、`#sched-ed0..6` 各 **73×21**、`#sched-leech-action` **131.5×36**、`#sched-leech` **80×21**。日志 `verify-fsrs2-out/a11y-before-fix.log`。
+- 绿（修复后）：`a11y-browser` **374 / 374**；内容三档 **298/298（+0）**、**560/560（+0）**、**560/560（+0）**；11 控件 ≥44×44（360：fuzz 124×44、fuzzmax 258×44、ed 60×44、leech-action 124×44、leech 124×44；768/1280：122.5×44 / 520×44 / 69.1×44）。复选框 Space、下拉 ↓、Esc 焦点回位全通过。日志 `verify-fsrs2-out/a11y-after-fix.log`。
+- 单测新增：`ui-renderer.test.mjs` 180→**183**（none 回退文案 + tag/none 两档 + 默认 none）；`sched.test.mjs` 215→**217**（cap=0 与官方 δ 逐值相等、cap>0 只收紧）；`a11y.test.mjs` 92→**101**（令牌唯一、7 列 minmax、4 列断点、100%+min-width:0、label 热区、无 overflow-x 裁剪、作用域类）。
+- 门禁：`test-all` 30 运行项 0 失败，断言 **4853 / 4853**（+14）；`node --expose-gc scripts/bench.mjs --assert` **55 项全绿**：heapUsed 增量 **2.68 MB ≤ 40MB**、`grade` 比值 **2.70 ≤ 2.90**、`gradeMany` 比值 **5.18 ≤ 5.35**、PATCH P95 **9.56 ms ≤ 50ms**；`docs-check --write` 与 `--static` 一致（30 / 4853 / 55），首屏 **330.1 KB gzip / 933.2 KB raw**（+0.5 / +1.3，来自新增 CSS）。
+- 文档：ARCHITECTURE（复习设置弹窗布局约定 + 真机门禁 374）、user-guide（fuzzMaxDays 语义与控件说明）、SRS（0–36500 / cap 语义 / 文案规则 / 计数）、README、DEVELOPMENT。
+
+**遗留 TODO / 风险**
+- 360 档 `#sched-ed*` 列宽 60px（高度 44px）：宽度满足 ≥44，但若日后在每列加长标签需重新核算。
+- 44px 控件使弹窗内容变高，360 档出现纵向滚动条（`clientWidth` 313→298），横向溢出仍为 0；属预期。
+- `fuzzMaxDays cap=0` 语义锁只覆盖 `applyFuzz`；`golden2` 未新增 cap=0 场景（现有 fuzz 场景使用 cap=2）。
+
+---
+
 ## 84b8187 · test(srs): 二期金样本 golden2（fuzz 确定性 / easyDays 边界 / 默认关闭等价）
 
 **Commit**：`84b8187`

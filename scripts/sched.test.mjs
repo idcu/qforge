@@ -325,6 +325,12 @@ section('二期 fuzz：题库开关 / 幅度上限 / 确定性（默认关闭）
   const capped = QB.FSRS.applyFuzz(10, () => 0.999, 1);
   ok(capped >= 9 && capped <= 11, 'applyFuzz 第 3 参收紧幅度（cap=1 → ' + capped + ' ∈ [9,11]）');
   ok(QB.FSRS.applyFuzz(10, () => 0.999) > 11, '不带 cap 时官方幅度更大（对照）');
+  // fuzzMaxDays 语义锁：0 = 仅用官方 δ（不额外收紧），>0 = 收紧到该天数
+  const officialOnly = QB.FSRS.applyFuzz(10, () => 0.999);
+  eq(QB.FSRS.applyFuzz(10, () => 0.999, 0), officialOnly,
+    'fuzzMaxDays=0：与仅官方 δ 完全一致（cap=0 不额外收紧，' + officialOnly + '）');
+  ok(QB.FSRS.applyFuzz(10, () => 0.999, 1) <= officialOnly,
+    'fuzzMaxDays>0 只收紧或持平，绝不放大（' + officialOnly + ' → ' + QB.FSRS.applyFuzz(10, () => 0.999, 1) + '）');
 
   // 题库开关：sched.fuzz=true 且未显式给 seed 也启用（seed 默认 0，确定性）
   const p = { algo: 'fsrs', due: T0, stability: 30, difficulty: 5, reps: 5, lapses: 0, last: T0 };

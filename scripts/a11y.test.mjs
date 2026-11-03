@@ -383,6 +383,25 @@ section('视觉回归：语义文字令牌 / 条形图填充 / 窄屏不裁剪')
   ok(!/box\.style\.(color|background|borderColor|whiteSpace|marginTop)/.test(ioSrc) &&
     !/<div class="import-error"[^>]*style=/.test(ioSrc),
     'JS 不再内联错误样式（颜色/间距/换行均由 CSS 唯一提供）');
+
+  // 复习设置弹窗：布局与触摸热区（作用域限定、公共尺寸令牌、禁止裁剪）
+  const tapTokens = CSS.match(/--tap-min:\s*44px/g) || [];
+  ok(tapTokens.length === 1, '--tap-min: 44px 尺寸令牌只定义一次（公共尺寸唯一来源）');
+  ok(/\.sched-grid\s*>\s*div\s*\{[^}]*min-width:\s*0/.test(CSS), '弹窗字段 flex 子项 min-width:0（不按原生最小内容宽撑破）');
+  ok(/\.sched-grid\s*>\s*\.sched-days-wrap\s*\{[^}]*flex:\s*1\s+1\s+100%[^}]*min-width:\s*0/.test(CSS),
+    '轻松日整行展示且可收缩（flex-basis 100% + min-width:0）');
+  ok(/\.sched-days\s*\{[^}]*repeat\(7,\s*minmax\(0,\s*1fr\)\)/.test(CSS),
+    '轻松日 7 列使用 minmax(0, 1fr)（列可收缩到 0，不产生横向溢出）');
+  ok(/@media\s*\(max-width:\s*560px\)\s*\{[\s\S]{0,220}\.sched-days\s*\{[^}]*repeat\(4,\s*minmax\(0,\s*1fr\)\)/.test(CSS),
+    '360 档轻松日改为 4 列（4+3 分行）');
+  ok(/\.sched-grid\s*input\[type='number'\],\s*\.sched-grid\s*select\s*\{[^}]*width:\s*100%[^}]*min-width:\s*0[^}]*min-height:\s*var\(--tap-min\)/.test(CSS),
+    '弹窗数字/下拉 width:100% + min-width:0 + min-height:44px');
+  ok(/\.sched-check\s*\{[^}]*min-height:\s*var\(--tap-min\)/.test(CSS),
+    '复选框热区由包裹 label 撑到 44px（不改全站表单）');
+  ok(!/overflow-x:\s*hidden/.test(CSS), '无 overflow-x:hidden 裁剪（溢出必须从布局根因解决）');
+  const appSrc2 = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8');
+  ok(!/repeat\(7,1fr\)/.test(appSrc2) && /class="qe-grid sched-grid"/.test(appSrc2) && /class="sched-days"/.test(appSrc2),
+    '复习设置弹窗改用作用域类（移除内联 repeat(7,1fr) 网格）');
 }
 
 /* ============================ 5. 动效 ============================ */

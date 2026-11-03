@@ -31,6 +31,8 @@
   /* 顶栏 + 菜单栏固定后的总高度，供 sticky 元素定位（由 app.js 实测写入） */
   --top-shell-h: 0px;
   --radius: 10px;
+  /* 触摸目标最小边长（复习设置弹窗控件热区唯一来源） */
+  --tap-min: 44px;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.14);
 }
@@ -583,6 +585,20 @@ body {
 .qe-form textarea { resize: vertical; }
 .qe-grid { display: flex; gap: 10px; flex-wrap: wrap; }
 .qe-grid > div { flex: 1 1 120px; }
+
+/* ===== 复习设置弹窗：布局与触摸热区（仅 .sched-grid 作用域，不影响全站表单） =====
+   数字输入的原生最小内容宽约 73px，7 列 repeat(7,1fr) 会撑破弹窗；列用 minmax(0,1fr)，
+   输入 width:100% + min-width:0 才能跟列一起收缩。 */
+.sched-grid > div { min-width: 0; }
+.sched-grid > .sched-days-wrap { flex: 1 1 100%; min-width: 0; }
+.sched-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.sched-day { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sched-grid input[type='number'], .sched-grid select { width: 100%; min-width: 0; min-height: var(--tap-min); }
+.sched-check { display: flex; align-items: center; gap: 6px; min-height: var(--tap-min); cursor: pointer; }
+@media (max-width: 560px) {
+  /* 360 档：7 列 → 4 列（4+3 分行），单列 ≥44px 仍可点 */
+  .sched-days { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 .qe-optrow { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .qe-optrow input[type='text'] { flex: 1; }
 .qe-letter { min-width: 22px; font-weight: 600; color: var(--text-muted); }

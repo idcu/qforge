@@ -1096,7 +1096,7 @@
       '<h3>复习设置 · ' + esc(State.bank.name) + '</h3>' +
       '<p class="li-meta">控制「今日复习」每轮最多排入的题量，顺序为：学习中（分钟级）→ 到期复习 → 新题。' +
       '设为 0 表示该组本轮不排。</p>' +
-      '<div class="qe-grid">' +
+      '<div class="qe-grid sched-grid">' +
       '<div><label class="qe-label">每日新题上限</label>' +
       '<input type="number" min="0" max="9999" id="sched-new" aria-label="每日新题上限" value="' + s.newPerDay + '" /></div>' +
       '<div><label class="qe-label">每日复习上限</label>' +
@@ -1118,15 +1118,15 @@
       '<option value="tag"' + (s.leechAction === 'tag' ? ' selected' : '') + '>标记为难卡</option>' +
       '</select></div>' +
       '<div><label class="qe-label">间隔模糊（默认关闭）</label>' +
-      '<label style="display:flex;align-items:center;gap:6px">' +
+      '<label class="sched-check">' +
       '<input type="checkbox" id="sched-fuzz"' + (s.fuzz ? ' checked' : '') + ' aria-label="间隔模糊开关" /> 开启</label></div>' +
       '<div><label class="qe-label">模糊幅度上限（天，0=官方规则）</label>' +
       '<input type="number" min="0" max="' + QB.SchedSettings.MAX_INTERVAL_MAX + '" step="1" id="sched-fuzzmax" ' +
       'aria-label="模糊幅度上限（天）" value="' + s.fuzzMaxDays + '" /></div>' +
-      '<div style="grid-column:1/-1"><label class="qe-label">轻松日权重（周日→周六，100=不压缩）</label>' +
-      '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">' +
+      '<div class="sched-days-wrap"><label class="qe-label">轻松日权重（周日→周六，100=不压缩）</label>' +
+      '<div class="sched-days">' +
       ['日', '一', '二', '三', '四', '五', '六'].map((n, i) =>
-        '<label class="li-meta" style="display:flex;flex-direction:column;gap:2px">周' + n +
+        '<label class="li-meta sched-day">周' + n +
         '<input type="number" min="0" max="100" step="1" id="sched-ed' + i + '" aria-label="周' + n +
         '轻松日权重" value="' + s.easyDays[i] + '" /></label>').join('') +
       '</div></div>' +

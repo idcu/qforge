@@ -391,11 +391,18 @@
       : QB.SchedSettings.DEFAULTS.leechThreshold;
     const leechHit = opts.reviewState && (opts.reviewState.leech === true
       || (leechThreshold > 0 && opts.reviewState.lapses >= leechThreshold));
+    // 文案按「当前动作」渲染：none 时即使历史 state.leech=true 也回到累计遗忘文案；
+    // 历史数据保留不清洗（唯一判断点，勿在别的渲染处复制）
+    const leechAction = opts.settings && opts.settings.leechAction === 'tag'
+      ? 'tag' : QB.SchedSettings.DEFAULTS.leechAction;
+    const leechTitle = leechHit
+      ? (leechAction === 'tag' && opts.reviewState.leech === true
+        ? '已标记为难卡（累计遗忘 ' : '累计遗忘 ') + opts.reviewState.lapses + ' 次，建议拆分或重学'
+      : '';
     regions.push({ key: 'quiz-head', html: '<div class="quiz-head" data-region="quiz-head">' +
       '<div><span class="type-badge">' + esc(QB.typeBadge(q.type)) + '</span> ' +
       (leechHit
-        ? '<span class="type-badge leech-badge" title="' + (opts.reviewState.leech === true
-          ? '已标记为难卡（累计遗忘 ' : '累计遗忘 ') + opts.reviewState.lapses + ' 次，建议拆分或重学">难卡</span> '
+        ? '<span class="type-badge leech-badge" title="' + leechTitle + '">难卡</span> '
         : '') +
       '<span class="q-progress">第 ' + prog.current + ' / ' + prog.total + ' 题</span>' +
       (q.category ? ' <span class="q-progress">· ' + esc(q.category) + '</span>' : '') + '</div>' +

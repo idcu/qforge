@@ -8,6 +8,8 @@
  *  - 弹窗完整落在视口内、内容超出时可滚动、焦点在弹窗内、有可访问名称、内部控件均有名称
  *  - 交互控件均有可访问名称；role=radio/checkbox 具备 aria-checked 与 tabindex
  *  - 焦点行为：打开弹窗焦点进入、Esc 关闭后回焦触发元素、Tab 在弹窗内循环
+ *  - 复习设置弹窗：内容 scrollWidth == clientWidth（三档宽度）、11 个控件热区 ≥44×44、
+ *    复选框 Space / 下拉方向键可操作
  *  - prefers-reduced-motion 生效时 animation/transition 时长归零
  *
  * 注意：本脚本需要真实 Edge 窗口，**不进入 CI**（见 docs/DEVELOPMENT.md）。
@@ -51,6 +53,7 @@ const results = [];
 const failures = [];
 const measurements = [];
 const modalOverflows = [];
+const settingsGeometry = [];
 let totalAssertions = 0;
 let currentWidth = 'all';
 function check(page, label, cond, detail) {
@@ -181,6 +184,33 @@ const MODAL_AUDIT = `(function () {
     scrollable, overflows, scrollHeight: m.scrollHeight, clientHeight: m.clientHeight,
     focusInside, name, controlCount: controls, unnamedCount: unnamed.length, unnamed: unnamed.slice(0, 8),
     keyCount: key.length, smallCount: small.length, small: small.slice(0, 8)
+  };
+})()`;
+
+/** 复习设置弹窗：内容溢出 + 11 个控件实际点击矩形（checkbox 量其包裹 label 的热区） */
+const SCHED_AUDIT = `(function () {
+  const root = document.getElementById('modal-root');
+  if (!root || root.hidden) return { present: false };
+  const m = root.querySelector('.modal');
+  const sw = m.scrollWidth, cw = m.clientWidth;
+  const ids = ['sched-fuzz', 'sched-fuzzmax'];
+  for (let i = 0; i < 7; i++) ids.push('sched-ed' + i);
+  ids.push('sched-leech-action', 'sched-leech');
+  const controls = [];
+  ids.forEach(function (id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // 复选框原生尺寸很小，热区由外层 label 撑开；量实际可点击矩形
+    const tap = (el.type === 'checkbox' && el.closest('label')) ? el.closest('label') : el;
+    const r = tap.getBoundingClientRect();
+    controls.push({ id: id, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 });
+  });
+  const bad = controls.filter(function (c) { return c.w < 43.5 || c.h < 43.5; });
+  return {
+    present: true,
+    scrollWidth: sw, clientWidth: cw, overflowPx: sw - cw,
+    count: controls.length, badCount: bad.length,
+    controls: controls, bad: bad
   };
 })()`;
 
@@ -505,6 +535,38 @@ try {
     const settingsModal = await session.ev(MODAL_AUDIT);
     auditModal(session, '设置弹窗', settingsModal);
     await checkPageOverflow(session, '设置弹窗');
+
+    // 5a) 复习设置弹窗：内容不横向溢出 + 11 个控件热区 ≥44×44（三档宽度回归）
+    const schedGeo = await session.ev(SCHED_AUDIT);
+    settingsGeometry.push({
+      width, theme: currentTheme,
+      scrollWidth: schedGeo.scrollWidth, clientWidth: schedGeo.clientWidth,
+      overflowPx: schedGeo.overflowPx, count: schedGeo.count, badCount: schedGeo.badCount,
+      controls: schedGeo.controls
+    });
+    check('设置弹窗', '内容无横向溢出（scrollWidth == clientWidth）',
+      schedGeo.present && schedGeo.overflowPx <= 1,
+      `scrollWidth/clientWidth ${schedGeo.scrollWidth}/${schedGeo.clientWidth}（+${schedGeo.overflowPx}px）`);
+    check('设置弹窗', '11 个控件点击区 ≥44×44（实测 ' + schedGeo.count + ' 个）',
+      schedGeo.count === 11 && schedGeo.badCount === 0,
+      schedGeo.badCount ? JSON.stringify(schedGeo.bad) : JSON.stringify(schedGeo.controls));
+
+    // 5b) 键盘操作：复选框 Space、下拉方向键（未保存，不影响题库设置）
+    const fuzzBefore = await session.ev(`document.getElementById('sched-fuzz').checked`);
+    await session.ev(`(function(){var el=document.getElementById('sched-fuzz'); el.focus(); return document.activeElement===el;})()`);
+    await session.send('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' });
+    await session.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+    await sleep(150);
+    const fuzzAfter = await session.ev(`document.getElementById('sched-fuzz').checked`);
+    check('设置弹窗', '复选框可用键盘（Space）切换', fuzzBefore !== fuzzAfter, `${fuzzBefore} → ${fuzzAfter}`);
+
+    const actBefore = await session.ev(`document.getElementById('sched-leech-action').value`);
+    await session.ev(`(function(){var el=document.getElementById('sched-leech-action'); el.focus(); return document.activeElement===el;})()`);
+    await pressKey(session, 'ArrowDown', 'ArrowDown', 40);
+    await sleep(200);
+    const actAfter = await session.ev(`document.getElementById('sched-leech-action').value`);
+    check('设置弹窗', '下拉可用键盘（↓）切换', actBefore !== actAfter, `${actBefore} → ${actAfter}`);
+
     // Esc 关闭 → 焦点回位
     await pressKey(session, 'Escape', 'Escape', 27);
     await sleep(300);
@@ -589,6 +651,7 @@ const summary = {
   byWidth,
   measurements,
   modalOverflows,
+  settingsGeometry,
   checks: results,
   failures: failures.map((f) => ({ width: f.width, theme: f.theme, page: f.page, label: f.label, detail: f.detail }))
 };
@@ -608,6 +671,8 @@ console.log('横向溢出实测（doc scrollWidth/clientWidth）：');
 measurements.forEach((m) => console.log(`  ${m.width}px ${m.theme} ${m.page}: ${m.docScrollWidth}/${m.docClientWidth}（body ${m.bodyScrollWidth}/${m.bodyClientWidth}），越界元素 ${m.outOfViewCount}，关键按钮 ${m.keyCount}，控件 ${m.controlCount}`));
 console.log('弹窗打开时横向溢出实测（doc scrollWidth/clientWidth）：');
 modalOverflows.forEach((m) => console.log(`  ${m.width}px ${m.theme} ${m.page}: ${m.scrollWidth}/${m.clientWidth}`));
+console.log('复习设置弹窗实测（内容 scrollWidth/clientWidth；11 控件热区）：');
+settingsGeometry.forEach((g) => console.log(`  ${g.width}px ${g.theme}: ${g.scrollWidth}/${g.clientWidth}（+${g.overflowPx}px），控件 ${g.count} 个，未达标 ${g.badCount}：` + g.controls.map((c) => `${c.id} ${c.w}×${c.h}`).join('，')));
 console.log(`总计：断言 ${totalAssertions}，通过 ${totalAssertions - failures.length}，失败 ${failures.length}`);
 if (failures.length) {
   console.log('失败明细：');
