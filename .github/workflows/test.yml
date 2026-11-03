@@ -25,6 +25,8 @@ jobs:
         run: node scripts/docs-links.mjs
       - name: 装配顺序（81 个 script 的顺序即依赖图）
         run: node scripts/check-modules.mjs
+      - name: 结构性删除的账本
+        run: node scripts/check-deletions.mjs
 
   logic-tests:
     runs-on: ubuntu-latest
