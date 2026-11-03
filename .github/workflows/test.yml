@@ -21,6 +21,8 @@ jobs:
           node-version: '24'
       - name: 文档数字校验（静态基线；README / docs/DEVELOPMENT.md）
         run: node scripts/docs-check.mjs --static
+      - name: 文档链接 / 锚点 / 版本读数
+        run: node scripts/docs-links.mjs
 
   logic-tests:
     runs-on: ubuntu-latest
@@ -89,3 +91,55 @@ jobs:
       - name: 性能门禁（Node 24 / Asia-Shanghai）
         if: matrix.node-version == '24' && matrix.tz == 'Asia/Shanghai'
         run: node --expose-gc scripts/bench.mjs --assert
+
+  vendor-check:
+    name: vendor 接线自检
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: vendor 路径 ↔ ngm.json ↔ ngm.lock
+        run: node scripts/check-ngm.mjs
+
+  ngm-preflight:
+    name: ngm binary configuration preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain optional ngm verify
+        run: |
+          if [ -z "${{ vars.NGM_BIN_URL }}" ] || [ -z "${{ vars.NGM_BIN_SHA256 }}" ]; then
+            echo "::notice::ngm verify skipped: set repository variables NGM_BIN_URL and NGM_BIN_SHA256 to a reachable ngm release artifact. The vendor self-check still runs."
+          else
+            echo "ngm verify configured: ${{ vars.NGM_BIN_URL }}"
+          fi
+
+  ngm-verify:
+    name: ngm verify --deep (optional binary)
+    if: ${{ vars.NGM_BIN_URL != '' && vars.NGM_BIN_SHA256 != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify pinned ngm binary
+        env:
+          NGM_BIN_URL: ${{ vars.NGM_BIN_URL }}
+          NGM_BIN_SHA256: ${{ vars.NGM_BIN_SHA256 }}
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/ngm"
+          if ! curl -fsSL --retry 3 --retry-delay 2 "$NGM_BIN_URL" -o "$bin"; then
+            echo "::error::failed to download ngm from NGM_BIN_URL; the runner is network-restricted or the URL is stale"
+            exit 1
+          fi
+          echo "$NGM_BIN_SHA256  $bin" | sha256sum -c -
+          chmod +x "$bin"
+          want="$(tr -d '\r\n' < .ngm-version)"
+          got="$("$bin" --version | awk '{print $2}')"
+          if [ "$got" != "$want" ]; then
+            echo "::error::ngm version mismatch: binary=$got expected=$want"
+            exit 1
+          fi
+      - name: Verify vendor provenance
+        run: |
+          "$RUNNER_TEMP/ngm" verify --deep

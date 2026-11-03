@@ -194,10 +194,16 @@ function checkPattern(doc, regex, label, actual, pick) {
   }
 }
 
-const readme = readDoc('README.md');
-const dev = readDoc('docs/DEVELOPMENT.md');
+// 判据跟着文档走：拆分后（TESTING / BENCH）数字仍在，就必须仍在被复算的范围内。
+// 少读一个文件 = 那些读数悄悄不再被校验，而"没红过"看起来与"没问题"一样。
+const DOCS_WITH_NUMBERS = [
+  'README.md',
+  'docs/DEVELOPMENT.md',
+  'docs/TESTING.md',
+  'docs/BENCH.md'
+].map(readDoc);
 
-[readme, dev].forEach((doc) => {
+DOCS_WITH_NUMBERS.forEach((doc) => {
   checkSuiteRows(doc);
   // 合计断言数（形如 「3782 / 3782 通过」）
   checkPattern(doc, /(\d+) \/ (\d+) 通过/, '合计断言数', totalAssertions, (m) => m[1]);

@@ -42,156 +42,16 @@
 
 ## 3. 模块清单与职责
 
-### 3.1 入口与配置
-| 文件 | 职责 |
-| --- | --- |
-| `index.html` | 唯一入口；按依赖顺序加载脚本；定义 `#view`/`#tabs`/`#status-text`/`#modal-root` 等骨架元素 |
-| `js/config.js` | `QB.CONFIG` 唯一配置中心：`NETWORK`（API_BASE_URL/网络导入限额）、`STORAGE`（前缀/配额/防抖）、`LIMITS`（题量/分值/历史与 revlog FIFO）、`ASSETS`（IDB 实例）、`WORKERS`、后端开关与题型/难度字典（顶层旧键保留为别名）+ `QB.typeLabel`/`QB.typeBadge` |
-| `js/app.js` | 主应用：状态管理、事件委托、视图渲染调度、模式流程；**视图级缓存**（`banksLoaded` 题库列表、`favoriteBankId`+`favoriteKeys` 当前库收藏集合、`reviewLogBankId`+`reviewLog` 当前库 revlog）使答题热路径不再逐次读题库/收藏；api 模式作答写路径由「GET reviews + GET weights + PUT reviews + POST revlog」收敛为首次 3 个、热态 1 个 PUT（`reviews.record` + 权重缓存）；题库列表/收藏变更、评分/交卷与跨标签 `storage` 事件令缓存精确失效。每次渲染后实测「顶栏+菜单栏」高度写入 CSS 变量 `--top-shell-h`（`syncStickyOffset`），供 sticky 区块定位；「回到顶部 / 直达底部」两个悬浮按钮复用共享样式类 `.btn-float`（定位用 `.btn-top`/`.btn-bottom`），由 `syncScrollButtons` 按「距顶/距底 > 400px 且非答题视图」切换显隐；练习/考试开始弹窗 `openStartDialog(mode, opts)` 支持自定义题池（错题重练 `openWrongDialog` 传入错题池）；**视图渲染结尾按「区域数组」走 `QB.DomPatch.patch` 局部回填（quiz/错题/收藏/历史/搜索五个视图；其余视图仍整块 `innerHTML`）**；末行导出 `QB.App` |
+## 3. 模块清单与职责
 
-### 3.2 公共抽象（utils）
-| 文件 | 导出 | 职责 |
+> 模块清单按层拆到 `docs/modules/`（原表占全文 3/4，单行上千字符）。分层、约束与数据流仍在本文件。
+
+| 层 | 覆盖 | 文件 |
 | --- | --- | --- |
-| `utils/helpers.js` | `QB.Helpers` | `debounce`（返回函数带 **`.cancel()`**，可丢弃挂起调用）/`throttle/cloneDeep/uid/escapeHtml/formatDate/formatDuration/calculateAccuracy` |
-| `utils/time.js` | `QB.Time` | 自然日公共抽象：`dayStart/dayIndex/isSameDay/endOfDay`（唯一实现；SRS 到期、复习队列、学习热力图共用，禁止各自 `setHours(0,0,0,0)`） |
-| `utils/rich-text.js` | `QB.RichText` | 模型内容上屏统一入口：`render()`（转义 + `^{}`/`_{}` 上下标 + **轻量公式子集 `\frac{}{}`/`\sqrt{}`/`\sqrt[n]{}`（CSS 排版，参数组可嵌套、内部递归渲染）**）、`toPlain()`（去记号，不转义）、`questionAssetIds()`（收集题内图片 id，含材料正文 `material` 与递归小问 `children`，供 qbk 打包/备份孤儿清理的引用集） |
-| `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存，且支持 `registerMerge(match, merge)` 对指定键做按键合并（当前用于 `user:review:*` / `user:reviewRev:*`，复用 `QB.ReviewMerge`）；`getFresh()` 绕过缓存直读（写前重读）；visibility/beforeunload 落盘；`usageBytes()`。**双后端门面（v6）**：接口/同步读语义不变，后端由 `QB.Store` 决定——IDB 模式下写先更新缓存并聚合成**一个微任务 IDB 事务**（同调用栈内多次 `setSync` 原子提交，失败整体回滚并保留待写重试），确认落盘用 `await Storage.flush()`；引导标记仍同步写 LS，且等待切换期（`_awaiting`）不被门控（业务键门控不变），否则接管方写的迁移锁只留本页内存 |
-| `utils/fnv.js` | `QB.FNV` | FNV-1a 散列唯一实现：32 位 `hashString`（UTF-16 码元）/`hashBytes`/`toHex`（资产 id、来源/URL checksum），**64 位 `hashString64`/`hashBytes64`（BigInt，16 hex）**（contentHash v3、导出内容校验和）；question-id/assets/source/exporter 共用（serve-api 为 Node ESM 独立实现，等价性由 E2E 守护） |
-| `utils/random.js` | `QB.mulberry32` | 确定性 PRNG 唯一实现（`[0,1)`），供 `QB.shuffle`/`shuffleOptions` 与 FSRS fuzz 共用 |
-| `utils/answer-text.js` | `QB.AnswerText` | 填空答案拼接/回退与按题型答案行文本：`joinBlanks/blankAnswers/answerText`；exporter/share-page/question-editor/adapters/judge-answer 共用 |
-| `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions`/`QB.shuffleChildren` | 基于 `QB.mulberry32` 的种子化洗牌/抽样；选项乱序（单选/多选/不定项）并同步重映射答案；材料题小问乱序保留原 contentHash（整题身份不随展示顺序变化） |
-| `utils/answer-normalize.js` | `QB.normalizeAnswer`/`QB.parseBoolean`/`QB.normalizeLetters` | 全角转半角、去空白、去标点、大小写归一；布尔归一 |
-| `utils/judge-answer.js` | `QB.judgeAnswer` / `QB.childPoints` / `QB.normalizeChildScore` | 按 `type` 策略表判分；`judgeAnswer(q, ans, opts?)` 的 `opts.pointOf(type)` 提供本场「按题型分值」，`opts.useTypePoints` 为 true（本场显式设置分值）时才覆盖小问自带分；口径唯一：**本场显式题型分值 > `children[*].score`（1–100） > `CONFIG.POINTS_PER_CORRECT`**；小问分值归一由 `normalizeChildScore` 统一（编辑器/导入/存储/导出共用） |
-| `utils/result-policy.js` | `QB.ResultPolicy.kind/isDecided/isWrong` | **判分结果语义唯一入口**：`empty/pending/partial/correct/wrong`；材料题“全半对”按 `partial` 优先，计分/答题卡/结果页/SRS 评分统一使用，禁止各处 if-else |
-| `utils/question-id.js` | `QB.makeContentHash`/`QB.makeQuestionKey`/`QB.isCurrentHash`/`QB.hashVersionOf`/`QB.isLegacyHash` | v3 去重键（前缀 `3:` + FNV-1a 64 位 16 hex；题型+题干+选项+答案，材料题含材料与子问题）；`hashVersionOf` 识别 v3/v2（`2:`+8hex）/v1（裸 8hex），供迁移与双读去重；普通题与材料题子问题共用模块内语义归一件 |
-| `utils/hash-remap.js` | `QB.HashRemap` | contentHash 重映射唯一实现：`remapList`（错题/收藏条目数组按映射换键、合并重复并保留最大计数/最早时间）、`mergeWrong`/`mergeFav`（同键合并规则）；`migrate.js` 与 backup 跨版本恢复共用，禁止各自复制 |
-| `utils/crc32.js` | `QB.Crc32` | CRC32（IEEE/zlib）唯一实现，供 ZipWriter 写校验值、ZipReader 解包校验共用 |
-| `utils/zip-reader.js` | `QB.ZipReader`/`QB.decodeUtf8` | 原生 ZIP 读取（EOCD→中央目录→本地头）+ `DecompressionStream('deflate-raw')`；支持 method 0/8；**条目数/单条/总解压字节上限 + CRC 校验**（防 zip bomb/损坏包） |
-| `utils/zip-writer.js` | `QB.ZipWriter` | 原生 ZIP 打包（stored method=0 + `QB.Crc32`），与 ZipReader 对称；xlsx/docx/qbk/qfbk 写出共用 |
-| `utils/sqlite-reader.js` | `QB.SqliteReader` | **最小 SQLite 只读唯一实现**（零依赖，探针与 Anki 导入器共用，禁止第二份解析）：100 字节头/页大小/freelist/文本编码（UTF-8、UTF-16LE/BE）、B-tree 叶子（`0x0D`）与内部页（`0x05`）递归、cell pointer 数组、record 头与 serial type、overflow 页链、`INTEGER PRIMARY KEY` 的 rowid 别名、`CREATE TABLE` 中 `--`/`/* */` 注释剥离；只读活跃 cell（不遍历 freelist）故被删除记录天然不可见；深度/行数/单 record 字节/页号与 overflow 环均设上限，损坏库抛 `SqliteReadError` 而非崩溃 |
-| `utils/xml-lite.js` | `QB.XmlLite.parse` | 自研极简 XML 解析器（OOXML 子集：标签/属性/命名空间/实体/注释/CDATA/DOCTYPE 跳过，深度先序查询；畸形 XML 抛错），替代 DOMParser，Node/浏览器/CI 同路径 |
-| `utils/assets.js` | `QB.Assets` | 图片资产存储（IndexedDB，内容寻址 id=`QB.FNV`-长度，同图去重）；驱动可注入（idbDriver/memoryDriver），与 Repository 双实现同构 |
-| `utils/weights.js` | `QB.Weights` | FSRS 权重仓归一（旧单组 `{w,...}` → global，非法/空 → `{global:null,banks:{}}`）；local-adapter 与 fsrs-opt 共用，数据层不反向依赖应用层 |
-| `utils/review-merge.js` | `QB.ReviewMerge` | 多端/多标签复习状态合并唯一实现：`mergeMaps(local, remote)` 同 contentHash 保留 `last` 更大者（缺失/非法 `last` 视为 0，相同保留远端），`lastOf(state)`；api-adapter 的 409 冲突重试、local-adapter 写前合并与 storage 事件合并共用 |
-
-### 3.3 数据访问层（data）
-| 文件 | 职责 |
-| --- | --- |
-| `data/contracts.js` | `QB.KEYS`（逻辑键，含题目分片键 `questionsMeta`/`questionShard`）、`QB.CONTRACTS`（**7 组**接口方法名：banks/questions/progress + 阶段 C 新增 reviews/revlog/weights/backup，只暴露存储原语）、`QB.ASSET_DRIVER_CONTRACT`（资产驱动 6 方法，独立于仓库契约以避免「仓库→驱动→仓库」自递归）、`QB.assertAdapter`/`QB.assertDriver`（自检） |
-| `data/wire.js` | `QB.Wire`：wire（snake_case，见 API-CONTRACT）↔ 本地（camelCase）**字段映射唯一实现**——`bank/question/wrong/favorite/attempt` 各 `from`（wire→本地）/`to`（本地→wire 的全量导出口径，含 id/时间戳）。`from` 由 `api-adapter`（REST 响应）与 `backup.js`（备份跨布局转换）共用；`to` 仅备份转换用（`api-adapter` 另有请求体塑形的 `toWire*`，用途不同故未合并） |
-| `data/local-adapter.js` | 七个 Repository 的 LocalStorage 实现；`reviews.record` 为作答热路径（状态 + 评分日志一次提交，等价 save + append）；`insertMany` 是导入落库唯一入口。单库题目按 `LIMITS.QUESTIONS_SHARD_SIZE`（200）分片存 `questions:<bankId>:<i>` + 清单 `questions:<bankId>:meta`（`{v:3,shardSize,count,sizes}`），单题增删改只重写所在分片、列表按区间只解析覆盖分片；分片读写收敛为公共抽象 **`QB.QuestionShards`**（`readAll/readRange/count/writeAll/append/locate/clear/indexesOf/compact/invariant` 等，供 migrate 复用，双重实现者禁止各自复制）；其中切分规则（`plan`）、清单解析（`parseMeta`）、按序拼接（`concatShards`）为**纯函数**，额外供 `backup.js` 的跨布局转换复用（分片生成/重组不复制）。**删除任一导致分片清空的分片时统一调用 `compact` 按物理索引升序重建（重编号）**，`clear` 同时回收高位孤儿分片；`invariant` 为只读不变量自检（sizes 之和 = count = 实际可读、分片键连续无孤儿）。阶段 C 的 `reviews/revlog/weights` **直接读写 LocalStorage（唯一存储权威）**、`backup` 复用 `QB.Backup.readAllData/applyData`（纯存取，零算法复制）；领域模块反向经 `QB.DB.*` 委托本适配器——**不可双向委托**（否则「适配器 → 领域模块 → QB.DB → 适配器」成自递归死循环）；删库级联收敛为私有唯一入口 `cascadeDelete(bankId)`（题目分片 + 错题/收藏/复习/评分日志/权重 preset/历史/当前库）。**schema v5 布局**：复习状态按 hash 独立键 `user:review:<bankId>:<hash>` + 清单 `user:reviewMeta:<bankId>`（`{v:3,count,keys}`，含每库键集合内存缓存使写入 O(1)），读取合并旧整表（per-hash 优先）；评分日志分段 `user:revlogMeta`（`{v:2,segSize:200,first,last,count}`）+ `user:revlog:<i>`，单次评分只重写尾段，旧整表 `user:revlog` 仅兼容读；两套布局读写收敛为 `QB.ReviewStore`/`QB.RevlogStore`（适配器内部公共件，禁止第二条实现） |
-| `data/api-adapter.js` | REST 实现（照 `QB.CONTRACTS` 对接 `API-CONTRACT.md`）：`useFetch` 注入 + `AbortController` 超时（`NETWORK.API_TIMEOUT_MS`）+ 统一错误体（`.status/.code`）+ camelCase↔snake_case **wire 映射表**（`from` 方向委托 `QB.Wire`，见 `data/wire.js`）；**`count`/`reviews` 按库缓存、权重仓缓存**（写·级联·`backup.import` 后失效；`reviews.record` 成功后缓存刚提交的 map）、`revision()` 客户端写修订号、`assetDriver()` 实现资产驱动契约；**响应体一律消费**（含 204 空体，避免浏览器记 `net::ERR_ABORTED`） |
-| `data/db.js` | 门面：`init()` 按 `DATA_BACKEND` 选适配器并暴露 **7 个仓库**（banks/questions/progress/reviews/revlog/weights/backup）；**`loadQuestions(bankId)` 整库读缓存**（按 `bankId` + 适配器写修订号失效，供各视图按需装载，命中即复用同一数组、0 分片解析）；`buildIndex(bankId)` 复用该缓存建 contentHash 索引 |
-| `data/store.js` | **`QB.Store`：持久化引擎 + 后端切换唯一入口（schema v6）**。IndexedDB 对象仓 `qforge-kv/kv`（`keyPath=key`，索引 `by_bank`/`by_kind`/`by_bank_kind`/`by_kind_seq`）与 LocalStorage 两个后端实现**同一套方法**（`get/set/del/keys/batch/clear`），上层（`QB.Storage`、适配器、领域模块）不感知差异；`batch` 单事务、失败整体回滚，保证一次评分（状态 + 日志段）原子落盘。对外还有：`init()`（探测/水合/安全回落）、`query()`（按库/按 kind/按库取日志尾 N 条）、`logTail()`、`stats()/estimate()`、`migrateToIdb/verifyAgainstLS/cleanupLegacyLS/rollbackToLS/reenableIdb`、`isBootstrap/isBackupExcluded/tagOf`。**引导标记（后端标记/迁移标记/schema 版本/迁移锁/迁移备份）始终同步写 LocalStorage**（打开 IDB 之前就要可读、且跨标签协调） |
-| `data/sample-data.js` | `QB.SAMPLE`：18 道内置样例（判断/单选/多选/填空/简答各 3 + 不定项 3，覆盖六题型） |
-
-### 3.4 导入器（importers）
-| 文件 | 职责 |
-| --- | --- |
-| `importers/adapters.js` | **公共适配器**：`toStandard`/`sniffAndAdapt`/`adaptArray`/`adaptNested`/`tableToQuestions`/`validateQuestions`；题型映射、表头别名；M2-B 起 `tableToQuestions` 含材料多行块扫描（材料/小问两列，块首+小问归组，旧表零变化）；解析类多列/多键经 `ANALYSIS_FIELDS` + `mergeAnalysisPieces` 合并为单一 `analysis`（唯一实现） |
-| `importers/line-parser.js` | **行式切题公共解析器**：`parseLines`/`blocksToQuestions`（题号/选项/答案/解析类标记/分类标记识别 + 题型推断），docx 与 md 共用；解析类标记（解析/解题思路/考点/释义…）经 `Adapters.matchAnalysisMarker` 识别并 `appendAnalysis` 增量合并，避免与表头别名两套维护；M2 起含材料块状态机（`[材料题]` 开块 / `材料：` / `(i)` 小问 / 顶层题号收块，输出 `isMaterial` 块交 `Adapters.toStandard` 递归）；父题解析标记后的多行续行（如合并后的 `【释义】…` 分段）在小问出现前归父题解析，不误入材料正文 |
-| `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX/Anki/Quizlet；同一扩展名可登记多个解析器（`priority` 降序 + `sniff(input)` 选择，`sniff` 抛错视为不接管），`.txt` 由 Quizlet（priority 10）与 CSV 竞争，含表头的普通 CSV 仍走 CSV；二进制格式（xlsx/docx/qbk/apkg）按 `arrayBuffer` 读取，文本格式按 `text` 读取；入参区分**真实 File/Blob**（选文件/拖拽，内部 FileReader 读取）与**内存快照** `{name,text}` / `{name,arrayBuffer}`（网络导入/粘贴/测试注入），真实 File 上的 `text()`/`arrayBuffer()` 方法不与快照数据混用 |
-| `importers/qbk-importer.js` | `.qbk` 题库包：`Qbk.parseBundle` 解包 → 复用 JsonImporter → 资产写 QB.Assets（缺图警告） |
-| `modules/qbk.js` | `QB.Qbk`：qbk/qfbk 的 stored ZIP 编解码（bank.json/backup.json + 可选 manifest.json + assets/*）、PK 头识别、题目引用资产 id 收集；`buildBundle` 第 4 参 `extra` 仅分发题包使用，旧包解析 `manifest=null` |
-| `modules/package.js` | `QB.Package`：**分发题包清单唯一实现**——`makeManifest`/`parseManifest`/`verify`（题数·checksum·格式，只警告不阻断）/`compareVersions`/导入历史 `findDuplicate`·`latestForPackage`·`recordImport`（`meta:pkgHistory`）；导出与导入两侧只调用本模块，不复制校验逻辑 |
-| `importers/json-importer.js` | JSON 结构嗅探（数组/导出/中文嵌套）；解析前去 UTF-8 BOM（与 CSV/MD 一致） |
-| `importers/csv-importer.js` | CSV/TSV 表头映射（自动识别逗号/制表符/分号、BOM、引号转义） |
-| `importers/md-importer.js` | Markdown 清洗（标题/列表/加粗/反引号/引用，保护 `____`）后复用 LineParser |
-| `importers/xlsx-importer.js` | 原生 zip + **XmlLite**（自研极简 XML，不依赖 DOMParser）：解析 workbook.xml + rels 取**全部工作表**（空表跳过、按工作簿顺序合并），支持共享字符串/内联字符串/数值单元格 |
-| `importers/docx-importer.js` | 原生 zip 读 `word/document.xml` 成段落行后复用 LineParser；解析 `word/_rels/document.xml.rels` + `word/media/*`，段落 a:blip/v:imagedata 引用的图片写 QB.Assets 并插 asset 占位（缺图警告不阻断） |
-| `importers/anki-package.js` | `.apkg` 包识别与媒体清单的**唯一实现**：`meta` 最小 protobuf（字段 1 = 版本 varint）、Legacy1/Legacy2/Latest 判定、Legacy2 优先 `collection.anki21`（缺失回退并警告）、`.anki21b` 明确拒绝并给出「导出勾选兼容旧版」指引、明文 `media` JSON → `{原文件名: 包内条目名}`；探针与导入器共用 |
-| `importers/anki-importer.js` | Anki Legacy（`.apkg`）**按 note 导入**：复用 ZipReader + SqliteReader + AnkiPackage + Adapters + Assets；Front/Back 去 HTML 后按题型判定（选项行→single/multi、显式判断词→judge，其余→essay；Back 作参考答案），cloze 降级 essay 并汇总答案；媒体内容寻址入库、缺失保留占位并警告；多卡 note 合并为 1 题并在 `meta.migration` 中列出丢失 card 历史；重复 note 按 v3 contentHash 跳过；源 revlog 不导入并明示 |
-| `importers/quizlet-importer.js` | Quizlet 纯文本：分隔符自动识别（Tab/逗号/全角逗号/分号/全角分号/竖线，支持显式覆盖），复用 `CsvImporter.parseRows` 行解析与 `Adapters.toStandard`；全部落 essay（term 题干 + definition 参考答案）；表头/非两列/空 term/重复行跳过并警告；`priority` + `sniff` 保证不劫持含表头的普通 CSV |
-
-### 3.5 业务模块（modules）
-| 文件 | 职责 |
-| --- | --- |
-| `modules/quiz-engine.js` | 答题状态机：装载/作答/进度/判分/`gradeAll`/`byType`/`restore`；本场配置 `pointsMap`（按题型分值）、`durationMs`（考试限时）、`showTimer`（练习正计时开关）随 `getState/restore` 持久化；`pointOf(type)` 为分值解析唯一入口，`getScore()` 按题型计分 |
-| `modules/ui-renderer.js` | 渲染首页/答题/结果/列表/统计/搜索，以及 `toast`/`openModal`/`confirmDialog`；**可访问性**：选项带 `role=radio/checkbox`、`aria-checked`、`tabindex`（作答后 -1 + `aria-disabled`），弹窗 `role=dialog`/`aria-modal` + 首焦点 + Tab 循环 + 关闭归还焦点，`confirmDialog` 支持结构化 `lines`（逐行转义）；**弹窗纯 HTML 构建**（组卷 `renderMixDialog`、练习/考试开始 `renderStartDialog(mode, avail, cats, opts)`；题型行由公共 `typeCountRows(avail, {countClass,countValue,points,pointsDefault})` 构建，练习/考试含「每题分值」`bp-pts` 列、考试含 `#st-duration`、练习含 `#st-timer`），交互由 app.js 绑定；**需吸顶区块加 `stick-head` 类**（历史统计卡、搜索工具栏），答题卡按状态类着色（`ac-correct`/`ac-wrong`/`ac-answered`/`ac-pending`/`ac-empty`）；**作答反馈（`renderFeedback`/`renderMaterialOverall`，含解析）紧接 `quiz-question`，位于 `quiz-actions` 与 `quiz-card` 之前**；**答题/错题/收藏/历史/搜索提供「区域数组变体」**（`renderQuizRegions`/`renderWrongListRegions`/`renderFavoritesListRegions`/`renderHistoryListRegions`/`renderSearchRegions`，每区域顶层带 `data-region="KEY"`；原整块函数保留为 `regions.map(r=>r.html).join('')` 的薄包装，输出逐字节一致）；**答题卡为格级增量**（`answerCardRegion` 返回 `{ key, html, frame, sub }`——`html` 整块（向后兼容拼接）、`frame` 仅结构（计数/格子容器留空，跨作答不变）、`sub` = 计数 + 逐格 `ac-cell-<i>`） |
-| `modules/dom-patch.js` | `QB.DomPatch`：**DOM 增量更新（局部回填）**。`plan(prev, regions)` 纯对账（不触碰 DOM，Node 可测）算出区域的新增/变化/未变/移除；`patch(root, regions)` 应用到真实 DOM——**内容未变的区域保留原节点**（保住焦点/`<details>` 展开态/滚动），仅重建变化区域；`normalize` 过滤空区域并去重 key、`snapshot` 生成上次快照 map、`contentOf` 取 `frame||html`。**子区域（格级增量）**：区域可带 `frame`（仅结构，跨作答稳定）+ `sub`（子区域数组，各带 `into` 指定容器 `[data-sub]`），顶层对账只比 `frame`，帧未变时 `syncSub` 仅按 key 就地替换内容变化的子节点（`groupSub` 按容器归组） |
-| `modules/bank-manager.js` | `create/rename/remove(级联)/importSample` |
-| `modules/question-editor.js` | 题目 CRUD：`buildQuestion` 纯函数 + 编辑器/管理器界面（走 QuestionRepo）；**M3 材料题专用嵌套编辑器**：`buildChildQuestion`（子问题清理继承字段）、`buildMaterialQuestion`（父题校验：材料/总题干至少一项、≥2 小问、禁嵌套）、`materialEditorBody`（纯 HTML 可测）、`openMaterialEditor`（小问增删/题型切换重置答案区/图片插入），作答区控件通过 `data-cc` 前缀与普通题 `data-qe` 作用域隔离（唯一实现 `answerSection` 前缀化）；管理器按 `isMaterialQuestion` 路由到对应编辑器 |
-| `modules/wrong-book.js` | 错题本薄封装（`QB.DB.progress` + `buildIndex`）；`isWrongResult/sessionWrongs` 统一「是否错题」判定（错且非半对，不定项少选不算），结果页「错题重练」据此只取本场错题 |
-| `modules/favorites.js` | 收藏夹薄封装 |
-| `modules/history.js` | 历史记录 + `stats` 聚合 |
-| `modules/statistics.js` | `overview`/`typePerformance`/`suggestions`/`dailyActivity`（近 N 周答题热力，周一列首对齐） |
-| `modules/search-filter.js` | `haystack`（题干+选项+答案/填空/参考答案+解析+材料+分类+标签，材料题递归）、`search`/`filter`/`highlight`/`categories`/`tags`；高亮先转义后正则，XSS 安全 |
-| `modules/progress-saver.js` | 答题进度 `save/saveDebounced/load/clear` |
-| `modules/fsrs.js` | **FSRS-6 纯调度器**（21 个官方默认权重，逐项对齐 py-fsrs 6.3.2）：`review(state,rating,now,weights,opts?)`/`initialState/isLearning`、指数式初始难度、可学习衰减（DECAY=-w20）、召回/遗忘/同日稳定度、整日间隔反解、opt-in fuzz、新卡/重学 learning steps（默认 1m/10m，可由 `opts.sched` 覆盖），无 DOM/存储依赖。`factorOf`/`powerDecay` 恒以 0.9 为稳定度衰减锚点，**不随目标留存率变化**；`nextIntervalDays(stability, requestRetention?, w?, maxDays?)` 的留存率/上限仅影响新算出的间隔。公式/状态机/边界见 [SRS.md](SRS.md) |
-| `modules/fsrs-train-core.js` | 训练**纯计算核心**（Storage/DOM 零依赖）：computeTrain/diagnose/序列/NLL/梯度/Adam/门控常量（门控基线 `initWeights` 与热启动起点 `startWeights` 分离）；Worker 与主线程共用同一数值来源，见 [SRS.md](SRS.md) §8.2 |
-| `modules/fsrs-opt.js` | revlog/权重**存取**（经 `QB.DB.revlog/weights`，**均为异步**；local-adapter 直写 LocalStorage / api-adapter 走 REST）+ 一键训练：`train`（存储包装，`async`）/`trainAsync`（Worker 优先自动回退）；门控采纳后唯一写盘点；权重支持全局 + 按题库 preset（旧单组结构自动归一，唯一实现 `QB.Weights.normalizeStore` 在 utils/weights.js，被 local-adapter/api-adapter 复用）。**增量重训**：采纳后记录 `trainedLogLen`，`shouldRetrain()` 纯读判定增量触发，已有权重时以之为热启动起点（`WARM_ITERATIONS` 少迭代，门控基线不变）。细节见 [SRS.md](SRS.md) §8 |
-| `modules/fsrs-train-client.js` | 训练执行选择器：`supported(env)` 判定（http(s)+Worker）、`run(revlog,opts)` 消息往返（30s 超时）并透传训练参数（含热启动 `startWeights`）、构造/运行失败自动回退主线程；env/createWorker/compute 可注入测试 |
-| `workers/fsrs-worker.js` | 训练 Worker（不经 index.html）：importScripts fsrs.js + train-core，收 `train`（`initWeights` 基线 / `startWeights?` 热启动）回 `done/error`；SW 预缓存，离线可用 |
-| `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
-| `modules/sched-settings.js` | `QB.SchedSettings`：按题库调度设置（`bank.sched`）**唯一归一实现**——`newPerDay/reviewPerDay/requestRetention/maximumIntervalDays/learningSteps（秒）/leechThreshold/leechAction/fuzz/fuzzMaxDays/easyDays`；`normalize` 钳制范围、步骤升序去重并保留未知键（老客户端保存不清空新字段）；`validate` 是设置弹窗**唯一表单校验**（非法值就地报错，不静默丢弃）；`ofBank/ofBankId` 按库缓存（save 后更新），复用 banks 仓库（local/api/备份同语义）。默认值唯一来源 `DEFAULTS`（每日限额仍与 `CONFIG.LIMITS` 同值） |
-| `modules/start-prefs.js` | `QB.StartPrefs`：练习/考试开始弹窗上次参数（各题型数量/分值、分类、时长、计时/乱序开关）归一与存取；本机偏好 `meta:startPrefs`，不参与跨设备备份转换 |
-| `modules/review-queue.js` | `QB.ReviewQueue`：今日复习队列纯函数——learning（分钟级已到期）→ 到期复习（逾期在前，封顶 `reviewPerDay-learning`）→ 新题（封顶 `newPerDay`）；`dailyFromLog(log,bankId,now)` 从 revlog 推导今日已引入新卡/已复习次数，实现**跨会话每日累计额度**；返回 `{questions, counts, settings}`，不碰存储/DOM |
-| `modules/srs-store.js` | SRS 状态按题库存取（`user:review:<bank>`，contentHash 键）**经 `QB.DB.reviews`（异步）**：`grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear` 均 `async`；评分提交优先 `reviews.patch`（api 增量上行，B1），无 patch 的适配器回退 `record` 整表；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（同步纯函数，一次作答一条 revlog 契约）；`applyLeechAction` 是 leech 动作唯一实现（仅 grade/gradeMany 调用，默认 `none` 不写字段） |
-| `modules/exam-timer.js` | `createExamTimer({durationMs,onTick,onExpire,countUp})`：倒计时（考试，到期 `onExpire` 自动交卷）与正计时（练习 `countUp=true`，从 0 累加不结束）共用同一实现，`onTick` 统一回调「剩余/已用毫秒」 |
-| `modules/source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入测试） |
-| `modules/data-io.js` | 文件/粘贴/拖拽/**URL** 导入编排，统一「解析→预览→insertMany→记录来源」；`refreshUrlFlow` 按 checksum 刷新 |
-| `modules/office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包（与导入端对称） |
-| `modules/backup.js` | 全量备份/恢复：数据载荷**经 `QB.DB.backup.export/import`（异步）**（local 直写 LocalStorage / api 走 REST），外壳与脱敏（`redactSecrets`）在本模块；有图自动 ZIP .qfbk；`confirmRestore` 供文件与 WebDAV 共用；覆盖恢复先快照再写入，失败自动回滚（不先删后写）。**跨布局自动转换**：备份载荷有「本地布局」与「后端布局」两种（见 DATABASE.md §7.1），`applyBackup` 按 `QB.DB.backend` 判定并调用纯函数 `isServerFormat`/`isLocalFormat`/`serverToLocal`/`localToServer` 转换后再落库（字段映射复用 `QB.Wire`、分片生成/重组复用 `QB.QuestionShards.plan/concatShards`；后端布局缺本地专有 meta 偏好时保留本机现值）|
-| `modules/migrate.js` | `QB.Migration.run({force?})`：本地 schema 版本化迁移（**当前 schema=5**；v1→v2 contentHash、v2→v3 题目分片、v3→v4 分片一致修复、**v4→v5 hash 64 位 + 复习 per-hash + 日志分段一次性迁移**），按 `fromVersion` 链式执行；分片复用 `QB.QuestionShards.writeAll`、hash 重映射复用 `QB.HashRemap`、旧布局归一复用 `QB.ReviewStore/RevlogStore/ensureLayout`。**可靠性**：迁移前全量键快照（失败 `restoreAll` 原子回滚）；`meta:migrationLock`（owner/at，30s 陈旧锁可接管）+ 模块级 inflight 单飞 + 二读确认，保证多标签只迁移一次；中断后重入从头安全重跑（幂等）；备份恢复用 `force:true` 自愈「版本戳已为 5 但载荷仍旧」。返回 `{migrated, sharded, repaired, layout}`（见 [DATABASE.md](DATABASE.md) §4） |
-| `modules/sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象异步备份（Basic Auth，fetch 可注入测试）；CORS 受限如实报错 |
-| `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |
-| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT/**只读分享页 HTML** 八格式（qbk 异步读 IndexedDB、html 异步读图片资产），题库/错题/收藏；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder）；格式可按 `formats`（对象白名单）与 `kinds`（格式白名单）双重过滤；材料题在 MD/DOCX/TXT 经公共 `materialBlock` 行式分流（M2-A），见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) |
-| `modules/share-page.js` | `QB.SharePage`：只读分享页构建（复用 `RichText.questionAssetIds` 收集图片、`Assets.getMap` 读字节并内嵌 data URL、`RichText.render` 转义渲染）；`buildHTML(payload, assetMap)` 纯构建可测，`build(payload)` 异步读资产；无脚本/无网络请求/可打印 |
-
-### 3.6 复习调度参数（唯一解析入口）
-
-`bank.sched` 是开放 JSON，字段与默认值：
-
-| 字段 | 范围/格式 | 默认 | 作用 |
-| --- | --- | --- | --- |
-| `newPerDay` | 0–999 整数 | `CONFIG.LIMITS.NEW_PER_DAY` | 每日新题额度（复习队列） |
-| `reviewPerDay` | 0–9999 整数 | `CONFIG.LIMITS.REVIEW_PER_DAY` | 每日到期复习额度（复习队列） |
-| `requestRetention` | 0.70–0.97 浮点 | **0.90** | 目标留存率，只进 `nextIntervalDays` 入参（越高 → 间隔越短） |
-| `maximumIntervalDays` | 1–36500 整数 | **36500** | 新算间隔上限，只压未来 due，不重排已有 due |
-| `learningSteps` | 1–4 个正整数（**秒**），升序去重 | **[60, 600]** | 新卡/重学步骤；内部转毫秒；长度 1 时 `good` 直接毕业 |
-| `leechThreshold` | 0–9999 整数（0=关闭） | **8** | 难卡阈值；徽标恒生效 |
-| `leechAction` | `none` / `tag` | **none** | 默认仅徽标；`tag` 命中后写 `state.leech=true`（不 suspend） |
-| `fuzz` | 布尔 | **false** | 间隔模糊开关；关闭时与金样本逐字段一致 |
-| `fuzzMaxDays` | 0–36500 整数（0=官方规则） | **0** | 只收紧官方 fuzz δ，不放大 |
-| `easyDays` | 7 × 0–100 整数（周日→周六） | **全 100** | 命中降权日按比例压缩间隔；全 100 不生效 |
-
-- **归一**：`QB.SchedSettings.normalize` 是唯一实现；幂等、不改入参、未知键原样保留。
-- **唯一解析点**：`SRSStore.grade` 每次评分、`SRSStore.gradeMany` **每批只读一次库** `QB.SchedSettings.ofBankId(bankId)`，经 `FSRS.review(state, rating, now, weights, { sched })` 既有 `opts` 通道传入。app / review-queue / ui-renderer 均不各自解析或写默认值；`FSRS.review` 的 `sched` 缺失等价于显式默认（金样本 `scripts/fixtures/fsrs-sched-golden.json` 锁定 bit-identical）。
-- **只对未来的卡生效**：参数不重排已有到期时间、不批量改写 learning 状态；读取 `learning.step` 时钳到 `[0, len-1]`。
-- **fuzz 已接入**（默认关闭）：`SRSStore` 只在 `sched.fuzz` 开启时按 `bankId|contentHash|reps` 派生确定性 seed，经 `opts.fuzzSeed` 交给 `FSRS.review`；`fuzzMaxDays` 仅收紧官方 δ。
-- **easyDays 已接入**（默认全 100 = 不生效）：`FSRS.longTermDue` 在 fuzz 之后按目标到期日的本地周几权重压缩间隔，0% → 1 天、恒 ≥1 且不越 maxDays；只压缩一次、不迭代择日。
-- **leech 动作已显式决策**：默认 `none`（仅徽标，旧行为不变），可选 `tag`（`SRSStore.applyLeechAction` 唯一实现，仅 grade/gradeMany 调用，写持久 `state.leech=true`）；**不实现 suspend**（跨队列/撤销/多端恢复无闭环）。
-- **明确不做**：独立 relearning steps。不新增「可配但不起作用」的字段。
-
-### 3.7 无障碍与焦点管理约定（门禁化）
-
-无障碍不是一次性改造，而是**可重复执行的门禁**：能在 Node 里静态断言的进 CI，需要真实布局/命中的走 Edge + CDP 手动门禁。
-
-**静态门禁（`scripts/a11y.test.mjs`，101 断言，进 `test-all` 与 CI）**
-- **对比度（唯一色板事实源）**：直接解析 `css/style.css` 的 `:root` 与 `html[data-theme='dark']` token，按 WCAG 相对亮度公式计算 20 组「前景/背景」色对。正文/次要文字/按钮文字 ≥4.5:1，大字（≥18.66px 粗体或 ≥24px）≥3:1。**不达标时改 token 本身，不在组件里临时覆盖颜色**；颜色语义统一为 `--text/--text-muted/--on-solid/--on-warning/--primary-text/--warning-text/--success/--danger`。
-- **ARIA 与键盘可达**：对 14 份渲染快照（首页、题库列表、六种题型答题页、已作答、结果页、组卷/开始弹窗、搜索页）做 HTML 扫描——禁止 `tabindex>0`；空文本按钮必须有 `aria-label`/`aria-labelledby`；`role="button"` 必须自身可聚焦且具备键盘操作路径；`role="radio"`/`role="checkbox"` 必须有 `aria-checked` 与 `tabindex`；非原生 `data-action` 容器要么自身可聚焦，要么内含原生控件；表单控件必须有关联 label（`aria-label`/`aria-labelledby`/`<label for>`）。
-- **焦点可管理**：`UIRenderer.openModal` 统一为 `role="dialog"` + `aria-modal="true"` + `aria-labelledby`（标题无 id 时补 `modal-title`；无标题回退 `aria-label`），打开后把焦点移到弹窗内首个可聚焦元素；`closeModal` 统一把焦点还给触发元素。Tab/Shift+Tab 在弹窗内循环；`Esc` 复用 `app.js` 既有全局处理器调用 `UI.closeModal()`。**新增弹窗不得绕过 `openModal/closeModal` 自成一套焦点逻辑**，否则静态断言与真机门禁都会失败。
-- **异步入口的 returnFocusTo（唯一实现）**：`openModal(html, onMount, onClose, returnFocusTo)` 的第 4 参数是可选显式回焦目标。凡「先 `await` 文件选择/网络拉取/解析，再打开弹窗」的路径，触发元素必须在**事件入口同步捕获**（`app.js` 的 `handleAction` 统一 `const trigger = el`），再沿 `importFlow → importFile → commitImport → showPreview/askDuplicate`、`openFlow/distributeFlow → chooseFormat/askPackageInfo` 透传；调用点不得各自再写一份 `document.activeElement` 记录逻辑。`openModal` 的回退规则：显式 `returnFocusTo` > 已打开弹窗沿用上一次记录的触发元素（嵌套弹窗保留外层入口）> 当前焦点（排除 `BODY`）。异步取消路径（Esc/跳过）不得在 `closeModal` 之后立即重渲染触发按钮所在视图，否则刚归还的焦点会被新 DOM 替换掉（`bank-import` 等入口仅在确有数据变化时 `render()`）。
-- **动效**：`css/style.css` 必须存在 `@media (prefers-reduced-motion: reduce)` 分支，使用 `*, *::before, *::after` 全覆盖，将 `animation-duration`/`transition-duration` 压到 `0.01ms !important`，并关闭 `scroll-behavior: smooth`。
-
-**复习设置弹窗布局约定（SRS）**
-- 字段容器统一挂 `.sched-grid` 作用域（`app.js` 的 `openSchedDialog`）；样式只作用于弹窗，**不得改全站表单**。
-- flex 子项必须 `min-width: 0`：`input[type=number]` 的原生最小内容宽约 73px，否则 7 列会按 min-content 撑破弹窗。
-- 轻松日 7 列必须 `repeat(7, minmax(0, 1fr))`，数字输入 `width: 100%; min-width: 0`；≤560px（360 档）改 4 列（4+3 分行），保证 `scrollWidth == clientWidth`。
-- 触摸热区统一取 `--tap-min: 44px`（唯一定义在 `:root`）：弹窗内数字/下拉 `min-height` 用它，复选框由包裹 `label.sched-check` 撑到 44px 高（实际点击矩形以 label 为准）。
-- **禁止 `overflow-x: hidden` 等裁剪**：溢出必须从布局根因解决；静态门禁断言全站无该裁剪。
-
-**真机门禁（`scripts/a11y-browser.mjs`，374 断言，非 CI 门禁）**
-- 原因：依赖本机 Edge 的 `--remote-debugging-port` 真实布局与命中测试，CI 无浏览器环境，故**不并入 CI**，按需手动执行。
-- 三档视口 `360 / 768 / 1280`（可用 `A11Y_WIDTHS` 覆盖）× 两主题 `light / dark`（可用 `A11Y_THEMES` 覆盖）；视口使用 `mobile:false` 保留桌面滚动条，360px 下 `clientWidth≈345`，与真机桌面窗口实测口径一致。
-- 页面覆盖首页、答题页、结果页、导入预览、三选一弹窗、设置页；弹窗打开时额外检查整页横向溢出。
-- 断言：`document.scrollWidth <= clientWidth + 1` 无横向溢出；无元素超出视口（被 `overflow` 裁剪的容器内元素豁免）；关键按钮与答题卡格 ≥44×44 CSS px；弹窗落在视口内、内容超出时 `overflowY` 可滚动、焦点在弹窗内；控件可访问名称与 `role` 状态；`prefers-reduced-motion` 下动画/过渡时长 ≤0.02ms。
-- **异步焦点回位**：真实文件选择（DTO 喂入 `File` + 模拟对话框关闭后焦点落到 `BODY`）打开导入预览/三选一，按 `Esc` 后断言 `activeElement` 是触发按钮 `data-action="bank-import"`，不是 `BODY`。
-- **视觉回归实测**：题型徽标前景/背景实测算对比度（深色 5.52:1）；结果页与统计页 `.bar-fill` 必须宽高 >1px（0×0 视为失败）；悬浮滚动按钮与 `.bar-val` 不得矩形重叠。
-- **复习设置弹窗（三档宽度）**：弹窗内容 `scrollWidth == clientWidth`（360/768/1280 溢出均须为 0）；11 个控件（`#sched-fuzz`、`#sched-fuzzmax`、`#sched-ed0..6`、`#sched-leech-action`、`#sched-leech`）实际点击矩形 ≥44×44（复选框量包裹 `label` 热区）；复选框 `Space`、下拉 `↓` 可操作；`Esc` 关闭后焦点回位触发按钮。
-- 输出 `.screenshots/a11y-browser/result.json` 与逐档截图（gitignored）。
-
-**约束**：不得为过门禁删功能或隐藏控件；不改既有公开签名；不引入 axe-core 等第三方依赖；修 UI 不得回退模态焦点/`Esc`/键盘行为。每处修复都应有对应断言，并先用旧代码（`git archive` 临时 worktree）证明该断言会失败。
+| 入口与配置 | `index.html`、`config.js`、`app.js` | [modules/entry.md](modules/entry.md) |
+| 公共抽象 | `js/utils/*`（判分、去重键、存储门面、资产、ZIP/XML 适配） | [modules/utils.md](modules/utils.md) |
+| 数据访问与导入 | `js/data/*`、`js/importers/*` | [modules/data.md](modules/data.md) |
+| 业务模块 | `js/modules/*`、`js/workers/*` | [modules/app.md](modules/app.md) |
 
 ## 4. 关键数据流
 
@@ -335,85 +195,10 @@ Exporters.openFlow({kind, bank, trigger})   // trigger 可选：异步收集后�
 | --- | --- |
 | file:// 限制 | 不使用 ES module / fetch 本地文件；导入走 `<input type=file>` + FileReader |
 | xlsx/docx 解析 | 依赖浏览器 `DecompressionStream`；老浏览器不支持时给出明确错误提示 |
-| LocalStorage 容量 | schema v6 起业务数据默认存 IndexedDB（解除约 5MB 硬顶，见 §9）；IDB 不可用（隐私模式/配额拒绝）时**安全回落** LS，此时仍受 5–10MB 限制。LS 只保留极小引导标记 |
+| LocalStorage 容量 | schema v6 起业务数据默认存 IndexedDB（解除约 5MB 硬顶，见 [STORAGE.md](STORAGE.md)）；IDB 不可用（隐私模式/配额拒绝）时**安全回落** LS，此时仍受 5–10MB 限制。LS 只保留极小引导标记 |
 | 序列化开销 | `Storage` 防抖批写（200ms）减少写放大；`beforeunload` 强制同步 |
 | 内容安全（CSP） | 页面 `index.html` meta 与 `scripts/lib/security-headers.mjs` 的 `CSP` 逐字符一致（pwa.test 守护）；`script-src 'self'`（无内联脚本/无 eval），`style-src 'unsafe-inline'`（渲染层内联样式），`img-src data: blob:`（IndexedDB 资产），`connect-src http: https:`（自建后端/WebDAV/URL 导入），各指令额外放行 `file:` 仅用于双击 `index.html` 直开；本地静态服务与参考后端对 HTML 另加 `frame-ancestors 'none'`/`X-Frame-Options: DENY`，所有静态响应加 `nosniff`/`Referrer-Policy: same-origin`。二次开发新增内联脚本会被拦截，须放外部文件 |
 
-## 9. 存储底座：LocalStorage → IndexedDB（Phase G / schema v6）
+## 9. 存储底座（LocalStorage → IndexedDB）
 
-### 9.1 为什么这样分层
-
-```
-业务模块 / 适配器 / 领域模块      ← 只经 QB.DB.* 与 QB.Storage（签名不变）
-        │
-   QB.Storage（同步门面）          ← 内存缓存 + 防抖/微任务事务；唯一对外读写入口
-        │
-   QB.Store（持久化引擎）          ← **唯一后端切换点**：lsBackend / idbBackend 同接口
-        ├── lsBackend  → localStorage（回落/旧版/受限环境）
-        └── idbBackend → IndexedDB 对象仓 qforge-kv/kv
-```
-
-- **一套接口、两条实现**：`QB.Store.get/set/del/keys/batch/clear` 对两后端行为一致；业务代码不写 `if (idb)`，领域模块（题库/SRS/错题/收藏/历史/计划/revlog）**禁止直连 `localStorage`**。禁止为 IDB 另写一套领域逻辑。
-- **同步门面不拆**：`QB.Storage` 的同步读（`get/getFresh/keys`）是上层大量同步调用的既有契约。IDB 模式用「启动时全量水合内存缓存」维持同步读；写走缓存 + 微任务聚合事务，`flush()` 确认真实落盘。
-- **原子性**：一次评分在同一调用栈里写「状态键 + 尾段日志 + 修订号」，IDB 模式下聚合成**一个事务**；事务失败整体回滚、待写保留、`onError` 通知并重试（不会出现状态写成功、日志丢一半）。
-- **O(改动数) 写入**：迁移只换后端，不换布局——题目仍 200 题/片、复习仍 per-hash 键、日志仍 200 条/段；单次评分只写 1 个状态键 + 1 个尾段（实测 0.06ms / 213B @20000 题，与 v5 per-hash 基线 0.14ms 同量级，见 [DATABASE.md](DATABASE.md) §9）。
-
-### 9.2 数据划分
-
-| 存放位置 | 键 | 理由 |
-| --- | --- | --- |
-| **IndexedDB**（业务数据） | `banks` / `questions:*`（分片 + 清单）/ `user:review:<bank>:<hash>` + `user:reviewMeta` / `user:revlogMeta` + `user:revlog:<i>` / 错题 / 收藏 / 历史 / 会话 / 权重 / 当前库 / 主题 / 开始偏好 / 题目图片资产索引 | 数据量随题量增长（50k 题约 45MB 估算），必须解除 LS 约 5MB 硬顶；IDB 配额按 origin 计算且通常远大于 LS |
-| **LocalStorage**（引导标记，`QB.Store.BOOTSTRAP_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:schemaVersion` / `meta:migrationLock` / `meta:migrationBackup` / `meta:lsQuotaProbe` / `meta:lsQuotaCap` | **打开 IDB 之前就要同步可读**（决定用哪个后端）；迁移锁需跨标签同步原子；自动备份在 IDB 不可用时要有落点；`meta:lsQuotaProbe` 是探测临时键（每次探测结束/启动时清理，不得残留），`meta:lsQuotaCap` 是容量探测缓存。这些都是极小状态，不占容量 |
-| 备份排除（`BACKUP_EXCLUDED_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:lsQuotaProbe` / `meta:lsQuotaCap` | 只描述「本设备当前用哪个后端/容量」，换设备应重新探测；恢复 replace 时也不删除（否则会把新设备的后端选择一起删掉） |
-
-题目图片二进制沿用既有独立 IDB 库 `qforge/assets`（不属于本节的 KV 底座）。
-
-### 9.3 后端选择与安全回落
-
-后端标记 `meta:storageBackend` 取值：`null`（首次） / `'idb'` / `'ls'`（用户显式回退，不再自动升级） / `'ls-fallback'`（IDB 不可用或读失败）。
-
-启动路径（`js/app.js::boot` → `QB.Storage.initStore()` → `QB.Store.init()`）：
-
-1. 无 `indexedDB`（或探测打开失败/对象仓缺失）→ 写 `ls-fallback`，继续用 LS（**不白屏**）。
-2. 标记为 `'idb'` → 打开并 `readAll(true,true)` 全量水合；**打开失败、读取失败、或 IDB 无业务键而 LS 仍有业务键**（数据丢失）→ 写 `ls-fallback` 并回落 LS。
-3. 标记为 `null` → 保持 LS，由 Migration v6 持锁决定是否升级（`Migration.run` 内部 `migrateV5ToV6`）。
-4. 标记为 `'ls'` → 只走 LS（用户回退后的稳定状态，不自动再升级）。
-
-所有回落都保留原数据可读；`Store.detect()` 的失败原因（`no-indexeddb` / `QuotaExceededError` / 版本冲突等）写进标记并在备份弹窗展示。
-
-### 9.4 schema v6（LocalStorage → IndexedDB）每一步
-
-沿用 v5 迁移框架（同一 `Migration.run`、同一把锁、同一套快照/回滚），**不改数据形状**；迁移过程改为**流式分批 + 断点续传**，任何时刻只保留在途批次：
-
-1. 抢 `meta:migrationLock`（owner + 30s TTL）；抢不到说明其他标签在迁移，本标签**进入等待**（`QB.Storage.waitForMigrationTakeover`）：轮询 `meta:storageBackend`（200ms）+ 复用 `BroadcastChannel` 的 `{type:'backend'}` 广播，期间读写仍走内存缓存但**写入只排队、不落 LocalStorage**（否则会被迁移后的自动清理当旧数据删除）。
-   - **协作式**：持锁标签每 2s 心跳续租**同一把锁**（`startLockHeartbeat`，不新增并发原语），迁移再慢锁也不会因 30s TTL 被误判为崩溃；等待者的 `Migration.run()` 仍以 `tryLock` 为唯一裁决点，返回 `locked` 时继续等胜者完成，**不会出现两个标签并发迁移**。
-   - **中断自愈**：等待超过 TTL 后不再只弹 toast，而是按 `[0,1000,3000,6000]` 退避重试 `Migration.run()` 主动重抢过期锁；重抢成功即完成迁移并切后端，随后把等待期写入/删除回放进 IDB。
-   - 重试仍失败时返回 `persisted=false`，UI 状态栏**持久显示**「本页写入尚未落盘（迁移未完成）」并 toast 明确告知，绝不静默留在内存或假装成功。
-   - 引导标记（后端标记/迁移标记/schema 版本/迁移锁）在等待期**不被门控**、始终同步写 LocalStorage：否则接管方 `tryLock` 写的锁只留在本页内存，其他标签看不到。业务键的等待期门控保持不变。
-   - **迁移前容量预检**（2026-11-03，运行时探测）：抢锁成功后、备份/写入前调用 `QB.Store.preflightMigration({idbUsable})`（口径见 [DATABASE.md](DATABASE.md) §9.5）。上限由 `QB.Store.ensureLSQuota()` 运行时探测：独立键 `meta:lsQuotaProbe`，从 1Mi 字符倍增到 16Mi、首次配额失败后二分到 16Ki 粒度，写后回读校验，`finally` 清理；结果缓存到 `meta:lsQuotaCap`（探测值 7 天 / 回退值 1 小时 / UA 变化或缓存失效重测）。探测在首屏渲染后空闲期后台执行（`requestIdleCallback`，超时 2s；无则 800ms `setTimeout`），不进启动关键路径。IDB 可用时预检**只读有效缓存**（`Store.readLSQuota()`，无缓存用保守常量且不探测）并恒放行（≥85% 仅标记 `nearLimit` 供 UI 提示）；IDB 不可用时同步 `ensureLSQuota()` 后按「整份副本」估算，不足即抛 `LS_CAPACITY`、释放锁、不写任何业务键。探测失败回退保守常量 5,210,112 字符并标记 `source=conservative-constant`，不冒充探测值。
-   - **迁移写入缓冲**（2026-11-03）：备份成功后调用 `QB.Storage.beginMigrationBuffer()`。迁移期间业务写入只进内存缓存/待写队列，**LocalStorage 只允许写引导键**（锁/进度/标记），因此 v4→v5 的 per-hash/分段键不再追加到 LS（修复近满旧库在 `user:revlog:47` 爆 `QuotaExceededError`）。目标为 LS（IDB 不可用）时不启用缓冲，仍用推进前快照 `restoreAll` 回滚。
-2. `saveAutoBackup` 迁移前全量备份：分块保存**原始 JSON 串**（100 键/条，不解析成对象）；优先独立 IDB `qforge-backup/snapshots`，不可用时回落 `meta:migrationBackup`；写后回读逐串校验，失败即中止、不写任何数据。
-3. `Store.detect()`：IDB 不可用 → 写 `ls-fallback`，本次迁移按 LS 结束（业务可用）。
-4. `Store.migrateToIdb(lsSource())`：按分片流式复制非引导键——读源是**逻辑键视图**（`QB.Storage.keys()` = LS ∪ 迁移缓冲，且剔除等待期墓碑），确保只存在于内存缓冲的新布局键也被复制；题目 **200 题/片**（与存储分片对齐），其余前缀键 **64 键/批**；每批「单事务写 IDB → **回读本批**逐键深比对（`QB.deepEqual`，全工程唯一比较实现）→ 写断点 → 释放」。回读只针对本批键（单事务多请求），**不整库 `getAll`、不物化整库**；校验在批内即时完成，通过即释放该批，不再单独做一次整库回读。
-5. **断点续传**：每批完成即写 `meta:migrationProgress`（`{v,done,total,bytes,at}`，始终同落 LocalStorage）；中断后下次启动从 `done` 继续，已完成批次不从头重跑；重入幂等（同名 key 覆盖写，最终逐键一致）。
-6. **进度可订阅**：`Store.onMigrationProgress(fn)`（返回取消订阅函数）与 `Store.migrationProgress()` 提供 `{done,total,percent,bytes}`；`app.js::boot` 订阅并在状态栏显示「正在迁移存储到 IndexedDB X%（done/total）」，完成后取消订阅，避免长时间无声阻塞。
-7. 逐键完整性校验：已并入步骤 4 的批内即时校验（覆盖题库/题目/复习/错题/收藏/日志），任一不一致即抛错、标记保持未迁移；迁移路径不调用 `verifyAgainstLS`（该接口只用于启动/清理前的独立体检，分块回读且不整库物化）。
-   - **校验粒度实测结论（2026-11-02）**：20k 分阶段采样中，v5→v6 阶段峰值 +70.00MB 与写路径回读采样同步出现；`MIG_SKIP_VERIFY=1` 隔离实验仅把该阶段峰值降到 +58.13MB（校验约占 12MB / 84ms），`MIG_SKIP_WRITE=1` 则 +0.00MB——**瓶颈是 IDB 单条 put 的结构化克隆与回读克隆本身（O(data)），不是校验批次大小**。改用 range `getAll` 每批一次回读的尝试实测峰值/耗时双双变差（20k 70.05→92.54MB、250.38→437.01ms），已按数据回退，保留逐键 `get` 回读。因此原始峰值仍随题量线性，本阶段只收紧门禁、不宣称线性已消除（数据见 [DATABASE.md](DATABASE.md) §9.2）。
-8. 全部一致 → 写 `meta:storageBackend='idb'` + `lsMigratedAt`，`lsBackupState='retained'`；`QB.Storage.endMigrationBuffer(handle,true)` 丢弃内存迁移产物；`QB.Storage.adoptStore({mode:'idb'})` 切换门面（缓存已在迁移缓冲中，无需额外整库回读克隆）。
-9. 版本戳 `meta:schemaVersion=6`，`await flush()` 确认落盘；释放锁。
-10. **自动清理窗口**：下一次启动 `Store.init()` 检测 `lsBackupState==='retained'` → 先校验 IDB 可读（题目数 >0 且与分片清单一致）→ 自动 `cleanupLegacyLS()`：只保留 BOOTSTRAP_KEYS，写 `meta:lsCleanupAt` 并把 `lsBackupState` 置为 `'cleaned'`；清理后按 BOOTSTRAP_KEYS 重读 LS 刷新缓存。清理失败不删除任何一侧（IDB 数据完好，下次启动可重试），回退仍可走全量备份；备份弹窗仍保留手动「清理旧 LocalStorage」入口。
-
-幂等/重入：迁移中途中断（标记仍非 `idb`）→ 下次启动按 `meta:migrationProgress.done` 从断点续跑，同名记录覆盖写，最终收敛；多标签并发只有持锁标签执行，未持锁标签**等待切换**；等待超时后按「协作式 + 中断自愈」策略重抢过期锁接管（见步骤 1），切换后补写等待期写入，避免「写 LS 后被清理」的静默丢数据。接管迁移会先快照等待期 `pending/deletes/clear`（`Migration.run` 内部 `adoptStore` 会重置待写队列），迁移成功后经 `_applyPendingWrites` 唯一实现回放，再复位 `_awaiting`（Node 回归：A 崩溃后 B 接管，等待期写的收藏 21/22 全部落 IDB，最终 22 → 刷新仍 22）。
-
-### 9.5 回滚与降级路径
-
-| 场景 | 行为 | 数据影响 |
-| --- | --- | --- |
-| 显式回退（备份弹窗「回退到 LocalStorage」，默认 `current`） | 把当前 IDB 全量逐键写回 LS + 回读校验，成功才写 `ls` 标记；写满/校验失败**保持 IDB 并抛错，不半切** | 迁移后的新数据保留 |
-| 回退到迁移前快照（`snapshot`） | 直接写 `ls` 标记，改用保留的迁移前 LS 数据 | 迁移后新写入不保留（需用户明确选择） |
-| 回退后重新启用 | `reenableIdb` 重新探测 + `migrateToIdb` 逐键校验 | 以当前 LS 为准 |
-| IDB 在目标环境不可用 | 启动即 `ls-fallback`，业务继续用 LS | 无丢失；容量仍受 LS 限制 |
-| 迁移前空间不足（仅 IDB 不可用时拦截） | 预检抛 `LS_CAPACITY`，释放锁、schema 不推进、不写业务键；UI 提示具体已用/上限 | 无丢失、无半写；继续兼容模式 |
-| 想彻底释放 LS 空间 | 迁移后首次启动校验 IDB 完整即**自动** `cleanupLegacyLS`（只保留 BOOTSTRAP_KEYS）；备份弹窗仍可手动触发 | 删除 LS 退路，此后回退只能靠备份 |
-
-回滚需要什么：① 保留的 LS 旧数据或一份全量备份；② 页面刷新后重新 `initStore`；③ 若 LS 空间不足以容纳 IDB 数据，回退会明确失败并保持 IDB（不会静默丢数据）。真实 Edge 配额与近满迁移已用 CDP 真窗口验证（2026-11-03）；真实无痕窗口与多标签 IDB 事务语义仍未实机验证（见 [DATABASE.md](DATABASE.md) §9.4、§9.5）。
+> 单独成文：[STORAGE.md](STORAGE.md) —— 为什么这样分层、数据划分、后端选择与安全回落、v6 迁移十步、回滚路径。

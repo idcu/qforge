@@ -61,7 +61,7 @@
 | Anki | `.apkg` | ZIP 内的 SQLite collection（Legacy1/2） | Front/Back 字段（见 §11） | 仅支持「兼容旧版 / Legacy」导出；`.anki21b` 明确拒绝；按 note 导入，多卡历史不保留 |
 | Quizlet | `.txt` `.quizlet` | 每行 `term<分隔符>definition` | 无选项（全部 essay） | Tab/逗号/分号/竖线自动识别；无图片、无在线进度；与 CSV 的路由边界见 §11.3 |
 
-通用要求：题干必填；单/多选题必须有选项与答案；警告（缺答案等）**不阻断**导入，可在预览页核对；去重键为「题型 + 规范化题干 + 选项 + 正确答案」（v2，详见 [DATABASE.md](DATABASE.md) §4）。
+通用要求：题干必填；单/多选题必须有选项与答案；警告（缺答案等）**不阻断**导入，可在预览页核对；去重键为「题型 + 规范化题干 + 选项 + 正确答案」（当前版本见 [DEVELOPMENT.md](DEVELOPMENT.md) §0「当前版本读数」，算法详见 [DATABASE.md](DATABASE.md) §4）。
 
 ## 2. JSON（`.json`）
 
@@ -157,7 +157,7 @@
 ## 4. Excel（`.xlsx`）
 
 - 读取**全部工作表**：每张表首行须为同一套表头（首行表头 + 数据行），按工作簿标签顺序合并，空表自动跳过；多表时预览警告区给出「N 个工作表合并 M 题」汇总。
-- 原生解析：ZIP（`zip-reader`）→ `workbook.xml` + rels 解析表顺序与路径 → `sharedStrings.xml` / 各 `sheetN.xml` → 自研 `XmlLite`（零依赖，不依赖浏览器 DOMParser，Node/CI 同路径）。
+- 解析：ZIP（`zip-reader`，底层 `@idcu/format-zip`）→ `workbook.xml` + rels 解析表顺序与路径 → `sharedStrings.xml` / 各 `sheetN.xml` → `XmlLite`（底层 `@idcu/format-xml-lite`；零第三方依赖，不依赖浏览器 DOMParser，Node/CI 同路径）。
 - 支持共享字符串（`t="s"`）、内联字符串（`t="inlineStr"`）与数值单元格。单表工作簿行为与旧版完全一致。
 - 材料题多行块（「材料/小问」两列）与 CSV 完全同规则，见 §3.1（`sheetToRows → tableToQuestions` 同一管线，零额外代码）。
 
@@ -305,7 +305,10 @@ DOCX 中材料题与 Markdown 使用**同一套行式材料块语法**（LinePar
 
 导入预览会显示：**总题数 / 各题型数 / 警告 / 文件内重复数**；JSON/.qbk 若带 `checksum`（本系统导出默认带），还会显示**内容校验和一致/不一致**（不一致仅警告，不阻断导入）。分发题包还会显示题包名/版本/题数与**清单校验和一致/不一致**（规则见 §9）。
 
-- **去重键（v2）**：`'2:' + FNV1a(题型 + 规范化题干 + 选项文本集合 + 正确答案语义)`。选择类答案按选中文本比对（选项乱序/字母重映射不影响），判断按布尔语义，填空按各空答案，简答按参考答案；分类/难度/标签不参与。题干仅尾部空格差异视为同题；**同题干但选项/答案不同的题分别保留**。v1（仅题型+题干）存量在升级时由 `Migration.run` 重映射（见 [DATABASE.md](DATABASE.md) §4）。
+- **去重键（版本号见 [DEVELOPMENT.md](DEVELOPMENT.md) §0，当前为 v3）**：`'<版本>:' + FNV1a(题型 + 规范化题干 + 选项文本集合 + 正确答案语义)`。选择类答案按选中文本比对（选项乱序/字母重映射不影响），判断按布尔语义，填空按各空答案，简答按参考答案；分类/难度/标签不参与。题干仅尾部空格差异视为同题；**同题干但选项/答案不同的题分别保留**。v1（仅题型+题干）/ v2 的存量在升级时由 `Migration.run` 重映射（见 [DATABASE.md](DATABASE.md) §4）。
+  > **为什么这里不写死版本号**：它曾经写死过 v2，而实现早已是 v3 —— 两份真相，
+  > 谁也不知道该信哪一份。现在版本号的**唯一声明处**是 DEVELOPMENT.md §0 那张表，
+  > 由 `scripts/docs-links.mjs` 与 `js/utils/question-id.js` 的 `HASH_VERSION` 对账。
 - **合并**：跳过与库内已存在的重复题；**覆盖**：清空目标库后写入。
 - 警告（如缺答案）**不阻断**导入，但该题在答题时会判为未得分。
 

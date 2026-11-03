@@ -467,7 +467,7 @@ return QB.MdImporter.parse(...);
 | 未使用变量 | [fsrs-train-core.js](../js/modules/fsrs-train-core.js#L142-L156) | `cur` 赋值后未使用 |
 | 冗余判断 | [adapters.js](../js/importers/adapters.js#L256-L256) | `options.length >= 2 && options.length <= 2` 等价于 `=== 2` |
 | 注释陈旧 | [srs.js](../js/modules/srs.js#L3-L3)、[fsrs-opt.js](../js/modules/fsrs-opt.js#L2-L2) | 仍写 FSRS-4.5，实际 FSRS-6 |
-| SW 注释 | [sw.js](../js/sw.js#L25-L39)、[app.js](../js/app.js#L1421-L1422) | 注释称“无 skipWaiting”，代码有 `skipWaiting()` + `clients.claim()` |
+| SW 注释 | [sw.js](../sw.js#L25-L39)、[app.js](../js/app.js#L1421-L1422) | 注释称“无 skipWaiting”，代码有 `skipWaiting()` + `clients.claim()` |
 | 死代码 | `Favorites.has/count`、`WrongBook.count`、`QuizEngine.sliceQuestions/getUserAnswer`、`QuestionEditor.openReservedDialog`、`QB.App.State` 导出 | 无调用方；建议删除或补测试 |
 | 首屏请求 | [index.html](../index.html#L49-L123) | 65 个同步脚本、70 个首屏文件；HTTP/2 可接受，HTTP/1.1/弱网偏慢 |
 | 可访问性 | [index.html](../index.html#L34-L34)、`css/style.css` | `#view aria-live=polite` 覆盖整视图；无 `radiogroup`；无 axe/Lighthouse 门禁；无 768px 断点 |
