@@ -6,9 +6,9 @@
 
 ---
 
-## 待回填 · fix(ui): 导入失败原因错误语义（D3）+ 来源徽章长路径分隔符
+## f76f475 · fix(ui): 导入失败原因错误语义（D3）+ 来源徽章长路径分隔符
 
-**Commit**：`（本轮修复提交，hash 提交后回填）`
+**Commit**：`f76f475`
 
 **真机复验证据（D1/D2 已生效，9 项过 8）**
 - D3：URL 0 题弹窗内原因文字 computed `color = rgb(31, 35, 40)`、`background = rgba(0, 0, 0, 0)`、`borderColor = rgb(31, 35, 40)`，即普通正文色；`.anki21b`「导入未完成」弹窗同样。根因：`data-io` 只内联 `white-space/margin`，`css/style.css` 无 `.import-error` 规则（grep 0 命中），而既有 `.qe-err` 已用 `var(--danger)`。
