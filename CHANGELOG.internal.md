@@ -6,9 +6,9 @@
 
 ---
 
-## 待回填 · fix(importers): 粘贴入口统一解析 + 0 题拒绝原因可见（D1/D2）
+## 20d16ed · fix(importers): 粘贴入口统一解析 + 0 题拒绝原因可见（D1/D2）
 
-**Commit**：`（本轮修复提交，hash 提交后回填）`
+**Commit**：`20d16ed`
 
 **真机零注入验证发现（HEAD `07555d3`）**
 - D1（阻断）：首页粘贴 `apple<Tab>苹果\nbanana<Tab>香蕉` → **落库 0 题**，toast「解析失败：未能从 Markdown 中识别出题目」；同一文本 `QB.Importers.runImport({name:'set.txt', text})` → 2 题 / `types=["essay","essay"]` / `format=quizlet（分隔符 Tab）`。根因：`data-io.parsePastedText` 只走 JSON/MdImporter，绕过了导入器注册表，形成第二条解析链。
