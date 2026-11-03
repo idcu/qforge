@@ -1,10 +1,11 @@
 /**
  * 导入编排（公共抽象）
- * 三种入口共用同一「解析 → 预览校验 → insertMany 落库」流程：
+ * 四个入口共用同一「解析 → 预览校验 → insertMany 落库」流程：
  *   - importFlow：选择文件
  *   - importFile：拖拽得到的 File
- *   - importTextFlow：剪贴板粘贴文本（自动嗅探 JSON / Markdown-行式）
- * 解析走 registry / importers，落库复用 QuestionRepo.insertMany，本模块不重复实现。
+ *   - importTextFlow：剪贴板粘贴文本（虚拟文件名走 registry/sniff；JSON→.txt(Quizlet/CSV)→Markdown 回退）
+ *   - importUrlFlow / refreshUrlFlow：网络地址（快照）
+ * 四个入口解析一律经 QB.Importers.runImport（粘贴入口不维护第二条解析链），落库复用 QuestionRepo.insertMany。
  * 导出统一走 js/modules/exporter.js（QB.Exporters）。
  */
 (function (global) {
@@ -144,10 +145,66 @@
     } catch (e) { /* 来源记录失败（含并发冲突）不影响题目导入 */ }
   }
 
+  /**
+   * 0 题 / 拒绝导入的可读原因（唯一实现）：
+   * 优先取 migration.supported=false 的拒绝原因，再补首条 warning；
+   * 两者互相包含时只保留更长的一条，避免重复。
+   * 无任何原因时保持旧文案「未解析出任何题目」。
+   */
+  function importFailureText(result) {
+    const mig = result && result.meta && result.meta.migration;
+    const reason = mig && mig.supported === false && mig.reason ? String(mig.reason).trim() : '';
+    const warnings = ((result && result.warnings) || []).filter(Boolean).map((w) => String(w).trim());
+    const first = warnings.length ? warnings[0] : '';
+    if (!reason && !first) return '未解析出任何题目';
+    if (!reason) return first;
+    if (!first) return reason;
+    if (first.indexOf(reason) >= 0 || reason.indexOf(first) >= 0) return reason.length >= first.length ? reason : first;
+    return reason + '\n' + first;
+  }
+
+  /** 0 题且原因可读时弹可停留错误弹窗；无原因时保留旧 toast（D2：拒绝原因不能被吞） */
+  function showImportFailure(result, returnFocusTo) {
+    const text = importFailureText(result);
+    if (text === '未解析出任何题目') { UI.toast(text, 'err'); return; }
+    UI.openModal(
+      '<h3>导入未完成</h3>' +
+      '<div class="li-meta">没有可导入的题目，原因如下：</div>' +
+      '<div class="import-error" role="alert" style="white-space:pre-wrap;margin-top:8px">' +
+      QB.escapeHtml(text) + '</div>' +
+      '<div class="modal-actions"><button class="btn" data-action="modal-ok">关闭</button></div>',
+      (modal) => {
+        const btn = modal.querySelector('[data-action="modal-ok"]');
+        if (btn) btn.onclick = () => UI.closeModal();
+      },
+      undefined,
+      returnFocusTo
+    );
+  }
+
+  /** 来源弹窗内联展示 0 题原因（不关闭弹窗、不丢用户已输入内容） */
+  function showInlineFailure(modal, result) {
+    if (!modal || typeof document === 'undefined') return;
+    let box = modal.querySelector('.import-error');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'import-error';
+      box.setAttribute('role', 'alert');
+      box.style.whiteSpace = 'pre-wrap';
+      box.style.marginTop = '8px';
+      const actions = modal.querySelector('.modal-actions');
+      if (actions && actions.parentNode) actions.parentNode.insertBefore(box, actions);
+      else modal.appendChild(box);
+    }
+    const text = importFailureText(result);
+    box.textContent = text;
+    box.hidden = text === '未解析出任何题目';
+  }
+
   /** 解析结果 → 预览 → 落库（文件/粘贴/拖拽/URL 共用）；source 为来源描述 */
   async function commitImport(bank, result, source, returnFocusTo) {
     if (!result.questions.length) {
-      UI.toast('未解析出任何题目', 'err');
+      showImportFailure(result, returnFocusTo);
       return null;
     }
     // G4：分发包重复导入识别（同 id+版本 → 显式选择；同 id 新版本 → 仅提示，按合并去重）
@@ -192,19 +249,40 @@
     return QB.Importers.runImport(file);
   }
 
-  /** 粘贴文本嗅探：JSON 走 JsonImporter，其余按行式（Markdown/纯文本，LineParser 同源） */
+  /**
+   * 粘贴文本嗅探：不再维护第二条解析链，统一复用导入器注册表。
+   *   1) 以 { / [ 开头先按虚拟 .json 走 runImport（[材料题] 行式块在 JSON 语法失败时回退）；
+   *   2) 再以虚拟 .txt 走 runImport，由 Quizlet（priority+sniff）接管两列 term/definition；
+   *   3) 注册表无解析器接受（如 Markdown 标题行式）→ 回退 MdImporter，保持原行为。
+   * 返回值一律为 runImport 形状（questions/warnings/format/stats/meta），调用方不得再次校验。
+   */
   async function parsePastedText(text) {
     const trimmed = String(text || '').trim();
     if (!trimmed) throw new Error('内容为空');
-    // 以 [ 开头的行式材料块（[材料题]）不能直接当 JSON；先试 JSON，仅“JSON 语法失败”回退行式。
+    // 以 [ 开头的行式材料块（[材料题]）不能直接当 JSON；仅“JSON 语法失败”回退后续入口。
     if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
       try {
-        return await QB.JsonImporter.parse({ text: trimmed, fileName: '粘贴.json' });
+        return await QB.Importers.runImport({ name: '粘贴.json', text: trimmed });
       } catch (e) {
         if (!/JSON 解析失败/.test(String(e && e.message))) throw e;
       }
     }
-    return QB.MdImporter.parse({ text: trimmed, fileName: '粘贴.md' });
+    let routed = null;
+    try {
+      routed = await QB.Importers.runImport({ name: '粘贴.txt', text: trimmed });
+    } catch (e) {
+      routed = null; // .txt 的 CSV 分支要求表头；不满足即视为未命中，交回 Markdown 行式解析
+    }
+    if (routed && routed.questions.length) return routed;
+    const md = await QB.MdImporter.parse({ text: trimmed, fileName: '粘贴.md' });
+    const validated = QB.Adapters.validateQuestions(md.questions || []);
+    return {
+      questions: md.questions || [],
+      warnings: (md.warnings || []).concat(validated.warnings || []),
+      format: md.format || 'markdown',
+      stats: validated.stats,
+      meta: null
+    };
   }
 
   /** 选择文件完整流程 */
@@ -230,14 +308,14 @@
     return commitImport(bank, result, source, returnFocusTo);
   }
 
-  /** 剪贴板粘贴导入 */
+  /** 剪贴板粘贴导入（与文件/拖拽/URL 共用 registry 解析与 commitImport 落库） */
   function importTextFlow(bank, returnFocusTo) {
     if (!bank) { UI.toast('请先创建一个题库', 'err'); return null; }
     return new Promise((resolve) => {
       UI.openModal(
         '<h3>粘贴文本导入</h3>' +
-        '<div class="li-meta">支持 JSON（标准结构/数组）或行式题目，格式同 Markdown 导入：' +
-        '「<code>1. 题干</code> / <code>A. 选项</code> / <code>答案：X</code> / <code>解析：…</code> / <code>分类：…</code>」。</div>' +
+        '<div class="li-meta">支持 JSON（标准结构/数组）、两列纯文本（Quizlet 的 term/definition，Tab/逗号/分号分隔均可），' +
+        '或行式题目（格式同 Markdown：<code>1. 题干</code> / <code>A. 选项</code> / <code>答案：X</code> / <code>解析：…</code>）。</div>' +
         '<textarea id="paste-area" rows="12" style="width:100%;margin-top:8px" placeholder="把题目粘贴到这里…"></textarea>' +
         '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
         '<button class="btn" data-action="modal-ok">解析预览</button></div>',
@@ -252,15 +330,19 @@
               UI.toast('解析失败：' + e.message, 'err');
               return;
             }
-            const validated = QB.Adapters.validateQuestions(parsed.questions || []);
+            // 0 题：保留弹窗与已粘贴文本，就地显示拒绝原因（D2），不只提示「未解析出任何题目」
+            if (!(parsed.questions || []).length) {
+              showInlineFailure(modal, parsed);
+              return;
+            }
             UI.closeModal();
-            const res = await commitImport(bank, {
-              questions: parsed.questions || [],
-              warnings: (parsed.warnings || []).concat(validated.warnings || []),
+            resolve(await commitImport(bank, {
+              questions: parsed.questions,
+              warnings: parsed.warnings || [],
               format: '粘贴·' + (parsed.format || 'text'),
-              stats: validated.stats
-            }, QB.Source.makeSource(QB.Source.KINDS.PASTE, { uri: '剪贴板' }), returnFocusTo);
-            resolve(res);
+              stats: parsed.stats,
+              meta: parsed.meta || null
+            }, QB.Source.makeSource(QB.Source.KINDS.PASTE, { uri: '剪贴板' }), returnFocusTo));
           };
         },
         undefined,
@@ -279,7 +361,7 @@
     return new Promise((resolve) => {
       UI.openModal(
         '<h3>从网络地址导入</h3>' +
-        '<div class="li-meta">输入题目文件的 http(s) 直链（json / csv / tsv / txt / md / xlsx / docx / qbk）。' +
+        '<div class="li-meta">输入题目文件的 http(s) 直链（json / csv / tsv / txt(Quizlet) / md / xlsx / docx / qbk / apkg）。' +
         '远端文件作为快照保存到本地，可离线使用；服务器需允许跨域访问（CORS），否则请另存为文件后拖拽导入。上限 8MB。</div>' +
         '<input type="url" id="url-area" class="grow" style="width:100%;margin-top:8px" placeholder="https://example.com/questions.json" value="' +
         QB.escapeHtml(presetUrl || '') + '" />' +
@@ -316,6 +398,12 @@
             const source = QB.Source.makeSource(QB.Source.KINDS.URL, {
               uri: snapshot.url, fetchedAt: Date.now(), checksum: snapshot.checksum, refreshable: true
             });
+            // 0 题：保留来源弹窗与 URL 输入，就地显示拒绝原因（D2），不再「先关闭再静默丢弃」
+            if (!result.questions.length) {
+              btn.disabled = false; btn.textContent = '拉取并预览';
+              showInlineFailure(modal, result);
+              return;
+            }
             UI.closeModal();
             resolve(await commitImport(bank, result, source, returnFocusTo));
           };
@@ -362,6 +450,8 @@
 
   QB.DataIO = {
     pickFile, importFlow, importFile, importTextFlow, importUrlFlow, refreshUrlFlow,
-    parsePastedText, parseFile, commitImport, stampSource
+    parsePastedText, parseFile, commitImport, stampSource,
+    /** 0 题错误提示文案（纯函数；UI 与测试共用，避免两套文案） */
+    importFailureText
   };
 })(window);

@@ -117,6 +117,57 @@ section('路由边界：不劫持普通 CSV');
   eq(extRes.format.indexOf('quizlet'), 0, '.quizlet 走 Quizlet');
 }
 
+section('D1：粘贴入口复用注册表（不再维护第二条解析链）');
+{
+  const tab = await QB.DataIO.parsePastedText('apple\t苹果\nbanana\t香蕉');
+  eq(tab.questions.length, 2, '粘贴 Tab 两列 → 2 题');
+  eq(tab.questions[0].type, 'essay', '第 1 题 essay');
+  eq(tab.questions[1].type, 'essay', '第 2 题 essay');
+  eq(tab.questions[0].question, 'apple', 'term 作题干');
+  eq(tab.questions[0].reference_answer, '苹果', 'definition 作参考答案');
+  eq(tab.questions[0].options.length, 0, '无选项');
+  eq(tab.meta && tab.meta.migration && tab.meta.migration.source, 'quizlet', '粘贴走 Quizlet 注册表（meta.migration.source=quizlet）');
+  ok(tab.format.indexOf('quizlet') === 0, 'format=quizlet（实际 ' + tab.format + '）');
+  ok(tab.warnings.some((w) => w.indexOf('无选项、无图片') >= 0), 'warnings 含「无选项/无图片」');
+  ok(tab.warnings.some((w) => w.indexOf('在线学习进度') >= 0), 'warnings 含「无在线进度」');
+
+  const comma = await QB.DataIO.parsePastedText('apple,苹果\nbanana,香蕉');
+  eq(comma.questions.length, 2, '粘贴逗号两列 → 2 题');
+  ok(comma.format.indexOf('quizlet') === 0, '逗号走 Quizlet');
+  eq(comma.questions[1].reference_answer, '香蕉', '逗号定义正确');
+
+  const full = await QB.DataIO.parsePastedText('apple，苹果\nbanana，香蕉');
+  eq(full.questions.length, 2, '粘贴全角逗号两列 → 2 题');
+  ok(full.format.indexOf('quizlet') === 0, '全角逗号走 Quizlet');
+  eq(full.questions[0].reference_answer, '苹果', '全角逗号定义正确');
+
+  // 与文件/URL/拖拽入口同源：runImport 的结果必须与粘贴完全一致
+  const fileRes = await QB.Importers.runImport({ name: 'set.txt', text: 'apple\t苹果\nbanana\t香蕉' });
+  eq(fileRes.questions.length, tab.questions.length, '文件入口与粘贴题数一致');
+  eq(JSON.stringify(fileRes.questions.map((q) => q.type)), JSON.stringify(tab.questions.map((q) => q.type)), '文件入口与粘贴题型一致');
+  eq(fileRes.format, tab.format, '文件入口与粘贴 format 一致（同一注册表）');
+  eq(fileRes.warnings.length, tab.warnings.length, '文件入口与粘贴 warnings 一致（同一注册表）');
+
+  const md = await QB.DataIO.parsePastedText('## 1. 题干\nA. 甲\nB. 乙\n答案：A');
+  eq(md.questions.length, 1, '粘贴 Markdown 仍走 MdImporter');
+  eq(md.questions[0].type, 'single', 'Markdown 题型识别不变');
+  eq(md.format, 'markdown', 'Markdown format 保持 markdown');
+
+  const json = await QB.DataIO.parsePastedText(JSON.stringify([
+    { type: 'judge', question: 'JSON 粘贴题', options: [], answer: '正确' }
+  ]));
+  eq(json.questions.length, 1, '粘贴 JSON 仍走 JSON 分支');
+  ok(json.format.indexOf('json') === 0, 'JSON format 以 json 开头（实际 ' + json.format + '）');
+
+  let errMsg = '';
+  try { await QB.DataIO.parsePastedText('纯文字内容没有题目结构'); } catch (e) { errMsg = String(e.message); }
+  ok(errMsg.indexOf('未能从 Markdown 中识别出题目') >= 0, '无法识别内容保留原「解析失败」提示（实际：' + errMsg + '）');
+
+  let emptyThrew = false;
+  try { await QB.DataIO.parsePastedText('   '); } catch (e) { emptyThrew = true; }
+  ok(emptyThrew, '空白粘贴仍明确报错');
+}
+
 section('落库 / 重复导入');
 {
   QB.Assets.useDriver(QB.Assets.memoryDriver());

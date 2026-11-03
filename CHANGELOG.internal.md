@@ -6,6 +6,34 @@
 
 ---
 
+## 待回填 · fix(importers): 粘贴入口统一解析 + 0 题拒绝原因可见（D1/D2）
+
+**Commit**：`（本轮修复提交，hash 提交后回填）`
+
+**真机零注入验证发现（HEAD `07555d3`）**
+- D1（阻断）：首页粘贴 `apple<Tab>苹果\nbanana<Tab>香蕉` → **落库 0 题**，toast「解析失败：未能从 Markdown 中识别出题目」；同一文本 `QB.Importers.runImport({name:'set.txt', text})` → 2 题 / `types=["essay","essay"]` / `format=quizlet（分隔符 Tab）`。根因：`data-io.parsePastedText` 只走 JSON/MdImporter，绕过了导入器注册表，形成第二条解析链。
+- D2（部分）：导入 `.anki21b` 时解析层已有完整 `warnings[0]`（「当前版本不支持 Anki 新版 .anki21b（zstd 压缩）。请在 Anki 桌面端导出时勾选「兼容旧版 / Legacy」后重试。」）与 `meta.migration.reason`，但 UI 只显示「未解析出任何题目」——`commitImport` 0 题分支丢弃 `result.warnings`；URL 入口还先关弹窗再提交。
+
+**核心改动点**
+- D1：`parsePastedText` 改为注册表统一入口——先 `粘贴.json`（仅 JSON 语法失败才回退），再 `粘贴.txt`（Quizlet `priority`+`sniff` 接管两列），两者均未命中才回退 `MdImporter`；返回值统一为 `runImport` 形状。粘贴/文件/拖拽/URL 四入口解析行为一致，`data-io` 不再自带解析链。
+- D2：新增纯函数 `QB.DataIO.importFailureText(result)`（唯一文案实现）：`migration.supported=false.reason` 优先，否则取首条 warning，互相包含取更长；`commitImport` 0 题改弹可停留错误弹窗（`role="alert"`），仅无原因时保留旧 toast；粘贴/URL 来源弹窗 0 题时**不关闭弹窗**、就地内联展示原因（`showInlineFailure`），保留用户输入。粘贴弹窗文案同步说明支持 Quizlet term/definition。
+- 测试补强：`importers-quizlet.test.mjs` +27（48→75）、`importers-anki.test.mjs` +11（135→146）。
+
+**实测数据（2026-11-03，本机 Asia/Shanghai）**
+- D1 断言（修复后）：粘贴 Tab / 逗号 / 全角逗号两列均 **2 题、essay×2、`format=quizlet（分隔符 …）`**，warnings 含「无选项、无图片」「无 Quizlet 在线学习进度」；与文件入口 `set.txt` 的题数/题型/format/warnings **逐项相等**。Markdown `## 1. 题干` 仍 1 题 single、`format=markdown`；JSON 仍走 JSON 分支；无法识别内容仍抛「未能从 Markdown 中识别出题目」；空白仍抛「内容为空」。
+- D2 断言（修复后）：`.anki21b` 夹具 → `commitImport` 返回 null，UI 收到的 HTML 含「兼容旧版 / Legacy」原文与 `.anki21b`，**不含**「未解析出任何题目」且未退回无信息 toast；坏 SQLite 夹具 → 含「collection 数据库无法解析」；无 warning 的 0 题 → 仍为旧 toast，不弹空框。
+- 旧代码复跑证明（`git worktree add .tmp-samples/old-07555d3 07555d3` + 新测试）：D1 在 `parsePastedText('apple\t苹果…')` 直接抛「未能从 Markdown 中识别出题目」；D2「错误弹窗包含 Legacy 指引原文」「未退回无信息 toast」失败，且 `QB.DataIO.importFailureText` 不存在（TypeError）。
+- 门禁：`test-all` **30 个运行项、0 失败**；断言 **4728 / 4728**（原 4690，+38）；`node --expose-gc scripts/bench.mjs --assert` **全部通过**（heapUsed **+2.66MB** ≤ 40MB；SRS gradeMany 比值 **4.93 ≤ 5.35**；API PATCH P95 **5.97 ms ≤ 50 ms**）；`docs-check --static` 一致（30 运行项 / 4728 断言 / 55 门禁）。
+- 首屏：**326.0 KB gzip / 921.3 KB raw**（89 文件 / 81 内联 js），较 `07555d3` +1.5 KB gzip / +4.5 KB raw（data-io 与测试未计入首屏，仅业务代码增量）。
+
+**遗留 TODO / 风险**
+- 粘贴入口按虚拟文件名路由，因此 `.txt` 会先经过 CSV 解析器（无 `sniff`，靠抛错回退）；若未来 CSV 解析器改为「永不抛错」，需在注册表层补显式 `sniff`，否则 Markdown 行式粘贴可能被 CSV 吞掉。
+- `showInlineFailure` 依赖真实 DOM（`document` 未定义时直接返回），Node 层只覆盖 `commitImport` 的错误弹窗路径；来源弹窗内联展示需下一次真机（粘贴/URL 0 题）确认。
+- `importFailureText` 只取首条 warning；多原因场景（如同时缺 notes 表与模型损坏）仍只展示第一条，完整列表留在解析层 `warnings`。
+
+---
+
+
 ## 538cd10 / 2529790 · feat(importers): Anki Legacy + Quizlet 迁移桥（SQLite 只读零依赖）
 
 **Commit**：`538cd10`（阶段 0/1：SQLite 只读 + `.apkg` 探针 + 方案文档）、`2529790`（阶段 2/3：Anki/Quizlet 导入器 + 测试 + 文档）

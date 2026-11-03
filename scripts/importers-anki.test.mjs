@@ -19,6 +19,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const SAMPLES = path.join(ROOT, 'samples', 'anki');
 const { QB, window } = await createHarness(ROOT);
+// 浏览器加载顺序：ui-renderer 先于 data-io（data-io 在模块顶层捕获 UI）。
+// harness 默认跳过纯 DOM 模块，这里按 assets.test.mjs 同法补载，D2 才能断言 UI 实际收到的文案。
+for (const rel of ['js/modules/ui-renderer.js', 'js/modules/data-io.js']) {
+  new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, rel), 'utf8'))(window, window);
+}
 QB.DB.init();
 
 let pass = 0;
@@ -280,6 +285,43 @@ section('落库 / 重复导入 / v3 contentHash / revlog');
   ok(QB.isCurrentHash(logs[0].h), 'revlog 键为 v3 hash');
   const state = await QB.SRSStore.getState(bank.id, stored);
   ok(!!state && state.stability > 0, '评分后 FSRS 状态已落盘');
+}
+
+section('D2：0 题拒绝原因在 UI 可见（不再只提示「未解析出任何题目」）');
+{
+  const latest = await QB.Importers.runImport(apkg('示例-Anki-Latest.apkg'));
+  const bad = await QB.Importers.runImport(apkg('示例-Anki-坏库.apkg'));
+  const UI = QB.UIRenderer;
+  const origOpen = UI.openModal;
+  const origToast = UI.toast;
+  let html = '';
+  const toasts = [];
+  UI.openModal = function (h) { html = String(h); };
+  UI.toast = function (msg) { toasts.push(String(msg)); };
+  try {
+    const bank = await QB.DB.banks.create({ name: 'D2 拒绝原因库' });
+    const r1 = await QB.DataIO.commitImport(bank, latest, null);
+    eq(r1, null, 'Latest 0 题 → commitImport 返回 null');
+    ok(html.indexOf('兼容旧版 / Legacy') >= 0, '错误弹窗包含 Legacy 指引原文');
+    ok(html.indexOf('anki21b') >= 0, '错误弹窗包含 .anki21b 说明');
+    ok(html.indexOf('未解析出任何题目') < 0, '不再只显示「未解析出任何题目」');
+    ok(toasts.indexOf('未解析出任何题目') < 0, '未退回无信息 toast');
+    eq(QB.DataIO.importFailureText(latest), latest.meta.migration.reason, 'importFailureText 去重后即拒绝原因');
+
+    html = '';
+    const r2 = await QB.DataIO.commitImport(bank, bad, null);
+    eq(r2, null, '坏 SQLite 0 题 → commitImport 返回 null');
+    ok(html.indexOf('collection 数据库无法解析') >= 0, '坏 SQLite 原因可见');
+    ok(html.indexOf('未解析出任何题目') < 0, '坏库不再只显示「未解析出任何题目」');
+
+    html = '';
+    const r3 = await QB.DataIO.commitImport(bank, { questions: [], warnings: [], meta: null }, null);
+    eq(r3, null, '无原因 0 题 → 返回 null');
+    ok(toasts.indexOf('未解析出任何题目') >= 0 && html === '', '无原因时保留旧 toast，不弹空错误框');
+  } finally {
+    UI.openModal = origOpen;
+    UI.toast = origToast;
+  }
 }
 
 section('htmlToText 纯函数（唯一实现）');
