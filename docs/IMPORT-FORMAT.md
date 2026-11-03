@@ -1,6 +1,6 @@
 # 导入格式说明（IMPORT-FORMAT）
 
-> 导入支持 **题库包(.qbk) / JSON / CSV / TSV / Markdown(.md) / XLSX / DOCX** 七种来源，全部在浏览器本地解析（零第三方库）。
+> 导入支持 **题库包(.qbk) / JSON / CSV / TSV / Markdown(.md) / XLSX / DOCX / Anki(.apkg) / Quizlet(.txt/.quizlet)** 九种来源，全部在浏览器本地解析（零第三方库）。
 > 解析规则变化时须同步更新本文档与 `js/importers/adapters.js`、`js/importers/line-parser.js`。
 
 ## 1. 标准题目模型
@@ -58,6 +58,8 @@
 | Markdown | `.md` `.markdown` | `## 数字. 题干` 分题，`- **A.** 选项`，`**答案：X**` | `- **A.** 文本` 列表行 | 与本系统 md 导出格式对齐，支持导出→再导入往返；见 §6 |
 | Excel | `.xlsx` | 每个工作表首行表头（同 CSV），按工作簿顺序合并 | 同 CSV | 读**全部工作表**（空表跳过），支持共享字符串/内联字符串/数字单元格 |
 | Word | `.docx` | 题号分段，`A.`/`答案：`/`解析：` 标记 | `A. 文本` 行 | 必须严格按排版规范（见 §5），否则切题不准；**段落内嵌图片自动提取**（见 §5.1） |
+| Anki | `.apkg` | ZIP 内的 SQLite collection（Legacy1/2） | Front/Back 字段（见 §11） | 仅支持「兼容旧版 / Legacy」导出；`.anki21b` 明确拒绝；按 note 导入，多卡历史不保留 |
+| Quizlet | `.txt` `.quizlet` | 每行 `term<分隔符>definition` | 无选项（全部 essay） | Tab/逗号/分号/竖线自动识别；无图片、无在线进度；与 CSV 的路由边界见 §11.3 |
 
 通用要求：题干必填；单/多选题必须有选项与答案；警告（缺答案等）**不阻断**导入，可在预览页核对；去重键为「题型 + 规范化题干 + 选项 + 正确答案」（v2，详见 [DATABASE.md](DATABASE.md) §4）。
 
@@ -297,7 +299,7 @@ DOCX 中材料题与 Markdown 使用**同一套行式材料块语法**（LinePar
 
 http(s) 环境下可直接粘贴远端文件地址导入，与选择文件走**同一解析管线**：
 
-- 仅允许 `http/https`，地址末段扩展名必须是受支持格式（json/csv/tsv/txt/md/markdown/xlsx/docx/qbk，查询串允许）。
+- 仅允许 `http/https`，地址末段扩展名必须是受支持格式（json/csv/tsv/txt/quizlet/md/markdown/xlsx/docx/qbk/apkg，查询串允许）。
 - 15 秒超时；大小上限 **8MB**（先用 `Content-Length` 预检，读取后再按字节兜底；文本按 UTF-8 字节计）。
 - 远端必须返回允许跨域的响应头（**CORS**）。无 CORS 的地址浏览器必然拦截，应用不做代理，请另存为文件后拖拽导入。
 - 落地为**本地快照**：题库记录来源 `{kind:'url', uri, fetchedAt, checksum}`；首页显示来源徽章，「刷新网络来源」按 checksum 判断是否有变化，有变化才重新预览、合并去重。刷新是单向快照追加，不覆盖本地修改，不做双向同步。
@@ -356,3 +358,46 @@ assets/asyyyyyyyy-456.png
 | `原始-问卷星-物业管理师-425题.json` | 问卷星试卷（`ks.wjx.com/vm/Psns19e.aspx`）提取的标准原始题库（判断 170/单选 210/多选 45，解析 425/425 非空，source 为原题号；导入零重复零警告，JSON/CSV/MD/XLSX/DOCX 五格式往返 contentHash 与解析逐题一致） |
 | `原始-问卷星-物业管理师技能操作-30题.json` | 问卷星试卷（`ks.wjx.com/vm/OiVG8e1.aspx`）提取的标准原始题库（简答/案例 30 题，参考答案 30/30 存于 `reference_answer`；导入零重复零警告，五格式往返参考答案逐题一致） |
 | `真实-多列解题思路-次北固山下.json/.csv/.xlsx` | **真实多列解析夹具**：内容取自 21世纪教育网公开解析页（`mip.21cnjy.com/P/19649466.html`）《次北固山下》第 1 题；原页面【解析】整段按原文“本题考查…”/“答题注意…”拆为解析与解题思路，【知识点】→考点，【译文】→释义，文字未改写。1 道材料题 + 2 小问，父子分别带独立的解析/解题思路/考点/释义字段（JSON 多键、CSV/XLSX 多列）；导入零警告，合并顺序固定为 `解析→思路→考点→释义`，五格式往返父子合并解析逐题一致。仅作回归夹具。 |
+| `anki/示例-Anki-Legacy2.apkg` | Anki Legacy2 夹具（`collection.anki21` + 占位 `collection.anki2`；16 note / 17 card / 5 revlog / 2 媒体，覆盖 judge/single/cloze/多卡/缺字段/空题/重复/缺图/HTML/音频）；`anki/gen_fixtures.py` 可复现 |
+| `anki/示例-Anki-Legacy1.apkg` | Anki Legacy1 夹具（`collection.anki2`，2 题） |
+| `anki/示例-Anki-UTF16.apkg` | SQLite `UTF-16LE` 编码夹具（中文/emoji 字段，2 题） |
+| `anki/示例-Anki-深分页.apkg` | B-tree 深分页夹具（200 note / 200 card / freelist 3 页 / 被删记录 / 80KB overflow 字段） |
+| `anki/示例-Anki-Legacy2-缺anki21.apkg` | Legacy2 缺 `collection.anki21` 时回退 `collection.anki2` 的夹具（1 题 + 回退警告） |
+| `anki/示例-Anki-Latest.apkg` | `meta` 版本 3 夹具：**明确拒绝**并指引导出旧版 |
+| `anki/示例-Anki-坏库.apkg` / `示例-Anki-损坏.apkg` | 非法 SQLite / 非 ZIP 损坏包：不崩溃、返回警告 |
+
+## 11. Anki（`.apkg`）与 Quizlet（`.txt` / `.quizlet`）
+
+> 迁移桥只做**离线题库搬运**，不模拟 Anki/Quizlet 的调度与在线学习行为。真实性优先于覆盖率：无法无损表达的内容**宁可少导并警告**，不伪造。
+
+### 11.1 `.apkg` 包结构识别
+
+`.apkg` 是 ZIP，关键条目：
+
+| 条目 | 含义 | 本系统处理 |
+| --- | --- | --- |
+| `collection.anki2` | Legacy1 唯一 collection；Legacy2 中为旧客户端占位库 | Legacy1 读取；Legacy2 仅当 `collection.anki21` 缺失时回退（并警告） |
+| `collection.anki21` | Legacy2 真实 SQLite collection | Legacy2 **优先读取** |
+| `collection.anki21b` | 最新格式（zstd 压缩 + 新 schema） | **不支持**：识别后返回明确提示，并要求在 Anki 导出时勾选「兼容旧版 / Legacy」；不会尝试解析 |
+| `meta` | 最小 protobuf，字段 1 = varint 版本（1/2/3） | 仅解析该字段；缺失时按 ZIP 条目推断 |
+| `media` | 明文 JSON `{原文件名: 包内数字条目名}` | 映射到 ZIP 条目，媒体按内容寻址写入资产库 |
+| `0`,`1`,… | `media` 指向的媒体条目 | 读取字节；缺失/非图片/`[sound:]` 分别警告 |
+
+版本判定：`meta` 版本 3 或存在 `collection.anki21b` → Latest（拒绝）；版本 2 或存在 `collection.anki21` → Legacy2；否则 Legacy1。
+
+### 11.2 SQLite 只读与导入语义
+
+- **唯一实现**：`js/utils/sqlite-reader.js`（探针 `scripts/probe-apkg.mjs` 与导入器共用，禁止第二份解析）。支持页大小、freelist、UTF-8/UTF-16LE/UTF-16BE、被删除记录（不遍历 freelist）、内部页递归、overflow 页链、`INTEGER PRIMARY KEY` 的 rowid 别名、`CREATE TABLE` 中的 `--`/`/* */` 注释。
+- **按 note 导入，不按 card**：同一 note 的多个 card 合并为 1 题（模板派生题的独立复习历史**无法保留**）。丢失量在预览中明确列出：`多卡 note N 个 / 丢失 card 历史 M 条`。
+- **字段映射**：按 `models` 的字段名（Front/Question/正面/问题/题干/term/prompt…、Back/Answer/背面/答案/response/definition…）匹配；找不到时按顺序取前两列。多于 2 个字段时取前两列并警告「其余字段未映射」；少于 2 个字段时 Back 视为空并警告。
+- **题型判定**：Front/Back 先去 HTML（`<br>`→换行、实体解码、`<img src>`→资产占位、`[sound:]`移除）。Front 中有 ≥2 行 `A.`/`B.` 选项且 Back 为 1–4 个字母 → `single`/`multi`；Back 为**显式**判断词（正确/错误/对/错/√/×/true/false/yes/no）→ `judge`；其余 → `essay`（Back 作为 `reference_answer`）。数字答案（如 `1`）**不判为判断**，避免数学题被误判。
+- **Cloze**：`{{c1::X::hint}}` → 题干 `[____（hint）]`，去重后的答案汇总到 `reference_answer`；因多空位在 Anki 中是多张 card，明确降级为 `essay` 并警告「cloze 多卡语义丢失」。
+- **稳定键**：题目写入时按 v3 contentHash（`3:` + 16 hex）计算，重复导入按 key 去重；包内重复 note 跳过并警告。
+- **源 revlog 不导入**：Anki 的复习历史语义（评分/间隔）与 FSRS-6 不兼容，导入后为全新未学状态；预览明确提示「源 revlog N 条未导入」。首条本系统评分会正常写入新 revlog。
+
+### 11.3 Quizlet 纯文本
+
+- **格式**：每行 `term<分隔符>definition`；分隔符自动识别 Tab / 逗号（含全角）/ 分号（含全角）/ 竖线，也可由调用方显式传入自定义分隔符。解析复用 `QB.CsvImporter.parseRows`（引号转义、引号内分隔符）。
+- **落库**：全部 `essay`（term 为题干、definition 为 `reference_answer`）；**无选项、无图片、无 Quizlet 在线学习进度**，预览逐条提示。
+- **跳过与警告**：`Term/Definition` 表头跳过；非两列、term 为空、包内重复行跳过并给出计数与警告；空文件明确报错；无法识别分隔符时返回 0 题并说明原因。
+- **路由边界**：`.txt` 同时登记 CSV 与 Quizlet（Quizlet `priority` 更高）。仅当「首列不是试题表头（题目/答案/类型…）且所有非空行都能切成两列」时 Quizlet 接管；含表头的普通 CSV（如 `题目,答案`）仍由 CSV 解析器处理，既有行为不变。`.quizlet` 扩展名只登记 Quizlet。

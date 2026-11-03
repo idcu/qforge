@@ -6,6 +6,41 @@
 
 ---
 
+## 本轮 · feat(importers): Anki Legacy + Quizlet 迁移桥（SQLite 只读零依赖）
+
+**Commit**：本轮三个实现提交（`docs(migration)` 首提交含 `docs/MIGRATION-BRIDGE-PLAN.md`；精确哈希见 `git log`，末尾另有 docs 回填提交）
+
+**范围（只做 Quizlet + Anki Legacy，不做 `.anki21b`、不做问卷星）**
+- 阶段 0：`scripts/probe-apkg.mjs` 只读探针（不注册进 `test-all`）；识别 `meta` 版本（Legacy1/2/Latest）、列 ZIP 条目、Legacy collection 解压后读 SQLite 头与 notes/cards/revlog/col.ver。
+- 阶段 1：`js/utils/sqlite-reader.js` 最小 SQLite 只读**唯一实现**（零依赖），探针与导入器共用。
+- 阶段 2：`js/importers/anki-package.js` + `anki-importer.js`，**按 note 导入**、媒体内容寻址、丢失项写入 `meta.migration` 并展示在预览。
+- 阶段 3：`js/importers/quizlet-importer.js`，纯文本两列、复用 CSV 行解析与 `Adapters.toStandard`，全部 essay。
+- 注册表：同扩展多解析器（`priority` + `sniff`），`.txt` 由 Quizlet 与 CSV 竞争；`BINARY_EXTS` 增加 `apkg`；`ACCEPT`/URL 扩展名白名单同步。
+
+**实测数据（2026-11-03，本机 Asia/Shanghai）**
+- 真实样本 `tables_de_multiplication_anki.apkg`：60,620 B，SHA-256 `048f0d67169dc8c505546bd62c2c0576fc920d03b03b132f7d6cc367669cf496`；探针 Legacy2 / `collection.anki21` / 4096 UTF-8 / col.ver 11 / notes **144** / cards **144** / revlog 0 / media 0。导入落库 **143** 题（144 note，1 条重复跳过），题型 **essay 143 / judge 0 / single 0**。
+- 端到端：导入 → 落库 143 → 抽查前 3 题字段（type/question/options/answer/reference_answer/analysis/tags/source/contentHash 均正确）→ Legacy2 夹具图片渲染水合（`data-asset` → `QB.Assets.get` 命中 image/png）→ 导出 `.qbk` 再导入 **143 题**，题型一致，**contentHash 集合 143/143 完全一致**。
+- 夹具 `示例-Anki-Legacy2.apkg`：16 note / 17 card / 5 revlog / 2 媒体 → 导入 **14 题**（judge 1 / single 1 / essay 12），资产 2 个（1 图片 + 1 音频），10 条警告（多卡丢失 2、cloze 1、空题 1、重复 1、字段不足 2、额外字段 1、缺媒体 1、非图片 1、`[sound:]` 1、revlog 5 条未导入）。Legacy1 2 题；UTF-16 2 题（中文/emoji）；深分页 200 题（freelist 3 页、被删记录不出现、80KB overflow 完整）。
+- 异常包：Latest 0 题 + 「兼容旧版」指引；坏 SQLite 0 题 + 警告；损坏 ZIP 0 题 + 警告；Legacy2 缺 anki21 回退 1 题 + 回退警告。均不抛异常。
+- 重复导入：第二次 `inserted=0 / duplicates=14`；首次评分 `revlog.h = contentHash`（v3 `3:`+16hex）。
+- 门禁：`test-all` **30 个运行项、0 失败**；断言 **4690 / 4690**（新增 **183**：Anki 135 + Quizlet 48；原 4507）；`bench --assert --expose-gc` **55 项全部通过**（`heapUsed +2.69MB ≤ 40MB`、SRS gradeMany 比值 5.01 ≤ 5.35、API PATCH P95 8.33ms ≤ 50ms）；`docs-check --static` 一致。
+- 首屏：**324.5 KB gzip / 916.8 KB raw**（89 文件 / 81 内联 js），较上一轮 +16.2 KB gzip / +44.3 KB raw（4 个新 js）。
+
+**不支持的格式分支（明确说明）**
+- `collection.anki21b`（zstd + 新 schema）：**不解析**，识别后返回「请导出兼容旧版」提示；零依赖约束下不引入 zstd/sql.js，不伪装支持。
+- 问卷星真实 Excel/Word：样本未提供，未实现（禁止用帮助页推断写解析器）。
+- Anki 源 revlog：语义与 FSRS-6 不兼容，不导入，只警告。
+- note→card：多模板派生 card 的独立复习历史、cloze 多空位多卡语义无法保留，预览明确列出丢失量。
+- 非图片媒体（音频等）：入库但不在题面渲染（只警告）；`[sound:]` 移除并警告。
+
+**遗留风险**
+- SQLite 只读仅覆盖读取 collection 所需子集：不支持 WAL 未 checkpoint 的数据库（Anki 导出的 `.apkg` 为已合并的单文件，正常样本无此情况）、不支持加密库、不支持 `WITHOUT ROWID` 表；页损坏/溢出链环有上限保护（抛 `SqliteReadError`，不崩溃）。
+- 题型判定是启发式：选项行与字母答案满足才判 single/multi，Back 仅显式判断词才判 judge；宁少判不乱判。
+- Anki 字段名映射覆盖常见语言，非中英文字段名会退回「前两列」并给额外字段警告。
+- 真实样本仅 1 个（数学题、无媒体、无 revlog）；含媒体/revlog 的样本由自造夹具覆盖，夹具由 `samples/anki/gen_fixtures.py` 用标准库 sqlite3 生成，可复现但非 Anki 客户端原生导出。
+
+---
+
 ## 4e5b166 · perf(bench): SRS 门禁改为同轮标定比值，消除机器漂移误报并补负向注入验证
 
 **Commit**：`4e5b166`

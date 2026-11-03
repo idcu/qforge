@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-03T00:25:04.988Z",
-  "runItems": 28,
-  "suiteFiles": 27,
-  "totalAssertions": 4507,
+  "generatedAt": "2026-11-03T02:54:51.684Z",
+  "runItems": 30,
+  "suiteFiles": 29,
+  "totalAssertions": 4690,
   "gateCount": 55,
   "counts": {
     "smoke-test.mjs": 724,
@@ -18,6 +18,8 @@
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
     "idb.test.mjs": 106,
+    "importers-anki.test.mjs": 135,
+    "importers-quizlet.test.mjs": 48,
     "migrate.test.mjs": 291,
     "office-export.test.mjs": 1150,
     "pwa.test.mjs": 90,
@@ -35,9 +37,9 @@
     "xml-lite.test.mjs": 39
   },
   "firstScreen": {
-    "scripts": 77,
-    "files": 85,
-    "rawKB": "872.5",
-    "gzipKB": "308.3"
+    "scripts": 81,
+    "files": 89,
+    "rawKB": "916.8",
+    "gzipKB": "324.5"
   }
 }

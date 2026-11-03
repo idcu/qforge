@@ -28,6 +28,8 @@ const ORDER = [
   'idb.test.mjs',
   'backup.test.mjs',
   'migrate.test.mjs',
+  'importers-anki.test.mjs',
+  'importers-quizlet.test.mjs',
   'shard.test.mjs',
   'contract.test.mjs',
   'sched.test.mjs',

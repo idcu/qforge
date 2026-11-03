@@ -68,6 +68,7 @@
 | `utils/crc32.js` | `QB.Crc32` | CRC32（IEEE/zlib）唯一实现，供 ZipWriter 写校验值、ZipReader 解包校验共用 |
 | `utils/zip-reader.js` | `QB.ZipReader`/`QB.decodeUtf8` | 原生 ZIP 读取（EOCD→中央目录→本地头）+ `DecompressionStream('deflate-raw')`；支持 method 0/8；**条目数/单条/总解压字节上限 + CRC 校验**（防 zip bomb/损坏包） |
 | `utils/zip-writer.js` | `QB.ZipWriter` | 原生 ZIP 打包（stored method=0 + `QB.Crc32`），与 ZipReader 对称；xlsx/docx/qbk/qfbk 写出共用 |
+| `utils/sqlite-reader.js` | `QB.SqliteReader` | **最小 SQLite 只读唯一实现**（零依赖，探针与 Anki 导入器共用，禁止第二份解析）：100 字节头/页大小/freelist/文本编码（UTF-8、UTF-16LE/BE）、B-tree 叶子（`0x0D`）与内部页（`0x05`）递归、cell pointer 数组、record 头与 serial type、overflow 页链、`INTEGER PRIMARY KEY` 的 rowid 别名、`CREATE TABLE` 中 `--`/`/* */` 注释剥离；只读活跃 cell（不遍历 freelist）故被删除记录天然不可见；深度/行数/单 record 字节/页号与 overflow 环均设上限，损坏库抛 `SqliteReadError` 而非崩溃 |
 | `utils/xml-lite.js` | `QB.XmlLite.parse` | 自研极简 XML 解析器（OOXML 子集：标签/属性/命名空间/实体/注释/CDATA/DOCTYPE 跳过，深度先序查询；畸形 XML 抛错），替代 DOMParser，Node/浏览器/CI 同路径 |
 | `utils/assets.js` | `QB.Assets` | 图片资产存储（IndexedDB，内容寻址 id=`QB.FNV`-长度，同图去重）；驱动可注入（idbDriver/memoryDriver），与 Repository 双实现同构 |
 | `utils/weights.js` | `QB.Weights` | FSRS 权重仓归一（旧单组 `{w,...}` → global，非法/空 → `{global:null,banks:{}}`）；local-adapter 与 fsrs-opt 共用，数据层不反向依赖应用层 |
@@ -89,7 +90,7 @@
 | --- | --- |
 | `importers/adapters.js` | **公共适配器**：`toStandard`/`sniffAndAdapt`/`adaptArray`/`adaptNested`/`tableToQuestions`/`validateQuestions`；题型映射、表头别名；M2-B 起 `tableToQuestions` 含材料多行块扫描（材料/小问两列，块首+小问归组，旧表零变化）；解析类多列/多键经 `ANALYSIS_FIELDS` + `mergeAnalysisPieces` 合并为单一 `analysis`（唯一实现） |
 | `importers/line-parser.js` | **行式切题公共解析器**：`parseLines`/`blocksToQuestions`（题号/选项/答案/解析类标记/分类标记识别 + 题型推断），docx 与 md 共用；解析类标记（解析/解题思路/考点/释义…）经 `Adapters.matchAnalysisMarker` 识别并 `appendAnalysis` 增量合并，避免与表头别名两套维护；M2 起含材料块状态机（`[材料题]` 开块 / `材料：` / `(i)` 小问 / 顶层题号收块，输出 `isMaterial` 块交 `Adapters.toStandard` 递归）；父题解析标记后的多行续行（如合并后的 `【释义】…` 分段）在小问出现前归父题解析，不误入材料正文 |
-| `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX；入参区分**真实 File/Blob**（选文件/拖拽，内部 FileReader 读取）与**内存快照** `{name,text}` / `{name,arrayBuffer}`（网络导入/粘贴/测试注入），真实 File 上的 `text()`/`arrayBuffer()` 方法不与快照数据混用 |
+| `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX/Anki/Quizlet；同一扩展名可登记多个解析器（`priority` 降序 + `sniff(input)` 选择，`sniff` 抛错视为不接管），`.txt` 由 Quizlet（priority 10）与 CSV 竞争，含表头的普通 CSV 仍走 CSV；二进制格式（xlsx/docx/qbk/apkg）按 `arrayBuffer` 读取，文本格式按 `text` 读取；入参区分**真实 File/Blob**（选文件/拖拽，内部 FileReader 读取）与**内存快照** `{name,text}` / `{name,arrayBuffer}`（网络导入/粘贴/测试注入），真实 File 上的 `text()`/`arrayBuffer()` 方法不与快照数据混用 |
 | `importers/qbk-importer.js` | `.qbk` 题库包：`Qbk.parseBundle` 解包 → 复用 JsonImporter → 资产写 QB.Assets（缺图警告） |
 | `modules/qbk.js` | `QB.Qbk`：qbk/qfbk 的 stored ZIP 编解码（bank.json/backup.json + 可选 manifest.json + assets/*）、PK 头识别、题目引用资产 id 收集；`buildBundle` 第 4 参 `extra` 仅分发题包使用，旧包解析 `manifest=null` |
 | `modules/package.js` | `QB.Package`：**分发题包清单唯一实现**——`makeManifest`/`parseManifest`/`verify`（题数·checksum·格式，只警告不阻断）/`compareVersions`/导入历史 `findDuplicate`·`latestForPackage`·`recordImport`（`meta:pkgHistory`）；导出与导入两侧只调用本模块，不复制校验逻辑 |
@@ -98,6 +99,9 @@
 | `importers/md-importer.js` | Markdown 清洗（标题/列表/加粗/反引号/引用，保护 `____`）后复用 LineParser |
 | `importers/xlsx-importer.js` | 原生 zip + **XmlLite**（自研极简 XML，不依赖 DOMParser）：解析 workbook.xml + rels 取**全部工作表**（空表跳过、按工作簿顺序合并），支持共享字符串/内联字符串/数值单元格 |
 | `importers/docx-importer.js` | 原生 zip 读 `word/document.xml` 成段落行后复用 LineParser；解析 `word/_rels/document.xml.rels` + `word/media/*`，段落 a:blip/v:imagedata 引用的图片写 QB.Assets 并插 asset 占位（缺图警告不阻断） |
+| `importers/anki-package.js` | `.apkg` 包识别与媒体清单的**唯一实现**：`meta` 最小 protobuf（字段 1 = 版本 varint）、Legacy1/Legacy2/Latest 判定、Legacy2 优先 `collection.anki21`（缺失回退并警告）、`.anki21b` 明确拒绝并给出「导出勾选兼容旧版」指引、明文 `media` JSON → `{原文件名: 包内条目名}`；探针与导入器共用 |
+| `importers/anki-importer.js` | Anki Legacy（`.apkg`）**按 note 导入**：复用 ZipReader + SqliteReader + AnkiPackage + Adapters + Assets；Front/Back 去 HTML 后按题型判定（选项行→single/multi、显式判断词→judge，其余→essay；Back 作参考答案），cloze 降级 essay 并汇总答案；媒体内容寻址入库、缺失保留占位并警告；多卡 note 合并为 1 题并在 `meta.migration` 中列出丢失 card 历史；重复 note 按 v3 contentHash 跳过；源 revlog 不导入并明示 |
+| `importers/quizlet-importer.js` | Quizlet 纯文本：分隔符自动识别（Tab/逗号/全角逗号/分号/全角分号/竖线，支持显式覆盖），复用 `CsvImporter.parseRows` 行解析与 `Adapters.toStandard`；全部落 essay（term 题干 + definition 参考答案）；表头/非两列/空 term/重复行跳过并警告；`priority` + `sniff` 保证不劫持含表头的普通 CSV |
 
 ### 3.5 业务模块（modules）
 | 文件 | 职责 |
@@ -256,12 +260,16 @@ Exporters.openFlow({kind, bank, trigger})   // trigger 可选：异步收集后�
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
 | `Adapters.mergeAnalysisPieces/appendAnalysis/matchAnalysisMarker` | 解析类多列/多标记（解析/解题思路/考点/释义）合并为单一 `analysis`（唯一实现） | adapters（JSON/表格）、line-parser（DOCX/Markdown/粘贴） |
 | `LineParser.parseLines/blocksToQuestions` | 文本行（DOCX 段落 / Markdown 行）→ 题目块 → 标准题目 | docx-importer、md-importer |
+| `QB.SqliteReader.open(source)` | 只读打开 SQLite 字节（`{pageSize, encoding, pageCount, freelist, tables, hasTable, readTable}`）；唯一实现 | `scripts/probe-apkg.mjs`、anki-importer |
+| `QB.AnkiPackage.classify(entries)` / `readMediaMap(entries)` | `.apkg` 版本判定（Legacy1/2/Latest 拒绝/回退说明）与明文媒体清单映射；唯一实现 | 探针、anki-importer、`data-io` 预览 |
 | `Exporters`（KINDS × FORMATS 注册表） | 题集收集与多格式文本构建解耦 | 题库/错题/收藏导出 |
 
 **影响范围说明（重要）**：
 - `quiz-engine` / `statistics` 的判分统一改调 `judge-answer`（取代内联 if-else），新增题型只需在策略表加一项；**结果语义统一走 `QB.ResultPolicy`**：材料题“全半对”在计分/答题卡/结果页/SRS 评分中均按 partial，不允许再按 `isCorrect` 抢先判断（影响 quiz-engine、srs-store、wrong-book、ui-renderer）。
 - 错题/收藏/历史的题目键统一改用 **contentHash**（不再用裸 `id+type`），避免跨题库 id 冲突、跨导入版本稳定。
 - 导入路径复用 `QuestionRepo.insertMany`，**不另写落库逻辑**；去重、批删同理。
+- **`.apkg` 的 SQLite 解析只有 `js/utils/sqlite-reader.js` 一份**：探针 `scripts/probe-apkg.mjs` 与 `importers/anki-importer.js` 共用 `QB.SqliteReader`/`QB.AnkiPackage`，禁止在别处再写 B-tree/record 解析。只读、零第三方依赖（不引入 sql.js/zstd）；`.anki21b` 只识别并拒绝，不做「伪支持」。
+- Anki 导入**按 note 合并 card**（1 note = 1 题）：多模板派生 card 的独立复习历史、cloze 多空位多卡语义无法表达，必须在预览的 `meta.migration` 中列出丢失量，不允许静默吞掉；源 revlog 不导入，避免把 Anki 调度状态伪装成 FSRS 进度。
 - `QB.parseBoolean` 与 `QB.normalizeLetters` 由 `answer-normalize.js` 单点提供，`judge-answer` / `adapters` / `shuffleOptions` / 测试均复用，禁止各自实现。
 - **FNV / mulberry32 / 答案文本 / 权重归一已收敛**（`utils/fnv.js`、`utils/random.js`、`utils/answer-text.js`、`utils/weights.js`）：question-id/assets/source、shuffle/fsrs、exporter/share-page/editor/adapters/judge-answer、local/api-adapter/fsrs-opt 均改调唯一实现；新增代码禁止再复制散列/PRNG/答案拼接/权重归一的本地版本。`scripts/serve-api.mjs` 的 FNV 属 Node ESM 运行时独立实现，等价性由 api-backend 资产 id 断言守护。数据层（local-adapter）不再引用应用层 `QB.FSRSOpt`。
 - 题干/选项/解析/参考答案等**模型内容上屏统一走 `QB.RichText.render()`**（转义 + 上下标 + 轻量公式子集 `\frac`/`\sqrt`），紧凑列表/搜索走 `toPlain()`（去记号后由调用方转义）；禁止再对模型内容直接 `escapeHtml` 拼接（影响范围：ui-renderer、question-editor 列表；文本框编辑与判分/去重仍用原始文本，不解析记号）。公式子集只做 CSS 排版、不引入公式库；`\frac`/`\sqrt` 的展开与上下标同一入口，新增记号须在此模块内实现（禁止各处自行拼接 HTML）。

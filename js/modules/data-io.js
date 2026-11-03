@@ -12,7 +12,7 @@
   const QB = (global.QB = global.QB || {});
   const UI = QB.UIRenderer;
 
-  const ACCEPT = '.json,.csv,.tsv,.txt,.md,.markdown,.xlsx,.docx,.qbk';
+  const ACCEPT = '.json,.csv,.tsv,.txt,.md,.markdown,.xlsx,.docx,.qbk,.apkg,.quizlet';
 
   function pickFile() {
     return new Promise((resolve) => {
@@ -42,6 +42,26 @@
       const rows = QB.CONFIG.TYPES.map((t) =>
         '<tr><td>' + QB.typeLabel(t) + '</td><td>' + (stats.byType[t] || 0) + '</td></tr>').join('');
 
+      // 迁移桥接摘要：把「note→card / 多卡历史 / cloze 语义」的丢失项放在预览顶部，而不是只埋在警告里
+      const mig = result.meta && result.meta.migration;
+      let migHtml = '';
+      if (mig && mig.source === 'anki' && mig.stats) {
+        const s = mig.stats;
+        const media = mig.media || {};
+        migHtml = '<div class="section-title">Anki 迁移摘要</div><div class="li-meta">' +
+          'note ' + s.notes + ' / card ' + s.cards + ' · 导入 ' + s.imported +
+          ' · 跳过空题 ' + s.skippedEmpty + ' / 重复 ' + s.skippedDuplicate +
+          ' · 多卡丢失 ' + s.lostCards + ' · cloze ' + s.clozeNotes +
+          ' · 媒体 ' + (media.stored || 0) + '（缺失 ' + (media.missing || 0) + '，非图片 ' + (media.nonImage || 0) + '）' +
+          ' · revlog ' + s.revlog + ' 条未导入（调度历史不迁移）</div>';
+      } else if (mig && mig.source === 'quizlet' && mig.stats) {
+        const s = mig.stats;
+        migHtml = '<div class="section-title">Quizlet 迁移摘要</div><div class="li-meta">' +
+          '行 ' + s.rows + ' · 导入 ' + s.imported + ' · 表头 ' + s.skippedHeader +
+          ' · 非两列 ' + s.skippedBad + ' · 空 term ' + s.skippedEmpty + ' · 重复 ' + s.skippedDuplicate +
+          ' · 全部为 essay（无选项/图片/在线进度）</div>';
+      }
+
       const warnHtml = result.warnings && result.warnings.length
         ? '<div class="section-title">校验提示（' + result.warnings.length + '）</div>' +
           '<ul class="warn-list">' + result.warnings.slice(0, 50).map((w) => '<li>' + QB.escapeHtml(w) + '</li>').join('') +
@@ -52,6 +72,7 @@
         '<h3>导入预览</h3>' +
         '<div class="li-meta">目标题库：' + QB.escapeHtml(bank.name) + '　格式：' + QB.escapeHtml(result.format) + '</div>' +
         UI.renderImportChecksum(result.meta) +
+        migHtml +
         '<table class="preview-table"><thead><tr><th>题型</th><th>数量</th></tr></thead>' +
         '<tbody>' + rows +
         '<tr><td><b>合计</b></td><td><b>' + (stats.total || 0) + '</b></td></tr>' +

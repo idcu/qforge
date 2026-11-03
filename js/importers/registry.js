@@ -8,12 +8,36 @@
   const QB = (global.QB = global.QB || {});
 
   const TEXT_EXTS = ['json', 'csv', 'tsv', 'txt', 'md', 'markdown'];
-  const BINARY_EXTS = ['xlsx', 'docx', 'qbk'];
+  const BINARY_EXTS = ['xlsx', 'docx', 'qbk', 'apkg'];
 
-  const parsers = {};
+  // 同一扩展可注册多个解析器（如 .txt 的 CSV 与 Quizlet），按 priority 降序 + sniff 选择
+  const parserLists = {};
 
   function register(parser) {
-    (parser.exts || []).forEach((ext) => { parsers[ext] = parser; });
+    (parser.exts || []).forEach((ext) => {
+      const key = String(ext).toLowerCase();
+      const list = parserLists[key] || (parserLists[key] = []);
+      if (list.indexOf(parser) < 0) list.push(parser);
+    });
+  }
+
+  function candidates(ext) {
+    return (parserLists[String(ext || '').toLowerCase()] || [])
+      .slice()
+      .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0));
+  }
+
+  function chooseParser(ext, input) {
+    const list = candidates(ext);
+    for (const p of list) {
+      if (typeof p.sniff === 'function') {
+        let ok = false;
+        try { ok = !!p.sniff(input); } catch (e) { ok = false; }
+        if (!ok) continue;
+      }
+      return p;
+    }
+    return null;
   }
 
   function extOf(fileName) {
@@ -45,9 +69,8 @@
     const realFile = file && file.file ? file.file : file;
     const name = (file && file.name) || (realFile && realFile.name) || '';
     const ext = extOf(name);
-    const parser = parsers[ext];
-    if (!parser) {
-      throw new Error('不支持的文件类型 .' + ext + '（支持：json / csv / md / xlsx / docx）');
+    if (!candidates(ext).length) {
+      throw new Error('不支持的文件类型 .' + ext + '（支持：json / csv / txt(Quizlet) / md / xlsx / docx / qbk / apkg）');
     }
     const asBinary = BINARY_EXTS.indexOf(ext) >= 0;
     let input;
@@ -71,6 +94,8 @@
       input = { text: file.text, fileName: name };
     }
 
+    const parser = chooseParser(ext, input);
+    if (!parser) throw new Error('无法识别 .' + ext + ' 的具体格式（没有解析器接受该内容）');
     const result = await parser.parse(input);
     const validated = QB.Adapters.validateQuestions(result.questions || []);
     // 解析器附加元数据（.qbk 清单/校验和）必须在此统一透传：下游 data-io 只依赖
@@ -91,13 +116,15 @@
   register(QB.XlsxImporter);
   register(QB.DocxImporter);
   register(QB.QbkImporter);
+  register(QB.AnkiImporter);
+  register(QB.QuizletImporter);
 
   QB.Importers = {
     register,
     runImport,
     extOf,
-    has: (ext) => !!parsers[String(ext).toLowerCase()],
-    supported: Object.keys(parsers),
+    has: (ext) => candidates(ext).length > 0,
+    supported: Object.keys(parserLists).sort(),
     TEXT_EXTS,
     BINARY_EXTS
   };

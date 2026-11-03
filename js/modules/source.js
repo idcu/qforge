@@ -47,7 +47,7 @@
     }
     const ext = (u.pathname.toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || '';
     if (!QB.Importers || !QB.Importers.has(ext)) {
-      return { ok: false, reason: '地址需以支持的文件结尾（json/csv/tsv/txt/md/xlsx/docx/qbk）' };
+      return { ok: false, reason: '地址需以支持的文件结尾（json/csv/tsv/txt/quizlet/md/markdown/xlsx/docx/qbk/apkg）' };
     }
     return { ok: true, url: u, ext: ext };
   }
