@@ -6,9 +6,9 @@
 
 ---
 
-## （待回填）· fix(a11y): 复习设置弹窗横向溢出 + 11 控件 44px 热区 + 难卡文案按当前动作
+## 8ae294e · fix(a11y): 复习设置弹窗横向溢出 + 11 控件 44px 热区 + 难卡文案按当前动作
 
-**Commit**：`（待回填）`
+**Commit**：`8ae294e`
 
 **核心改动点**
 - 弹窗布局根因修复：新增 `.sched-grid` 作用域；flex 子项 `min-width: 0`；轻松日 `repeat(7, minmax(0, 1fr))`；数字输入 `width: 100%; min-width: 0`；≤560px 改 4 列（4+3 分行）。**未使用 `overflow-x: hidden`**。
