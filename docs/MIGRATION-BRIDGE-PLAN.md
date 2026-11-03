@@ -80,10 +80,10 @@
 | B7 | `factor` 为 10 倍百分比（2500 = 250%）；启用 FSRS 时为 difficulty shifted 到 100–1100 区间 | 事实 | 同上 `ease_factor` 注释 |
 | B8 | `id` 是毫秒时间戳（`RevlogId::new()` 取当前毫秒；`as_secs` 除以 1000） | 事实 | 同上 |
 | B9 | 实测样本 `revlog` 为 0 条，`cards.data` 全为 `{}`（该样本不含调度数据） | 实测 | §0 样本解析 |
-| B10 | qforge revlog 条目为 `{id,t,h,r,b}`：时间、题目 contentHash、评分、题库 id；无 `cid`、无 `ivl`、无 `type`、无 `factor` | 事实 | [fsrs-opt.js](file:///e:/qforge/js/modules/fsrs-opt.js#L4) |
-| B11 | qforge revlog 为 FIFO，上限 20000 条；存储为分段数组 | 事实 | [config.js](file:///e:/qforge/js/config.js#L49)、[local-adapter.js](file:///e:/qforge/js/data/local-adapter.js#L655)、[local-adapter.js](file:///e:/qforge/js/data/local-adapter.js#L880-L1024) |
-| B12 | qforge FSRS 状态为 `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}`，保留全精度 | 事实 | [fsrs.js](file:///e:/qforge/js/modules/fsrs.js#L36)、[fsrs.js](file:///e:/qforge/js/modules/fsrs.js#L240-L257) |
-| B13 | qforge 只有**全局/按库**的 `requestRetention`（默认 0.90，范围 0.70–0.97），没有逐卡 desired retention | 事实 | [sched-settings.js](file:///e:/qforge/js/modules/sched-settings.js#L22-L25)、[sched-settings.js](file:///e:/qforge/js/modules/sched-settings.js#L63-L71) |
+| B10 | qforge revlog 条目为 `{id,t,h,r,b}`：时间、题目 contentHash、评分、题库 id；无 `cid`、无 `ivl`、无 `type`、无 `factor` | 事实 | [fsrs-opt.js](../js/modules/fsrs-opt.js#L4) |
+| B11 | qforge revlog 为 FIFO，上限 20000 条；存储为分段数组 | 事实 | [config.js](../js/config.js#L49)、[local-adapter.js](../js/data/local-adapter.js#L655)、[local-adapter.js](../js/data/local-adapter.js#L880-L1024) |
+| B12 | qforge FSRS 状态为 `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}`，保留全精度 | 事实 | [fsrs.js](../js/modules/fsrs.js#L36)、[fsrs.js](../js/modules/fsrs.js#L240-L257) |
+| B13 | qforge 只有**全局/按库**的 `requestRetention`（默认 0.90，范围 0.70–0.97），没有逐卡 desired retention | 事实 | [sched-settings.js](../js/modules/sched-settings.js#L22-L25)、[sched-settings.js](../js/modules/sched-settings.js#L63-L71) |
 
 **映射可行性判断（基于以上事实，非猜测）**
 
@@ -124,7 +124,7 @@
 **矩阵题能否映射成材料题 + 子问？**
 
 - 结构上**可以**：矩阵的「题干 + 行标签 + 列标签」正好对应 qforge `material`（共享材料）+ 多子问。
-- 硬约束：qforge 材料题**子问 2–10 个**（[adapters.js](file:///e:/qforge/js/importers/adapters.js#L264-L265)、校验见 [adapters.js](file:///e:/qforge/js/importers/adapters.js#L633-L637)）。矩阵常超过 10 行，必须拆成多个材料块或拒绝。
+- 硬约束：qforge 材料题**子问 2–10 个**（[adapters.js](../js/importers/adapters.js#L264-L265)、校验见 [adapters.js](../js/importers/adapters.js#L633-L637)）。矩阵常超过 10 行，必须拆成多个材料块或拒绝。
 - 结论：**可做，但需要拆分策略**；不能默认「来多少行就塞多少子问」。
 
 ### 2.4 Quizlet
@@ -145,8 +145,8 @@
 | G1 | Anki 媒体文件以**数字名**（`0`、`1`…）存放在 ZIP 根部，`media` 映射「原文件名 ↔ 数字名」 | 事实 | `rslib/src/import_export/package/media.rs`；实测样本 `media` 为 `{}` |
 | G2 | Latest 格式：媒体清单为 protobuf 并 zstd 压缩；每个媒体文件在包内也经 zstd（`copy_decode`） | 事实 | `media.rs` `copy_and_ensure_sha1_set`（`compressed` 分支）、`get_media_list_data` |
 | G3 | Anki 字段通过 HTML `<img src="...">` 引用图片、`[sound:...]` 引用音频 | 推断 | 官方文档通用说明；实测样本无媒体，无法实测 |
-| G4 | qforge 资产仅支持图片 | 事实 | [assets.js](file:///e:/qforge/js/utils/assets.js#L18-L34) |
-| G5 | qforge 图片占位格式为 `![](asset:<id>)`，渲染时由 `hydrate()` 换成 `<img data-asset>` | 事实 | [rich-text.js](file:///e:/qforge/js/utils/rich-text.js#L23)、[rich-text.js](file:///e:/qforge/js/utils/rich-text.js#L97-L105)、[rich-text.js](file:///e:/qforge/js/utils/rich-text.js#L156) |
+| G4 | qforge 资产仅支持图片 | 事实 | [assets.js](../js/utils/assets.js#L18-L34) |
+| G5 | qforge 图片占位格式为 `![](asset:<id>)`，渲染时由 `hydrate()` 换成 `<img data-asset>` | 事实 | [rich-text.js](../js/utils/rich-text.js#L23)、[rich-text.js](../js/utils/rich-text.js#L97-L105)、[rich-text.js](../js/utils/rich-text.js#L156) |
 | G6 | 问卷星图片上传题在 Excel 中显示为图片 URL；另有插件可转内嵌图片 | 事实（URL）+ 未核实（插件行为与内嵌形态） | 官方帮助页（`catid=5` / `helpid=166`） |
 | G7 | Quizlet 图片不可导出 | 事实 | 同 Q4 |
 
@@ -160,36 +160,36 @@
 
 | # | 格式 | 入口（`file:line`） | 扩展名 | 内部走向 |
 | --- | --- | --- | --- | --- |
-| 1 | JSON | [json-importer.js](file:///e:/qforge/js/importers/json-importer.js#L35) | `json` | `Adapters.toStandard` / `toStandardMaterial` |
-| 2 | CSV / TSV / TXT | [csv-importer.js](file:///e:/qforge/js/importers/csv-importer.js#L62) | `csv`, `tsv`, `txt` | `Adapters.tableToQuestions` |
-| 3 | Markdown | [md-importer.js](file:///e:/qforge/js/importers/md-importer.js#L50) | `md`, `markdown` | `LineParser.parseLines` → `blocksToQuestions` |
-| 4 | XLSX | [xlsx-importer.js](file:///e:/qforge/js/importers/xlsx-importer.js#L72) | `xlsx` | `Adapters.tableToQuestions`（不提取内嵌图片） |
-| 5 | DOCX | [docx-importer.js](file:///e:/qforge/js/importers/docx-importer.js#L138) | `docx` | `docToLines` → `LineParser`；图片 → `QB.Assets` |
-| 6 | QBK | [qbk-importer.js](file:///e:/qforge/js/importers/qbk-importer.js#L48) | `qbk` | `Qbk.parseBundle` + `JsonImporter` |
+| 1 | JSON | [json-importer.js](../js/importers/json-importer.js#L35) | `json` | `Adapters.toStandard` / `toStandardMaterial` |
+| 2 | CSV / TSV / TXT | [csv-importer.js](../js/importers/csv-importer.js#L62) | `csv`, `tsv`, `txt` | `Adapters.tableToQuestions` |
+| 3 | Markdown | [md-importer.js](../js/importers/md-importer.js#L50) | `md`, `markdown` | `LineParser.parseLines` → `blocksToQuestions` |
+| 4 | XLSX | [xlsx-importer.js](../js/importers/xlsx-importer.js#L72) | `xlsx` | `Adapters.tableToQuestions`（不提取内嵌图片） |
+| 5 | DOCX | [docx-importer.js](../js/importers/docx-importer.js#L138) | `docx` | `docToLines` → `LineParser`；图片 → `QB.Assets` |
+| 6 | QBK | [qbk-importer.js](../js/importers/qbk-importer.js#L48) | `qbk` | `Qbk.parseBundle` + `JsonImporter` |
 
-分派与注册：[registry.js](file:///e:/qforge/js/importers/registry.js#L15)、[registry.js](file:///e:/qforge/js/importers/registry.js#L44-L50)、[registry.js](file:///e:/qforge/js/importers/registry.js#L88-L101)。
+分派与注册：[registry.js](../js/importers/registry.js#L15)、[registry.js](../js/importers/registry.js#L44-L50)、[registry.js](../js/importers/registry.js#L88-L101)。
 
 ### 3.2 可直接复用（唯一实现，禁止另写）
 
 | 能力 | 唯一实现 | 迁移桥怎么用 | 结论 |
 | --- | --- | --- | --- |
-| ZIP 读（stored + deflate-raw，CRC，解压上限） | [zip-reader.js](file:///e:/qforge/js/utils/zip-reader.js#L11-L23)（薄适配层，实现来自 `ngm.vendor` 的 `packages/format/zip`） | `.apkg` 与 `.qbk` 同一条路径；实测样本的 `collection.anki21` 是 deflate，正好在支持范围内 | **复用，不新增** |
-| ZIP 写 | [zip-writer.js](file:///e:/qforge/js/utils/zip-writer.js#L10) | 若要做「Anki → qbk」导出，直接复用 | **复用，不新增** |
-| 表头别名 / 表格 → 题目 | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L437-L453)、[adapters.js](file:///e:/qforge/js/importers/adapters.js#L455-L465)、[adapters.js](file:///e:/qforge/js/importers/adapters.js#L475) | 问卷星 Excel/CSV 直接走这里，**只扩别名表** | **复用 + 扩别名** |
-| 题型归一 | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L13-L25)、[adapters.js](file:///e:/qforge/js/importers/adapters.js#L170) | 所有来源都在 `normalizeType` 收敛 | **复用 + 补键** |
-| 行式切题 | [line-parser.js](file:///e:/qforge/js/importers/line-parser.js#L18-L40)、[line-parser.js](file:///e:/qforge/js/importers/line-parser.js#L116)、[line-parser.js](file:///e:/qforge/js/importers/line-parser.js#L278) | 问卷星 Word 若为「1. 题干 / A. 选项 / 答案：X」，可直接用 | **复用** |
-| DOCX 段落 + 内嵌图片抽取 | [docx-importer.js](file:///e:/qforge/js/importers/docx-importer.js#L27)、[docx-importer.js](file:///e:/qforge/js/importers/docx-importer.js#L53)、[docx-importer.js](file:///e:/qforge/js/importers/docx-importer.js#L88-L110) | 问卷星 Word 导出直接复用 | **复用** |
-| 图片内容寻址入库 | [assets.js](file:///e:/qforge/js/utils/assets.js#L36)、[assets.js](file:///e:/qforge/js/utils/assets.js#L116-L121)、[assets.js](file:///e:/qforge/js/utils/assets.js#L172) | Anki 媒体与 wjx 图片都走 `putEntries` | **复用，且这是去重的唯一实现** |
-| 图片占位与渲染 | [rich-text.js](file:///e:/qforge/js/utils/rich-text.js#L23) | 迁移后题干必须用 `asset:` 占位，不能写 `<img src>` | **复用** |
-| JSON 归一（含材料题） | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L271)、[adapters.js](file:///e:/qforge/js/importers/adapters.js#L331) | 所有来源最终都产出这一结构 | **复用** |
-| 校验与统计 | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L614-L660) | 迁移结果统一过校验；矩阵拆分、丢卡等额外警告在此汇总 | **复用** |
-| 导入提交与来源标记 | [data-io.js](file:///e:/qforge/js/modules/data-io.js#L118)、[data-io.js](file:///e:/qforge/js/modules/data-io.js#L127)、[data-io.js](file:///e:/qforge/js/modules/data-io.js#L171) | 新来源只需产出 `{questions, warnings, format, assetCount}` | **复用** |
-| 粘贴文本入口 | [data-io.js](file:///e:/qforge/js/modules/data-io.js#L213) | 仅嗅探 JSON 与行式文本；**不支持表格粘贴**。Quizlet 文本可走这里，但需要新增格式识别分支 | **复用 + 扩嗅探** |
-| URL 快照 / 校验和 | [source.js](file:///e:/qforge/js/modules/source.js#L12)、[source.js](file:///e:/qforge/js/modules/source.js#L42-L52)、[source.js](file:///e:/qforge/js/modules/source.js#L56-L83)、[source.js](file:///e:/qforge/js/modules/source.js#L86) | 新增 `.apkg` 时只需注册扩展名；但 8MB 默认上限与 `.apkg` 体积不匹配，必须单独评估 | **复用 + 调上限** |
-| contentHash | [question-id.js](file:///e:/qforge/js/utils/question-id.js#L67) | 迁移后去重、revlog 关联都只能用它 | **复用，禁止另写哈希** |
-| FSRS 状态推进 | [fsrs.js](file:///e:/qforge/js/modules/fsrs.js#L240-L257) | 导入时只写状态，不推进 | **复用** |
-| revlog 写入 | [srs-store.js](file:///e:/qforge/js/modules/srs-store.js#L38)、[local-adapter.js](file:///e:/qforge/js/data/local-adapter.js#L1234) | 迁移历史必须走这条写入路径，不能直写存储 | **复用** |
-| QBK 打包/校验和 | [qbk.js](file:///e:/qforge/js/modules/qbk.js#L37)、[qbk.js](file:///e:/qforge/js/modules/qbk.js#L55-L70) | 「Anki → qbk」导出可复用 | **复用** |
+| ZIP 读（stored + deflate-raw，CRC，解压上限） | [zip-reader.js](../js/utils/zip-reader.js#L11-L23)（薄适配层，实现来自 `ngm.vendor` 的 `packages/format/zip`） | `.apkg` 与 `.qbk` 同一条路径；实测样本的 `collection.anki21` 是 deflate，正好在支持范围内 | **复用，不新增** |
+| ZIP 写 | [zip-writer.js](../js/utils/zip-writer.js#L10) | 若要做「Anki → qbk」导出，直接复用 | **复用，不新增** |
+| 表头别名 / 表格 → 题目 | [adapters.js](../js/importers/adapters.js#L437-L453)、[adapters.js](../js/importers/adapters.js#L455-L465)、[adapters.js](../js/importers/adapters.js#L475) | 问卷星 Excel/CSV 直接走这里，**只扩别名表** | **复用 + 扩别名** |
+| 题型归一 | [adapters.js](../js/importers/adapters.js#L13-L25)、[adapters.js](../js/importers/adapters.js#L170) | 所有来源都在 `normalizeType` 收敛 | **复用 + 补键** |
+| 行式切题 | [line-parser.js](../js/importers/line-parser.js#L18-L40)、[line-parser.js](../js/importers/line-parser.js#L116)、[line-parser.js](../js/importers/line-parser.js#L278) | 问卷星 Word 若为「1. 题干 / A. 选项 / 答案：X」，可直接用 | **复用** |
+| DOCX 段落 + 内嵌图片抽取 | [docx-importer.js](../js/importers/docx-importer.js#L27)、[docx-importer.js](../js/importers/docx-importer.js#L53)、[docx-importer.js](../js/importers/docx-importer.js#L88-L110) | 问卷星 Word 导出直接复用 | **复用** |
+| 图片内容寻址入库 | [assets.js](../js/utils/assets.js#L36)、[assets.js](../js/utils/assets.js#L116-L121)、[assets.js](../js/utils/assets.js#L172) | Anki 媒体与 wjx 图片都走 `putEntries` | **复用，且这是去重的唯一实现** |
+| 图片占位与渲染 | [rich-text.js](../js/utils/rich-text.js#L23) | 迁移后题干必须用 `asset:` 占位，不能写 `<img src>` | **复用** |
+| JSON 归一（含材料题） | [adapters.js](../js/importers/adapters.js#L271)、[adapters.js](../js/importers/adapters.js#L331) | 所有来源最终都产出这一结构 | **复用** |
+| 校验与统计 | [adapters.js](../js/importers/adapters.js#L614-L660) | 迁移结果统一过校验；矩阵拆分、丢卡等额外警告在此汇总 | **复用** |
+| 导入提交与来源标记 | [data-io.js](../js/modules/data-io.js#L118)、[data-io.js](../js/modules/data-io.js#L127)、[data-io.js](../js/modules/data-io.js#L171) | 新来源只需产出 `{questions, warnings, format, assetCount}` | **复用** |
+| 粘贴文本入口 | [data-io.js](../js/modules/data-io.js#L213) | 仅嗅探 JSON 与行式文本；**不支持表格粘贴**。Quizlet 文本可走这里，但需要新增格式识别分支 | **复用 + 扩嗅探** |
+| URL 快照 / 校验和 | [source.js](../js/modules/source.js#L12)、[source.js](../js/modules/source.js#L42-L52)、[source.js](../js/modules/source.js#L56-L83)、[source.js](../js/modules/source.js#L86) | 新增 `.apkg` 时只需注册扩展名；但 8MB 默认上限与 `.apkg` 体积不匹配，必须单独评估 | **复用 + 调上限** |
+| contentHash | [question-id.js](../js/utils/question-id.js#L67) | 迁移后去重、revlog 关联都只能用它 | **复用，禁止另写哈希** |
+| FSRS 状态推进 | [fsrs.js](../js/modules/fsrs.js#L240-L257) | 导入时只写状态，不推进 | **复用** |
+| revlog 写入 | [srs-store.js](../js/modules/srs-store.js#L38)、[local-adapter.js](../js/data/local-adapter.js#L1234) | 迁移历史必须走这条写入路径，不能直写存储 | **复用** |
+| QBK 打包/校验和 | [qbk.js](../js/modules/qbk.js#L37)、[qbk.js](../js/modules/qbk.js#L55-L70) | 「Anki → qbk」导出可复用 | **复用** |
 
 ### 3.3 必须新增（且不应重复已有能力）
 
@@ -200,11 +200,11 @@
 | **Anki note type 结构读取** | Legacy 在 `col.models` JSON；Latest 在 `notetypes` protobuf，二者都要读到「字段名 + 模板数」 | 新增 `anki-notetype.js`；**只读字段名与模板，不实现模板渲染** |
 | **Anki 字段 → qforge 题干** | `flds` 是 `\x1f` 分隔的原始字段，需要 Basic/Cloze 语义 | 新增映射层，复用 `Adapters.toStandard` 产出标准题 |
 | **媒体名映射与资产落库** | `media` 映射格式在 Legacy/Latest 完全不同 | 新增 `anki-media.js`；落库复用 `QB.Assets.putEntries` |
-| **表格别名扩展** | 现表头只认 `题目/题干…`、选项只认 `A–H` 或 `选项A`，不认 `选项1–5`、`分值`、`考试单选` 等 | 扩 [adapters.js](file:///e:/qforge/js/importers/adapters.js#L437-L453) 与 [adapters.js](file:///e:/qforge/js/importers/adapters.js#L462)，**不新建第二套别名表** |
-| **题型字典补键** | `TYPE_MAP` 缺 `考试单选/考试判断/考试多选/单项填空/多项填空/简答/矩阵/量表/排序` | 扩 [adapters.js](file:///e:/qforge/js/importers/adapters.js#L13-L25) |
-| **顶层分值策略** | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L284-L296) 不读 `raw.score`；普通题分值被静默丢弃 | 需产品决策：丢弃并警告 / 新增字段。**本轮不建议新增字段**（会牵动导出、QBK、UI） |
+| **表格别名扩展** | 现表头只认 `题目/题干…`、选项只认 `A–H` 或 `选项A`，不认 `选项1–5`、`分值`、`考试单选` 等 | 扩 [adapters.js](../js/importers/adapters.js#L437-L453) 与 [adapters.js](../js/importers/adapters.js#L462)，**不新建第二套别名表** |
+| **题型字典补键** | `TYPE_MAP` 缺 `考试单选/考试判断/考试多选/单项填空/多项填空/简答/矩阵/量表/排序` | 扩 [adapters.js](../js/importers/adapters.js#L13-L25) |
+| **顶层分值策略** | [adapters.js](../js/importers/adapters.js#L284-L296) 不读 `raw.score`；普通题分值被静默丢弃 | 需产品决策：丢弃并警告 / 新增字段。**本轮不建议新增字段**（会牵动导出、QBK、UI） |
 | **Quizlet 文本适配器** | `.txt` 已被 CSV 注册；`LineParser` 不认无题号的 `term\tdefinition` | 新增独立格式选择或嗅探，避免和第 2 项 CSV 抢同一扩展名 |
-| **导入失败文案与 URL 扩展名白名单** | [registry.js](file:///e:/qforge/js/importers/registry.js#L44-L50) 的错误提示、[source.js](file:///e:/qforge/js/modules/source.js#L49-L50) 的可导入扩展名提示都写死了旧格式清单 | 新增来源时必须同步更新，否则用户会看到「不支持」的错误提示却实际支持 |
+| **导入失败文案与 URL 扩展名白名单** | [registry.js](../js/importers/registry.js#L44-L50) 的错误提示、[source.js](../js/modules/source.js#L49-L50) 的可导入扩展名提示都写死了旧格式清单 | 新增来源时必须同步更新，否则用户会看到「不支持」的错误提示却实际支持 |
 | **复习历史导入（可选）** | qforge 没有「导入历史」写入口 | 新增导入器选项 + `srs-store` 批量写入；**复用** `SRSStore.record` |
 
 ### 3.4 明确禁止的重复实现
@@ -224,12 +224,12 @@
 
 | 约束 | 事实 | 影响 |
 | --- | --- | --- |
-| 7 种题型：`judge/single/multi/indefinite/fill/essay/material` | [config.js](file:///e:/qforge/js/config.js#L20) | 没有 flashcard（front/back）类型 |
-| 无顶层 `score` | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L284-L296) | 只有材料小问有 `score` |
-| 材料题子问 2–10 个、且不可二层嵌套 | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L264-L265)、[adapters.js](file:///e:/qforge/js/importers/adapters.js#L633-L647) | 矩阵/大材料必须拆分 |
-| 选择题选项字母 A–H | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L462) | 超过 8 个选项需要降级策略 |
-| 填空题答案按 `[；;\|、]` 分段 | [adapters.js](file:///e:/qforge/js/importers/adapters.js#L213) | Cloze 多空可行，但答案文本不能含这些字符 |
-| 资产仅图片 | [assets.js](file:///e:/qforge/js/utils/assets.js#L18-L34) | Anki 音频必然丢失 |
+| 7 种题型：`judge/single/multi/indefinite/fill/essay/material` | [config.js](../js/config.js#L20) | 没有 flashcard（front/back）类型 |
+| 无顶层 `score` | [adapters.js](../js/importers/adapters.js#L284-L296) | 只有材料小问有 `score` |
+| 材料题子问 2–10 个、且不可二层嵌套 | [adapters.js](../js/importers/adapters.js#L264-L265)、[adapters.js](../js/importers/adapters.js#L633-L647) | 矩阵/大材料必须拆分 |
+| 选择题选项字母 A–H | [adapters.js](../js/importers/adapters.js#L462) | 超过 8 个选项需要降级策略 |
+| 填空题答案按 `[；;\|、]` 分段 | [adapters.js](../js/importers/adapters.js#L213) | Cloze 多空可行，但答案文本不能含这些字符 |
+| 资产仅图片 | [assets.js](../js/utils/assets.js#L18-L34) | Anki 音频必然丢失 |
 
 ### 4.2 Anki → qforge
 
@@ -327,7 +327,7 @@
   1. Legacy1 与 Legacy2 各 1 份样本：`notes` 数 == 去重后题目数；`flds` 切分字段数 == note type 字段数。
   2. 媒体：图片数 == `media` 中图片条目数；音频计入 `skipped` 并在报告中列出。
   3. 重复图片按内容寻址去重后，`assetCount` 等于去重后数量。
-  4. 包体积 / 单条目超过 `QB_ZipReader` 上限（单条 32MB、总量 64MB，[zip-reader.js](file:///e:/qforge/js/utils/zip-reader.js#L11-L17)）时给出可操作错误，不崩溃。
+  4. 包体积 / 单条目超过 `QB_ZipReader` 上限（单条 32MB、总量 64MB，[zip-reader.js](../js/utils/zip-reader.js#L11-L17)）时给出可操作错误，不崩溃。
   5. 探针判定 Latest 时，**不进入解析**，直接给出「请在 Anki 导出时勾选兼容旧版」。
 
 ### 阶段 5：`.anki21b`（本轮不做）

@@ -13,11 +13,14 @@
  * 为什么要有这一条：docs-check.mjs 只复算文档里的**数字**（断言数、体积），
  * 不检查链接、锚点与版本号。而"文档里写的版本号"正是最容易过期、又最像真的那种内容。
  *
- * 用法：node scripts/docs-links.mjs [--quiet]
+ * 用法：node scripts/docs-links.mjs [--quiet] [--selftest]
+ *   --selftest 造一棵**必然违约**的临时树并跑自己，证明它真的会红（判据的牙齿）。
  * 退出码：0 通过（允许告警）；1 有坏链 / 越界锚点 / 版本读数不一致。
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -199,3 +202,40 @@ if (!QUIET) {
 }
 
 process.exitCode = failed ? 1 : 0;
+
+/* ---------------- 牙齿：造一棵必然违约的树，跑自己 ---------------- */
+// 做法是把脚本复制到临时目录的 scripts/ 下再跑——脚本的 ROOT 是 `__dirname/..`，
+// 复制过去之后 ROOT 自然变成临时树，**不需要为测试重构主流程**。
+// 三类违约各造一个：坏链、行区间越界、版本读数漂移。
+if (process.argv.includes('--selftest')) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qf-docs-links-'));
+  try {
+    for (const d of ['scripts', 'docs', 'js/modules', 'js/utils']) {
+      fs.mkdirSync(path.join(tmp, d), { recursive: true });
+    }
+    fs.copyFileSync(fileURLToPath(import.meta.url), path.join(tmp, 'scripts', 'check.mjs'));
+
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '[坏链](nope.md)\n[越界](b.md#L1-L99)\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'b.md'), '# b\n\n只有三行\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'DEVELOPMENT.md'), [
+      '## 当前版本读数', '',
+      '| 读数 | 当前值 | 事实源 |', '| --- | --- | --- |',
+      '| SW 缓存版本 | qforge-v9 | sw.js |',
+      '| 数据 schemaVersion | 6 | migrate.js |',
+      '| 去重键版本 | 3 | question-id.js |', ''
+    ].join('\n'));
+    fs.writeFileSync(path.join(tmp, 'sw.js'), "const CACHE = 'qforge-v8';\n");
+    fs.writeFileSync(path.join(tmp, 'js', 'modules', 'migrate.js'), 'const SCHEMA_VERSION = 6;\n');
+    fs.writeFileSync(path.join(tmp, 'js', 'utils', 'question-id.js'), "const HASH_VERSION = '3';\n");
+
+    const r = spawnSync(process.execPath, [path.join(tmp, 'scripts', 'check.mjs')], { encoding: 'utf8' });
+    const out = (r.stdout || '') + (r.stderr || '');
+    const ok = r.status === 1 && out.includes('2 broken') && out.includes('1 mismatched');
+    console.log(ok
+      ? 'docs-links selftest: 坏链 / 行区间越界 / 版本读数漂移 三类都抓住了'
+      : 'SELFTEST FAILED（exit=' + r.status + '）:\n' + out);
+    process.exitCode = ok ? 0 : 1;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
