@@ -240,5 +240,8 @@
     return await QB.DB.reviews.remove(bankId);
   }
 
-  QB.SRSStore = { getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear, keyFor, ratingForResult, collectGraded, readMap, writeMap };
+  QB.SRSStore = {
+    getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear,
+    keyFor, ratingForResult, collectGraded, readMap, writeMap, fuzzSeedFor
+  };
 })(window);

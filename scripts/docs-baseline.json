@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-03T05:44:42.049Z",
+  "generatedAt": "2026-11-03T05:50:47.332Z",
   "runItems": 30,
   "suiteFiles": 29,
-  "totalAssertions": 4811,
+  "totalAssertions": 4839,
   "gateCount": 55,
   "counts": {
     "smoke-test.mjs": 724,
@@ -26,7 +26,7 @@
     "references.test.mjs": 13,
     "review-queue.test.mjs": 51,
     "rich-text.test.mjs": 66,
-    "sched.test.mjs": 187,
+    "sched.test.mjs": 215,
     "shard.test.mjs": 115,
     "source.test.mjs": 39,
     "srs.test.mjs": 63,

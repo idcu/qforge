@@ -514,6 +514,55 @@ section('二期 参数校验：非法值就地报错（不静默丢弃）');
     '难卡阈值越界报错');
 }
 
+section('二期金样本：fuzz 确定性 / easyDays 边界 / 默认关闭等价');
+{
+  const G2 = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'fsrs-sched-golden2.json'), 'utf8'));
+  function snap3(st) {
+    return {
+      due: st.due, stability: st.stability, difficulty: st.difficulty, reps: st.reps, lapses: st.lapses,
+      learning: st.learning ? { step: st.learning.step, mode: st.learning.mode } : null
+    };
+  }
+  function replay(c) {
+    const sched = S.normalize(c.sched);
+    let prev = c.start || null;
+    return c.steps.map((step, i) => {
+      const at = i === 0 ? c.at : prev.due;
+      const seed = c.sched && c.sched.fuzz ? QB.SRSStore.fuzzSeedFor(c.bankId, c.key, prev && prev.reps) : undefined;
+      prev = QB.FSRS.review(prev, step.rating, at, W, { sched: sched, fuzzSeed: seed });
+      return snap3(prev);
+    });
+  }
+  G2.cases.forEach((c) => {
+    const got = replay(c);
+    c.steps.forEach((step, i) => deep(got[i], {
+      due: step.due, stability: step.stability, difficulty: step.difficulty, reps: step.reps,
+      lapses: step.lapses, learning: step.learning
+    }, c.name + ' 第 ' + i + ' 步'));
+    if (c.name.indexOf('fuzz') >= 0) {
+      deep(replay(c), got, c.name + '：同 seed 再跑逐字段一致');
+    }
+  });
+
+  const offCase = G2.cases.find((c) => c.name.indexOf('defaults-off') >= 0);
+  const offGot = replay(offCase);
+  let prev = offCase.start;
+  offCase.steps.forEach((step, i) => {
+    const at = i === 0 ? offCase.at : prev.due;
+    prev = QB.FSRS.review(prev, step.rating, at, W, { sched: S.normalize(null) });
+    deep(snap3(prev), offGot[i], 'defaults-off 与 normalize(null) 严格相等 第 ' + i + ' 步');
+  });
+
+  const zero = G2.cases.find((c) => c.name.indexOf('easy-zero') >= 0);
+  const z = replay(zero);
+  z.forEach((st, i) => eq(Math.round((st.due - (i === 0 ? zero.at : z[i - 1].due)) / DAY), 1,
+    'easy-zero 第 ' + i + ' 步恒 1 天'));
+  const cap = G2.cases.find((c) => c.name.indexOf('easy-maxdays') >= 0);
+  const cp = replay(cap);
+  cp.forEach((st, i) => ok(Math.round((st.due - (i === 0 ? cap.at : cp[i - 1].due)) / DAY) <= 5,
+    'easy-maxdays 第 ' + i + ' 步 ≤5 天'));
+}
+
 /* 汇总 */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

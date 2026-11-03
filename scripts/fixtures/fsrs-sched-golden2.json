@@ -1,0 +1,281 @@
+{
+  "meta": {
+    "note": "二期回归锁：由当前实现生成（非独立复算）；fuzz 官方区间公式另由 fsrs.test.mjs 断言覆盖",
+    "seed": "SRSStore.fuzzSeedFor(bankId, key, reps) → FNV-1a",
+    "t0": 1767225600000,
+    "firstDueAt": "每步取上一步 due 作为复习时刻"
+  },
+  "cases": [
+    {
+      "name": "fuzz-on-同 seed 可复现",
+      "sched": {
+        "fuzz": true
+      },
+      "bankId": "golden2",
+      "key": "q-fuzz",
+      "at": 1768089600000,
+      "start": {
+        "algo": "fsrs",
+        "due": 1768003200000,
+        "stability": 20,
+        "difficulty": 5,
+        "reps": 5,
+        "lapses": 0,
+        "last": 1767225600000
+      },
+      "steps": [
+        {
+          "rating": 3,
+          "at": 1768089600000,
+          "due": 1772150400000,
+          "stability": 43.074900489512075,
+          "difficulty": 4.9902283692968386,
+          "reps": 6,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 2,
+          "at": 1772150400000,
+          "due": 1779235200000,
+          "stability": 77.49863202348502,
+          "difficulty": 6.659508505478089,
+          "reps": 7,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 3,
+          "at": 1779235200000,
+          "due": 1794355200000,
+          "stability": 169.12647711692452,
+          "difficulty": 6.64807736626945,
+          "reps": 8,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 4,
+          "at": 1794355200000,
+          "due": 1845504000000,
+          "stability": 577.2343053865586,
+          "difficulty": 5.51324939096827,
+          "reps": 9,
+          "lapses": 0,
+          "learning": null
+        }
+      ]
+    },
+    {
+      "name": "fuzz-on-上限 2 天",
+      "sched": {
+        "fuzz": true,
+        "fuzzMaxDays": 2
+      },
+      "bankId": "golden2",
+      "key": "q-cap",
+      "at": 1768089600000,
+      "start": {
+        "algo": "fsrs",
+        "due": 1768003200000,
+        "stability": 20,
+        "difficulty": 5,
+        "reps": 5,
+        "lapses": 0,
+        "last": 1767225600000
+      },
+      "steps": [
+        {
+          "rating": 3,
+          "at": 1768089600000,
+          "due": 1771804800000,
+          "stability": 43.074900489512075,
+          "difficulty": 4.9902283692968386,
+          "reps": 6,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 2,
+          "at": 1771804800000,
+          "due": 1778112000000,
+          "stability": 75.39876704417493,
+          "difficulty": 6.659508505478089,
+          "reps": 7,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 3,
+          "at": 1778112000000,
+          "due": 1791763200000,
+          "stability": 159.46124452568597,
+          "difficulty": 6.64807736626945,
+          "reps": 8,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 4,
+          "at": 1791763200000,
+          "due": 1838073600000,
+          "stability": 536.2178235549994,
+          "difficulty": 5.51324939096827,
+          "reps": 9,
+          "lapses": 0,
+          "learning": null
+        }
+      ]
+    },
+    {
+      "name": "easy-zero-全 0 权重",
+      "sched": {
+        "easyDays": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "at": 1768089600000,
+      "start": {
+        "algo": "fsrs",
+        "due": 1768003200000,
+        "stability": 20,
+        "difficulty": 5,
+        "reps": 5,
+        "lapses": 0,
+        "last": 1767225600000
+      },
+      "steps": [
+        {
+          "rating": 3,
+          "at": 1768089600000,
+          "due": 1768176000000,
+          "stability": 43.074900489512075,
+          "difficulty": 4.9902283692968386,
+          "reps": 6,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 3,
+          "at": 1768176000000,
+          "due": 1768262400000,
+          "stability": 45.56211930256663,
+          "difficulty": 4.98046651022438,
+          "reps": 7,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 3,
+          "at": 1768262400000,
+          "due": 1768348800000,
+          "stability": 48.03173085675413,
+          "difficulty": 4.970714413010994,
+          "reps": 8,
+          "lapses": 0,
+          "learning": null
+        }
+      ]
+    },
+    {
+      "name": "easy-maxdays-5 天钳制",
+      "sched": {
+        "maximumIntervalDays": 5
+      },
+      "at": 1768089600000,
+      "start": {
+        "algo": "fsrs",
+        "due": 1768003200000,
+        "stability": 5000,
+        "difficulty": 5,
+        "reps": 5,
+        "lapses": 0,
+        "last": 1767225600000
+      },
+      "steps": [
+        {
+          "rating": 3,
+          "at": 1768089600000,
+          "due": 1768521600000,
+          "stability": 5011.3666880288465,
+          "difficulty": 4.9902283692968386,
+          "reps": 6,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 3,
+          "at": 1768521600000,
+          "due": 1768953600000,
+          "stability": 5017.0599913282285,
+          "difficulty": 4.98046651022438,
+          "reps": 7,
+          "lapses": 0,
+          "learning": null
+        }
+      ]
+    },
+    {
+      "name": "defaults-off-默认关闭等价",
+      "sched": null,
+      "at": 1768089600000,
+      "start": {
+        "algo": "fsrs",
+        "due": 1768003200000,
+        "stability": 20,
+        "difficulty": 5,
+        "reps": 5,
+        "lapses": 0,
+        "last": 1767225600000
+      },
+      "steps": [
+        {
+          "rating": 3,
+          "at": 1768089600000,
+          "due": 1771804800000,
+          "stability": 43.074900489512075,
+          "difficulty": 4.9902283692968386,
+          "reps": 6,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 2,
+          "at": 1771804800000,
+          "due": 1778284800000,
+          "stability": 75.39876704417493,
+          "difficulty": 6.659508505478089,
+          "reps": 7,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 3,
+          "at": 1778284800000,
+          "due": 1792195200000,
+          "stability": 161.10813654330354,
+          "difficulty": 6.64807736626945,
+          "reps": 8,
+          "lapses": 0,
+          "learning": null
+        },
+        {
+          "rating": 4,
+          "at": 1792195200000,
+          "due": 1839110400000,
+          "stability": 543.432394123784,
+          "difficulty": 5.51324939096827,
+          "reps": 9,
+          "lapses": 0,
+          "learning": null
+        }
+      ]
+    }
+  ]
+}

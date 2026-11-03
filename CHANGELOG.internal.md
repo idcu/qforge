@@ -6,9 +6,31 @@
 
 ---
 
-## 待回填 · feat(srs): leech 动作可配置（默认仅徽标，不 suspend）
+## 待回填 · test(srs): 二期金样本 golden2（fuzz 确定性 / easyDays 边界 / 默认关闭等价）
 
 **Commit**：`待回填`（收尾 docs 提交回填）
+
+**核心改动点**
+- 新增 `scripts/fixtures/fsrs-sched-golden2.json`（5 组 / 13 步）与生成器 `scripts/gen-fsrs-sched-golden2.mjs`；生成器与测试共用 `QB.SRSStore.fuzzSeedFor`，保证金样本与生产同源。
+- 新样本覆盖：fuzz 同 seed 逐字段复现、`fuzzMaxDays=2` 收紧、easyDays 全 0（每步恒 1 天）、`maximumIntervalDays=5` 钳制、默认关闭与 `normalize(null)` 严格相等。
+- 金样本明确定位为**回归锁**（由实现生成，非独立复算）；官方 fuzz 区间公式仍由 `fsrs.test.mjs` 的 FUZZ_RANGES/applyFuzz 独立断言覆盖。
+- `QB.SRSStore` 导出 `fuzzSeedFor`（纯函数，新增公共抽象；唯一调用方为 grade/gradeMany 与金样本工具）。
+
+**实测数据（2026-11-03，本机 Asia/Shanghai）**
+- 红→绿：fixture 缺失时测试抛 `ENOENT` 失败；生成后 sched.test **215 / 215**（原 187，+28）。
+- 金样本：5 组 / 13 步全部逐字段 Deep-equal；fuzz 用例同 seed 重跑逐字段一致；easy-zero 每步到期恒 1 天；maxDays 用例每步 ≤5 天。
+- 门禁：`test-all` 30 运行项 0 失败、断言 **4839 / 4839**（较二期前 4744，+95）；`bench --assert --expose-gc` 全绿：heapUsed 增量 **2.69 MB ≤ 40MB**、`grade` 比值 **2.70 ≤ 2.90**、`gradeMany` 比值 **5.15 ≤ 5.35**、PATCH P95 **7.88 ms ≤ 50ms**；首屏 **329.6 KB gzip / 931.9 KB raw**（与切片 C 相同，本切片只加脚本/样本）。
+- 环境漂移如实标注：`gradeMany` 本轮 5.15 高于切片 B 的 4.93，基线 5.05，属同机轮间抖动（轮间极差 1.16×），未放宽阈值。
+
+**遗留 TODO / 风险**
+- golden2 是快照锁而非独立复算：若官方 fuzz 语义再次调整，需同时改实现、公式断言与 golden2，并在 CHANGELOG 说明。
+- easyDays 周几依赖本地时区；金样本仅使用「全 0 / 全 100」权重规避时区差异，单日权重边界由属性断言在运行时计算目标周几。
+
+---
+
+## 9f23660 · feat(srs): leech 动作可配置（默认仅徽标，不 suspend）
+
+**Commit**：`9f23660`
 
 **核心改动点**
 - `bank.sched.leechAction`（wire `sched.leech_action`）取值 `'none'`（默认）/ `'tag'`；`normalize` 对未知值（含 `'suspend'`）回落 `'none'` 并保留未知键。
@@ -29,9 +51,9 @@
 
 ---
 
-## 待回填 · feat(srs): easyDays 七天权重（默认全 100 不生效）
+## 2862500 · feat(srs): easyDays 七天权重（默认全 100 不生效）
 
-**Commit**：`待回填`（收尾 docs 提交回填）
+**Commit**：`2862500`
 
 **核心改动点**
 - `bank.sched.easyDays`（wire `sched.easy_days`）7 项 0–100%，顺序 **周日→周六**，与 `Date.getDay()` 对齐；默认全 100，缺省调度与金样本逐字段一致。
@@ -52,9 +74,9 @@
 
 ---
 
-## 待回填 · feat(srs): 题库级 fuzz 开关与幅度上限（默认关闭）
+## d60f9c8 · feat(srs): 题库级 fuzz 开关与幅度上限（默认关闭）
 
-**Commit**：`待回填`（收尾 docs 提交回填）
+**Commit**：`d60f9c8`
 
 **核心改动点**
 - `bank.sched` 新增 `fuzz`（默认 `false`）与 `fuzzMaxDays`（默认 `0`=官方规则）；wire 为 `sched.fuzz` / `sched.fuzz_max_days`，local/wire snake↔camel 双向补齐，未知键仍原样保留。
