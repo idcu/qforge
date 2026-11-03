@@ -34,7 +34,7 @@
    * 导入预览
    * @param {string|null} [presetMode] 预选落库方式（G4 重复题包交互选定后带入）：'overwrite' 或 'merge'
    */
-  function showPreview(bank, result, presetMode) {
+  function showPreview(bank, result, presetMode, returnFocusTo) {
     return new Promise((resolve) => {
       let settled = false;
       const finish = (value) => { if (settled) return; settled = true; resolve(value); };
@@ -74,7 +74,8 @@
             UI.closeModal();
           };
         },
-        () => finish(null)
+        () => finish(null),
+        returnFocusTo
       );
     });
   }
@@ -84,7 +85,7 @@
    * Esc 语义与「跳过」一致（不写入任何题目）：弹窗被 UI.closeModal 关闭时通过 onClose 收口，
    * 保证 Promise 一定有终态，导入流程不会悬挂。
    */
-  function askDuplicate(manifest, prev) {
+  function askDuplicate(manifest, prev, returnFocusTo) {
     return new Promise((resolve) => {
       let settled = false;
       const finish = (value) => { if (settled) return; settled = true; resolve(value); };
@@ -107,7 +108,8 @@
           modal.querySelector('[data-action="dup-merge"]').onclick = pick('merge');
           modal.querySelector('[data-action="dup-over"]').onclick = pick('overwrite');
         },
-        () => finish('skip')
+        () => finish('skip'),
+        returnFocusTo
       );
     });
   }
@@ -122,7 +124,7 @@
   }
 
   /** 解析结果 → 预览 → 落库（文件/粘贴/拖拽/URL 共用）；source 为来源描述 */
-  async function commitImport(bank, result, source) {
+  async function commitImport(bank, result, source, returnFocusTo) {
     if (!result.questions.length) {
       UI.toast('未解析出任何题目', 'err');
       return null;
@@ -133,7 +135,7 @@
     if (manifest) {
       const prevSame = QB.Package.findDuplicate(bank.id, manifest);
       if (prevSame) {
-        const action = await askDuplicate(manifest, prevSame);
+        const action = await askDuplicate(manifest, prevSame, returnFocusTo);
         if (!action || action === 'skip') {
           UI.toast('已跳过题包 v' + (manifest.version || ''), 'ok');
           return null;
@@ -147,7 +149,7 @@
         }
       }
     }
-    const choice = await showPreview(bank, result, presetMode);
+    const choice = await showPreview(bank, result, presetMode, returnFocusTo);
     if (!choice) return null;
     try {
       const res = await QB.DB.questions.insertMany(bank.id, result.questions, {
@@ -185,15 +187,15 @@
   }
 
   /** 选择文件完整流程 */
-  async function importFlow(bank) {
+  async function importFlow(bank, returnFocusTo) {
     if (!bank) { UI.toast('请先创建一个题库', 'err'); return null; }
     const file = await pickFile();
     if (!file) return null;
-    return importFile(bank, file);
+    return importFile(bank, file, undefined, returnFocusTo);
   }
 
   /** 指定 File 的完整流程（拖拽用，kind 区分选文件/拖拽） */
-  async function importFile(bank, file, kind) {
+  async function importFile(bank, file, kind, returnFocusTo) {
     if (!bank) { UI.toast('请先创建一个题库', 'err'); return null; }
     UI.toast('正在解析 ' + file.name + ' …');
     let result;
@@ -204,11 +206,11 @@
       return null;
     }
     const source = QB.Source.makeSource(kind || QB.Source.KINDS.FILE, { uri: file.name || '' });
-    return commitImport(bank, result, source);
+    return commitImport(bank, result, source, returnFocusTo);
   }
 
   /** 剪贴板粘贴导入 */
-  function importTextFlow(bank) {
+  function importTextFlow(bank, returnFocusTo) {
     if (!bank) { UI.toast('请先创建一个题库', 'err'); return null; }
     return new Promise((resolve) => {
       UI.openModal(
@@ -236,16 +238,18 @@
               warnings: (parsed.warnings || []).concat(validated.warnings || []),
               format: '粘贴·' + (parsed.format || 'text'),
               stats: validated.stats
-            }, QB.Source.makeSource(QB.Source.KINDS.PASTE, { uri: '剪贴板' }));
+            }, QB.Source.makeSource(QB.Source.KINDS.PASTE, { uri: '剪贴板' }), returnFocusTo);
             resolve(res);
           };
-        }
+        },
+        undefined,
+        returnFocusTo
       );
     });
   }
 
   /** 网络地址导入弹窗（输入 URL → 拉取 → 同一预览流程） */
-  function importUrlFlow(bank, presetUrl) {
+  function importUrlFlow(bank, presetUrl, returnFocusTo) {
     if (!bank) { UI.toast('请先创建一个题库', 'err'); return null; }
     if (location.protocol !== 'http:' && location.protocol !== 'https:') {
       UI.toast('file:// 双击打开时网络导入受限，请用 GitHub Pages 或本地服务打开', 'err');
@@ -292,15 +296,17 @@
               uri: snapshot.url, fetchedAt: Date.now(), checksum: snapshot.checksum, refreshable: true
             });
             UI.closeModal();
-            resolve(await commitImport(bank, result, source));
+            resolve(await commitImport(bank, result, source, returnFocusTo));
           };
-        }
+        },
+        undefined,
+        returnFocusTo
       );
     });
   }
 
   /** 刷新 URL 来源：checksum 相同提示无更新，否则重新拉取并走预览（合并去重） */
-  async function refreshUrlFlow(bank) {
+  async function refreshUrlFlow(bank, returnFocusTo) {
     const src = bank && bank.source;
     if (!src || !src.refreshable || !src.uri) {
       UI.toast('该题库没有可刷新的网络来源', 'err');
@@ -330,7 +336,7 @@
     const nextSource = QB.Source.makeSource(QB.Source.KINDS.URL, {
       uri: snapshot.url, fetchedAt: Date.now(), checksum: snapshot.checksum, refreshable: true
     });
-    return commitImport(bank, result, nextSource);
+    return commitImport(bank, result, nextSource, returnFocusTo);
   }
 
   QB.DataIO = {

@@ -156,16 +156,20 @@
 
 无障碍不是一次性改造，而是**可重复执行的门禁**：能在 Node 里静态断言的进 CI，需要真实布局/命中的走 Edge + CDP 手动门禁。
 
-**静态门禁（`scripts/a11y.test.mjs`，71 断言，进 `test-all` 与 CI）**
+**静态门禁（`scripts/a11y.test.mjs`，82 断言，进 `test-all` 与 CI）**
 - **对比度（唯一色板事实源）**：直接解析 `css/style.css` 的 `:root` 与 `html[data-theme='dark']` token，按 WCAG 相对亮度公式计算 20 组「前景/背景」色对。正文/次要文字/按钮文字 ≥4.5:1，大字（≥18.66px 粗体或 ≥24px）≥3:1。**不达标时改 token 本身，不在组件里临时覆盖颜色**；颜色语义统一为 `--text/--text-muted/--on-solid/--on-warning/--primary-text/--warning-text/--success/--danger`。
 - **ARIA 与键盘可达**：对 14 份渲染快照（首页、题库列表、六种题型答题页、已作答、结果页、组卷/开始弹窗、搜索页）做 HTML 扫描——禁止 `tabindex>0`；空文本按钮必须有 `aria-label`/`aria-labelledby`；`role="button"` 必须自身可聚焦且具备键盘操作路径；`role="radio"`/`role="checkbox"` 必须有 `aria-checked` 与 `tabindex`；非原生 `data-action` 容器要么自身可聚焦，要么内含原生控件；表单控件必须有关联 label（`aria-label`/`aria-labelledby`/`<label for>`）。
-- **焦点可管理**：`UIRenderer.openModal` 统一为 `role="dialog"` + `aria-modal="true"` + `aria-labelledby`（标题无 id 时补 `modal-title`；无标题回退 `aria-label`），打开后记录 `lastFocus = document.activeElement` 并把焦点移到弹窗内首个可聚焦元素；`closeModal` 统一把焦点还给触发元素。Tab/Shift+Tab 在弹窗内循环；`Esc` 复用 `app.js` 既有全局处理器调用 `UI.closeModal()`。**新增弹窗不得绕过 `openModal/closeModal` 自成一套焦点逻辑**，否则静态断言与真机门禁都会失败。
+- **焦点可管理**：`UIRenderer.openModal` 统一为 `role="dialog"` + `aria-modal="true"` + `aria-labelledby`（标题无 id 时补 `modal-title`；无标题回退 `aria-label`），打开后把焦点移到弹窗内首个可聚焦元素；`closeModal` 统一把焦点还给触发元素。Tab/Shift+Tab 在弹窗内循环；`Esc` 复用 `app.js` 既有全局处理器调用 `UI.closeModal()`。**新增弹窗不得绕过 `openModal/closeModal` 自成一套焦点逻辑**，否则静态断言与真机门禁都会失败。
+- **异步入口的 returnFocusTo（唯一实现）**：`openModal(html, onMount, onClose, returnFocusTo)` 的第 4 参数是可选显式回焦目标。凡「先 `await` 文件选择/网络拉取/解析，再打开弹窗」的路径，触发元素必须在**事件入口同步捕获**（`app.js` 的 `handleAction` 统一 `const trigger = el`），再沿 `importFlow → importFile → commitImport → showPreview/askDuplicate`、`openFlow/distributeFlow → chooseFormat/askPackageInfo` 透传；调用点不得各自再写一份 `document.activeElement` 记录逻辑。`openModal` 的回退规则：显式 `returnFocusTo` > 已打开弹窗沿用上一次记录的触发元素（嵌套弹窗保留外层入口）> 当前焦点（排除 `BODY`）。异步取消路径（Esc/跳过）不得在 `closeModal` 之后立即重渲染触发按钮所在视图，否则刚归还的焦点会被新 DOM 替换掉（`bank-import` 等入口仅在确有数据变化时 `render()`）。
 - **动效**：`css/style.css` 必须存在 `@media (prefers-reduced-motion: reduce)` 分支，使用 `*, *::before, *::after` 全覆盖，将 `animation-duration`/`transition-duration` 压到 `0.01ms !important`，并关闭 `scroll-behavior: smooth`。
 
-**真机门禁（`scripts/a11y-browser.mjs`，142 断言，非 CI 门禁）**
+**真机门禁（`scripts/a11y-browser.mjs`，350 断言，非 CI 门禁）**
 - 原因：依赖本机 Edge 的 `--remote-debugging-port` 真实布局与命中测试，CI 无浏览器环境，故**不并入 CI**，按需手动执行。
-- 三档视口 `360 / 768 / 1280`（可用 `A11Y_WIDTHS` 覆盖），页面覆盖首页、答题页、结果页、导入预览、三选一弹窗、设置页。
+- 三档视口 `360 / 768 / 1280`（可用 `A11Y_WIDTHS` 覆盖）× 两主题 `light / dark`（可用 `A11Y_THEMES` 覆盖）；视口使用 `mobile:false` 保留桌面滚动条，360px 下 `clientWidth≈345`，与真机桌面窗口实测口径一致。
+- 页面覆盖首页、答题页、结果页、导入预览、三选一弹窗、设置页；弹窗打开时额外检查整页横向溢出。
 - 断言：`document.scrollWidth <= clientWidth + 1` 无横向溢出；无元素超出视口（被 `overflow` 裁剪的容器内元素豁免）；关键按钮与答题卡格 ≥44×44 CSS px；弹窗落在视口内、内容超出时 `overflowY` 可滚动、焦点在弹窗内；控件可访问名称与 `role` 状态；`prefers-reduced-motion` 下动画/过渡时长 ≤0.02ms。
+- **异步焦点回位**：真实文件选择（DTO 喂入 `File` + 模拟对话框关闭后焦点落到 `BODY`）打开导入预览/三选一，按 `Esc` 后断言 `activeElement` 是触发按钮 `data-action="bank-import"`，不是 `BODY`。
+- **视觉回归实测**：题型徽标前景/背景实测算对比度（深色 5.52:1）；结果页与统计页 `.bar-fill` 必须宽高 >1px（0×0 视为失败）；悬浮滚动按钮与 `.bar-val` 不得矩形重叠。
 - 输出 `.screenshots/a11y-browser/result.json` 与逐档截图（gitignored）。
 
 **约束**：不得为过门禁删功能或隐藏控件；不改既有公开签名；不引入 axe-core 等第三方依赖；修 UI 不得回退模态焦点/`Esc`/键盘行为。每处修复都应有对应断言，并先用旧代码（`git archive` 临时 worktree）证明该断言会失败。
@@ -219,7 +223,7 @@ engine.loadQuestions(questions, type, opts)
 
 ### 4.5 导出
 ```
-Exporters.openFlow({kind, bank})
+Exporters.openFlow({kind, bank, trigger})   // trigger 可选：异步收集后打开格式弹窗的回焦目标
   → KINDS[kind].collect(bank) 得到统一载荷 {kind, bank, entries:[{question, meta}]}
   → 弹窗在 7 种 FORMATS 中选格式：qbk/json/csv/xlsx/docx/markdown/txt
   → qbk：buildAsync 异步读 IndexedDB 图片 → ZipWriter 打 stored ZIP

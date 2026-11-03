@@ -101,8 +101,8 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 | `scripts/contract.test.mjs` | **66** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源（**local-adapter 直读写 Storage，领域模块经 `QB.DB.*` 委托本适配器，禁双向委托以免自递归**）；**`historyAdd` 返回新增记录（与 api 适配器同形）**、**`historyUpdate` 保留 id/createdAt 且缺失 id 返回 null（4 项）**；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径；**权重归一下沉（4 项）：旧单组 `{w,...}` 读取归一为 global、banks 为空、local-adapter 不再引用 `QB.FSRSOpt`（数据层不反向依赖应用层）、使用 `QB.Weights.normalizeStore`**；**record 热路径（5 项）：本地一次落状态+日志、日志题库归属、logged/saved 回执** |
 | `scripts/references.test.mjs` | **13** | 全仓 `QB.<name>` 引用对账：运行时 `QB` 导出集合（harness + 补载 ui-renderer/dom-patch/bank-manager，不手写符号白名单）、剥离注释/字符串后递归扫描 `js/**/*.js`（71 文件 / 104 个引用名）、**悬空引用必须为 0**；唯一例外 `QB.App`（`app.js` DOM 启动挂载）显式列出且断言清单不漂移；扫描器自检（注释/字符串不误判）与 `QB.formatDate` 顶层不存在的直接回归 |
 | `scripts/api-backend.test.mjs` | **310** | **参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；**CORS 默认关闭、显式放行来源预检 204、未放行不带 ACAO**；**content_hash 按合并后完整题目重算、仅改解析不变**；**筛选查询不污染 count 缓存**；**historyAdd 返回形状与 local 一致**、**historyUpdate PATCH（保留 id/created_at、未知 id 404、api 回写得分，6 项）**；**bank.sched 创建/保存/回读**；**题目与题库元数据乐观并发（13+13 项）：base_updated_at 匹配成功/updated_at 单调递增/过期 409 CONFLICT+current/冲突不覆盖；api 适配器 baseUpdatedAt → 409 错误码与消息**；**复习进度多端冲突（12 项）：服务端 `review_rev` 初始 0、PUT 后 +1、`base_rev` 匹配成功、过期 409 CONFLICT + current 且不覆盖；客户端 409 后按 `last` 合并重试一次（merged=true、双方键保留、服务端 rev 递增、revlog 只 1 条）**；**B1 增量写入与 B3 revlog 版本（12 项）：PATCH 只合并增量键、其余键保留、`null` 删除、`rev` 递增、缺 `items` 400、`base_rev` 过期 409 返回 current/rev、本地缓存与 `revlog.revision()` 同步**；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、**`count`/`reviews` 按库缓存命中与写·级联·`backup.import` 后失效（5 项）**、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错（注入 fetch 走**真实网络失败**路径）；**跨布局整链 E2E（33 项）：本地模式造数 → 本地布局备份 → api 模式 `applyBackup` 经 `localToServer` + 真实 `POST /api/backup?mode=replace` → 直读 `GET /api/backup` 核对接管后端口径（snake_case、按库归集、id 保留）→ 再恢复到另一 local 上下文，题库/题目/错题/历史/revlog/权重逐项等价（闭环）**；**可选 Bearer 令牌鉴权（12 项）**；**静态安全头（6 项）**；**作答热路径（16 项）：首次作答 4 请求（含按库读取调度设置，后续缓存命中）、热态 PATCH 1 请求、gradeMany 1 请求；错题额外 1；权重 write 后读缓存命中、remove 后重新 GET；revlog 非数组 400 BAD_REQUEST**；**按 IP 限流（24 项）：窗口限额/429+Retry-After/静态与 health 不受限/窗口重置/trustProxy 分桶/rateLimit:false 关闭，适配器 429 诚实抛出** |
-| `scripts/a11y.test.mjs` | **71** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、全仓禁止 tabindex>0、模态焦点进入/回位/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖 |
-| **合计** | **4496 / 4496 通过 · 28 个运行项**（2026-11-03 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+| `scripts/a11y.test.mjs` | **82** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、全仓禁止 tabindex>0、模态焦点进入/异步回位链路/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖、4 项视觉结构回归 |
+| **合计** | **4507 / 4507 通过 · 28 个运行项**（2026-11-03 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
 
 **真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**：
 - 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。
@@ -187,7 +187,7 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 > **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账（列表 + 答题区，含**答题卡格级增量**）。**列表侧**——错题本移除一条仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）。**答题区**——勾选选项时顶层仅重建 3/5 区域（占字节 15.6%）；答题卡由「整卡单区域」细化为 `frame` + `sub`：帧跨作答逐字节不变（整张 `<details>` 不重建，展开态不丢），仅按 key 就地替换变化的 **3/52** 子节点（计数 + 受影响格，占整卡 HTML 字节 2.0%）。相较细化前（整卡占答题区字节约 95.6%），答题热路径重建量 **由 95.6% 降至 15.6%**。**浏览器实机验证**：折叠答题卡后作答，卡片保持折叠（证明 `<details>` 未被重建）；作答使选项态/提交按钮/计数/当前格状态同步更新，控制台无报错。
 > `insertMany` 落库耗时以 v3（64 位）contentHash 语义哈希重算为主（约 11.32 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体）远低于旧单键写。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化；v3 的 BigInt 64 位哈希比 v2 的 32 位慢（单次约 2 倍），仍在门禁（≤30 ms）内。
 
-bench 全程 heapUsed：8.60 → 11.28 MB（**+2.67 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 20.17 MB；DOM 增量末态 20.37 MB）。首屏静态体积（index.html + css + 77 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 85 个文件，逐文件 `gzip -9` 合计；2026-11-03 本轮实测）：**307.7 KB gzip / 870.5 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：8.60 → 11.28 MB（**+2.67 MB**；`--expose-gc` 连跑稳定；3000 题规模库末态 20.17 MB；DOM 增量末态 20.37 MB）。首屏静态体积（index.html + css + 77 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 85 个文件，逐文件 `gzip -9` 合计；2026-11-03 本轮实测）：**308.3 KB gzip / 872.5 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > **耗时口径（F4，2026-11-02）**：上列与 `bench.mjs` 输出中的毫秒/内存数值均为**同机参考值**（Node v24.14.0、当前机器负载），跨机器/跨轮次会波动；`scripts/docs-check.mjs --static` **只校验运行项、断言数、门禁数与首屏体积**，**不把耗时数字纳入校验**，故上述耗时仅作趋势参考，不构成文档门禁。
 
@@ -220,7 +220,12 @@ node scripts/task-timer.mjs report                      # 明细表 + 已完成�
 
 **独立轻量 `docs-check` job**（`scripts/docs-check.mjs --static`）：只读 `scripts/docs-baseline.json` 的套件断言数/门禁数，实时读取运行项与首屏文件/gzip 体积后与 README、本文比对，**不 spawn 套件、不跑 bench**，不拖慢重腿（重腿仍 28 个运行项）。数字有意变化时本地 `node scripts/docs-check.mjs --write` 刷新基线并随代码同 commit 提交；默认 live 模式则实测跑一遍套件与 bench 复算（手动核对用）。
 
-**无障碍真机门禁（非 CI）**：`node scripts/a11y-browser.mjs` 需要本机 Edge，启动 8799 静态服务 + CDP，跑 360 / 768 / 1280 三档与首页/答题页/结果页/导入预览/三选一弹窗/设置页，输出 `.screenshots/a11y-browser/result.json` 与逐页截图。CI 无浏览器，故**不纳入 CI 门禁**；提交前手动执行，失败退出码 1。Node 侧静态门禁 `a11y.test.mjs` 已进 CI。
+**无障碍真机门禁（非 CI）**：`node scripts/a11y-browser.mjs` 需要本机 Edge，启动 8799 静态服务 + CDP，跑 360 / 768 / 1280 三档 × light/dark 两主题，页面覆盖首页/答题页/结果页/导入预览/三选一弹窗/设置页，共 **350 断言**，输出 `.screenshots/a11y-browser/result.json` 与逐页截图。CI 无浏览器，故**不纳入 CI 门禁**；提交前手动执行，失败退出码 1。Node 侧静态门禁 `a11y.test.mjs` 已进 CI。
+
+**真机门禁覆盖范围（不要用总数推断全覆盖）**：
+- 已覆盖的 `Esc` 回焦路径：`review-settings`（同步弹窗）、文件导入预览（异步：文件选择 → 解析 → `showPreview`）、题包三选一（异步：`importFile → commitImport → askDuplicate`）。三档两主题均断言 `activeElement` 为真实触发按钮，`BODY` 即失败。
+- 已覆盖的布局/视觉：360px（`mobile:false`，`clientWidth≈345`）整页与四类弹窗打开时无横向溢出；结果页三类分布与统计页 7 种题型条形图填充宽高 >1px；悬浮滚动按钮与 `.bar-val` 矩形不重叠；深色题型徽标实测算对比度 ≥4.5:1。
+- **未覆盖**：拖拽导入（无稳定可聚焦触发元素，`activeElement` 为 `BODY` 时不回焦）；`backup.js` 恢复确认等「外层弹窗内再开内层弹窗」只验证了 `openModal` 保留外层入口的源码约定，未做真机 Esc 断言；`confirmDialog` 在无弹窗的异步回调中调用；`SyncDAV` 弹窗；键盘操作（Tab 循环仅在设置弹窗做了 1 次真机断言）；14 份渲染快照之外的动态题型/材料题子问。新增弹窗或入口时必须先补静态断言，再按需补真机用例。
 
 ## 5. 扩展指南（最小改动路径）
 

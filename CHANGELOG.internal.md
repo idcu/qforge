@@ -6,6 +6,65 @@
 
 ---
 
+## 本轮修复（commit hash 待回填）· fix(a11y): 异步弹窗 Esc 回焦 + 门禁盲区 + 3 项预存视觉缺陷
+
+**背景（视觉/键盘零注入复验轮 4，HEAD `e772e60`）**
+- 复验结论：语义色令牌改动通过；发现 1 个本轮相关缺陷（异步弹窗 Esc 回 `BODY`）、1 处令牌未落地、3 个预存视觉缺陷、1 处门禁盲区。
+- **先承认门禁盲区**：旧 `a11y-browser.mjs` 的 **142/142** 中，「Esc 回焦」只覆盖 `review-settings`（同步触发）。文件导入预览与题包三选一走「文件选择/解析 → `await` → `openModal`」异步路径，未被覆盖；旧代码真机实测 Esc 后 `document.activeElement === BODY`。这不是漏测，是门禁失效。
+
+**异步弹窗入口全量复核（`openModal` 调用点）**
+- 导入链路（`js/modules/data-io.js`）：`pickFile:17`、`showPreview:37`、`askDuplicate:88`、`commitImport:127`、`importFlow:190`、`importFile:198`、`importTextFlow:213`、`importUrlFlow:252`、`refreshUrlFlow:309`。全部在入口捕获的 `trigger` 随链透传为第 4 参数 `returnFocusTo`。
+- 导出链路（`js/modules/exporter.js`）：`chooseFormat:564`、`askPackageInfo:631`，由 `openFlow:596`（`:611`）与 `distributeFlow:688`（`:703`）传入 `opts.trigger`。
+- 入口捕获（`js/app.js:597` `const trigger = el;`）：导入 `:641/647/653/658`、导出 `:664/668/672/676/680`；拖拽 `:1305`（无稳定可聚焦 trigger，见遗留风险）。
+- 嵌套弹窗（`backup.js` 恢复确认、`SyncDAV` 等）：内层打开时沿用外层 `lastFocus`，不覆盖外层入口。
+
+**逐项修复前 / 后实测（Edge + CDP，`mobile:false` 桌面滚动条，三档 × light/dark）**
+
+| # | 项 | 修复前（e772e60 旧代码） | 修复后（本轮） |
+| --- | --- | --- | --- |
+| 1 | 三选一 / 导入预览 Esc 回焦 | `activeElement = BODY`（360 light/dark 均复现） | `BUTTON[data-action=bank-import]`（6 组三档×两主题全部通过） |
+| 2 | 暗色题型徽标对比度 | `4.39:1`（`rgb(79,140,255)` / `rgb(30,43,69)`，`.type-badge` 用 `--primary`） | `5.52:1`（`rgb(110,161,255)` / `rgb(30,43,69)`，改用 `--primary-text`）；light 4.51:1 不变 |
+| 3 | 条形图填充 | `0×0`（`.bar-fill` 为 inline `<i>`，`width/height` 不生效；`48adb18` 引入） | `75×12` @360、`471×12` @768、`798×12` @1280；结果页按题型/分类/难度 3 类均有填充，统计页全题型夹具 7 条均可见（高度 12） |
+| 4 | 360 宽开弹窗整页横向溢出 | `scrollWidth 359 / clientWidth 345`，`.topbar-right` `right=359.2`，主题按钮越界；越界元素 2 | `345 / 345`（预览/三选一/设置/开始 4 类弹窗均为 0 溢出），`.topbar` 换行 + `min-width:0`，无元素越界 |
+| 5 | 360 结果页悬浮按钮遮挡 | `.bar-val maxRight=318 > btnLeft=283`，矩形重叠 1 处 | `maxRight=254 < btnLeft=283`，重叠 0；768 为 `656 < 691`，1280 为 `1075.5 < 1203` |
+
+**代码位置**
+- `js/modules/ui-renderer.js:1071-1076`：`openModal(html, onMount, onClose, returnFocusTo)` 第 4 参数显式回焦；回退优先级 `显式 > 已开弹窗沿用上次 lastFocus > 当前焦点（排除 BODY）`。唯一实现，调用点不再自行记录 `activeElement`。
+- `js/app.js:641-658`：导入取消/跳过返回 `null` 时不再无条件 `render()`，避免 `closeModal` 刚归还焦点的触发按钮被重渲染替换。
+- `css/style.css:289`：`.type-badge` `color: var(--primary-text)`；全仓已无 `color: var(--primary)` 的文字用法。
+- `css/style.css:438/441`：`.bar-row` 恒留 `padding-right: 64px` 悬浮按钮安全区；`.bar-row .bar-fill { display: block; }`。
+- `css/style.css:93-105`：`.topbar { flex-wrap: wrap; gap: 8px 12px; }`，左右容器 `min-width: 0` / `margin-left:auto`；未使用 `overflow-x:hidden` 裁剪。
+
+**门禁补强**
+- `scripts/a11y.test.mjs` **71 → 82 断言**（+11）：`openModal` 显式 `returnFocusTo` 与回退表达式、导入/导出全链路透传、`app.js` 入口 trigger、4 项视觉结构（语义令牌/bar-fill block/顶栏 wrap/安全区）。
+- `scripts/a11y-browser.mjs` **142 → 350 断言**（每档每主题 58 + reduced-motion 2）：新增真实文件喂入（`DataTransfer` + 模拟对话框关闭后 `blur`）→ 导入预览 / 三选一 Esc 回焦；题型徽标实测算对比度；结果页 3 类分布与统计页条形图实渲染宽高；悬浮按钮与 `.bar-val` 矩形不重叠；弹窗打开时整页横向溢出。视口改 `mobile:false`（360px `clientWidth=345`，与真机桌面口径一致）。
+- 覆盖/未覆盖路径已写入 `docs/DEVELOPMENT.md`（拖拽导入、backup 嵌套、`confirmDialog` 异步、SyncDAV 等明确标注未覆盖）。
+
+**旧代码复跑（证明新断言会失败）**
+- `git worktree add --detach <tmp> e772e60` + 复制本轮新脚本，`A11Y_WIDTHS=360 A11Y_THEMES=light|dark`：
+  - light：**59 断言 / 43 通过 / 16 失败**
+  - dark：**59 断言 / 42 通过 / 17 失败**
+  - 关键失败：`Esc → activeElement=BODY`（预览/三选一）、`bar-fill 0×0`、`scrollWidth 359/345` + 2 个越界元素、悬浮按钮 `maxRight 318 > btnLeft 283`；dark 另加徽标 `4.39:1`。
+- 证据：`.screenshots/a11y-before/r4/old-code-run/`（日志 + 截图），新截图在 `.screenshots/a11y-browser/`；修复前用户轮 4 截图保留于 `.screenshots/a11y-before/r4/user-round4/shots/`。
+
+**验证数据**
+- `node scripts/a11y.test.mjs`：**82 / 82**。
+- `node scripts/test-all.mjs`：**28 个运行项，4507 / 4507 断言通过，失败 0，36.5s**（a11y 82，其余套件断言数不变）。
+- `node scripts/a11y-browser.mjs`（360/768/1280 × light/dark）：**350 / 350**；每档每主题 58：首页 5、导入预览 8、三选一 8、开始弹窗 7、答题页 6、结果页 8、设置页 8、设置弹窗 7、全局 1；另有 reduced-motion 2。
+- `node scripts/docs-check.mjs --static`：**全部一致 ✅**（28 运行项 / 4507 断言 / 55 门禁 / 首屏 308.3 KB gzip / 872.5 KB raw）。
+- `node --expose-gc scripts/bench.mjs --assert`：**未通过（如实记录）**。`SRSStore.grade` p50 `0.0902–0.0932ms`（上限 0.0810）、`gradeMany` p50 `0.2777–0.2806ms`（上限 0.2604）。**未放宽阈值**；在同一台机器上以 `e772e60` 旧代码复测：`0.0882 / 0.2784ms`，同样超过基线，说明是本机当前 CPU 频率/负载导致的环境漂移，不是本轮代码回归（本轮改动不进入 SRS 热路径，bench 也未修改）。其余 bench 门禁全部通过。
+
+**预存缺陷说明**
+- `.bar-fill` 无填充由 `48adb18` 引入（`<i>` 默认 inline，百分比宽度/高度不生效）；本轮补 `display:block`，并用真机矩形实测（非仅 DOM 节点存在）兜底。
+
+**遗留 TODO / 风险**
+- 拖拽导入无稳定可聚焦触发元素：`activeElement` 为 `BODY` 时不回焦；已在 `docs/DEVELOPMENT.md` 标注未覆盖。
+- `backup.js` 恢复确认 / `SyncDAV` 的「外层弹窗内再开内层」仅验证源码保留外层入口，未做真机 Esc 断言；`confirmDialog` 在无弹窗的异步回调中调用仍可能回 `BODY`。
+- 真机门禁仍非 CI；每次新增异步弹窗入口必须同步补 `scripts/a11y.test.mjs` 的链路断言。
+- bench 的 SRS 绝对 p50 依赖本机 CPU 状态；当前机器环境无法复现上一轮基线，需在稳定机器上复测或由用户决定是否重建基线（本轮未改）。
+
+---
+
 ## 6774a86 · test(a11y): 无障碍与移动端门禁（静态 71 断言进 CI + 真机三档 142 断言）
 
 **目标与范围**

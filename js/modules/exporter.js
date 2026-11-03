@@ -561,7 +561,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function chooseFormat(count, kindLabel, allowedIds, unit, kindId) {
+  function chooseFormat(count, kindLabel, allowedIds, unit, kindId, returnFocusTo) {
     unit = unit || '题';
     const formats = FORMATS.filter((f) =>
       (!allowedIds || allowedIds.indexOf(f.id) >= 0) &&
@@ -582,7 +582,9 @@
             QB.UIRenderer.closeModal();
             resolve(id);
           };
-        }
+        },
+        undefined,
+        returnFocusTo
       );
     });
   }
@@ -606,7 +608,7 @@
     if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
 
     const unit = def.unit || '题';
-    const formatId = await chooseFormat(payload.entries.length, def.label, def.formats, unit, opts.kind);
+    const formatId = await chooseFormat(payload.entries.length, def.label, def.formats, unit, opts.kind, opts.trigger);
     if (!formatId) return null;
 
     let built;
@@ -626,7 +628,7 @@
   }
 
   /** 分发题包信息弹窗：版本/作者/描述；返回 null（取消）或 {preview:true} 或 {version, author, description} */
-  function askPackageInfo(bank, count) {
+  function askPackageInfo(bank, count, returnFocusTo) {
     return new Promise((resolve) => {
       QB.UIRenderer.openModal(
         '<h3>导出分发题包 · ' + QB.escapeHtml(bank.name) + '</h3>' +
@@ -649,7 +651,9 @@
           modal.querySelector('[data-action="modal-cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
           modal.querySelector('[data-action="pkg-preview"]').onclick = () => { QB.UIRenderer.closeModal(); resolve({ preview: true }); };
           modal.querySelector('[data-action="modal-ok"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(readInfo()); };
-        }
+        },
+        undefined,
+        returnFocusTo
       );
     });
   }
@@ -696,7 +700,7 @@
     }
     if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
 
-    const info = await askPackageInfo(opts.bank, payload.entries.length);
+    const info = await askPackageInfo(opts.bank, payload.entries.length, opts.trigger);
     if (!info) return null;
     if (info.preview) {
       await openPreview(payload);

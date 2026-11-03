@@ -593,6 +593,8 @@
     const action = el.getAttribute('data-action');
     const id = el.getAttribute('data-id');
     const key = el.getAttribute('data-key');
+    // 异步流程（文件选择/网络拉取）会在 await 后丢失焦点，入口处捕获真实触发元素交给 openModal
+    const trigger = el;
 
     switch (action) {
       /* —— 题库 —— */
@@ -635,42 +637,47 @@
       }
       case 'bank-import': {
         if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
-        await QB.DataIO.importFlow(State.bank);
-        return render();
+        // 取消/跳过导入时没有数据变化：不重渲染，避免把 closeModal 刚归还焦点的触发按钮替换掉
+        const res = await QB.DataIO.importFlow(State.bank, trigger);
+        if (res) return render();
+        return;
       }
       case 'bank-import-text': {
         if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
-        await QB.DataIO.importTextFlow(State.bank);
-        return render();
+        const res = await QB.DataIO.importTextFlow(State.bank, trigger);
+        if (res) return render();
+        return;
       }
       case 'bank-import-url': {
         if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
-        await QB.DataIO.importUrlFlow(State.bank);
-        return render();
+        const res = await QB.DataIO.importUrlFlow(State.bank, undefined, trigger);
+        if (res) return render();
+        return;
       }
       case 'bank-refresh-url': {
-        await QB.DataIO.refreshUrlFlow(State.bank);
-        return render();
+        const res = await QB.DataIO.refreshUrlFlow(State.bank, trigger);
+        if (res) return render();
+        return;
       }
       case 'bank-export': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
-        return QB.Exporters.openFlow({ kind: 'bank', bank: State.bank });
+        return QB.Exporters.openFlow({ kind: 'bank', bank: State.bank, trigger: trigger });
       }
       case 'bank-package': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
-        return QB.Exporters.distributeFlow({ kind: 'bank', bank: State.bank });
+        return QB.Exporters.distributeFlow({ kind: 'bank', bank: State.bank, trigger: trigger });
       }
       case 'export-wrong': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
-        return QB.Exporters.openFlow({ kind: 'wrong', bank: State.bank });
+        return QB.Exporters.openFlow({ kind: 'wrong', bank: State.bank, trigger: trigger });
       }
       case 'export-fav': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
-        return QB.Exporters.openFlow({ kind: 'favorites', bank: State.bank });
+        return QB.Exporters.openFlow({ kind: 'favorites', bank: State.bank, trigger: trigger });
       }
       case 'export-history': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
-        return QB.Exporters.openFlow({ kind: 'history', bank: State.bank });
+        return QB.Exporters.openFlow({ kind: 'history', bank: State.bank, trigger: trigger });
       }
       case 'import-sample': {
         const bank = await QB.DB.banks.create({ name: QB.SAMPLE.name, description: QB.SAMPLE.description, category: '示例' });
@@ -1294,7 +1301,8 @@
       if (!file) return;
       if (!State.bank) { UI.toast('请先创建或选择题库', 'err'); return; }
       if (State.engine) { UI.toast('答题中不能导入，请先交卷或退出', 'err'); return; }
-      await QB.DataIO.importFile(State.bank, file, QB.Source.KINDS.DROP);
+      const active = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+      await QB.DataIO.importFile(State.bank, file, QB.Source.KINDS.DROP, active);
       render();
     });
 

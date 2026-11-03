@@ -320,7 +320,29 @@ section('焦点管理：模态焦点进入/回位/Tab 循环/Esc 关闭（源码
 {
   const uiSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8');
   const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8');
-  ok(/lastFocus\s*=\s*document\.activeElement/.test(uiSrc), 'openModal 打开前记录 document.activeElement');
+  const ioSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/data-io.js'), 'utf8');
+  const exportSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/exporter.js'), 'utf8');
+  ok(/function openModal\(html, onMount, onClose, returnFocusTo\)/.test(uiSrc) &&
+    /lastFocus\s*=\s*explicit\s*\|\|\s*\(alreadyOpen\s*\?\s*lastFocus\s*:\s*current\)/.test(uiSrc),
+    'openModal 支持显式 returnFocusTo：异步入口触发元素优先，嵌套弹窗沿用外层入口');
+  ok(/function importFlow\(bank, returnFocusTo\)/.test(ioSrc) && /return importFile\(bank, file, undefined, returnFocusTo\)/.test(ioSrc),
+    'importFlow 把入口触发元素传给 importFile（文件选择 await 后不丢焦点）');
+  ok(/function importFile\(bank, file, kind, returnFocusTo\)/.test(ioSrc) && /commitImport\(bank, result, source, returnFocusTo\)/.test(ioSrc),
+    'importFile 把入口触发元素传给 commitImport（拖拽/选文件同一条链路）');
+  ok(/function commitImport\(bank, result, source, returnFocusTo\)/.test(ioSrc) &&
+    /showPreview\(bank, result, presetMode, returnFocusTo\)/.test(ioSrc) &&
+    /askDuplicate\(manifest, prevSame, returnFocusTo\)/.test(ioSrc),
+    'commitImport 把入口触发元素传给预览与三选一弹窗');
+  ok(/function refreshUrlFlow\(bank, returnFocusTo\)/.test(ioSrc) && /commitImport\(bank, result, nextSource, returnFocusTo\)/.test(ioSrc),
+    'refreshUrlFlow（网络刷新后异步弹窗）同样携带入口触发元素');
+  ok(/function importUrlFlow\(bank, presetUrl, returnFocusTo\)/.test(ioSrc) &&
+    /commitImport\(bank, result, source, returnFocusTo\)/.test(ioSrc),
+    'importUrlFlow 解析后再弹预览仍使用入口触发元素');
+  ok(/function chooseFormat\(count, kindLabel, allowedIds, unit, kindId, returnFocusTo\)/.test(exportSrc) &&
+    /opts\.trigger/.test(exportSrc) && /function askPackageInfo\(bank, count, returnFocusTo\)/.test(exportSrc),
+    '导出/分发题包：异步收集完成后再打开的弹窗同样携带入口触发元素');
+  ok(/const trigger = el;/.test(appSrc) && /importFlow\(State\.bank, trigger\)/.test(appSrc) && /trigger: trigger/.test(appSrc),
+    'app.js 在事件入口统一捕获 trigger 并随调用链传递（不在各调用点重复记录逻辑）');
   ok(/list\.length[\s\S]{0,120}\.focus\(\)/.test(uiSrc), 'openModal 聚焦弹窗内首个可操作元素');
   ok(/modal\.setAttribute\('tabindex', '-1'\)[\s\S]{0,80}\.focus\(\)/.test(uiSrc), '无可用元素时聚焦弹窗容器（tabindex=-1）');
   ok(/lastFocus[\s\S]{0,140}\.focus\(\)/.test(uiSrc), 'closeModal 关闭后回焦触发元素');
@@ -329,7 +351,21 @@ section('焦点管理：模态焦点进入/回位/Tab 循环/Esc 关闭（源码
   ok(/e\.key === 'Escape'[\s\S]{0,80}UI\.closeModal\(\)/.test(appSrc), 'Esc 关闭弹窗（复用既有全局处理器）');
 }
 
-/* ============================ 4. 动效 ============================ */
+/* ============================ 4. 视觉回归（结构性） ============================ */
+
+section('视觉回归：语义文字令牌 / 条形图填充 / 窄屏不裁剪');
+{
+  ok(/\.type-badge\s*\{[^}]*color:\s*var\(--primary-text\)/.test(CSS),
+    '题型徽标使用 --primary-text（暗色下对比度 ≥4.5:1，而非 --primary）');
+  ok(/\.bar-row\s*\.bar-fill\s*\{[^}]*display:\s*block/.test(CSS),
+    '条形图 .bar-fill 为块级元素（width/height 生效，填充可见）');
+  ok(/\.topbar\s*\{[^}]*flex-wrap:\s*wrap/.test(CSS),
+    '顶栏允许换行（360px 下不靠裁剪隐藏内容）');
+  ok(/\.bar-row\s*\{[^}]*padding-right:\s*64px/.test(CSS),
+    '条形图右侧恒留 64px 悬浮按钮安全区（所有宽度均不遮挡数值，且不裁剪内容）');
+}
+
+/* ============================ 5. 动效 ============================ */
 
 section('动效：prefers-reduced-motion 分支覆盖 animation / transition');
 {

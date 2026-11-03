@@ -1065,10 +1065,15 @@
    * @param {(modal: Element) => void} [onMount] 挂载后绑定按钮
    * @param {() => void} [onClose] 关闭钩子：任何方式关闭（含 Esc / 取消）都会触发一次，
    *   供调用方收口 Promise，避免「Esc 关闭后流程悬挂」。
+   * @param {Element|null} [returnFocusTo] 异步流程在入口处捕获的触发元素。省略时回退：
+   *   已有弹窗打开则沿用上一次记录的触发元素（嵌套弹窗不丢外层入口），否则取当前焦点。
    */
-  function openModal(html, onMount, onClose) {
+  function openModal(html, onMount, onClose, returnFocusTo) {
     const root = document.getElementById('modal-root');
-    lastFocus = document.activeElement || null;
+    const explicit = returnFocusTo && typeof returnFocusTo.focus === 'function' ? returnFocusTo : null;
+    const alreadyOpen = !root.hidden && !!lastFocus;
+    const current = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+    lastFocus = explicit || (alreadyOpen ? lastFocus : current);
     modalOnClose = typeof onClose === 'function' ? onClose : null;
     root.innerHTML = '<div class="modal">' + html + '</div>';
     root.hidden = false;

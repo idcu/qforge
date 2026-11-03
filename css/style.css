@@ -94,17 +94,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 10px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
-.topbar-left, .topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+.topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; }
+.topbar-right { display: flex; align-items: center; gap: 10px; flex: none; margin-left: auto; }
 
 .brand {
   font-weight: 700;
@@ -288,7 +286,7 @@ body {
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--primary-weak);
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 12px;
   font-weight: 600;
 }
@@ -435,10 +433,12 @@ body {
 .stat-box { background: var(--surface-2); border-radius: var(--radius); padding: 14px; text-align: center; }
 .stat-box .st-num { font-size: 24px; font-weight: 700; color: var(--primary-text); }
 .stat-box .st-label { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
-.bar-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+/* 右侧固定 44px 悬浮滚动按钮（right:18px）在所有宽度下都可能压到数值：
+   统一预留 64px 安全区，避免遮挡且不裁剪内容 */
+.bar-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; padding-right: 64px; }
 .bar-row .bar-label { width: 72px; flex: none; font-size: 13px; color: var(--text-muted); }
 .bar-row .bar-track { flex: 1; height: 12px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
-.bar-row .bar-fill { height: 100%; background: var(--primary); border-radius: 999px; }
+.bar-row .bar-fill { display: block; height: 100%; background: var(--primary); border-radius: 999px; }
 .bar-row .bar-val { width: 60px; flex: none; text-align: right; font-size: 13px; color: var(--text-muted); }
 
 /* ===== 表单 ===== */

@@ -25,7 +25,9 @@ const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, '.screenshots', 'a11y-browser');
 const PORT = 8799;
 const WIDTHS = process.env.A11Y_WIDTHS ? process.env.A11Y_WIDTHS.split(',').map(Number) : [360, 768, 1280];
+const THEMES = process.env.A11Y_THEMES ? process.env.A11Y_THEMES.split(',') : ['light', 'dark'];
 const HEIGHT = 900;
+let currentTheme = 'light';
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
@@ -48,11 +50,12 @@ const browser = await launchBrowser({ profileDir: profile, port: 9333 });
 const results = [];
 const failures = [];
 const measurements = [];
+const modalOverflows = [];
 let totalAssertions = 0;
 let currentWidth = 'all';
 function check(page, label, cond, detail) {
   totalAssertions++;
-  const rec = { width: currentWidth, page, label, ok: !!cond, detail: detail || '' };
+  const rec = { width: currentWidth, theme: currentTheme, page, label, ok: !!cond, detail: detail || '' };
   results.push(rec);
   if (!cond) failures.push(rec);
   return !!cond;
@@ -183,7 +186,8 @@ const MODAL_AUDIT = `(function () {
 
 /* ---------------- 工具 ---------------- */
 async function setViewport(session, width) {
-  await session.send('Emulation.setDeviceMetricsOverride', { width, height: HEIGHT, deviceScaleFactor: 1, mobile: width < 768 });
+  // mobile:false → 保留桌面滚动条（360px 下 clientWidth≈345），与真机桌面窗口实测口径一致
+  await session.send('Emulation.setDeviceMetricsOverride', { width, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
 }
 
 async function click(session, selector) {
@@ -208,7 +212,7 @@ async function pressKey(session, key, code, vkKeyCode) {
 async function auditPage(session, width, page) {
   const a = await session.ev(AUDIT);
   measurements.push({
-    width, page,
+    width, theme: currentTheme, page,
     docScrollWidth: a.docScrollWidth, docClientWidth: a.docClientWidth,
     bodyScrollWidth: a.bodyScrollWidth, bodyClientWidth: a.bodyClientWidth,
     outOfViewCount: a.outOfViewCount, keyCount: a.keyCount, controlCount: a.controlCount
@@ -223,7 +227,7 @@ async function auditPage(session, width, page) {
     a.nameIssueCount ? `缺失 ${a.nameIssueCount}：` + JSON.stringify(a.nameIssues.slice(0, 4)) : '0');
   check(page, 'role 状态/键盘属性合法', a.roleIssueCount === 0,
     a.roleIssueCount ? JSON.stringify(a.roleIssues.slice(0, 4)) : '0');
-  await session.screenshot(path.join(OUT, `${width}-${page}.png`));
+  await session.screenshot(path.join(OUT, `${currentTheme}-${width}-${page}.png`));
   return a;
 }
 
@@ -239,15 +243,95 @@ function auditModal(session, page, m) {
     m.smallCount ? JSON.stringify(m.small) : '0');
 }
 
+/** 清掉短时 toast，避免遮挡视觉取证截图（仅测试侧操作，不改产品代码） */
+async function clearToasts(session) {
+  await session.ev(`(function(){ Array.prototype.forEach.call(document.querySelectorAll('.toast'), function(t){ t.remove(); }); return true; })()`);
+}
+
+/** 弹窗打开状态下整页不得横向溢出（覆盖「开弹窗后 scrollWidth 变大」的回归） */
+async function checkPageOverflow(session, page) {
+  const m = await session.ev(`({sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth})`);
+  modalOverflows.push({ width: currentWidth, theme: currentTheme, page, scrollWidth: m.sw, clientWidth: m.cw });
+  check(page, '弹窗打开时无整页横向溢出', m.sw <= m.cw + 1, `doc ${m.sw}/${m.cw}`);
+}
+
+/**
+ * 走真实「导入题库文件」入口：聚焦按钮 → 点击 → 向动态文件输入喂 File。
+ * 用于验证 await 文件选择/解析之后再 openModal 的异步焦点回位。
+ * kind=json 造普通预览；kind=qbk 造带 manifest 的题包以触发三选一。
+ */
+async function feedImport(session, kind, tag) {
+  // 真机上文件对话框关闭后焦点会落到 BODY；这里用原型拦截避免弹出系统对话框，
+  // 并在点完按钮后 blur，忠实复现「文件选择结束 → activeElement 变 BODY」的异步前提。
+  const fed = await session.ev(`(function(){
+    var b=document.querySelector('[data-action="bank-import"]');
+    if(!b) throw new Error('未找到「导入题库文件」按钮');
+    b.focus();
+    var orig=HTMLInputElement.prototype.click;
+    var picked=null;
+    HTMLInputElement.prototype.click=function(){
+      if (this.type === 'file') { picked=this; return; }
+      return orig.call(this);
+    };
+    try { b.click(); } finally { HTMLInputElement.prototype.click=orig; }
+    if (!picked) throw new Error('文件选择未创建 input[type=file]');
+    b.blur(); // 模拟系统文件对话框关闭后的焦点回退（真机实测为 BODY）
+    var file;
+    if (${JSON.stringify(kind)} === 'json') {
+      file = new File([JSON.stringify({questions:[{type:'single',question:'异步焦点夹具题',options:[{letter:'A',text:'甲'},{letter:'B',text:'乙'}],answer:'A'}]})], 'a11y-async.json', {type:'application/json'});
+    } else {
+      var bank = QB.App.State.bank;
+      var manifest = QB.Package.makeManifest({bank: bank, packageId:'a11y-async-' + ${JSON.stringify(tag)}, version:'1.0.0', title:'异步焦点测试包', questionCount:1});
+      QB.Package.recordImport(bank.id, manifest);
+      var json = JSON.stringify({questions:[{type:'single',question:'异步三选一夹具题',options:[{letter:'A',text:'甲'},{letter:'B',text:'乙'}],answer:'A'}]});
+      var buf = QB.Qbk.buildBundle('bank.json', json, [], [{name:'manifest.json', text: JSON.stringify(manifest)}]);
+      file = new File([buf], 'a11y-async.qbk', {type:'application/zip'});
+    }
+    var dt = new DataTransfer(); dt.items.add(file); picked.files = dt.files;
+    picked.dispatchEvent(new Event('change', {bubbles:true}));
+    return {name: file.name, size: file.size};
+  })()`);
+  if (!fed || !fed.name) throw new Error('文件喂入失败');
+  return fed;
+}
+
+/** 题型徽标实测算对比度（防止深色主题误用 --primary 导致 4.39:1） */
+async function checkBadgeContrast(session, page) {
+  const c = await session.ev(`(function(){
+    var el=document.querySelector('.type-badge');
+    if(!el) return {ok:false,why:'no-badge'};
+    function parse(s){ var m=String(s).match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/); return m?[+m[1],+m[2],+m[3]]:null; }
+    function lum(rgb){ return rgb.map(function(v){ v=v/255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4); }).reduce(function(s,v,i){ return s+v*[0.2126,0.7152,0.0722][i]; },0); }
+    var cs=getComputedStyle(el);
+    var fg=parse(cs.color), bg=parse(cs.backgroundColor);
+    if(!fg||!bg) return {ok:false,why:'unparsed',fg:cs.color,bg:cs.backgroundColor};
+    var l1=lum(fg), l2=lum(bg);
+    var ratio=(Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05);
+    return {ok:ratio>=4.5,ratio:Math.round(ratio*100)/100,fg:cs.color,bg:cs.backgroundColor,text:(el.textContent||'').trim()};
+  })()`);
+  check(page, '题型徽标对比度 ≥4.5:1', c.ok, JSON.stringify(c));
+}
+
+/** Esc 关闭后，焦点必须回到真实触发元素（异步路径也不能落在 BODY） */
+async function checkFocusReturn(session, page, action) {
+  const back = await session.ev(`document.activeElement && document.activeElement.getAttribute('data-action') === ${JSON.stringify(action)}`);
+  const now = await session.ev(`document.activeElement ? (document.activeElement.tagName + '[' + (document.activeElement.getAttribute('data-action') || '') + ']') : 'null'`);
+  check(page, 'Esc 关闭后焦点回到触发按钮 ' + action, !!back, 'activeElement=' + now);
+}
+
 /* ---------------- 主流程 ---------------- */
 const session = await openSession(browser, { url: `http://127.0.0.1:${PORT}/` });
 try {
-  for (const width of WIDTHS) {
+  for (const theme of THEMES) {
+    currentTheme = theme;
+    for (const width of WIDTHS) {
     currentWidth = width;
     await setViewport(session, width);
     await session.navigate(`http://127.0.0.1:${PORT}/?w=${width}`);
     const booted = await session.waitFor(`!!(window.QB && window.QB.App && window.QB.App.State)`, 20000);
     if (booted && booted.timeout) throw new Error('应用未启动');
+    await session.ev(`(function(t){ document.documentElement.setAttribute('data-theme', t); return document.documentElement.getAttribute('data-theme'); })(${JSON.stringify(theme)})`);
+    await sleep(120);
 
     // 首次运行：通过「题库管理 → 导入示例题库」真实创建数据
     const hasBank = await session.ev(`!!QB.App.State.bank`);
@@ -263,11 +347,38 @@ try {
     // 1) 首页
     await auditPage(session, width, '首页');
 
+    // 1a) 真实文件导入 → 预览 → Esc 焦点回位（覆盖 await 文件选择/解析后的异步路径）
+    await feedImport(session, 'json', width + '-' + theme);
+    await waitModal(session);
+    await checkPageOverflow(session, '导入预览');
+    auditModal(session, '导入预览', await session.ev(MODAL_AUDIT));
+    await session.screenshot(path.join(OUT, `${theme}-${width}-导入预览-Esc前.png`));
+    await pressKey(session, 'Escape', 'Escape', 27);
+    await sleep(300);
+    await waitModalGone(session);
+    await checkFocusReturn(session, '导入预览', 'bank-import');
+    await session.screenshot(path.join(OUT, `${theme}-${width}-导入预览-Esc后.png`));
+
+    // 1b) 真实题包导入 → 三选一 → Esc 焦点回位（同一异步入口，manifest 触发重复识别）
+    await feedImport(session, 'qbk', width + '-' + theme);
+    await waitModal(session);
+    const dupPresent = await session.ev(`!!document.querySelector('[data-action="dup-skip"]')`);
+    if (!dupPresent) throw new Error('未进入三选一弹窗');
+    await checkPageOverflow(session, '三选一弹窗');
+    auditModal(session, '三选一弹窗', await session.ev(MODAL_AUDIT));
+    await session.screenshot(path.join(OUT, `${theme}-${width}-三选一-Esc前.png`));
+    await pressKey(session, 'Escape', 'Escape', 27);
+    await sleep(300);
+    await waitModalGone(session);
+    await checkFocusReturn(session, '三选一弹窗', 'bank-import');
+    await session.screenshot(path.join(OUT, `${theme}-${width}-三选一-Esc后.png`));
+
     // 2) 答题页
     await click(session, '[data-action="start-practice"]');
     await waitModal(session);
     const startModal = await session.ev(MODAL_AUDIT);
     auditModal(session, '开始弹窗', startModal);
+    await checkPageOverflow(session, '开始弹窗');
     // 默认题量为 0，必须显式设置一种题型数量才能组卷
     await session.ev(`(function(){
       var i=document.querySelector('.modal input.st-count[data-bp-type="single"]');
@@ -279,58 +390,121 @@ try {
     const quizReady = await session.waitFor(`QB.App.State.view === 'quiz' && QB.App.State.engine && QB.App.State.engine.questions.length > 0`, 10000);
     if (quizReady && quizReady.timeout) throw new Error('未进入答题页（' + JSON.stringify(quizReady.last) + '）');
     await auditPage(session, width, '答题页');
+    await checkBadgeContrast(session, '答题页');
 
-    // 3) 结果页（练习 0 作答直接结束，不弹确认）
+    // 3) 结果页：先正确作答 1 题，确保按题型/分类/难度条形图有非零填充可渲染
+    await session.ev(`(function(){
+      var e=QB.App.State.engine;
+      var q=e.questions[e.currentIndex];
+      var ans=q && q.answer;
+      var letter=Array.isArray(ans)?String(ans[0]):String(ans==null?'':ans);
+      var o=document.querySelector('.option[data-action="pick"][data-value="'+letter+'"]') || document.querySelector('.option[data-action="pick"]');
+      if(!o) throw new Error('未找到可选项');
+      o.click(); return true;
+    })()`);
+    await sleep(150);
+    await click(session, '[data-action="submit"]');
+    await sleep(250);
     await click(session, '[data-action="finish-exam"]');
     await sleep(400);
     const maybeConfirm = await session.ev(`(function(){var r=document.getElementById('modal-root');return !!r && !r.hidden;})()`);
     if (maybeConfirm) { await click(session, '[data-action="modal-ok"]'); await waitModalGone(session); }
     await session.waitFor(`QB.App.State.view === 'result'`, 10000);
+    await clearToasts(session);
     await auditPage(session, width, '结果页');
-
-    // 4) 导入预览
-    await session.ev(`(function(){
-      window.__a11yP = QB.DataIO.commitImport(QB.App.State.bank, {
-        questions: [{ type: 'single', question: '无障碍夹具题', options: [{letter:'A',text:'甲'},{letter:'B',text:'乙'}], answer: 'A' }],
-        warnings: ['夹具告警一行'],
-        format: 'JSON 夹具',
-        stats: { byType: { single: 1 }, total: 1, inFileDuplicates: 0 },
-        meta: { manifest: { packageId: 'a11y-fixture-${width}', version: '1.0.0', title: '无障碍测试包' } }
-      }); return 'ok';
+    const bars = await session.ev(`(function(){
+      var fills=Array.prototype.map.call(document.querySelectorAll('.bar-row .bar-fill'), function(f){
+        var r=f.getBoundingClientRect(); return {w:Math.round(r.width*10)/10, h:Math.round(r.height*10)/10};
+      });
+      var vals=Array.prototype.map.call(document.querySelectorAll('.bar-val'), function(v){
+        var r=v.getBoundingClientRect(); return {right:Math.round(r.right*10)/10, text:(v.textContent||'').trim()};
+      });
+      return {count:fills.length, fills:fills, vals:vals.length, samples:vals.slice(0,3)};
     })()`);
-    await waitModal(session);
-    auditModal(session, '导入预览', await session.ev(MODAL_AUDIT));
-    await click(session, '[data-action="modal-cancel"]');
-    await waitModalGone(session);
-    await session.ev(`(function(){ if (window.__a11yP) window.__a11yP.catch(function(){}); return true; })()`);
-
-    // 5) 三选一弹窗（同 id+版本重复导入）
-    await session.ev(`QB.Package.recordImport(QB.App.State.bank.id, { packageId: 'a11y-fixture-${width}', version: '1.0.0', title: '无障碍测试包' })`);
-    await session.ev(`(function(){
-      window.__a11yP2 = QB.DataIO.commitImport(QB.App.State.bank, {
-        questions: [{ type: 'single', question: '无障碍夹具题', options: [{letter:'A',text:'甲'},{letter:'B',text:'乙'}], answer: 'A' }],
-        warnings: [], format: 'JSON 夹具', stats: { byType: { single: 1 }, total: 1 },
-        meta: { manifest: { packageId: 'a11y-fixture-${width}', version: '1.0.0', title: '无障碍测试包' } }
-      }); return 'ok';
+    check('结果页', '条形图填充实际渲染（' + bars.count + ' 条，宽高 >0）',
+      bars.count > 0 && bars.fills.every((f) => f.w > 1 && f.h > 1), JSON.stringify(bars));
+    const distCards = await session.ev(`(function(){
+      return ['按题型','按分类','按难度'].map(function(t){
+        var cards=Array.prototype.slice.call(document.querySelectorAll('.card'));
+        var card=null, i;
+        for(i=0;i<cards.length;i++){
+          var h=cards[i].querySelector('.card-title');
+          if(h && h.textContent.trim()===t){ card=cards[i]; break; }
+        }
+        var fills=card?Array.prototype.map.call(card.querySelectorAll('.bar-row .bar-fill'),function(f){
+          var r=f.getBoundingClientRect(); return {w:Math.round(r.width*10)/10, h:Math.round(r.height*10)/10};
+        }):[];
+        return {title:t,count:fills.length,ok:fills.length>0 && fills.every(function(f){return f.w>1 && f.h>1;})};
+      });
     })()`);
-    await waitModal(session);
-    const dupPresent = await session.ev(`!!document.querySelector('[data-action="dup-skip"]')`);
-    if (!dupPresent) throw new Error('未进入三选一弹窗');
-    auditModal(session, '三选一弹窗', await session.ev(MODAL_AUDIT));
-    await click(session, '[data-action="dup-skip"]');
-    await waitModalGone(session);
-    await session.ev(`(function(){ if (window.__a11yP2) window.__a11yP2.catch(function(){}); return true; })()`);
+    check('结果页', '按题型/按分类/按难度 三类分布均有可见填充', distCards.every((d) => d.ok), JSON.stringify(distCards));
+    // 悬浮滚动按钮与右侧数值的安全区：按钮强制显示后，所有 .bar-val 右缘必须在按钮左缘之外
+    const floatSafe = await session.ev(`(function(){
+      var b=document.getElementById('btn-bottom');
+      if(!b) return {ok:false, why:'no-btn-bottom'};
+      b.classList.add('show');
+      var br=b.getBoundingClientRect();
+      var vals=Array.prototype.slice.call(document.querySelectorAll('.bar-val'));
+      var overlaps=vals.filter(function(v){
+        var r=v.getBoundingClientRect();
+        return r.width>0 && r.right>br.left && r.left<br.right && r.bottom>br.top && r.top<br.bottom;
+      });
+      var maxRight=vals.reduce(function(m,v){return Math.max(m,v.getBoundingClientRect().right);},0);
+      b.classList.remove('show');
+      return {count:vals.length, overlap:overlaps.length, maxRight:Math.round(maxRight*10)/10, btnLeft:Math.round(br.left*10)/10};
+    })()`);
+    check('结果页', '悬浮滚动按钮不遮挡条形图数值（右侧安全区）',
+      floatSafe.ok !== false && floatSafe.count > 0 && floatSafe.overlap === 0 && floatSafe.maxRight <= floatSafe.btnLeft + 1,
+      JSON.stringify(floatSafe));
+    // 视觉取证：滚动到按题型卡片，截取三类分布的实际填充
+    await session.ev(`(function(){
+      var hs=Array.prototype.slice.call(document.querySelectorAll('.card-title'));
+      for(var i=0;i<hs.length;i++){ if(hs[i].textContent.trim()==='按题型'){ hs[i].scrollIntoView({block:'center'}); break; } }
+      return true;
+    })()`);
+    await sleep(250);
+    await session.screenshot(path.join(OUT, `${theme}-${width}-结果页-条形图.png`));
 
     // 6) 设置页（统计 → 复习设置弹窗），同时验证焦点进入 / Esc 回位 / Tab 循环
+    // 合成一条覆盖全部题型的历史记录，让「各题型表现」渲染出与真机复验相同的多行条形图（仅测试侧夹具）
+    await session.ev(`(function(){
+      var bt={};
+      QB.CONFIG.TYPES.forEach(function(t){ bt[t]={correct:2,total:2}; });
+      var n=QB.CONFIG.TYPES.length;
+      return QB.History.add({
+        bankId: QB.App.State.bankId,
+        bankName: QB.App.State.bank ? QB.App.State.bank.name : '',
+        mode: 'practice', total: n*2, correct: n*2, wrong: 0, pending: 0,
+        score: 100, accuracy: 100, byType: bt, durationMs: 60000, focusLeaves: 0
+      });
+    })()`);
     await click(session, '[data-tab="stats"]');
     await session.waitFor(`!!document.querySelector('[data-action="review-settings"]')`, 10000);
     const statsState = await session.ev(`({view: QB.App.State.view, hasTab: !!document.querySelector('[data-tab="stats"]'), hasBtn: !!document.querySelector('[data-action="review-settings"]'), html: document.getElementById('view').innerHTML.slice(0, 120)})`);
     if (!statsState.hasBtn) throw new Error('设置页缺少复习设置入口：' + JSON.stringify(statsState));
+    await clearToasts(session);
     await auditPage(session, width, '设置页');
+    const statBars = await session.ev(`(function(){
+      var rows=Array.prototype.slice.call(document.querySelectorAll('.bar-row'));
+      var fills=rows.map(function(row){
+        var f=row.querySelector('.bar-fill');
+        var r=f.getBoundingClientRect();
+        var lb=row.querySelector('.bar-label');
+        return {label:(lb?lb.textContent:'').trim(), w:Math.round(r.width*10)/10, h:Math.round(r.height*10)/10};
+      });
+      return {count:fills.length, fills:fills};
+    })()`);
+    check('设置页', '统计页多题型条形图填充实际渲染（' + statBars.count + ' 条，宽高 >0）',
+      statBars.count >= 4 && statBars.fills.every((f) => f.w > 1 && f.h > 1), JSON.stringify(statBars));
+    // 视觉取证：滚动到统计条形图
+    await session.ev(`(function(){ var f=document.querySelector('.bar-row'); if(f) f.scrollIntoView({block:'center'}); return true; })()`);
+    await sleep(200);
+    await session.screenshot(path.join(OUT, `${theme}-${width}-设置页-条形图.png`));
     await session.ev(`(function(){var b=document.querySelector('[data-action="review-settings"]'); b.focus(); b.click(); return true;})()`);
     await waitModal(session);
     const settingsModal = await session.ev(MODAL_AUDIT);
     auditModal(session, '设置弹窗', settingsModal);
+    await checkPageOverflow(session, '设置弹窗');
     // Esc 关闭 → 焦点回位
     await pressKey(session, 'Escape', 'Escape', 27);
     await sleep(300);
@@ -386,6 +560,7 @@ try {
   };
   check('全局', 'prefers-reduced-motion 下动画/过渡时长 ≤0.02ms', !!rm.ok && ms(rm.anim) <= 0.02 && ms(rm.trans) <= 0.02, JSON.stringify(rm));
   await session.send('Emulation.setEmulatedMedia', { features: [] });
+  }
 } finally {
   await browser.close();
   try { server.kill(); } catch (e) { /* ignore */ }
@@ -398,7 +573,7 @@ results.forEach((r) => {
   if (!byPage[r.page]) byPage[r.page] = { total: 0, pass: 0 };
   byPage[r.page].total++;
   if (r.ok) byPage[r.page].pass++;
-  const w = String(r.width);
+  const w = String(r.width) + '-' + String(r.theme);
   if (!byWidth[w]) byWidth[w] = {};
   if (!byWidth[w][r.page]) byWidth[w][r.page] = { total: 0, pass: 0 };
   byWidth[w][r.page].total++;
@@ -406,17 +581,20 @@ results.forEach((r) => {
 });
 const summary = {
   widths: WIDTHS,
+  themes: THEMES,
   assertions: totalAssertions,
   passed: totalAssertions - failures.length,
   failed: failures.length,
   byPage,
   byWidth,
   measurements,
-  failures: failures.map((f) => ({ width: f.width, page: f.page, label: f.label, detail: f.detail }))
+  modalOverflows,
+  checks: results,
+  failures: failures.map((f) => ({ width: f.width, theme: f.theme, page: f.page, label: f.label, detail: f.detail }))
 };
 fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(summary, null, 2));
 console.log('\n=== 真机门禁汇总 ===');
-console.log('宽度档位: ' + WIDTHS.join(' / '));
+console.log('宽度档位: ' + WIDTHS.join(' / ') + '；主题: ' + THEMES.join(' / '));
 Object.keys(byPage).forEach((p) => {
   console.log(`  ${p}: 断言 ${byPage[p].total}，通过 ${byPage[p].pass}，失败 ${byPage[p].total - byPage[p].pass}`);
 });
@@ -427,7 +605,9 @@ Object.keys(byWidth).forEach((w) => {
   console.log(`  [${w}px] ${pages.map((p) => p + ' ' + byWidth[w][p].pass + '/' + byWidth[w][p].total).join('，')} ⇒ ${pp}/${t}`);
 });
 console.log('横向溢出实测（doc scrollWidth/clientWidth）：');
-measurements.forEach((m) => console.log(`  ${m.width}px ${m.page}: ${m.docScrollWidth}/${m.docClientWidth}（body ${m.bodyScrollWidth}/${m.bodyClientWidth}），越界元素 ${m.outOfViewCount}，关键按钮 ${m.keyCount}，控件 ${m.controlCount}`));
+measurements.forEach((m) => console.log(`  ${m.width}px ${m.theme} ${m.page}: ${m.docScrollWidth}/${m.docClientWidth}（body ${m.bodyScrollWidth}/${m.bodyClientWidth}），越界元素 ${m.outOfViewCount}，关键按钮 ${m.keyCount}，控件 ${m.controlCount}`));
+console.log('弹窗打开时横向溢出实测（doc scrollWidth/clientWidth）：');
+modalOverflows.forEach((m) => console.log(`  ${m.width}px ${m.theme} ${m.page}: ${m.scrollWidth}/${m.clientWidth}`));
 console.log(`总计：断言 ${totalAssertions}，通过 ${totalAssertions - failures.length}，失败 ${failures.length}`);
 if (failures.length) {
   console.log('失败明细：');
