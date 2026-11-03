@@ -112,8 +112,20 @@
       (s.uri && s.kind === 'url' ? '：' + esc(shortHost(s.uri)) : '') + '</span>';
   }
   function shortHost(uri) {
-    try { const u = new URL(uri); return u.host + (u.pathname.length > 18 ? u.pathname.slice(-18) : u.pathname); }
-    catch (e) { return String(uri).slice(0, 36); }
+    try {
+      const u = new URL(uri);
+      const path = u.pathname || '';
+      if (path.length <= 18) return u.host + path;
+      // 按路径段保留末尾，保证分隔符不丢失：/verify-tmp/real.apkg → …/real.apkg
+      const segs = path.split('/').filter(Boolean);
+      let tail = '';
+      for (let i = segs.length - 1; i >= 0; i--) {
+        const next = '/' + segs[i] + tail;
+        if (next.length > 18 && tail) break;
+        tail = next;
+      }
+      return u.host + '…' + tail;
+    } catch (e) { return String(uri).slice(0, 36); }
   }
 
   function renderHome(bank, counts) {

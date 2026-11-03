@@ -407,6 +407,20 @@ section('首页存储卡：API 模式不显示 local 配额文案');
   ok(homeLocal.indexOf('本地存储') >= 0, 'local 模式：仍显示本地存储卡');
 }
 
+section('来源徽章：端口 + 长路径不丢分隔符');
+{
+  const uri = 'http://127.0.0.1:8796/verify-tmp/real.apkg';
+  const bank = { name: 'URL 来源库', source: { kind: 'url', uri: uri, refreshable: true } };
+  const html = UI.renderHome(bank, { total: 1, byType: {} });
+  const chip = (html.match(/<span class="src-chip"[^>]*>[\s\S]*?<\/span>/) || [''])[0];
+  ok(chip.indexOf('127.0.0.1:8796') >= 0, '徽章保留主机与端口');
+  ok(chip.indexOf('…/real.apkg') >= 0, '长路径按段截断且保留分隔符（…/real.apkg）');
+  ok(chip.indexOf('8796erify') < 0 && chip.indexOf('8796verify') < 0, '主机与路径之间不再缺少分隔符');
+  const shortBank = { name: '短路径', source: { kind: 'url', uri: 'http://127.0.0.1:8796/a.apkg' } };
+  const shortHtml = UI.renderHome(shortBank, { total: 1, byType: {} });
+  ok(shortHtml.indexOf('127.0.0.1:8796/a.apkg') >= 0, '短路径原样展示（不引入省略号）');
+}
+
 section('导入预览：内容校验和行（P4）');
 {
   eq(UI.renderImportChecksum(null), '', '无校验和 meta 不渲染');

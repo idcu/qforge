@@ -587,6 +587,17 @@ body {
 .qe-optrow input[type='text'] { flex: 1; }
 .qe-letter { min-width: 22px; font-weight: 600; color: var(--text-muted); }
 .qe-err { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 6px; }
+/* 导入失败原因（D3）：错误弹窗与来源弹窗内联共用；语义令牌唯一实现，JS 禁止内联色值 */
+.import-error {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--danger-weak);
+  color: var(--danger);
+  white-space: pre-wrap;
+  font-size: 14px;
+}
 /* 材料题嵌套编辑器：每个小问一张卡片，内部沿用 qe 控件样式 */
 .me-child {
   border: 1px solid var(--border);

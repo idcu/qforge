@@ -363,6 +363,26 @@ section('视觉回归：语义文字令牌 / 条形图填充 / 窄屏不裁剪')
     '顶栏允许换行（360px 下不靠裁剪隐藏内容）');
   ok(/\.bar-row\s*\{[^}]*padding-right:\s*64px/.test(CSS),
     '条形图右侧恒留 64px 悬浮按钮安全区（所有宽度均不遮挡数值，且不裁剪内容）');
+
+  // D3：导入失败原因样式（唯一实现，语义令牌；两处弹窗共用）
+  const errRule = CSS.match(/\.import-error\s*\{([^}]*)\}/);
+  ok(!!errRule, '存在 .import-error 规则（导入失败原因的唯一错误样式）');
+  ok((CSS.match(/\.import-error\b/g) || []).length === 1, '.import-error 在 style.css 中只定义一次');
+  if (errRule) {
+    const body = errRule[1];
+    ok(/color:\s*var\(--danger\)/.test(body), '错误文字使用 --danger 语义令牌（非正文色）');
+    ok(/background:\s*var\(--danger-weak\)/.test(body), '错误弱底使用 --danger-weak 语义令牌');
+    ok(/border:\s*1px\s+solid\s+var\(--danger\)/.test(body), '错误边框使用 --danger 语义令牌');
+    ok(/border-radius:\s*var\(--radius\)/.test(body), '圆角复用 --radius 令牌（不新增字面量）');
+    ok(/white-space:\s*pre-wrap/.test(body), '保留换行（white-space: pre-wrap）');
+    ok(!/(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\()/.test(body), '规则内无硬编码色值（仅语义令牌）');
+  }
+  const ioSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/data-io.js'), 'utf8');
+  ok(/class="import-error" role="alert"/.test(ioSrc) && /box\.className = 'import-error'/.test(ioSrc),
+    '两处失败弹窗共用 .import-error 类（showImportFailure / showInlineFailure）');
+  ok(!/box\.style\.(color|background|borderColor|whiteSpace|marginTop)/.test(ioSrc) &&
+    !/<div class="import-error"[^>]*style=/.test(ioSrc),
+    'JS 不再内联错误样式（颜色/间距/换行均由 CSS 唯一提供）');
 }
 
 /* ============================ 5. 动效 ============================ */

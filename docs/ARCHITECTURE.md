@@ -193,7 +193,10 @@
      → QuestionRepo.insertMany(bankId, questions, {mode, dedupe})
      → Storage 防抖落盘
 0 题 → DataIO.importFailureText(result)（migration.reason / 首条 warning 唯一文案）
+      → 展示容器统一 `.import-error`（css/style.css 唯一定义：danger 前景/弱底/边框/圆角/pre-wrap）
 ```
+
+> **错误展示约定（D3）**：导入失败的可见原因只有一处样式定义 `.import-error`（`css/style.css`，复用 `--danger` / `--danger-weak` / `--radius` 语义令牌）；`data-io` 只负责挂类与文案，**任何 JS 内联颜色/间距/换行都视为违规**（`scripts/a11y.test.mjs` 静态门禁覆盖规则唯一性与两处调用点）。
 
 ### 4.2 答题与结算
 ```

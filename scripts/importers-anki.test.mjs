@@ -305,6 +305,8 @@ section('D2：0 题拒绝原因在 UI 可见（不再只提示「未解析出任
     ok(html.indexOf('兼容旧版 / Legacy') >= 0, '错误弹窗包含 Legacy 指引原文');
     ok(html.indexOf('anki21b') >= 0, '错误弹窗包含 .anki21b 说明');
     ok(html.indexOf('未解析出任何题目') < 0, '不再只显示「未解析出任何题目」');
+    ok(html.indexOf('class="import-error"') >= 0, '错误弹窗挂 .import-error 类（样式唯一来源）');
+    ok(!/style="[^"]*(color|background|border)/.test(html), '错误弹窗不再内联颜色/边框');
     ok(toasts.indexOf('未解析出任何题目') < 0, '未退回无信息 toast');
     eq(QB.DataIO.importFailureText(latest), latest.meta.migration.reason, 'importFailureText 去重后即拒绝原因');
 

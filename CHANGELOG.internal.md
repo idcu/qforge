@@ -6,6 +6,34 @@
 
 ---
 
+## 待回填 · fix(ui): 导入失败原因错误语义（D3）+ 来源徽章长路径分隔符
+
+**Commit**：`（本轮修复提交，hash 提交后回填）`
+
+**真机复验证据（D1/D2 已生效，9 项过 8）**
+- D3：URL 0 题弹窗内原因文字 computed `color = rgb(31, 35, 40)`、`background = rgba(0, 0, 0, 0)`、`borderColor = rgb(31, 35, 40)`，即普通正文色；`.anki21b`「导入未完成」弹窗同样。根因：`data-io` 只内联 `white-space/margin`，`css/style.css` 无 `.import-error` 规则（grep 0 命中），而既有 `.qe-err` 已用 `var(--danger)`。
+- 附（既有缺陷）：来源徽章 `🌐 网络导入：127.0.0.1:8796rify-tmp/real.apkg` 丢失路径分隔符。`shortHost` 自 `d920e08 feat(source)` 起用 `pathname.slice(-18)` 硬截，短主机名 + 长路径时从段中间切断，主机与路径直接粘连。
+
+**核心改动点**
+- CSS 唯一实现 `.import-error`：`color: var(--danger)`、`background: var(--danger-weak)`、`border: 1px solid var(--danger)`、`border-radius: var(--radius)`、`padding: 10px 12px`、`white-space: pre-wrap`；两处失败弹窗（`showImportFailure` 错误弹窗、`showInlineFailure` 来源弹窗内联）共用该类。
+- 删除 JS 内联样式（`style="white-space:pre-wrap;margin-top:8px"` 与 `box.style.whiteSpace/marginTop`），JS 不再出现任何颜色/间距/换行字面量。
+- `shortHost` 改为**按路径段截断**：`/verify-tmp/real.apkg` → `…/real.apkg`，输出 `127.0.0.1:8796…/real.apkg`；短路径原样保留（不引入省略号）。
+
+**实测数据（2026-11-03，本机 Asia/Shanghai）**
+- 浅色主题：`--danger #b91c1c` on `--danger-weak #fdeceb` → 相对亮度 L(前景)=0.1123、L(底)=0.8687，比值 `(0.8687+0.05)/(0.1123+0.05) = 5.66:1 ≥ 4.5`。
+- 深色主题：`--danger #f87171` on `--danger-weak #3a1d1d` → L(前景)=0.3296、L(底)=0.0187，比值 `(0.3296+0.05)/(0.0187+0.05) = 5.53:1 ≥ 4.5`（两主题均由 `scripts/a11y.test.mjs` 既有「20 组色对」检查直接覆盖，本轮新增 `.import-error` 10 项静态断言锁定规则唯一性与令牌使用）。
+- 徽章断言：端口 + 长路径 `http://127.0.0.1:8796/verify-tmp/real.apkg` → chip 含 `127.0.0.1:8796` 与 `…/real.apkg`，且不含 `8796erify` / `8796verify`；短路径 `.../a.apkg` 原样展示。
+- 门禁：`test-all` 30 个运行项 0 失败；断言 **4744 / 4744**（原 4728，+16：a11y 82→92、ui-renderer 174→178、anki 146→148）；`node --expose-gc scripts/bench.mjs --assert` 全部通过（heapUsed **+2.66～+2.69MB**（两轮）≤ 40MB、gradeMany 比值 5.00 ≤ 5.35、API PATCH P95 8.41ms ≤ 50ms）；`docs-check --static` 一致（30 / 4744 / 55）。
+- 首屏：**326.2 KB gzip / 921.9 KB raw**（较上轮 326.0 / 921.3，+0.2 KB gzip / +0.6 KB raw，来自 CSS 规则与 shortHost 段截断逻辑）。
+- 旧代码复跑（`git worktree add .tmp-samples/old-D3 ba21771` + 本轮新测试）：`a11y.test.mjs` 3 条失败——「存在 .import-error 规则」「.import-error 只定义一次」「JS 不再内联错误样式」；`ui-renderer.test.mjs` 1 条失败——「长路径按段截断且保留分隔符」，实际徽章为 `127.0.0.1:8796erify-tmp/real.apkg`（与本轮真机现象一致）。
+
+**遗留 TODO / 风险**
+- `.import-error` 深色对比度依赖 `--danger-weak` 的取值；若未来调整暗色令牌，a11y 的 20 组色对会立即拦截。
+- `shortHost` 的截断阈值仍为 18 字符（按段遵守，单段超长时会被整体保留而不截断）；极端单段超长路径下徽章可能偏宽，但不会误导。
+
+---
+
+
 ## 20d16ed · fix(importers): 粘贴入口统一解析 + 0 题拒绝原因可见（D1/D2）
 
 **Commit**：`20d16ed`

@@ -170,7 +170,7 @@
     UI.openModal(
       '<h3>导入未完成</h3>' +
       '<div class="li-meta">没有可导入的题目，原因如下：</div>' +
-      '<div class="import-error" role="alert" style="white-space:pre-wrap;margin-top:8px">' +
+      '<div class="import-error" role="alert">' +
       QB.escapeHtml(text) + '</div>' +
       '<div class="modal-actions"><button class="btn" data-action="modal-ok">关闭</button></div>',
       (modal) => {
@@ -190,8 +190,6 @@
       box = document.createElement('div');
       box.className = 'import-error';
       box.setAttribute('role', 'alert');
-      box.style.whiteSpace = 'pre-wrap';
-      box.style.marginTop = '8px';
       const actions = modal.querySelector('.modal-actions');
       if (actions && actions.parentNode) actions.parentNode.insertBefore(box, actions);
       else modal.appendChild(box);

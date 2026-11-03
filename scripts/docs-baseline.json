@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-11-03T04:27:37.718Z",
+  "generatedAt": "2026-11-03T04:57:28.983Z",
   "runItems": 30,
   "suiteFiles": 29,
-  "totalAssertions": 4728,
+  "totalAssertions": 4744,
   "gateCount": 55,
   "counts": {
     "smoke-test.mjs": 724,
-    "a11y.test.mjs": 82,
+    "a11y.test.mjs": 92,
     "api-backend.test.mjs": 310,
     "assets.test.mjs": 182,
     "backup.test.mjs": 127,
@@ -18,7 +18,7 @@
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
     "idb.test.mjs": 106,
-    "importers-anki.test.mjs": 146,
+    "importers-anki.test.mjs": 148,
     "importers-quizlet.test.mjs": 75,
     "migrate.test.mjs": 291,
     "office-export.test.mjs": 1150,
@@ -33,13 +33,13 @@
     "static-server.test.mjs": 29,
     "storage.test.mjs": 39,
     "sync-dav.test.mjs": 45,
-    "ui-renderer.test.mjs": 174,
+    "ui-renderer.test.mjs": 178,
     "xml-lite.test.mjs": 39
   },
   "firstScreen": {
     "scripts": 81,
     "files": 89,
-    "rawKB": "921.3",
-    "gzipKB": "326.0"
+    "rawKB": "921.9",
+    "gzipKB": "326.2"
   }
 }
