@@ -16,7 +16,8 @@
   const SCHED_TO_WIRE = {
     newPerDay: 'new_per_day', reviewPerDay: 'review_per_day',
     requestRetention: 'request_retention', maximumIntervalDays: 'maximum_interval_days',
-    learningSteps: 'learning_steps', leechThreshold: 'leech_threshold'
+    learningSteps: 'learning_steps', leechThreshold: 'leech_threshold',
+    fuzz: 'fuzz', fuzzMaxDays: 'fuzz_max_days'
   };
 
   /** 本地 sched → wire（只输出已定义键；learningSteps 秒数组浅拷贝） */
@@ -39,7 +40,9 @@
       requestRetention: w.request_retention,
       maximumIntervalDays: w.maximum_interval_days,
       learningSteps: Array.isArray(w.learning_steps) ? w.learning_steps.slice() : w.learning_steps,
-      leechThreshold: w.leech_threshold
+      leechThreshold: w.leech_threshold,
+      fuzz: w.fuzz,
+      fuzzMaxDays: w.fuzz_max_days
     };
   }
 

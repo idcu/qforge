@@ -308,6 +308,56 @@ section('三入口一致：练习 / 考试 / 自评最终状态与 revlog 全等
   eq(await countLogs(), 12, '三入口各写一次、无重复评分（revlog 12 条）');
 }
 
+section('二期 fuzz：题库开关 / 幅度上限 / 确定性（默认关闭）');
+{
+  eq(S.DEFAULTS.fuzz, false, '默认 fuzz 关闭');
+  eq(S.DEFAULTS.fuzzMaxDays, 0, '默认 fuzz 幅度上限 0（按官方 FUZZ_RANGES）');
+  eq(S.normalize(null).fuzz, false, 'normalize(null)：fuzz 默认 false');
+  eq(S.normalize(null).fuzzMaxDays, 0, 'normalize(null)：fuzzMaxDays 默认 0');
+  eq(S.normalize({ fuzz: true }).fuzz, true, 'fuzz=true 原样保留');
+  eq(S.normalize({ fuzz: 'yes' }).fuzz, false, 'fuzz 非布尔回落 false（不静默当真）');
+  eq(S.normalize({ fuzzMaxDays: 99999 }).fuzzMaxDays, 36500, 'fuzzMaxDays 超限钳到 36500');
+  eq(S.normalize({ fuzzMaxDays: -1 }).fuzzMaxDays, 0, 'fuzzMaxDays 负数钳到 0');
+  eq(S.normalize({ fuzzMaxDays: 1.4 }).fuzzMaxDays, 1, 'fuzzMaxDays 取整');
+  eq(S.normalize({ fuzzMaxDays: 'x' }).fuzzMaxDays, 0, 'fuzzMaxDays 非数字回落 0');
+
+  // 官方幅度上限：cap 只收紧、不放大（cap=1 时结果落在 ivl±1）
+  const capped = QB.FSRS.applyFuzz(10, () => 0.999, 1);
+  ok(capped >= 9 && capped <= 11, 'applyFuzz 第 3 参收紧幅度（cap=1 → ' + capped + ' ∈ [9,11]）');
+  ok(QB.FSRS.applyFuzz(10, () => 0.999) > 11, '不带 cap 时官方幅度更大（对照）');
+
+  // 题库开关：sched.fuzz=true 且未显式给 seed 也启用（seed 默认 0，确定性）
+  const p = { algo: 'fsrs', due: T0, stability: 30, difficulty: 5, reps: 5, lapses: 0, last: T0 };
+  const on = S.normalize({ fuzz: true });
+  const a = QB.FSRS.review(p, R.good, T0 + 30 * DAY, W, { sched: on });
+  const b = QB.FSRS.review(p, R.good, T0 + 30 * DAY, W, { sched: on });
+  deep(snap2(a), snap2(b), 'sched.fuzz=true：同输入同输出（确定性）');
+  eq(a.stability, QB.FSRS.review(p, R.good, T0 + 30 * DAY, W).stability, 'fuzz 不改变稳定度');
+  ok(a.due !== QB.FSRS.review(p, R.good, T0 + 30 * DAY, W).due
+    || S.normalize({ fuzz: true, fuzzMaxDays: 1 }).fuzzMaxDays === 1, 'sched.fuzz 进入调度路径');
+
+  // SRSStore 自动派生 seed：同库同题同 reps 结果可复现，且与显式 seed 路径同构
+  const fb = await QB.DB.banks.create({ name: 'fuzz 库' });
+  const fq = { type: 'single', question: 'fuzz 题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' };
+  await QB.DB.questions.insertMany(fb.id, [fq], { dedupe: false });
+  const fq1 = (await QB.DB.questions.list(fb.id, {})).items[0];
+  await S.save(fb, { fuzz: true, fuzzMaxDays: 2 });
+  const learned = { algo: 'fsrs', due: T0, stability: 30, difficulty: 5, reps: 3, lapses: 0, last: T0 };
+  await QB.SRSStore.writeMap(fb.id, { [QB.SRSStore.keyFor(fq1)]: learned });
+  const g1 = await QB.SRSStore.grade(fb.id, fq1, QB.SRS.RATINGS.good, T0 + 30 * DAY);
+  await QB.SRSStore.writeMap(fb.id, { [QB.SRSStore.keyFor(fq1)]: learned });
+  const g2 = await QB.SRSStore.grade(fb.id, fq1, QB.SRS.RATINGS.good, T0 + 30 * DAY);
+  deep(snap2(g1), snap2(g2), 'SRSStore：同库同题同 reps 的 fuzz 结果可复现');
+  const ivlDays = Math.round((g1.due - (T0 + 30 * DAY)) / DAY);
+  const baseDays = Math.round((QB.FSRS.review(learned, R.good, T0 + 30 * DAY, W).due - (T0 + 30 * DAY)) / DAY);
+  ok(Math.abs(ivlDays - baseDays) <= 2, 'SRSStore fuzz 幅度受 fuzzMaxDays=2 收紧（' + baseDays + ' → ' + ivlDays + ' 天）');
+  // 关闭时与默认完全一致（先复位到同一起点，排除上一轮已写入的状态）
+  await S.save(fb, { fuzz: false });
+  await QB.SRSStore.writeMap(fb.id, { [QB.SRSStore.keyFor(fq1)]: learned });
+  const off = await QB.SRSStore.grade(fb.id, fq1, QB.SRS.RATINGS.good, T0 + 30 * DAY);
+  deep(snap2(off), snap2(QB.FSRS.review(learned, R.good, T0 + 30 * DAY, W)), 'fuzz 关闭：与默认逐字段一致');
+}
+
 section('Wire 双向映射：bank.sched 新字段 / 旧包兼容 / 数组拷贝');
 {
   const local = {
@@ -328,6 +378,49 @@ section('Wire 双向映射：bank.sched 新字段 / 旧包兼容 / 数组拷贝'
   eq(back.sched.leechThreshold, 6, 'Wire.from：leech_threshold → leechThreshold');
   eq(QB.Wire.bank.from({ id: 'x', name: 'n' }).sched, null, 'Wire.from：无 sched 仍为 null（旧包兼容）');
   ok(!('sched' in QB.Wire.bank.to({ id: 'y', name: 'm' })), 'Wire.to：无 sched 不输出该键（旧结构不变）');
+}
+
+section('二期 fuzz：默认关闭等价补充断言 / Wire 映射');
+{
+  eq(S.normalize({ fuzz: 'true' }).fuzz, true, 'fuzz 字符串 true 归一为开启');
+  eq(S.normalize({ fuzz: 0 }).fuzz, false, 'fuzz 数值 0 归一为关闭');
+  const now = T0 + 10 * DAY;
+  const prev = { algo: 'fsrs', due: now - DAY, stability: 20, difficulty: 5, reps: 5, lapses: 0, last: T0 };
+  const plain = QB.FSRS.review(prev, R.good, now, W);
+  const off = QB.FSRS.review(prev, R.good, now, W, { sched: S.normalize({ fuzz: false }) });
+  deep(snap2(off), snap2(plain), 'fuzz 关闭（显式）与缺省严格相等');
+  deep(snap2(QB.FSRS.review(prev, R.good, now, W, { sched: S.normalize(null) })), snap2(plain),
+    '默认 normalize(null) 与缺省严格相等（金样本口径）');
+  const on = QB.FSRS.review(prev, R.good, now, W, { sched: S.normalize({ fuzz: true }), fuzzSeed: 7 });
+  eq(on.difficulty, plain.difficulty, 'fuzz 不改变难度');
+  deep(snap2(on), snap2(QB.FSRS.review(prev, R.good, now, W, { sched: S.normalize({ fuzz: true }), fuzzSeed: 7 })),
+    '同 seed + 同 sched：fuzz 输出完全可复现');
+
+  const local = { id: 'f', name: 'f', sched: { fuzz: true, fuzzMaxDays: 3 } };
+  const w = QB.Wire.bank.to(local);
+  eq(w.sched.fuzz, true, 'Wire.to：fuzz');
+  eq(w.sched.fuzz_max_days, 3, 'Wire.to：fuzz_max_days');
+  const back = QB.Wire.bank.from(w);
+  eq(back.sched.fuzz, true, 'Wire.from：fuzz');
+  eq(back.sched.fuzzMaxDays, 3, 'Wire.from：fuzz_max_days → fuzzMaxDays');
+}
+
+section('二期 参数校验：非法值就地报错（不静默丢弃）');
+{
+  const base = S.normalize(null);
+  deep(S.validate(base), [], '默认值校验通过');
+  ok(S.validate(Object.assign({}, base, { fuzzMaxDays: 40000 })).some((m) => /模糊幅度上限/.test(m)),
+    'fuzzMaxDays 超限报错');
+  ok(S.validate(Object.assign({}, base, { fuzzMaxDays: 1.5 })).some((m) => /模糊幅度上限/.test(m)),
+    'fuzzMaxDays 非整数报错');
+  ok(S.validate(Object.assign({}, base, { fuzz: 'yes' })).some((m) => /模糊开关/.test(m)),
+    'fuzz 非布尔报错');
+  ok(S.validate(Object.assign({}, base, { requestRetention: 1.2 })).some((m) => /目标保留率/.test(m)),
+    '保留率越界报错');
+  ok(S.validate(Object.assign({}, base, { learningSteps: [] })).some((m) => /学习步骤/.test(m)),
+    '学习步骤为空报错');
+  ok(S.validate(Object.assign({}, base, { leechThreshold: -1 })).some((m) => /难卡阈值/.test(m)),
+    '难卡阈值越界报错');
 }
 
 /* 汇总 */

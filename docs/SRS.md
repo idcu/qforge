@@ -135,7 +135,7 @@ w = [0.212, 1.2931, 2.3065, 8.2956,   // w0..w3  初始稳定度（again/hard/go
 
 > **与 FSRS-4.5 的关键差异（本次升级）**：权重 17→21；衰减改为可学习（`DECAY=-w20`）；初始难度改指数式；难度更新加线性阻尼、均值回归目标改为**未钳制的 D₀(4)**；遗忘稳定度加 `S/e^(w17·w18)` 上限；新增同日 short-term 稳定度；稳定度统一钳制下限 0.001；**不再对 S/D 做 2 位小数取整**。旧 17 维 FSRS-4.5 权重与 6.x 不兼容：`fsrs-opt` 按长度自动拒绝并回落官方默认（§8.5），无需手工迁移。
 
-> **fuzz（间隔抖动）为 opt-in**：经 `review(..., { fuzzSeed })` 显式开启，算法与官方 `FUZZ_RANGES`（2.5/7/20 天分段，factor 0.15/0.10/0.05）一致，随机源为确定性 mulberry32（可复现）；**默认关闭**以保证「间隔反解 R=目标保留率」定义成立。Anki 默认开启且用 `(card_id+reps)→ChaCha12`，本实现不复刻其逐位分布。
+> **fuzz（间隔抖动）为 opt-in**：题库级开关 `bank.sched.fuzz`（wire `sched.fuzz`，默认 `false`），可用 `fuzzMaxDays`（wire `sched.fuzz_max_days`，默认 `0` = 官方规则）**只收紧、不放大**官方幅度；算法与官方 `FUZZ_RANGES`（2.5/7/20 天分段，factor 0.15/0.10/0.05）一致，取 `round(min_ivl + rand·(max_ivl−min_ivl))`；随机源为确定性 mulberry32，seed 由 `bankId|contentHash|reps` 经 FNV-1a 派生（同库同题同 reps 可复现）。仍保留 `review(..., { fuzzSeed })` 旧 opt-in（`sched.fuzz` 开启但未给 seed 时用确定性 seed 0）。**默认关闭**以保证「间隔反解 R=目标保留率」定义成立。Anki 默认开启且用 `(card_id+reps)→ChaCha12`，本实现不复刻其逐位分布。
 
 > 本实现的两处**有意裁剪**（非算法偏离）：① learning steps（1m/10m）是应用层「Anki 风格叠加层」，learning/relearning 期间仅推进步骤与分钟级 due，S/D 沿用；② fuzz 默认关闭（见上）。
 
@@ -274,9 +274,10 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 
 | 模块 | 关键导出 |
 | --- | --- |
-| `fsrs.js` | `QB.FSRS.review(state, rating, now, weights, opts?)`（`opts.fuzzSeed` 启用 fuzz）、`initialState(now)`、`isLearning(state)`、`DEFAULT_W`（21）、`DECAY`/`FACTOR`/`REQUEST_RETENTION`/`STABILITY_MIN`/`MAX_INTERVAL_DAYS`/`SAME_DAY_LIMIT_DAYS`/`FUZZ_RANGES`、`decayOf`/`factorOf`/`powerDecay`/`retrievability`、`initStability`/`initDifficulty`/`nextStability`/`nextDifficulty`、`recallStability`/`forgetStability`/`stabilityShortTerm`、`nextIntervalDays`/`applyFuzz` |
+| `fsrs.js` | `QB.FSRS.review(state, rating, now, weights, opts?)`（`opts.sched.fuzz` 或 `opts.fuzzSeed` 启用 fuzz）、`initialState(now)`、`isLearning(state)`、`DEFAULT_W`（21）、`DECAY`/`FACTOR`/`REQUEST_RETENTION`/`STABILITY_MIN`/`MAX_INTERVAL_DAYS`/`SAME_DAY_LIMIT_DAYS`/`FUZZ_RANGES`、`decayOf`/`factorOf`/`powerDecay`/`retrievability`、`initStability`/`initDifficulty`/`nextStability`/`nextDifficulty`、`recallStability`/`forgetStability`/`stabilityShortTerm`、`nextIntervalDays`/`applyFuzz(intervalDays, rand, maxDeltaDays?)` |
+| `sched-settings.js` | `QB.SchedSettings.normalize`（唯一归一，保留未知键）、`validate`（表单非法值就地报错）、`ofBank`/`ofBankId`（按库缓存）、`invalidate`/`save`；`DEFAULTS` 含 `fuzz:false`/`fuzzMaxDays:0` |
 | `srs.js` | `QB.SRS.RATINGS`、`isDue`、`isDueToday`、`dueQuestions` |
-| `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear`（**均 async，经 `QB.DB.reviews`**；0–3→1–4 映射、SM-2 迁移）；同步纯函数 `keyFor`/`ratingForResult`/`collectGraded` |
+| `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear`（**均 async，经 `QB.DB.reviews`**；0–3→1–4 映射、SM-2 迁移；`sched.fuzz` 开启时按 `bankId|contentHash|reps` 派生确定性 seed）；同步纯函数 `keyFor`/`ratingForResult`/`collectGraded` |
 | `fsrs-opt.js` | revlog/权重**存取层**（经 `QB.DB.revlog/weights`，**均 async**）：`appendLog`、`readLogForScope`、`diagnose`、`train`（async 存储包装）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights`、**`shouldRetrain`/`warmWeightsFor`**（增量重训）；纯函数 `normalizeStore`（归一唯一实现，local-adapter 复用）；常量 `LOG_LIMIT`/`WARM_ITERATIONS`/`RETRAIN_MIN_NEW` |
 | `fsrs-train-core.js` | 纯计算：`computeTrain(revlog,opts)`（`initWeights` 门控基线 / `startWeights` 优化起点）、`diagnose`、`buildSequences/loss/gradient/optimize`、门控/边界常量（Worker 与主线程共用） |
 | `fsrs-train-client.js` | 执行选择：`supported(env)`、`run(revlog,opts)`（Worker 优先、自动回退；训练参数含增量热启动 `startWeights`/`iterations` 一并透传，可注入测试） |
@@ -286,7 +287,7 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 
 ## 11. 已知边界（设计取舍）
 
-- fuzz（间隔抖动）已实现且与官方 `FUZZ_RANGES` 一致，但**默认关闭**（opt-in：`review(..., { fuzzSeed })`）；生产调度保持确定性以便「间隔反解 R=目标保留率」成立、且同数据可复现。无 lapses 手动重学卡的「提前毕业」微调。
+- fuzz（间隔抖动）已实现且与官方 `FUZZ_RANGES` 一致，但**默认关闭**（题库级 `sched.fuzz` 或旧 opt-in `review(..., { fuzzSeed })`）；`sched.fuzzMaxDays` 只能收紧官方 δ，不允许放大。生产默认保持确定性以便「间隔反解 R=目标保留率」成立、且同数据可复现。无 lapses 手动重学卡的「提前毕业」微调。
 - 优化器只做离线批训练（手动一键），不做在线增量更新；http(s) 下计算在专用 Worker、file:// 回退主线程（无共享内存/进度百分比，30s 超时保险）。单次训练成本（21 权重数值梯度）实测中位约 **3.89s** / 3200 样本 / 150 迭代；**增量重训热启动**将其降至约 **1.55s**（2.51×，见 §8.7 与 `scripts/bench.mjs`），均在 30s Worker 超时内。
 - 历史评分不回填：升级前没有 revlog，需从升级后积累样本。
 - 不做多用户/云协同权重；权重随全量备份迁移（`meta:fsrsWeights`），revlog 同理。

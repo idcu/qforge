@@ -123,7 +123,7 @@
 | `modules/fsrs-train-client.js` | 训练执行选择器：`supported(env)` 判定（http(s)+Worker）、`run(revlog,opts)` 消息往返（30s 超时）并透传训练参数（含热启动 `startWeights`）、构造/运行失败自动回退主线程；env/createWorker/compute 可注入测试 |
 | `workers/fsrs-worker.js` | 训练 Worker（不经 index.html）：importScripts fsrs.js + train-core，收 `train`（`initWeights` 基线 / `startWeights?` 热启动）回 `done/error`；SW 预缓存，离线可用 |
 | `modules/srs.js` | 到期判定公共层（与算法解耦）：`isDue/isDueToday/dueQuestions` + 应用层 0–3 评分常量 |
-| `modules/sched-settings.js` | `QB.SchedSettings`：按题库调度设置（`bank.sched`）**唯一归一实现**——`newPerDay/reviewPerDay/requestRetention/maximumIntervalDays/learningSteps（秒）/leechThreshold`；`normalize` 钳制范围、步骤升序去重并保留未知键（老客户端保存不清空新字段）；`ofBank/ofBankId` 按库缓存（save 后更新），复用 banks 仓库（local/api/备份同语义）。默认值唯一来源 `DEFAULTS`（每日限额仍与 `CONFIG.LIMITS` 同值） |
+| `modules/sched-settings.js` | `QB.SchedSettings`：按题库调度设置（`bank.sched`）**唯一归一实现**——`newPerDay/reviewPerDay/requestRetention/maximumIntervalDays/learningSteps（秒）/leechThreshold/fuzz/fuzzMaxDays`；`normalize` 钳制范围、步骤升序去重并保留未知键（老客户端保存不清空新字段）；`validate` 是设置弹窗**唯一表单校验**（非法值就地报错，不静默丢弃）；`ofBank/ofBankId` 按库缓存（save 后更新），复用 banks 仓库（local/api/备份同语义）。默认值唯一来源 `DEFAULTS`（每日限额仍与 `CONFIG.LIMITS` 同值） |
 | `modules/start-prefs.js` | `QB.StartPrefs`：练习/考试开始弹窗上次参数（各题型数量/分值、分类、时长、计时/乱序开关）归一与存取；本机偏好 `meta:startPrefs`，不参与跨设备备份转换 |
 | `modules/review-queue.js` | `QB.ReviewQueue`：今日复习队列纯函数——learning（分钟级已到期）→ 到期复习（逾期在前，封顶 `reviewPerDay-learning`）→ 新题（封顶 `newPerDay`）；`dailyFromLog(log,bankId,now)` 从 revlog 推导今日已引入新卡/已复习次数，实现**跨会话每日累计额度**；返回 `{questions, counts, settings}`，不碰存储/DOM |
 | `modules/srs-store.js` | SRS 状态按题库存取（`user:review:<bank>`，contentHash 键）**经 `QB.DB.reviews`（异步）**：`grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear` 均 `async`；评分提交优先 `reviews.patch`（api 增量上行，B1），无 patch 的适配器回退 `record` 整表；0–3→FSRS 1–4 映射、旧 SM-2 状态迁移（见 [SRS.md](SRS.md) §7）；`ratingForResult/collectGraded` 是判分结果→评分的唯一收集入口（同步纯函数，一次作答一条 revlog 契约） |
@@ -150,11 +150,14 @@
 | `maximumIntervalDays` | 1–36500 整数 | **36500** | 新算间隔上限，只压未来 due，不重排已有 due |
 | `learningSteps` | 1–4 个正整数（**秒**），升序去重 | **[60, 600]** | 新卡/重学步骤；内部转毫秒；长度 1 时 `good` 直接毕业 |
 | `leechThreshold` | 0–9999 整数（0=关闭） | **8** | 仅控制难卡徽标（`lapses ≥ 阈值`），不做 suspend/tag |
+| `fuzz` | 布尔 | **false** | 间隔模糊开关；关闭时与金样本逐字段一致 |
+| `fuzzMaxDays` | 0–36500 整数（0=官方规则） | **0** | 只收紧官方 fuzz δ，不放大 |
 
 - **归一**：`QB.SchedSettings.normalize` 是唯一实现；幂等、不改入参、未知键原样保留。
 - **唯一解析点**：`SRSStore.grade` 每次评分、`SRSStore.gradeMany` **每批只读一次库** `QB.SchedSettings.ofBankId(bankId)`，经 `FSRS.review(state, rating, now, weights, { sched })` 既有 `opts` 通道传入。app / review-queue / ui-renderer 均不各自解析或写默认值；`FSRS.review` 的 `sched` 缺失等价于显式默认（金样本 `scripts/fixtures/fsrs-sched-golden.json` 锁定 bit-identical）。
 - **只对未来的卡生效**：参数不重排已有到期时间、不批量改写 learning 状态；读取 `learning.step` 时钳到 `[0, len-1]`。
-- **明确不做**：fuzz、easyDays、leech 动作（suspend/tag）、独立 relearning steps。不新增「可配但不起作用」的字段。
+- **fuzz 已接入**（默认关闭）：`SRSStore` 只在 `sched.fuzz` 开启时按 `bankId|contentHash|reps` 派生确定性 seed，经 `opts.fuzzSeed` 交给 `FSRS.review`；`fuzzMaxDays` 仅收紧官方 δ。
+- **明确不做**：easyDays、leech 动作（suspend/tag）、独立 relearning steps。不新增「可配但不起作用」的字段。
 
 ### 3.7 无障碍与焦点管理约定（门禁化）
 

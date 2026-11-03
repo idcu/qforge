@@ -1112,10 +1112,18 @@
       '<input type="text" id="sched-steps" aria-label="学习步骤（秒）" value="' + s.learningSteps.join(',') + '" /></div>' +
       '<div><label class="qe-label">难卡阈值（0=关闭）</label>' +
       '<input type="number" min="0" max="9999" id="sched-leech" aria-label="难卡阈值" value="' + s.leechThreshold + '" /></div>' +
+      '<div><label class="qe-label">间隔模糊（默认关闭）</label>' +
+      '<label style="display:flex;align-items:center;gap:6px">' +
+      '<input type="checkbox" id="sched-fuzz"' + (s.fuzz ? ' checked' : '') + ' aria-label="间隔模糊开关" /> 开启</label></div>' +
+      '<div><label class="qe-label">模糊幅度上限（天，0=官方规则）</label>' +
+      '<input type="number" min="0" max="' + QB.SchedSettings.MAX_INTERVAL_MAX + '" step="1" id="sched-fuzzmax" ' +
+      'aria-label="模糊幅度上限（天）" value="' + s.fuzzMaxDays + '" /></div>' +
       '</div>' +
+      '<p class="li-meta" id="sched-err" role="alert" style="color:var(--danger);display:none"></p>' +
       '<p class="li-meta">默认：新题 ' + D.newPerDay + ' / 复习 ' + D.reviewPerDay + ' / 保留率 ' +
       D.requestRetention + ' / 最大 ' + D.maximumIntervalDays + ' 天 / 步骤 ' + D.learningSteps.join(',') +
-      ' 秒 / 难卡 ' + D.leechThreshold + '。<strong>调度参数只影响之后的评分与到期，不会重排已有到期时间。</strong>' +
+      ' 秒 / 难卡 ' + D.leechThreshold + ' / 模糊 ' + (D.fuzz ? '开' : '关') +
+      '。<strong>调度参数只影响之后的评分与到期，不会重排已有到期时间。</strong>' +
       '设置存于题库记录，local / api / 备份三端一致。</p>' +
       '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
       '<button class="btn" data-action="modal-ok">保存</button></div>',
@@ -1125,14 +1133,25 @@
           try {
             const stepsRaw = (modal.querySelector('#sched-steps').value || '')
               .split(/[,，、\s]+/).map(Number).filter((n) => isFinite(n));
-            const res = await QB.SchedSettings.save(State.bank, {
+            const patch = {
               newPerDay: parseInt(modal.querySelector('#sched-new').value, 10),
               reviewPerDay: parseInt(modal.querySelector('#sched-rev').value, 10),
               requestRetention: parseFloat(modal.querySelector('#sched-rr').value),
               maximumIntervalDays: parseInt(modal.querySelector('#sched-max').value, 10),
               learningSteps: stepsRaw,
-              leechThreshold: parseInt(modal.querySelector('#sched-leech').value, 10)
-            });
+              leechThreshold: parseInt(modal.querySelector('#sched-leech').value, 10),
+              fuzz: modal.querySelector('#sched-fuzz').checked,
+              fuzzMaxDays: parseInt(modal.querySelector('#sched-fuzzmax').value, 10)
+            };
+            const errEl = modal.querySelector('#sched-err');
+            const problems = QB.SchedSettings.validate(patch);
+            if (problems.length) {
+              errEl.textContent = problems.join('；');
+              errEl.style.display = '';
+              return;
+            }
+            errEl.style.display = 'none';
+            const res = await QB.SchedSettings.save(State.bank, patch);
             State.bank = res.bank;
             const i = State.banks.findIndex((b) => b.id === res.bank.id);
             if (i >= 0) State.banks[i] = res.bank;

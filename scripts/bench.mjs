@@ -528,6 +528,10 @@ row('FSRS.review 单次调度（毕业卡到期复习）', await timed(() => {
 row('FSRS.review 带 fuzz（opt-in 间隔抖动）', await timed(() => {
   QB.FSRS.review(fsGrad, QB.FSRS.RATINGS.good, fsAnchor + 20 * FS_DAY, FW, { fuzzSeed: 1 });
 }, 200), '确定性 mulberry32 + 官方 FUZZ_RANGES');
+const fsSchedFuzz = QB.SchedSettings.normalize({ fuzz: true });
+row('FSRS.review 题库 fuzz 开关（sched.fuzz）', await timed(() => {
+  QB.FSRS.review(fsGrad, QB.FSRS.RATINGS.good, fsAnchor + 20 * FS_DAY, FW, { sched: fsSchedFuzz });
+}, 200), '唯一解析点产物；未传 seed 用确定性 0');
 row('FSRS.review 新卡首次评分', await timed(() => {
   QB.FSRS.review(null, QB.FSRS.RATINGS.good, fsAnchor, FW);
 }, 200), '含指数式 D₀ / S₀ 初始化');

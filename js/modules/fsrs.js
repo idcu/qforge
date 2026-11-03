@@ -193,6 +193,12 @@
     return isFinite(v) && v > 0 ? Math.round(v) : MAX_INTERVAL_DAYS;
   }
 
+  /** fuzz 幅度上限（天）：0 = 不额外收紧，只允许在官方 δ 之内再收紧 */
+  function schedFuzzCap(sched) {
+    const v = sched && Number(sched.fuzzMaxDays);
+    return isFinite(v) && v > 0 ? Math.round(v) : 0;
+  }
+
   /** learningSteps 以秒存储 → 毫秒（长度 1–4；非法/空回落默认两步）。按 sched 对象缓存，热路径避免每次分配 */
   const stepsCache = typeof WeakMap === 'function' ? new WeakMap() : null;
   function schedSteps(sched) {
@@ -218,19 +224,23 @@
    * 官方 fuzz：< 2.5 天不抖动；否则在 [round(ivl−δ), round(ivl+δ)] 内取值，
    * δ = 1 + Σ factor·max(min(ivl, end) − start, 0)（FUZZ_RANGES 见上）。
    * @param {number} intervalDays 抖动前间隔（整日）
-   * @param {number} rand 随机数 [0,1)（由调用方提供，便于确定性复现）
+   * @param {number|Function} rand 随机数 [0,1)（由调用方提供，便于确定性复现）
+   * @param {number} [maxDeltaDays] 幅度上限（天，0/缺省 = 官方 δ）；只能收紧，不能放大
    */
-  function applyFuzz(intervalDays, rand) {
+  function applyFuzz(intervalDays, rand, maxDeltaDays) {
     if (!(intervalDays >= 2.5)) return intervalDays;
     let delta = 1;
     FUZZ_RANGES.forEach((f) => {
       delta += f.factor * Math.max(Math.min(intervalDays, f.end) - f.start, 0);
     });
+    const cap = Number(maxDeltaDays);
+    if (isFinite(cap) && cap > 0) delta = Math.min(delta, Math.round(cap));
     let minIvl = Math.max(2, Math.round(intervalDays - delta));
     let maxIvl = Math.min(Math.round(intervalDays + delta), MAX_INTERVAL_DAYS);
     minIvl = Math.min(minIvl, maxIvl);
     const r = typeof rand === 'function' ? rand() : Number(rand);
-    const picked = r * (maxIvl - minIvl + 1) + minIvl;
+    // 对齐 py-fsrs：round(min_ivl + rand·(max_ivl − min_ivl))，避免 +1 导致越出官方上界
+    const picked = r * (maxIvl - minIvl) + minIvl;
     return Math.min(Math.round(picked), MAX_INTERVAL_DAYS);
   }
 
@@ -263,8 +273,9 @@
 
   /** 由稳定度排长期间隔（含可选 fuzz；保留率/上限来自 opts.sched） */
   function longTermDue(now, s, w, fuzzRand, sched) {
-    let ivl = nextIntervalDays(s, schedRetention(sched), w, schedMaxDays(sched));
-    if (fuzzRand) ivl = Math.min(applyFuzz(ivl, fuzzRand), schedMaxDays(sched));
+    const maxDays = schedMaxDays(sched);
+    let ivl = nextIntervalDays(s, schedRetention(sched), w, maxDays);
+    if (fuzzRand) ivl = clamp(applyFuzz(ivl, fuzzRand, schedFuzzCap(sched)), 1, maxDays);
     return Math.round(now + ivl * DAY);
   }
 
@@ -343,8 +354,10 @@
     const n = Number(rating);
     const r = clamp(Math.round(Number.isNaN(n) ? RATINGS.good : n), 1, 4);
     opts = opts || {};
-    const fuzzRand = opts.fuzzSeed == null ? null : QB.mulberry32(opts.fuzzSeed | 0);
     const sched = opts.sched || null;
+    // 开关：显式 fuzzSeed（旧 opt-in）或题库设置 sched.fuzz；未给 seed 时用确定性 seed 0
+    const fuzzOn = opts.fuzzSeed != null || (sched != null && sched.fuzz === true);
+    const fuzzRand = fuzzOn ? QB.mulberry32(opts.fuzzSeed == null ? 0 : opts.fuzzSeed | 0) : null;
     const steps = schedSteps(sched);
 
     if (prev && prev.algo === 'fsrs' && prev.learning) {

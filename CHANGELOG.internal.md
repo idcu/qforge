@@ -6,6 +6,31 @@
 
 ---
 
+## 待回填 · feat(srs): 题库级 fuzz 开关与幅度上限（默认关闭）
+
+**Commit**：`待回填`（收尾 docs 提交回填）
+
+**核心改动点**
+- `bank.sched` 新增 `fuzz`（默认 `false`）与 `fuzzMaxDays`（默认 `0`=官方规则）；wire 为 `sched.fuzz` / `sched.fuzz_max_days`，local/wire snake↔camel 双向补齐，未知键仍原样保留。
+- `FSRS.applyFuzz(intervalDays, rand, maxDeltaDays?)` 第三参只收紧官方 δ；取值改为官方 `round(min_ivl + rand·(max_ivl−min_ivl))`（此前 `+1` 会越出官方上界）。
+- `FSRS.review` 开关来源：`opts.fuzzSeed`（旧 opt-in）或 `opts.sched.fuzz`；未给 seed 时用确定性 seed 0。
+- 唯一解析点不变：`SRSStore.grade/gradeMany` 每批一次 `ofBankId`，fuzz 开启时按 `bankId|contentHash|reps` 经 FNV-1a 派生 seed 传入 `opts.fuzzSeed`。
+- 设置弹窗新增开关 + 幅度上限输入；新增 `QB.SchedSettings.validate` 作为表单唯一校验入口，非法值就地红字提示并拒绝保存。
+
+**实测数据（2026-11-03，本机 Asia/Shanghai）**
+- 红→绿：实现前 `sched.test.mjs` 3 条失败（默认值/归一/Wire 字段不存在）；实现后 **157** 条全过（原 122，+35）。
+- 金样本 `fsrs-sched-golden.json` 默认关闭路径仍逐字段 Deep-equal（新增断言「fuzz 关闭（显式）与缺省严格相等」「normalize(null) 与缺省严格相等」）。
+- SRSStore 同状态同刻两次评分输出完全一致；`fuzzMaxDays=2` 时偏移 ≤2 天。
+- 门禁：`test-all` **30 运行项 0 失败**、断言 **4779 / 4779**（+35）；`bench.mjs --assert --expose-gc` 全绿：heapUsed 增量 **2.69 MB ≤ 40MB**、`gradeMany` 比值 **4.97 ≤ 5.35**、API PATCH P95 **8.82 ms ≤ 50ms**；新增观测行「FSRS.review 题库 fuzz 开关（sched.fuzz）」中位 **0.00 ms**（200 次）。
+- 首屏：**327.9 KB gzip / 926.9 KB raw**（89 文件 / 81 内联 js；较上轮 326.2 / 921.9，+1.7 KB gzip / +5.0 KB raw，来自设置弹窗控件与校验文案）。
+- `docs-check --write` 刷新基线（30 / 4779 / 55），随后 `--static` 一致。
+
+**遗留 TODO / 风险**
+- Anki 的 `(card_id+reps)→ChaCha12` 逐位分布未复刻；同库同题同 reps 才保证跨设备一致。
+- `fuzzMaxDays` 只收紧、不能放大；官方 δ 仍是硬上界。
+
+---
+
 ## f76f475 · fix(ui): 导入失败原因错误语义（D3）+ 来源徽章长路径分隔符
 
 **Commit**：`f76f475`

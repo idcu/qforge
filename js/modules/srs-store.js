@@ -58,6 +58,14 @@
     return out;
   }
 
+  /**
+   * fuzz 确定性 seed（仅 sched.fuzz 开启时传入）：同库 + 同题 key + 同 reps 恒定，
+   * 跨设备/跨会话一致；不复刻 Anki 的 ChaCha12 逐位分布（见 SRS.md）。
+   */
+  function fuzzSeedFor(bankId, key, reps) {
+    return QB.FNV.hashString(String(bankId || '') + '|' + String(key || '') + '|' + (Number(reps) || 0));
+  }
+
   /** 应用层评分 0–3（again/hard/good/easy）→ FSRS 评分 1–4；已是 1–4 原样透传 */
   function fsrsRating(rating) {
     const r = Math.round(Number(rating));
@@ -113,7 +121,8 @@
       QB.FSRSOpt.getActiveWeights(bankId),
       QB.SchedSettings.ofBankId(bankId)
     ]);
-    const next = QB.FSRS.review(cur, fr, ts, w, { sched: sched });
+    const seed = sched.fuzz ? fuzzSeedFor(bankId, k, cur && cur.reps) : undefined;
+    const next = QB.FSRS.review(cur, fr, ts, w, { sched: sched, fuzzSeed: seed });
     // 热路径：状态 + 评分日志一次提交；api 模式只上行本批改动键（patch），一个请求
     await commitGraded(bankId, { [k]: next }, [{ t: ts, h: k, r: fr, b: bankId }]);
     return next;
@@ -134,7 +143,9 @@
     entries.forEach((e) => {
       const k = keyFor(e.question);
       const fr = fsrsRating(e.rating);
-      const next = QB.FSRS.review(stateMap[k] || null, fr, ts, w, { sched: sched });
+      const cur = stateMap[k] || null;
+      const seed = sched.fuzz ? fuzzSeedFor(bankId, k, cur && cur.reps) : undefined;
+      const next = QB.FSRS.review(cur, fr, ts, w, { sched: sched, fuzzSeed: seed });
       delta[k] = next;
       stateMap[k] = next;
       logs.push({ t: ts, h: k, r: fr, b: bankId });

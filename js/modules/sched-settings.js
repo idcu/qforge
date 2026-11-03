@@ -10,6 +10,8 @@
  *   maximumIntervalDays           长期间隔上限（1–36500，默认 36500）
  *   learningSteps                 学习/重学步骤（**秒**存储，内部转毫秒；1–4 个、升序、默认 [60,600]）
  *   leechThreshold                难卡徽标阈值（默认 8，0=关闭；仅展示，不做 suspend/tag）
+ *   fuzz                          间隔模糊开关（默认 false；幅度公式沿用 FSRS 官方 FUZZ_RANGES）
+ *   fuzzMaxDays                   模糊幅度上限（天数，0=不额外收紧；只能小于官方幅度，不能放大）
  *
  * 未知键一律原样保留：老客户端保存时不会清掉新版本写入的字段（前向兼容）。
  * 默认值唯一来源：本文件 DEFAULTS（禁止在 UI / 调度层散落常量）。
@@ -25,7 +27,9 @@
     requestRetention: 0.9,
     maximumIntervalDays: 36500,
     learningSteps: [60, 600],
-    leechThreshold: 8
+    leechThreshold: 8,
+    fuzz: false,
+    fuzzMaxDays: 0
   };
   const MAX_PER_GROUP = 9999;
   const RETENTION_MIN = 0.70;
@@ -34,7 +38,18 @@
   const MAX_INTERVAL_MAX = 36500;
   const STEPS_MAX = 4;
   const KNOWN_KEYS = ['newPerDay', 'reviewPerDay', 'requestRetention', 'maximumIntervalDays',
-    'learningSteps', 'leechThreshold'];
+    'learningSteps', 'leechThreshold', 'fuzz', 'fuzzMaxDays'];
+
+  function toBool(v, fallback) {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v === 1 ? true : (v === 0 ? false : fallback);
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === 'true' || s === '1') return true;
+      if (s === 'false' || s === '0' || s === '') return false;
+    }
+    return fallback;
+  }
 
   function toInt(v, fallback, min, max) {
     const n = Number(v);
@@ -68,10 +83,43 @@
       requestRetention: toFloat(src.requestRetention, DEFAULTS.requestRetention, RETENTION_MIN, RETENTION_MAX),
       maximumIntervalDays: toInt(src.maximumIntervalDays, DEFAULTS.maximumIntervalDays, MAX_INTERVAL_MIN, MAX_INTERVAL_MAX),
       learningSteps: normalizeSteps(src.learningSteps),
-      leechThreshold: toInt(src.leechThreshold, DEFAULTS.leechThreshold)
+      leechThreshold: toInt(src.leechThreshold, DEFAULTS.leechThreshold),
+      fuzz: toBool(src.fuzz, DEFAULTS.fuzz),
+      fuzzMaxDays: toInt(src.fuzzMaxDays, DEFAULTS.fuzzMaxDays, 0, MAX_INTERVAL_MAX)
     };
     Object.keys(src).forEach((k) => { if (KNOWN_KEYS.indexOf(k) < 0) out[k] = src[k]; });
     return out;
+  }
+
+  /**
+   * 表单校验（UI 唯一入口）：返回错误消息数组（空 = 通过）。
+   * 只报非法、不做静默钳制；真正落盘前仍由 normalize 做最后一道归一。
+   */
+  function validate(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const errs = [];
+    function intField(k, label, min, max) {
+      const n = Number(src[k]);
+      if (!isFinite(n) || Math.round(n) !== n || n < min || n > max) {
+        errs.push(label + '需为 ' + min + '–' + max + ' 的整数');
+      }
+    }
+    intField('newPerDay', '每日新题上限', 0, MAX_PER_GROUP);
+    intField('reviewPerDay', '每日复习上限', 0, MAX_PER_GROUP);
+    intField('maximumIntervalDays', '最大间隔（天）', MAX_INTERVAL_MIN, MAX_INTERVAL_MAX);
+    intField('leechThreshold', '难卡阈值', 0, MAX_PER_GROUP);
+    intField('fuzzMaxDays', '模糊幅度上限（天）', 0, MAX_INTERVAL_MAX);
+    const rr = Number(src.requestRetention);
+    if (!isFinite(rr) || rr < RETENTION_MIN || rr > RETENTION_MAX) {
+      errs.push('目标保留率需在 ' + RETENTION_MIN + '–' + RETENTION_MAX + ' 之间');
+    }
+    const steps = src.learningSteps;
+    if (!Array.isArray(steps) || !steps.length || steps.length > STEPS_MAX
+      || steps.some((x) => { const n = Number(x); return !isFinite(n) || n < 1; })) {
+      errs.push('学习步骤需为 1–' + STEPS_MAX + ' 个 ≥1 的秒数');
+    }
+    if (typeof src.fuzz !== 'boolean') errs.push('模糊开关必须为开/关（布尔值）');
+    return errs;
   }
 
   /** 某题库的生效设置（bank.sched 可空） */
@@ -114,6 +162,6 @@
 
   QB.SchedSettings = {
     DEFAULTS, MAX_PER_GROUP, RETENTION_MIN, RETENTION_MAX, MAX_INTERVAL_MIN, MAX_INTERVAL_MAX,
-    normalize, normalizeSteps, ofBank, ofBankId, invalidate, save
+    normalize, normalizeSteps, validate, toBool, toInt, ofBank, ofBankId, invalidate, save
   };
 })(typeof window !== 'undefined' ? window : globalThis);
