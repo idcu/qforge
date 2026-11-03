@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "description": "适配层清单：公共模块（ngm-repo）与本仓库旧全局名之间的胶水。\n这些文件 6–180 行不等，本身不是重复实现——实现在 ngm.vendor 里；\n它们只负责把 ESM/CJS 导出接回 `Dxf` / `QB.Crc32` / `module.exports` 这些调用方还在用的名字。\n\n风险：公共模块升级改了导出名，适配层仍保留旧名字，调用方拿到 undefined，\n而没有任何判据会红。所以每条声明 `modules`（依赖哪个公共模块）与 `keeps`（保留了哪些名字）。\n由 scripts/check-ngm.mjs 核对：文件存在、模块确实在 ngm.json 里、keeps 在源码里真的出现，\n并反向扫描全仓，保证每个适配层都已登记。",
+  "adapters": [
+    {
+      "file": "js/utils/crc32.js",
+      "modules": [
+        "packages/format/zip"
+      ],
+      "keeps": [
+        "QB.Crc32 =",
+        "global.Zip"
+      ]
+    },
+    {
+      "file": "js/utils/xml-lite.js",
+      "modules": [
+        "packages/format/xml-lite"
+      ],
+      "keeps": [
+        "QB.XmlLite =",
+        "global.XmlLite"
+      ]
+    },
+    {
+      "file": "js/utils/fnv.js",
+      "modules": [
+        "packages/core/util"
+      ],
+      "keeps": [
+        "QB.FNV =",
+        "__idcuUtil"
+      ]
+    },
+    {
+      "file": "js/utils/time.js",
+      "modules": [
+        "packages/core/util"
+      ],
+      "keeps": [
+        "QB.Time =",
+        "__idcuUtil"
+      ]
+    },
+    {
+      "file": "js/utils/zip-reader.js",
+      "modules": [
+        "packages/format/zip"
+      ],
+      "keeps": [
+        "QB.ZipReader =",
+        "QB.decodeUtf8 ="
+      ]
+    },
+    {
+      "file": "js/utils/zip-writer.js",
+      "modules": [
+        "packages/format/zip"
+      ],
+      "keeps": [
+        "QB.ZipWriter ="
+      ]
+    },
+    {
+      "file": "js/utils/assets.js",
+      "modules": [
+        "packages/core/assets"
+      ],
+      "keeps": [
+        "QB.Assets =",
+        "__idcuAssets"
+      ]
+    }
+  ]
+}

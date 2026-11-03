@@ -260,6 +260,48 @@ if (project && lock) {
         + ' —— moduleDigest 按字节算，CRLF 会让 verify 在本机红、在 Linux CI 绿');
     }
 
+    /* 适配层清单：公共模块升级改了导出名，适配层仍保留旧名字，调用方拿到 undefined，
+       而没有任何东西会红。清单声明每个适配层依赖哪个公共模块、保留了哪些名字。
+       反向扫全仓，保证新增适配层不会漏登记。 */
+    const ADAPTER_MARK = /适配层|实现已抽到|实现由公共模块|保留原有.{0,20}全局导出名|适配 @idcu\//;
+    const SKIP_SCAN = new Set(['node_modules', 'ngm.vendor', 'scripts', 'test', 'tests',
+      'legacy', 'data', 'dist', 'analysis', '.trae', 'public', 'coverage', '.tmp']);
+    const adapterFiles = [];
+    const scanAdapters = (dir) => {
+      for (const name of fs.readdirSync(dir)) {
+        if (name.startsWith('.') || SKIP_SCAN.has(name)) continue;
+        const abs = path.join(dir, name);
+        if (fs.statSync(abs).isDirectory()) { scanAdapters(abs); continue; }
+        if (!name.endsWith('.js')) continue;
+        if (ADAPTER_MARK.test(fs.readFileSync(abs, 'utf8').slice(0, 700))) adapterFiles.push(rel(abs));
+      }
+    };
+    scanAdapters(ROOT);
+
+    const adaptersDoc = readJson('contracts/adapters.json');
+    if (!adaptersDoc) {
+      fail('缺少 contracts/adapters.json（适配层清单本身也要在）');
+    } else {
+      const declaredPaths = new Set((project.dependencies || []).map((d) => d.path));
+      const listed = new Set();
+      for (const a of adaptersDoc.adapters || []) {
+        listed.add(a.file);
+        const full = path.join(ROOT, a.file);
+        if (!fs.existsSync(full)) { fail(`适配层清单登记的文件不存在：${a.file}`); continue; }
+        const src = fs.readFileSync(full, 'utf8');
+        for (const m of a.modules || []) {
+          if (!declaredPaths.has(m)) fail(`适配层 ${a.file} 声明依赖 ${m}，但 ngm.json 里没有`);
+        }
+        for (const k of a.keeps || []) {
+          if (!src.includes(k)) fail(`适配层 ${a.file} 没有保留承诺的名字：${k}`);
+        }
+      }
+      for (const f of adapterFiles) {
+        if (!listed.has(f)) fail(`发现未登记的适配层：${f}（公共模块升级时它会静默失效）`);
+      }
+      console.log(`check-ngm: adapters ${listed.size} 条登记 / ${adapterFiles.length} 个实际适配层`);
+    }
+
     if (errors.length) {
       console.error(`check-ngm: FAILED (${errors.length} error(s), ${warnings.length} warning(s))`);
       for (const e of errors) console.error(`  - ${e}`);
