@@ -147,3 +147,12 @@ jobs:
       - name: Verify vendor provenance
         run: |
           "$RUNNER_TEMP/ngm" verify --deep
+
+  discipline:
+    # 十问看板（方法论 §8）：只回答"这个仓库几档、缺哪一条"，不改任何东西。
+    # --strict 在低于 L3 时退 1——防止新仓库悄悄从 L0 起步。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 十问看板
+        run: node scripts/check-discipline.mjs --strict
