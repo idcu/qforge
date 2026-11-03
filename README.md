@@ -118,7 +118,10 @@ qb/
 **模块与格式**
 
 - [模块清单](docs/modules/entry.md) —— 按层拆为 [入口](docs/modules/entry.md) / [公共抽象](docs/modules/utils.md) / [数据与导入](docs/modules/data.md) / [业务模块](docs/modules/app.md)
-- [导入格式说明](docs/IMPORT-FORMAT.md) —— 各格式与表头规范（含 Anki / Quizlet）
+- [导入格式 · 总览](docs/IMPORT-FORMAT.md) —— 标准题目模型、各格式速查、校验与去重、URL 快照、样例
+- [导入格式 · 表格](docs/IMPORT-FORMAT-TABLE.md) —— JSON / CSV·TSV / Excel 的模板与表头规范
+- [导入格式 · 行式文本](docs/IMPORT-FORMAT-TEXT.md) —— Word / Markdown / 粘贴的语法（题号、答案、解析）
+- [导入格式 · 二进制](docs/IMPORT-FORMAT-BINARY.md) —— 题库包 .qbk / Anki .apkg / Quizlet
 - [导出格式说明](docs/EXPORT-FORMAT.md) —— 导出对象/格式/扩展方式、分发题包
 
 **验证与领域**
