@@ -6,9 +6,9 @@
 
 ---
 
-## 待回填 · test(srs): 二期金样本 golden2（fuzz 确定性 / easyDays 边界 / 默认关闭等价）
+## 84b8187 · test(srs): 二期金样本 golden2（fuzz 确定性 / easyDays 边界 / 默认关闭等价）
 
-**Commit**：`待回填`（收尾 docs 提交回填）
+**Commit**：`84b8187`
 
 **核心改动点**
 - 新增 `scripts/fixtures/fsrs-sched-golden2.json`（5 组 / 13 步）与生成器 `scripts/gen-fsrs-sched-golden2.mjs`；生成器与测试共用 `QB.SRSStore.fuzzSeedFor`，保证金样本与生产同源。
