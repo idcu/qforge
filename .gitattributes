@@ -1,0 +1,24 @@
+# 文本文件统一 LF —— **不是为了好看，是为了字节稳定**。
+#
+# 这个仓库的 `ngm.vendor/` 按内容摘要（moduleDigest）校验：CRLF 与 LF 是两个不同的字节序列。
+# Windows 上 `core.autocrlf=true` 会在 checkout 时把 LF 换成 CRLF，于是 `ngm verify`
+# 在本地红、在 Linux CI 绿——典型的「平台相关」失效。
+# 显式写 `eol=lf`，换行策略不再取决于每个开发机的 git 配置。
+* text=auto eol=lf
+
+# 二进制资源：不做换行转换，也不做 diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.bmp binary
+*.ico binary
+*.xlsx binary
+*.zip binary
+*.gz binary
+*.docx binary
+*.pdf binary
+*.qbk binary
+*.qfbk binary
+*.apkg binary

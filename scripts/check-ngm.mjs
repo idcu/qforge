@@ -239,6 +239,27 @@ if (project && lock) {
     }
 
     const ngmVersion = fs.existsSync(versionFile) ? fs.readFileSync(versionFile, 'utf8').trim() : '(missing)';
+    /* 换行必须全 LF：moduleDigest 按**字节**算，CRLF 与 LF 是两个不同的内容。
+       Windows 上 `core.autocrlf=true` 会在 checkout 时把 LF 换成 CRLF，于是 verify
+       在本地红、在 Linux CI 绿——两边跑的是同一份代码，这类「平台相关」失效最难查。
+       `.gitattributes` 的 `eol=lf` 是预防，这一条是**发现**：预防失效时它还在。 */
+    const vendorDir = path.join(ROOT, 'ngm.vendor');
+    const TEXT_EXT = new Set(['.js', '.mjs', '.cjs', '.json', '.md', '.txt', '.css', '.html']);
+    const crlfFiles = [];
+    const walkVendor = (dir) => {
+      for (const name of fs.readdirSync(dir)) {
+        const abs = path.join(dir, name);
+        if (fs.statSync(abs).isDirectory()) { walkVendor(abs); continue; }
+        if (!TEXT_EXT.has(path.extname(name))) continue;
+        if (fs.readFileSync(abs).includes(0x0d)) crlfFiles.push(rel(abs));
+      }
+    };
+    if (fs.existsSync(vendorDir)) walkVendor(vendorDir);
+    if (crlfFiles.length) {
+      fail(`ngm.vendor 里 ${crlfFiles.length} 个文件含 CRLF（应全为 LF）：${crlfFiles.slice(0, 3).join('、')}`
+        + ' —— moduleDigest 按字节算，CRLF 会让 verify 在本机红、在 Linux CI 绿');
+    }
+
     if (errors.length) {
       console.error(`check-ngm: FAILED (${errors.length} error(s), ${warnings.length} warning(s))`);
       for (const e of errors) console.error(`  - ${e}`);
