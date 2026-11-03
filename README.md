@@ -126,6 +126,8 @@ qb/
 - [测试矩阵](docs/TESTING.md) —— 逐套件断言数与运行项数、跑法、时区矩阵
 - [性能打点](docs/BENCH.md) —— 性能门禁、容量档位、heap 红线与实测读数
 - [删除记录](docs/deletions.md) —— 结构性删除 / 出库的账本（判据校验：字段齐全、无假删除）
+- [第三方迁移桥 · 结论与计划](docs/MIGRATION-BRIDGE-PLAN.md) —— 要不要做、先做哪个、风险在哪（§5 排期）
+- [第三方迁移桥 · 事实基线](docs/MIGRATION-BRIDGE-FACTS.md) —— 逐来源字段表、能力对照、映射、SQLite 可行性
 - [间隔重复（FSRS-6）](docs/SRS.md) —— 公式、状态机、优化器、数据结构
 - [材料题规格](docs/SPEC-material.md) / [M2 计划](docs/SPEC-material-m2-plan.md) / [决策对比](docs/SPEC-material-decisions.md)
 - [同步后端与插件位方案](docs/SYNC-PLUGIN-PLAN.md) —— 增量同步/冲突策略/受信插件（**设计稿，未实现**）
