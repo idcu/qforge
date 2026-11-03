@@ -13,7 +13,8 @@
     "bench": "node --expose-gc scripts/bench.mjs",
     "serve": "node scripts/serve.mjs",
     "serve:api": "node scripts/serve-api.mjs",
-    "icons": "node scripts/gen-icons.mjs"
+    "icons": "node scripts/gen-icons.mjs",
+    "discipline": "node scripts/check-discipline.mjs"
   },
   "engines": {
     "node": ">=20"

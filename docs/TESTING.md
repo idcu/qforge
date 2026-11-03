@@ -59,3 +59,19 @@ Get-ChildItem scripts\*.test.mjs, scripts\smoke-test.mjs | ForEach-Object { node
 # 或（推荐，固定顺序 + 单进程汇总）
 node scripts/test-all.mjs
 ```
+
+---
+
+## 附：十问看板（成熟度自评）
+
+> `engineering-discipline.md` §8 的十问清单，做成了一个脚本：它**不替代**任何判据，
+> 只回答"这个仓库现在几档、缺哪一条"。
+
+```bash
+npm run discipline
+```
+
+结构上不适用的问写在 `docs/discipline-exemptions.json`（理由必须写清为什么结构上不成立；
+"暂时没做"不是理由）。不适用项从分母剔除，而不是从分子加分。
+
+当前：**8/8 → L4**。第 4、5 问声明了不适用（运行时断言即契约、纯静态无构建），理由在 `docs/discipline-exemptions.json`。
