@@ -6,9 +6,9 @@
 
 ---
 
-## 本轮 · feat(importers): Anki Legacy + Quizlet 迁移桥（SQLite 只读零依赖）
+## 538cd10 / 2529790 · feat(importers): Anki Legacy + Quizlet 迁移桥（SQLite 只读零依赖）
 
-**Commit**：本轮三个实现提交（`docs(migration)` 首提交含 `docs/MIGRATION-BRIDGE-PLAN.md`；精确哈希见 `git log`，末尾另有 docs 回填提交）
+**Commit**：`538cd10`（阶段 0/1：SQLite 只读 + `.apkg` 探针 + 方案文档）、`2529790`（阶段 2/3：Anki/Quizlet 导入器 + 测试 + 文档）
 
 **范围（只做 Quizlet + Anki Legacy，不做 `.anki21b`、不做问卷星）**
 - 阶段 0：`scripts/probe-apkg.mjs` 只读探针（不注册进 `test-all`）；识别 `meta` 版本（Legacy1/2/Latest）、列 ZIP 条目、Legacy collection 解压后读 SQLite 头与 notes/cards/revlog/col.ver。
