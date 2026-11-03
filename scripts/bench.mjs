@@ -16,6 +16,15 @@
  *   - SearchFilter 关键词检索 / Statistics 汇总
  *   - 选项乱序 / 多格式导出构建（文本四格式 + xlsx/docx 二进制）
  *   - heapUsed 增量 / localStorage 载荷字节
+ *
+ * SRS 相对门禁（P1-B 修订，替换历史绝对毫秒基线）：
+ *   `SRSStore.grade / gradeMany` 改为「同轮标定比值」判定。每轮在被测样本前后各跑一批
+ *   与存储提交（patch）同构的序列化标定工作，判定量 = 本轮被测中位数 / 标定单位耗时。
+ *   机器频率/负载/GC 相位漂移会同向放大两侧、在比值中抵消；真实代码回退只放大分子。
+ *   原理、适用边界、负向验证方法见 docs/DEVELOPMENT.md「3-B. SRS 相对门禁」。
+ *   负向验证：QF_BENCH_INJECT_SLOW=0.1 node --expose-gc scripts/bench.mjs --assert
+ *   （只在 scripts 侧给每个被测样本前置一段「样本耗时 × 比例」的 hrtime 忙等，不修改业务代码）。
+ *   门禁要求 --expose-gc：每轮前强制 GC，消除堆相位差；无该参数时比值仍输出但波动更大。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -103,7 +112,11 @@ function row(name, timeTriple, extra) {
   report.push({
     name, median: timeTriple.median, best: timeTriple.best,
     p50: timeTriple.p50, p95: timeTriple.p95, runs: timeTriple.runs, samples: timeTriple.samples,
-    min: timeTriple.min, max: timeTriple.max, extra: extra || ''
+    min: timeTriple.min, max: timeTriple.max,
+    // SRS 相对门禁字段（其余打点项为 undefined）
+    ratio: timeTriple.ratio, ratioRounds: timeTriple.ratioRounds, ratioSpread: timeTriple.ratioSpread,
+    unitMs: timeTriple.unitMs, injectRatio: timeTriple.injectRatio, injectMs: timeTriple.injectMs,
+    extra: extra || ''
   });
 }
 
@@ -520,16 +533,102 @@ row('FSRS.review 新卡首次评分', await timed(() => {
 }, 200), '含指数式 D₀ / S₀ 初始化');
 
 /* ---------- 5b. SRSStore 评分端到端（本地适配器：读状态/权重 + 一次 patch） ---------- */
+/* SRS 相对门禁的标定工作负载（唯一实现）：复刻 local-adapter patch 的稳态成本构成——
+ * 状态对象合并、200 条日志段拷贝、状态/尾段/首段/元数据 JSON 序列化、缓存查表。
+ * 只用标准 JS 常量与基元，不读取业务代码，因此业务回退不会带动标定值。 */
+const CAL_SEG_LEN = 200; // 与 REVLOG_SEG_SIZE 对齐，仅描述标定形状
+const CAL_STATE = { algo: 'fsrs6', due: qNow, stability: 9.5, difficulty: 5.1, reps: 4, lapses: 1, last: qNow, learning: 0 };
+const CAL_META = { v: 5, segSize: CAL_SEG_LEN, first: 0, last: 99, count: 20000 };
+const CAL_SEG = new Array(CAL_SEG_LEN);
+for (let i = 0; i < CAL_SEG_LEN; i++) CAL_SEG[i] = { t: qNow + i, h: 'cal-' + (i % 20), r: 3, b: 'bench-cal' };
+const CAL_CACHE = new Map();
+for (let i = 0; i < 32; i++) CAL_CACHE.set('cal-' + i, Object.assign({}, CAL_STATE));
+let calSink = 0;
+function calibrationUnit(i) {
+  const merged = Object.assign({}, CAL_STATE, { last: CAL_STATE.last + i });
+  CAL_CACHE.set('cal-' + (i & 31), merged);
+  const hit = CAL_CACHE.get('cal-' + (i & 31));
+  const seg = CAL_SEG.slice();
+  return JSON.stringify(hit).length + JSON.stringify(seg).length + JSON.stringify(CAL_SEG).length
+    + JSON.stringify(CAL_META).length;
+}
+/** 单位标定耗时（ms）：拆成 10 个小批取中位数，避免单次 GC 把长批均值整体抬高 */
+function calibrationUnitCost(totalUnits) {
+  const batches = 10;
+  const per = Math.max(1, Math.round(totalUnits / batches));
+  const costs = [];
+  for (let b = 0; b < batches; b++) {
+    const t0 = process.hrtime.bigint();
+    for (let i = 1; i <= per; i++) calSink += calibrationUnit(i);
+    costs.push(Number(process.hrtime.bigint() - t0) / 1e6 / per);
+  }
+  return median(costs);
+}
+/* 负向验证注入（仅 scripts 侧）：QF_BENCH_INJECT_SLOW=0.1 给每个被测样本前置一段「目标时长 = 比例 × 样本耗时」
+ * 的忙等，模拟被测路径整体变慢。用 hrtime 截止时间而非固定循环次数，忙等时长精确、跨机器可比。
+ * 实测注意：长忙等（≥70 µs/样本）会拉高 CPU 频率、让随后被测样本略变快，故这里按 10% 量级注入；
+ * 具体注入前后的实测数字记录在 CHANGELOG.internal.md，不参与门禁判定。 */
+const INJECT_SLOW = Number(process.env.QF_BENCH_INJECT_SLOW || 0);
+let burnSink = 0;
+function burnFor(ms) {
+  const end = process.hrtime.bigint() + BigInt(Math.round(ms * 1e6));
+  let x = 0;
+  while (process.hrtime.bigint() < end) x++;
+  return x;
+}
+/** 同轮标定测量：每轮「标定 → 被测样本 → 标定」，判定量 ratio = 本轮被测中位数 / 单位标定耗时。
+ *  返回 stableTimed 兼容字段 + ratio（各轮比值的中位数）/ ratioRounds / ratioSpread / unitMs。 */
+async function calibratedTimed(fn, n, runs, unitsPerSample) {
+  runs = runs || 3;
+  const probe = await timed(fn, 100);
+  const injectMs = INJECT_SLOW > 0 ? INJECT_SLOW * probe.median : 0;
+  const measuredFn = injectMs > 0 ? async (i) => { burnSink += burnFor(injectMs); return fn(i); } : fn;
+  const meds = [];
+  const all = [];
+  const ratios = [];
+  const unitCosts = [];
+  let min = Infinity;
+  let max = 0;
+  const totalUnits = Math.max(1, Math.round(unitsPerSample * n));
+  for (let r = 0; r < runs; r++) {
+    bestEffortGc();
+    const pre = calibrationUnitCost(totalUnits);
+    const t = await timed(measuredFn, n);
+    const post = calibrationUnitCost(totalUnits);
+    const unit = (pre + post) / 2;
+    meds.push(t.median);
+    all.push.apply(all, t.samples);
+    ratios.push(t.median / unit);
+    unitCosts.push(unit);
+    min = Math.min(min, t.min);
+    max = Math.max(max, t.max);
+  }
+  return {
+    median: median(meds), best: Math.min.apply(null, meds),
+    p50: percentile(all, 0.5), p95: percentile(all, 0.95),
+    runs: runs, samples: all.length, min: min, max: max,
+    ratio: median(ratios), ratioRounds: ratios,
+    ratioSpread: Math.max.apply(null, ratios) / Math.min.apply(null, ratios),
+    unitMs: median(unitCosts), injectRatio: INJECT_SLOW, injectMs: injectMs
+  };
+}
+
 const gradeBank = await QB.DB.banks.create({ name: 'SRS 评分基线', category: 'bench' });
 await QB.DB.questions.insertMany(gradeBank.id, bigAll.slice(0, 20), { dedupe: false });
 const gradeQs = (await QB.DB.questions.list(gradeBank.id, {})).items;
-row('SRSStore.grade 单次评分（本地适配器）', await stableTimed(async (i) => {
+/* 固定 revlog 稳态：先把全局日志灌到 FIFO 上限，使 11 轮样本全部落在「尾段写 + 满段裁剪」的同一稳态。
+ * 否则测量窗口会跨越 cap（前段慢/后段快两段成本），p50 取决于越界落在第几轮，不可复现。
+ * 只改测量前置条件，不改业务路径；后续迁移段 buildLegacyBank 会 Storage.clearAll()，不会污染其口径。 */
+QB.DB.revlog.append(Array.from({ length: (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000 }, (_, i) => ({
+  t: qNow + i, h: 'bench-cap-' + (i % 20), r: 3, b: 'bench-cap'
+})));
+row('SRSStore.grade 单次评分（本地适配器）', await calibratedTimed(async (i) => {
   await QB.SRSStore.grade(gradeBank.id, gradeQs[i % gradeQs.length], QB.SRS.RATINGS.good, qNow + i * 1000);
-}, 1000, 9), '存储层 stateFor + 一次 patch（状态 + revlog）；9 轮×1000，门禁取全样本 p50');
-row('SRSStore.gradeMany 批量 20 题（本地适配器）', await stableTimed(async (i) => {
+}, 1000, 11, 1), '存储层 stateFor + 一次 patch（状态 + revlog）；11 轮×1000；门禁=同轮标定比值');
+row('SRSStore.gradeMany 批量 20 题（本地适配器）', await calibratedTimed(async (i) => {
   await QB.SRSStore.gradeMany(gradeBank.id,
     gradeQs.map((q) => ({ question: q, rating: QB.SRS.RATINGS.good })), qNow + i * 1000);
-}, 200, 9), '批量读 20 状态 + 一次 patch；9 轮×200，门禁取全样本 p50');
+}, 200, 11, 4), '批量读 20 状态 + 一次 patch；11 轮×200；门禁=同轮标定比值');
 
 // 合成评分日志（可解释的显著偏离真权重，与 fsrs-opt.test 同一夹具口径）
 const fsSynth = [];
@@ -1082,25 +1181,30 @@ if (process.argv.indexOf('--assert') >= 0) {
     console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：' + ms(r.median) + ' ≤ ' + ms(max));
     if (!ok) fails.push(needle + ' ' + ms(r.median) + ' > ' + ms(max));
   });
-  // P1-B 参数化相对门禁：规则不变（≤ 基线 +5%）。
-  // 采样口径升级：5 轮×1000/5 轮×200 取「最好一轮中位数」→ 9 轮×1000/9 轮×200 取「全样本 p50」。
-  // 旧口径（best-of-5）基线：grade 0.0825 / gradeMany 0.2218。
-  // 新口径必须在**同一口径**下取基线（best 与 p50 不可直接比较）：在未改动的 HEAD 代码上重测 9 轮×1000/9 轮×200：
-  //   grade p50 0.0771、gradeMany p50 0.2480（旧代码）；改造后实测 0.0767 / 0.2481（+0.04%，属噪声）。
-  // 因此新基线取旧代码同口径值，门禁仍为 +5%，不做任何额外放宽。
-  const GRADE_BASELINE_MS = 0.0771;
-  const GRADE_MANY_BASELINE_MS = 0.2480;
-  [['SRSStore.grade 单次评分', GRADE_BASELINE_MS], ['SRSStore.gradeMany 批量 20 题', GRADE_MANY_BASELINE_MS]]
+  // P1-B 门禁修订：原「历史绝对毫秒基线 ×1.05」（grade 0.0771 / gradeMany 0.2480）对机器频率/负载漂移敏感：
+  //   HEAD 实测 0.0902 / 0.2787，同机复跑旧代码 e772e60 也是 0.0882 / 0.2784（同超限）→ 是机器漂移，不是代码回退。
+  // 改为「同轮标定比值」：ratio = 本轮被测中位数 / 标定单位耗时（标定工作与被测 patch 同构，见 5b）；
+  //   机器漂移同向影响两侧、在比值中抵消；真实代码回退只抬高分子 → 比值上升。
+  // 基线取未改业务代码的当前 HEAD 用本方法实测（数据与方差见 CHANGELOG.internal.md 2026-11-03）。
+  // 容差 6%：同机连续 6 次运行摆动 ≤2.2%（grade 2.69~2.75，gradeMany 4.94~5.11）；
+  //   6% ≈ 3 倍摆动，留足环境噪声；同时负向注入 +10% 实测 2.97~3.08 / 5.46~5.64 > 2.90 / 5.35 → 必失败。
+  //   容差再放宽会把 10% 级真实回退淹进噪声，再收紧则对未验证机器/负载过于苛刻（见 docs/DEVELOPMENT.md）。
+  const GRADE_RATIO_BASELINE = 2.74;
+  const GRADE_MANY_RATIO_BASELINE = 5.05;
+  const RATIO_TOLERANCE = 1.06;
+  [['SRSStore.grade 单次评分', GRADE_RATIO_BASELINE], ['SRSStore.gradeMany 批量 20 题', GRADE_MANY_RATIO_BASELINE]]
     .forEach(([needle, base]) => {
       const r = report.find((x) => x.name.indexOf(needle) === 0);
       if (!r) { fails.push(needle + ' 缺失'); return; }
-      const max = base * 1.05;
-      const val = r.p50 == null ? r.median : r.p50;
-      const ok = val <= max;
-      console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：p50 ' + val.toFixed(4) + ' ms ≤ ' + max.toFixed(4) + ' ms'
-        + '（基线 ' + base.toFixed(4) + ' ms +5%；p95 ' + (r.p95 == null ? NaN : r.p95).toFixed(4) + ' ms，同机参考；'
-        + (r.runs || '?') + ' 轮×' + (r.samples && r.runs ? (r.samples / r.runs) : '?') + ' 样本）');
-      if (!ok) fails.push(needle + ' p50 ' + ms(val) + ' > 基线+5% ' + ms(max));
+      if (!isFinite(r.ratio)) { fails.push(needle + ' 比值打点缺失'); return; }
+      const max = base * RATIO_TOLERANCE;
+      const ok = r.ratio <= max;
+      console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：比值 ' + r.ratio.toFixed(2) + ' ≤ ' + max.toFixed(2)
+        + '（基线 ' + base.toFixed(2) + ' ×' + RATIO_TOLERANCE + '；p50 ' + (r.p50 == null ? NaN : r.p50).toFixed(4)
+        + ' ms / 标定 ' + (r.unitMs * 1000).toFixed(1) + ' µs，同机参考；' + r.runs + ' 轮×' + (r.samples && r.runs ? (r.samples / r.runs) : '?')
+        + ' 样本，轮间极差 ' + r.ratioSpread.toFixed(2) + '×'
+        + (r.injectRatio ? '；负向注入 +' + (r.injectRatio * 100).toFixed(0) + '%（' + ((r.injectMs || 0) * 1000).toFixed(1) + ' µs/样本）' : '') + '）');
+      if (!ok) fails.push(needle + ' ratio ' + r.ratio.toFixed(2) + ' > 基线×' + RATIO_TOLERANCE + ' ' + max.toFixed(2));
     });
   const heapDeltaMb = (heapAfter - heapBefore) / 1024 / 1024;
   const heapOk = heapDeltaMb <= 40;
