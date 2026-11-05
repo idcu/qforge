@@ -1,14 +1,15 @@
 /**
  * 文档数字一致性校验（开发工具，零依赖）
  *
- * 目的（C2）：README / docs/DEVELOPMENT.md 里的「断言数、运行项数、门禁数、首屏体积」
+ * 目的（C2）：README / docs/DEVELOPMENT.md 等文档里的「断言数、运行项数、门禁数、首屏体积」
  * 一律由本脚本**实测复算**并逐项比对，消除人工改数字造成的漂移。
  *
  * 三种模式：
  *   （默认）live   ：逐项实测（spawn 全部套件 + bench --assert + 首屏 gzip），用于本地提交前校验；
  *   --write        ：同 live，并把实测结果写入 scripts/docs-baseline.json（数字有意变化时刷新基线）；
- *   --static       ：CI 轻量模式，不 spawn 套件、不跑 bench——套件/断言/门禁取基线，运行项与首屏体积
- *                    仍实时读取文件（新增/删除测试文件或前端资源时依然会报漂移）。
+ *   --static       ：CI 轻量模式，不 spawn 套件、不跑 bench——套件/断言/门禁取基线，
+ *                    但**基线自身必须自洽**（合计=逐套件之和、运行项/套件数与磁盘一致），
+ *                    运行项与首屏体积仍实时读取文件（新增/删除测试文件或前端资源时依然会报漂移）。
  *
  * 校验口径：
  *   1. 各套件断言数：逐个 spawn 测试文件，取末尾「通过: N」（static 模式取基线）；
@@ -16,7 +17,13 @@
  *   3. 性能门禁项数：跑 `bench.mjs --assert`，数「  ✓ 」行（static 模式取基线）；
  *   4. 首屏静态体积：index.html 引用的 css/script + Worker/sw/manifest/图标，逐文件 gzip -9（始终实测）。
  *
- * 运行：node scripts/docs-check.mjs [--static|--write]
+ * **C004 修的两个「静默绿」**：
+ *   - 文档里出现了 `scripts/<suite>.test.mjs` 却没有断言数字时，旧实现直接 `return`（当作没看见）；
+ *     现在判失败——「数字被删掉」必须与「数字写错」一样红。
+ *   - 基线文件被手改（如 totalAssertions 写成 4852、counts 少一项）时，静态模式只读不核对；
+ *     现在基线与逐套件之和、运行项数、套件文件数必须自洽。
+ *
+ * 运行：node scripts/docs-check.mjs [--static|--write|--selftest]
  * 退出码：0 全部一致；1 存在漂移（逐条打印「文档值 vs 实测值」）。
  */
 import fs from 'node:fs';
@@ -30,11 +37,8 @@ const ROOT = path.resolve(__dirname, '..');
 const BASELINE = path.join(__dirname, 'docs-baseline.json');
 const ARGS = new Set(process.argv.slice(2));
 const MODE = ARGS.has('--static') ? 'static' : ARGS.has('--write') ? 'write' : 'live';
+const SELFTEST = ARGS.has('--selftest');
 const problems = [];
-
-function fail(file, what, docValue, actual) {
-  problems.push(file + '：' + what + ' 文档=' + docValue + '，实测=' + actual);
-}
 
 /* ---------- 1. 套件清单（始终实时，读到新增/删除测试文件） ---------- */
 const suiteFiles = fs.readdirSync(__dirname)
@@ -101,6 +105,135 @@ function loadBaseline() {
   return JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
 }
 
+/** 基线自身是否自洽（static 模式拿不到实测，只能核对「基线内部」与磁盘） */
+function baselineProblems(base, order, suites) {
+  const out = [];
+  const counts = base.counts || {};
+  const sum = Object.keys(counts).reduce((n, f) => n + (typeof counts[f] === 'number' ? counts[f] : 0), 0);
+  if (typeof base.totalAssertions !== 'number') {
+    out.push('基线缺少 totalAssertions（请运行 node scripts/docs-check.mjs --write）');
+  } else if (sum !== base.totalAssertions) {
+    out.push('基线 totalAssertions=' + base.totalAssertions + ' 与逐套件计数之和 ' + sum + ' 不一致（基线被手改或未刷新）');
+  }
+  if (typeof base.runItems === 'number' && base.runItems !== order.length) {
+    out.push('基线 runItems=' + base.runItems + ' ≠ 磁盘运行项 ' + order.length);
+  }
+  if (typeof base.suiteFiles === 'number' && base.suiteFiles !== suites.length) {
+    out.push('基线 suiteFiles=' + base.suiteFiles + ' ≠ 磁盘套件文件 ' + suites.length);
+  }
+  return out;
+}
+
+/* ---------- 5. 文档比对（可独立调用，供 --selftest 用假文本） ---------- */
+function failInto(out, file, what, docValue, actual) {
+  out.push(file + '：' + what + ' 文档=' + docValue + '，实测=' + actual);
+}
+
+/** 校验每一条「特定套件」的断言数；数字缺失 = 失败（不允许静默跳过） */
+function checkSuiteRows(doc, ctx, out) {
+  doc.lines.forEach((line, i) => {
+    const fileM = line.match(/scripts\/([\w.-]+\.test\.mjs)/);
+    if (!fileM || !(fileM[1] in ctx.counts)) return;
+    const name = fileM[1];
+    const isTableRow = /^\|\s*`scripts\//.test(line);
+    let actualNum = null;
+    if (isTableRow) {
+      const m = line.match(/\|\s*\*\*(\d+)\*\*\s*\|/);
+      if (m) actualNum = m[1];
+    } else if (line.indexOf('`node scripts/' + name) >= 0) {
+      const bold = line.match(/\*\*(\d+)\*\*\s*项/);
+      const plain = line.match(/（(\d+)\s*项断言/);
+      const m = bold || plain;
+      if (m) actualNum = m[1];
+    } else {
+      return;
+    }
+    if (actualNum === null) {
+      failInto(out, doc.rel + ':' + (i + 1), name + ' 行缺少断言数（应写成 **N**）', '(缺失)', ctx.counts[name]);
+      return;
+    }
+    if (Number(actualNum) !== ctx.counts[name]) {
+      failInto(out, doc.rel + ':' + (i + 1), name + ' 断言数', actualNum, ctx.counts[name]);
+    }
+  });
+}
+
+/** 校验某类数字的所有出现处 */
+function checkPattern(doc, regex, label, actual, pick, out) {
+  let m;
+  const re = new RegExp(regex.source, regex.flags.indexOf('g') >= 0 ? regex.flags : regex.flags + 'g');
+  while ((m = re.exec(doc.text)) !== null) {
+    const value = pick ? pick(m) : m[1];
+    if (String(value) !== String(actual)) {
+      const line = doc.text.slice(0, m.index).split('\n').length;
+      failInto(out, doc.rel + ':' + line, label, value, actual);
+    }
+  }
+}
+
+function auditDoc(doc, ctx) {
+  const out = [];
+  checkSuiteRows(doc, ctx, out);
+  // 合计断言数（形如 「3782 / 3782 通过」）
+  checkPattern(doc, /(\d+) \/ (\d+) 通过/, '合计断言数', ctx.totalAssertions, (m) => m[1], out);
+  // 运行项 / 套件数
+  checkPattern(doc, /(\d+) 个运行项（冒烟 \+ (\d+) 套件）/, '运行项数', ctx.runOrder.length, null, out);
+  checkPattern(doc, /全部 (\d+) 个 `\*\.test\.mjs`（(\d+) 个运行项）/, '测试文件数', ctx.suiteFiles.length, null, out);
+  checkPattern(doc, /(\d+) 个逻辑层测试套件/, '套件数', ctx.runOrder.length, null, out);
+  // 门禁项数（README/DEVELOPMENT 各有「N 项阈值」等处）
+  checkPattern(doc, /(\d+) 项量级阈值/, '门禁项数', ctx.gateCount, null, out);
+  checkPattern(doc, /(\d+) 项阈值/, '门禁项数', ctx.gateCount, null, out);
+  // 首屏
+  checkPattern(doc, /共 (\d+) 个文件/, '首屏文件数', ctx.firstScreen.files, null, out);
+  checkPattern(doc, /(\d+) 个 index 内联 js/, '内联 js 数', ctx.firstScreen.scripts, null, out);
+  checkPattern(doc, /\*\*(\d+\.\d) KB gzip \/ (\d+\.\d) KB raw\*\*/, '首屏 gzip 体积', ctx.firstScreen.gzipKB, null, out);
+  return out;
+}
+
+function readDoc(rel) {
+  const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  return { rel, text, lines: text.split(/\r?\n/) };
+}
+
+/* ---------- 6. 自检：三种「静默绿」都必须被判红 ---------- */
+if (SELFTEST) {
+  const fakeBase = {
+    counts: { 'demo.test.mjs': 5 }, totalAssertions: 5, runItems: 2, suiteFiles: 1
+  };
+  const ctx = {
+    counts: { 'demo.test.mjs': 5 }, totalAssertions: 5, gateCount: 3,
+    runOrder: ['smoke-test.mjs', 'demo.test.mjs'], suiteFiles: ['demo.test.mjs'],
+    firstScreen: { scripts: 1, files: 1, gzipKB: '1.0', rawKB: '1.0' }
+  };
+  const cases = [
+    {
+      name: '文档删掉套件断言数',
+      hit: () => {
+        const doc = { rel: 'FAKE.md', text: '| `scripts/demo.test.mjs` | 覆盖 |\n', lines: ['| `scripts/demo.test.mjs` | 覆盖 |'] };
+        return auditDoc(doc, ctx).length > 0;
+      }
+    },
+    {
+      name: '合计断言数改 4853→4852',
+      hit: () => {
+        const doc = { rel: 'FAKE.md', text: '4 / 4 通过', lines: ['4 / 4 通过'] };
+        return auditDoc(doc, ctx).length > 0;
+      }
+    },
+    {
+      name: '基线被手改（合计与逐套件之和不等）',
+      hit: () => baselineProblems({ ...fakeBase, totalAssertions: 4 }, ctx.runOrder, ctx.suiteFiles).length > 0
+    }
+  ];
+  let ok = true;
+  cases.forEach((c) => {
+    const hit = c.hit();
+    console.log('[selftest] ' + c.name + ' → ' + (hit ? '已拦截' : '未拦截（门禁失效）'));
+    if (!hit) ok = false;
+  });
+  process.exit(ok ? 0 : 1);
+}
+
 let counts;
 let totalAssertions;
 let gateCount;
@@ -118,6 +251,7 @@ if (MODE === 'static') {
   });
   const stale = Object.keys(base.counts || {}).filter((f) => runOrder.indexOf(f) < 0);
   stale.forEach((f) => problems.push(f + '：基线含已不存在的套件（请运行 node scripts/docs-check.mjs --write）'));
+  baselineProblems(base, runOrder, suiteFiles).forEach((p) => problems.push(p));
   totalAssertions = base.totalAssertions;
   gateCount = base.gateCount;
   console.log('静态模式：' + runOrder.length + ' 个运行项，' + totalAssertions + ' 项断言（基线），'
@@ -148,52 +282,6 @@ if (MODE === 'write') {
   console.log('已写入基线 ' + path.relative(ROOT, BASELINE));
 }
 
-/* ---------- 5. 逐文档比对 ---------- */
-function readDoc(rel) {
-  const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  return { rel, text, lines: text.split(/\r?\n/) };
-}
-
-/** 校验每一条「特定套件」的断言数：file 行内出现 scripts/<name>.mjs 后紧跟的计数 */
-function checkSuiteRows(doc) {
-  doc.lines.forEach((line, i) => {
-    const fileM = line.match(/scripts\/([\w.-]+\.test\.mjs)/);
-    if (!fileM || !(fileM[1] in counts)) return;
-    const name = fileM[1];
-    // 仅在「套件行」校验：README 行含 node scripts/；DEVELOPMENT 表格第二列为 **N**
-    const isTableRow = /^\|\s*`scripts\//.test(line);
-    let actualNum = null;
-    if (isTableRow) {
-      const m = line.match(/\|\s*\*\*(\d+)\*\*\s*\|/);
-      if (m) actualNum = m[1];
-    } else if (line.indexOf('`node scripts/' + name) >= 0) {
-      const bold = line.match(/\*\*(\d+)\*\*\s*项/);
-      const plain = line.match(/（(\d+)\s*项断言/);
-      const m = bold || plain;
-      if (m) actualNum = m[1];
-    } else {
-      return;
-    }
-    if (actualNum === null) return;
-    if (Number(actualNum) !== counts[name]) {
-      fail(doc.rel + ':' + (i + 1), name + ' 断言数', actualNum, counts[name]);
-    }
-  });
-}
-
-/** 校验某类数字的所有出现处 */
-function checkPattern(doc, regex, label, actual, pick) {
-  let m;
-  const re = new RegExp(regex.source, regex.flags.indexOf('g') >= 0 ? regex.flags : regex.flags + 'g');
-  while ((m = re.exec(doc.text)) !== null) {
-    const value = pick ? pick(m) : m[1];
-    if (String(value) !== String(actual)) {
-      const line = doc.text.slice(0, m.index).split('\n').length;
-      fail(doc.rel + ':' + line, label, value, actual);
-    }
-  }
-}
-
 // 判据跟着文档走：拆分后（TESTING / BENCH）数字仍在，就必须仍在被复算的范围内。
 // 少读一个文件 = 那些读数悄悄不再被校验，而"没红过"看起来与"没问题"一样。
 const DOCS_WITH_NUMBERS = [
@@ -203,21 +291,9 @@ const DOCS_WITH_NUMBERS = [
   'docs/BENCH.md'
 ].map(readDoc);
 
+const ctx = { counts, totalAssertions, gateCount, runOrder, suiteFiles, firstScreen };
 DOCS_WITH_NUMBERS.forEach((doc) => {
-  checkSuiteRows(doc);
-  // 合计断言数（形如 「3782 / 3782 通过」）
-  checkPattern(doc, /(\d+) \/ (\d+) 通过/, '合计断言数', totalAssertions, (m) => m[1]);
-  // 运行项 / 套件数
-  checkPattern(doc, /(\d+) 个运行项（冒烟 \+ (\d+) 套件）/, '运行项数', runOrder.length);
-  checkPattern(doc, /全部 (\d+) 个 `\*\.test\.mjs`（(\d+) 个运行项）/, '测试文件数', suiteFiles.length);
-  checkPattern(doc, /(\d+) 个逻辑层测试套件/, '套件数', runOrder.length);
-  // 门禁项数（README/DEVELOPMENT 各有「N 项阈值」等处）
-  checkPattern(doc, /(\d+) 项量级阈值/, '门禁项数', gateCount);
-  checkPattern(doc, /(\d+) 项阈值/, '门禁项数', gateCount);
-  // 首屏
-  checkPattern(doc, /共 (\d+) 个文件/, '首屏文件数', firstScreen.files);
-  checkPattern(doc, /(\d+) 个 index 内联 js/, '内联 js 数', firstScreen.scripts);
-  checkPattern(doc, /\*\*(\d+\.\d) KB gzip \/ (\d+\.\d) KB raw\*\*/, '首屏 gzip 体积', firstScreen.gzipKB);
+  auditDoc(doc, ctx).forEach((p) => problems.push(p));
 });
 
 console.log('\n================ 文档数字校验 ================');

@@ -9,6 +9,31 @@
 
 ## 最新记录
 
+### fix(gate): docs-check 拒绝「删数字 / 改数字 / 改基线」三类静默绿（C004）
+
+**核心改动**
+- `scripts/docs-check.mjs`：文档里出现 `scripts/<suite>.test.mjs` 却无断言数 → 判红（旧实现直接 `return` 跳过，
+  「数字被删掉」也能绿）；`--static` 不再盲信基线——基线必须自洽（`totalAssertions` = 逐套件之和、
+  `runItems`/`suiteFiles` 与磁盘一致），基线被手改会红；基线含已不存在的套件也红。**不放宽校验、不加容差**。
+- 新增 `--selftest`：三个假文本/假基线分别证明「删断言数 / 4853→4852 / 手改基线」都被拦下。
+- 修复既有漂移 `docs/BENCH.md:73`：首屏 **329.8→329.7 KB gzip / 933.2→927.9 KB raw**（2026-11-06 复测），
+  同 commit `--write` 刷新基线（`firstScreen` 同步，`generatedAt` 更新）。
+- 文档：`docs/TESTING.md`（C004 三判据与 `--selftest`）。
+
+**验证数据（同机 Asia/Shanghai）**
+- **红（旧码 vs 新码，同一次注入）**：
+  ① 删掉 `docs/TESTING.md` xml-lite 行断言数 → 旧 `--static` **exit 0**（「全部一致 ✅」）、新 `--static` **exit 1**（「行缺少断言数 文档=(缺失)，实测=39」）；
+  ② 基线 `runItems` 手改 30→31 → 旧 **exit 0**、新 **exit 1**（「基线 runItems=31 ≠ 磁盘运行项 30」）。
+- **红（当前库真实漂移）**：改动前 `--static` exit 1（`docs/BENCH.md:73` gzip 329.8 vs 329.7）。
+- **绿**：改 `docs/BENCH.md` 数字 + `--write` 重算基线 → `--static` **exit 0**（全部一致 ✅）；
+  全量实测 30 运行项 / 4853 断言 / 55 门禁 / 首屏 89 文件（81 内联 js）329.7 KB gzip / 927.9 KB raw。
+- `node scripts/docs-check.mjs --selftest` → exit 0，3/3 已拦截。
+
+**遗留 / 风险**
+- `--static` 仍不跑 bench/套件（轻量模式）：某套件「断言数没变但逻辑坏了」由 CI 的 test-all 单步兜底，不属本任务。
+- `firstScreen` 口径含 `icon-192.png`/`icon-512.png`：PNG 若被换源（含 zip 时间戳）会导致 gzip 体积漂移，
+  属预期行为（按字节校验），非噪声容差。
+
 ### fix(gate): check-ngm 缺清单文件必须失败（C003）
 
 **核心改动**
