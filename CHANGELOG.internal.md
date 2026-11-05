@@ -11,7 +11,7 @@
 
 ### fix(quota): 修正 C009 峰值口径——estimate 成功即用 usage，50k/IDB 峰值 59.09→0.27MB（C009 补测）
 
-**Commit Hash**：待回填（本次完成后由 `docs(changelog)` 提交补录）
+**Commit Hash**：`6afab24`
 
 **背景**：`5a2db3c` 的 C009 条目把「进程峰值 +40.52MB」挂账为「按峰值口径未达标」。按「内存超标必须继续改」的硬规矩补测与修正，不复用旧结论。
 
