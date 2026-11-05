@@ -11,7 +11,7 @@
 
 ### perf(ui): 容量统计移出渲染热路径，50k 题库首页 P95 80.63→0.03 ms（C009）
 
-**Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录）
+**Commit Hash**：`5a2db3c`
 
 **核心改动**
 - `js/utils/quota.js`：新增 `meter` 快照（`ready/used/limit/backend/at/dirty`）与 `valueBytes`（唯一字节口径：
@@ -59,7 +59,7 @@
 
 ### fix(sync): reviewMeta 跨标签按键并集合并，消除孤儿 hash（C008）
 
-**Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录）
+**Commit Hash**：`29e1db0`
 
 **核心改动**
 - `js/utils/review-merge.js`：新增纯函数 `ReviewMerge.mergeMeta(local, remote)`——`keys` 并集、`count` 恒等于
@@ -91,7 +91,7 @@
 
 ### fix(storage): IDB 回落可见化 + 保留可恢复标记 + 回落会话写入即降级（C007）
 
-**Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录）
+**Commit Hash**：`fbca263`
 
 **核心改动**
 - `js/data/store.js`：新增唯一回落收口 `Store.enterFallback(kind, detail, available)`，`fallbackReason` 只保留三类规范值
@@ -122,7 +122,7 @@
 
 ### fix(import): 导入容量预检 + 落盘确认 + 失败回滚（C006）
 
-**Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录，与 P0 首批同口径）
+**Commit Hash**：`d5a369f`
 
 **核心改动**
 - 新增公共抽象 `js/utils/quota.js`（`QB.Quota`，容量口径唯一实现）：`limitBytes`（IDB=∞ / LS 读
