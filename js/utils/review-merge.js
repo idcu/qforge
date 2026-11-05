@@ -26,5 +26,27 @@
     return out;
   }
 
-  QB.ReviewMerge = { mergeMaps, lastOf };
+  /**
+   * 复习清单 `{v, count, keys}` 合并（跨标签并集，C008）。
+   * 另一标签可能只看到部分 hash：整值覆盖会让本地已有 hash 成为孤儿（state 存在、清单缺失，
+   * 迁移/备份按清单枚举时漏题）。只合并 `keys` 并集，`count` 恒等于并集长度，`v` 取较大者；
+   * 非法/缺字段一侧视为空，不改写另一侧的有效键。不修改入参。
+   */
+  function mergeMeta(local, remote) {
+    const a = local && typeof local === 'object' ? local : {};
+    const b = remote && typeof remote === 'object' ? remote : {};
+    const seen = new Set();
+    const keys = [];
+    [a.keys, b.keys].forEach((list) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((k) => {
+        if (typeof k !== 'string' || seen.has(k)) return;
+        seen.add(k);
+        keys.push(k);
+      });
+    });
+    return { v: Math.max(Number(a.v) || 0, Number(b.v) || 0), count: keys.length, keys: keys };
+  }
+
+  QB.ReviewMerge = { mergeMaps, lastOf, mergeMeta };
 })(typeof window !== 'undefined' ? window : globalThis);

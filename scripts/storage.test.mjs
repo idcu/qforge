@@ -163,6 +163,43 @@ section('跨标签合订（A4）：review 键按 ReviewMerge 合并而非覆盖'
   S.clearAll();
 }
 
+section('C008 跨标签 reviewMeta：keys 并集、count=并集长度（消除孤儿 hash）');
+{
+  // 双标签复现：两个独立 harness 共享同一底层 localStorage（A/B 各自一套模块状态）
+  const raw = new Map();
+  const A = await createHarness(path.resolve(__dirname, '..'), { raw });
+  const B = await createHarness(path.resolve(__dirname, '..'), { raw });
+  A.QB.DB.init(); B.QB.DB.init();
+  const bank = 'bank-meta';
+  const mk = A.QB.KEYS.reviewMeta(bank);
+  const v = A.QB.REVIEW_LAYOUT_VERSION;
+  // A 标签走真实写入路径：清单 keys=[h1] 并落盘
+  A.QB.ReviewStore.writeMeta(bank, ['h1']);
+  A.QB.Storage.forceSync();
+  const aValue = raw.get('qb:' + mk); // 事件载荷 = A 写入时的值（浏览器在写入瞬间捕获）
+  // B 标签本地已写入 keys=[h2]
+  B.QB.ReviewStore.writeMeta(bank, ['h2']);
+  // 浏览器 storage 事件：把 A 写入时的真实值送到 B
+  B.QB.Storage._handleExternalChange({ key: 'qb:' + mk, newValue: aValue });
+  const merged = B.QB.Storage.get(mk, null);
+  eq((merged.keys || []).length, 2, '双标签清单按键并集（h1+h2，不整值覆盖）');
+  ok((merged.keys || []).indexOf('h1') >= 0 && (merged.keys || []).indexOf('h2') >= 0, '并集包含双方 hash');
+  eq(merged.count, 2, 'count 与 keys 并集长度一致（不产生孤儿 hash）');
+  // 反向/重复事件幂等
+  B.QB.Storage._handleExternalChange({ key: 'qb:' + mk, newValue: aValue });
+  eq((B.QB.Storage.get(mk, null).keys || []).length, 2, '重复事件不重复计数');
+  eq(B.QB.ReviewStore.meta(bank).keys.length, 2, 'ReviewStore.meta 读回并集清单');
+  eq(B.QB.ReviewStore.stateKeys(bank).length, 2, 'stateKeys 覆盖双方 hash（另一标签进度不再成孤儿）');
+  // A 侧自己的清单未被事件反向污染
+  eq(A.QB.Storage.get(mk, null).keys.length, 1, 'A 标签本地清单保持自身视图（不被 B 覆盖）');
+  // 非法载荷不炸、不丢已有键
+  B.QB.Storage._handleExternalChange({ key: 'qb:' + mk, newValue: JSON.stringify({ v: v, count: 9, keys: 'bad' }) });
+  eq((B.QB.Storage.get(mk, null).keys || []).length, 2, '非法 keys 字段不破坏已有并集');
+  eq(B.QB.Storage.get(mk, null).count, 2, '非法 count 不覆盖并集长度');
+  A.QB.Storage.clearAll(); B.QB.Storage.clearAll();
+}
+
+
 section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
 {
   S.clearAll();

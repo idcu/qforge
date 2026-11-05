@@ -1355,6 +1355,12 @@
       (key) => key.indexOf(REVIEW_PREFIX) === 0 && key.indexOf(':', REVIEW_PREFIX.length) < 0,
       (local, incoming) => QB.ReviewMerge.mergeMaps(local || {}, incoming || {})
     );
+    // C008：复习清单 user:reviewMeta:<bankId> —— 两标签可能各自只看到部分 hash，必须按键并集；
+    // 整值覆盖会让另一标签的 hash 变孤儿（state 存在、清单缺失，迁移/备份按清单枚举时漏题）。
+    Storage.registerMerge(
+      (key) => key.indexOf(K.reviewMeta('')) === 0,
+      (local, incoming) => QB.ReviewMerge.mergeMeta(local, incoming)
+    );
     // per-hash 状态键：user:review:<bankId>:<hash>（同键按 last 合并，不让整值覆盖丢评分）
     Storage.registerMerge(
       (key) => key.indexOf(REVIEW_PREFIX) === 0 && key.indexOf(':', REVIEW_PREFIX.length) >= 0,

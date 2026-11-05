@@ -9,6 +9,38 @@
 
 ## 最新记录
 
+### fix(sync): reviewMeta 跨标签按键并集合并，消除孤儿 hash（C008）
+
+**Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录）
+
+**核心改动**
+- `js/utils/review-merge.js`：新增纯函数 `ReviewMerge.mergeMeta(local, remote)`——`keys` 并集、`count` 恒等于
+  并集长度、`v` 取大；缺字段/非数组一侧视为空，不破坏另一侧有效键，不修改入参。
+- `js/data/local-adapter.js`：为 `user:reviewMeta:<bankId>` 注册 `Storage.registerMerge` 钩子（LS `storage` 事件与
+  IDB `BroadcastChannel` 两条跨标签路径共用同一合并入口）。此前只有 review 状态/版本号/日志有合并策略，清单键
+  是整值覆盖：两标签各只看到部分 hash 时，后到者会把先到者的 hash 从清单抹掉（state 在、清单缺 → 迁移/备份
+  按清单枚举时漏题）。
+- 文档：`docs/STORAGE.md` §9.6（多标签按键合并表）、`docs/ARCHITECTURE.md` §5（`QB.ReviewMerge`）、
+  `docs/DATABASE.md`（reviewMeta 合并语义）、`docs/TESTING.md`、`docs/BENCH.md`（首屏 334.9 KB gzip / 939.6 KB raw）。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（HEAD=`fbca263` 旧码 + 同一测试）**：`node scripts/storage.test.mjs` → **40 通过 / 8 失败，exit 1**：
+  `keys 1+1 → 1`（整值覆盖）、缺少另一标签 hash、`count=1`、`stateKeys` 只含本地 hash；非法载荷时
+  `keys` 被 `"bad"` 覆盖成 3 项、`count` 被 9 覆盖。
+- **双标签复现方式（实际执行，非静态推断）**：`scripts/storage.test.mjs` C008 段创建**两个独立 harness**
+  （A/B 各自一整套模块状态）共享同一底层 localStorage Map：A 走真实 `QB.ReviewStore.writeMeta(bank,['h1'])`
+  + `forceSync()`，捕获写入瞬间的原始值作为 storage 事件载荷 → B 先 `writeMeta(bank,['h2'])` → 向 B 投递 A 的
+  事件载荷 → 断言 B 清单并集 2 项、`count=2`、`stateKeys` 2 项。**未在真实浏览器双标签手工复现**
+  （无浏览器自动化依赖）；真实双标签步骤：两个标签打开同一题库 → 各自评分一道不同题 → 任一标签控制台读
+  `qb:user:reviewMeta:<bankId>`（修复前后写者覆盖、只剩 1 个 hash；修复后两个）。
+- **绿（本提交）**：同一命令 **48 / 48，exit 0**（新增 9 断言）；`test-all` → **31 运行项 / 4917 断言 / 失败 0**；
+  `docs-check --static` 全部一致（基线 `--write`：断言 4908→4917、首屏 334.4→334.9 KB gzip / 938.3→939.6 KB raw）。
+
+**遗留 / 风险**
+- 合并只做并集：若某标签**删除**了某 hash 的 state，而另一标签的旧清单仍含该 hash，并集会把已删 hash 短暂保留
+  （`stateKeys` 多一项、读状态为空），由下一次整表重写收敛；不影响已有进度。
+- 真实浏览器双标签并发（尤其 IDB `BroadcastChannel` 路径）未实机验证；测试覆盖的是模块级双实例。
+
 ### fix(storage): IDB 回落可见化 + 保留可恢复标记 + 回落会话写入即降级（C007）
 
 **Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录）

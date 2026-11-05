@@ -45,7 +45,7 @@ users 1 ──<（wrong_questions / favorites / attempts / sessions）   # 多�
 | `qb:user:wrong:<bankId>` | `wrong_questions` | `{questionKey, wrongCount, lastAt}` |
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
 | `qb:user:review:<bankId>:<hash>` | `review_schedule` | **schema v5 主布局**：单题一项 `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}`，评分只写改动键（O(改动数)） |
-| `qb:user:reviewMeta:<bankId>` | `review_schedule`（清单） | `{v:3, count, keys:[...]}`；per-hash 键集合，供枚举/统计/清理（写入路径带内存键集合缓存） |
+| `qb:user:reviewMeta:<bankId>` | `review_schedule`（清单） | `{v:3, count, keys:[...]}`；per-hash 键集合，供枚举/统计/清理；**跨标签按 `keys` 并集合并、`count`=并集长度（C008，合并缺清单即孤儿 hash）** |
 | `qb:user:review:<bankId>` | `review_schedule`（旧整表） | 兼容读：迁移前/迁移中断/旧备份导入；`QB.ReviewStore` 合并旧整表与 per-hash（per 优先），写路径不再产生此键 |
 | `qb:user:reviewRev:<bankId>` | 本地同步元数据 | 单调递增的本地复习版本号（服务端 `review_rev` 的本地对应物）；用于 storage 事件按版本合并与写前重读，不进备份 |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |

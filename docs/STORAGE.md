@@ -96,3 +96,21 @@
 | 想彻底释放 LS 空间 | 迁移后首次启动校验 IDB 完整即**自动** `cleanupLegacyLS`（只保留 BOOTSTRAP_KEYS）；备份弹窗仍可手动触发 | 删除 LS 退路，此后回退只能靠备份 |
 
 回滚需要什么：① 保留的 LS 旧数据或一份全量备份；② 页面刷新后重新 `initStore`；③ 若 LS 空间不足以容纳 IDB 数据，回退会明确失败并保持 IDB（不会静默丢数据）。真实 Edge 配额与近满迁移已用 CDP 真窗口验证（2026-11-03）；真实无痕窗口与多标签 IDB 事务语义仍未实机验证（见 [DATABASE.md](DATABASE.md) §9.4、§9.5）。
+
+### 9.6 多标签并发：按键合并（C008）
+
+`Storage.registerMerge(match, merge)` 是跨标签「不整值覆盖」的唯一挂载点：`storage` 事件（LS）与
+`BroadcastChannel` 写入（IDB）命中匹配键时用 `merge(local, incoming)` 合并。local-adapter 注册：
+
+| 键 | 合并策略 |
+| --- | --- |
+| `user:review:<bankId>`（旧整表） | `ReviewMerge.mergeMaps`：同 hash 取 `last` 大者 |
+| `user:review:<bankId>:<hash>`（per-hash） | 同键按 `last` 合并，不整值覆盖 |
+| `user:reviewRev:<bankId>` | 取 `max` |
+| `user:revlog:<i>` | 按条目 `id` 并集（保留另一标签的追加） |
+| `user:revlogMeta` | `v/last` 取大、`first` 取小、`count` 取大 |
+| **`user:reviewMeta:<bankId>`（C008）** | **`ReviewMerge.mergeMeta`：`keys` 并集，`count` 恒等于并集长度，`v` 取大**——两标签各只看到部分 hash 时，整值覆盖会让另一标签的 hash 变孤儿（state 在、清单缺，迁移/备份按清单枚举漏题） |
+
+`mergeMeta` 对缺字段/非数组载荷视为空，不破坏另一侧有效键；重复事件幂等。回归：`scripts/storage.test.mjs`
+用两个独立 harness 共享同一底层存储（真实走 `ReviewStore.writeMeta`），断言 `keys 1+1→2`、`count=2`、
+`stateKeys` 覆盖双方 hash。
