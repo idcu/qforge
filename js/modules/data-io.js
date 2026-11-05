@@ -225,6 +225,21 @@
         }
       }
     }
+    // C006 容量预检：放不下就当场拒绝，不进入预览、不写任何键。
+    // 预检只是闸门（按题 JSON 长度估算）；真正的保证在 insertMany 的落盘回读 + 回滚。
+    if (QB.Quota && !QB.Quota.canFitQuestions(result.questions)) {
+      const need = QB.Quota.estimateQuestions(result.questions);
+      const remain = QB.Quota.remainingBytes();
+      const limit = QB.Quota.limitBytes();
+      showImportFailure({
+        questions: [],
+        warnings: ['存储空间不足：本次约需 ' + QB.Quota.formatBytes(need)
+          + '，当前可用 ' + QB.Quota.formatBytes(remain)
+          + '（已用 ' + QB.Quota.formatBytes(QB.Quota.usageBytes()) + ' / 上限 ' + QB.Quota.formatBytes(limit)
+          + '）。请先导出备份并删除部分题库后重试。']
+      }, returnFocusTo);
+      return null;
+    }
     const choice = await showPreview(bank, result, presetMode, returnFocusTo);
     if (!choice) return null;
     try {
@@ -232,12 +247,18 @@
         dedupe: QB.CONFIG.DEDUPE_ON_IMPORT,
         mode: choice.mode
       });
+      // 题目已落盘（insertMany 内已 flush + 回读校验）。来源/题包登记是**尽力而为**：
+      // 它们失败不能把已成功的导入说成失败，更不能反向删题。
       if (source) await stampSource(bank, source);
-      if (manifest) QB.Package.recordImport(bank.id, manifest);
+      if (manifest) {
+        try { QB.Package.recordImport(bank.id, manifest); } catch (e) {
+          if (global.console) console.warn('[导入] 题包登记失败（不影响题目）：', e);
+        }
+      }
       UI.toast('导入完成：新增 ' + res.inserted + ' · 重复跳过 ' + res.duplicates + ' · 库内共 ' + res.total, 'ok');
       return res;
     } catch (e) {
-      UI.toast('写入失败：' + e.message, 'err');
+      UI.toast('写入失败（已回滚到导入前状态）：' + e.message, 'err');
       return null;
     }
   }

@@ -231,7 +231,14 @@
 
     /** 清除某库全部分片与清单（含旧单 blob 与高位孤儿分片），删库级联/重写用 */
     clear(bankId) {
-      const idxs = new Set(QuestionShards.indexesOf(bankId));
+      const idxs = new Set();
+      try {
+        QuestionShards.indexesOf(bankId).forEach((i) => idxs.add(i));
+      } catch (_) {
+        // C006：导入写盘失败时待写仍在队列里，keys() 会强制 flush 并再次抛配额错。
+        // 此路径下必须仍能清掉本次写入的分片（否则回滚只清缓存、读回仍是半份数据），
+        // 因此降级为「清单 sizes」；清不到的孤儿分片由下一次重写/compact 收敛。
+      }
       const meta = QuestionShards.metaOf(bankId);
       if (meta) meta.sizes.forEach((_, i) => idxs.add(i));
       idxs.forEach((i) => Storage.remove(K.questionShard(bankId, i)));
@@ -474,7 +481,10 @@
       const dedupe = options.dedupe !== false;
       const mode = options.mode || 'merge'; // 'merge' | 'overwrite'
 
-      const existing = mode === 'overwrite' ? [] : QuestionShards.readAll(bankId);
+      // 回滚基线（C006）：merge 用于去重；overwrite 只用于失败回滚。
+      // 失败时必须把库恢复到「导入前」状态，不允许半写。
+      const before = QuestionShards.readAll(bankId);
+      const existing = mode === 'overwrite' ? [] : before;
       const seen = new Set(existing.map((q) => q.contentHash));
 
       let inserted = 0;
@@ -497,13 +507,41 @@
         inserted++;
       });
 
-      if (mode === 'overwrite') {
-        QuestionShards.writeAll(bankId, fresh);
-      } else if (fresh.length) {
-        QuestionShards.append(bankId, fresh);
+      const total = mode === 'overwrite' ? fresh.length : existing.length + fresh.length;
+
+      // 落盘确认（C006）：LS 模式的 set 是「缓存先行、写盘失败经 onError 通知」的，
+      // IDB 模式是异步入队——两条路径都必须显式确认，否则 toast 的「成功」可能只是内存幻觉。
+      const persist = () => {
+        if (QB.Storage && typeof QB.Storage._isIdb === 'function' && QB.Storage._isIdb()) {
+          return QB.Storage.flush();
+        }
+        if (QB.Storage && typeof QB.Storage.forceSync === 'function') QB.Storage.forceSync();
+        return Promise.resolve();
+      };
+
+      try {
+        if (mode === 'overwrite') {
+          QuestionShards.writeAll(bankId, fresh);
+        } else if (fresh.length) {
+          QuestionShards.append(bankId, fresh);
+        }
+        await persist();
+        // 落盘回读：写入被静默丢弃 / 部分丢失时，这里必须发现并回滚
+        const actual = QuestionShards.readAll(bankId).length;
+        if (actual !== total) {
+          throw new Error('导入落盘校验失败：期望 ' + total + ' 题，回读 ' + actual + ' 题');
+        }
+      } catch (e) {
+        try {
+          QuestionShards.writeAll(bankId, before);
+          // 回滚也要真的落盘：否则「回滚成功」同样只是内存幻觉
+          await persist();
+        } catch (e2) {
+          // 回滚失败：保留原始错误（上层据此报错），且绝不 bumpRev 假装成功
+        }
+        throw e;
       }
       if (mode === 'overwrite' || fresh.length) bumpRev();
-      const total = mode === 'overwrite' ? fresh.length : existing.length + fresh.length;
       return { inserted, duplicates, skipped, total };
     },
 

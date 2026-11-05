@@ -16,6 +16,7 @@ const MODULES = [
   'js/utils/time.js',
   'js/utils/rich-text.js',
   'js/utils/storage.js',
+  'js/utils/quota.js',
   'js/utils/fnv.js',
   'js/utils/random.js',
   'js/utils/shuffle.js',

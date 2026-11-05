@@ -64,9 +64,12 @@
          · DOCX（zip→段落行）/ Markdown（清洗行）→ LineParser.parseLines → blocksToQuestions → Adapters.toStandard
      → Adapters.toStandard（统一标准模型）
      → validateQuestions（总数/各题型/警告/文件内重复）
+     → QB.Quota.canFitQuestions（容量预检：放不下直接拒绝，0 次写，不进入预览）
      → 预览弹窗（显示统计，选目标题库 + 合并/覆盖）
      → QuestionRepo.insertMany(bankId, questions, {mode, dedupe})
-     → Storage 防抖落盘
+         · 变更前快照 → 写分片 → persist（LS forceSync / IDB await flush）
+         · 落盘回读校验（题数与期望不一致 = 失败）→ 失败时 writeAll(快照) + persist 回滚
+     → 成功后 bumpRev；Storage 防抖落盘
 0 题 → DataIO.importFailureText(result)（migration.reason / 首条 warning 唯一文案）
       → 展示容器统一 `.import-error`（css/style.css 唯一定义：danger 前景/弱底/边框/圆角/pre-wrap）
 ```
@@ -140,6 +143,7 @@ Exporters.openFlow({kind, bank, trigger})   // trigger 可选：异步收集后�
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
 | `QB.Importers.runImport(input)` | **唯一解析入口**：按扩展名 + `priority`/`sniff` 选解析器并合并校验警告；文件/拖拽/URL/粘贴（虚拟文件名）一律经此，`data-io` 不维护第二条解析链 | data-io（四个入口）、测试 |
 | `QB.DataIO.importFailureText(result)` | **0 题拒绝原因唯一文案**：`migration.supported=false.reason` 优先、否则首条 warning，互相包含取更长 | `commitImport` 错误框、来源弹窗内联错误、Node 断言 |
+| `QB.Quota` | **容量口径唯一实现**：`limitBytes/usageBytes/remainingBytes/estimateQuestions/canFitQuestions/estimateAsync/formatBytes`；IDB 后端视为无上限，LS 上限读 `CONFIG.STORAGE.QUOTA_BYTES`（含分片清单开销估算） | 导入预检（`commitImport`）、容量诊断 UI、Node 断言 |
 | `Adapters.mergeAnalysisPieces/appendAnalysis/matchAnalysisMarker` | 解析类多列/多标记（解析/解题思路/考点/释义）合并为单一 `analysis`（唯一实现） | adapters（JSON/表格）、line-parser（DOCX/Markdown/粘贴） |
 | `LineParser.parseLines/blocksToQuestions` | 文本行（DOCX 段落 / Markdown 行）→ 题目块 → 标准题目 | docx-importer、md-importer |
 | `QB.SqliteReader.open(source)` | 只读打开 SQLite 字节（`{pageSize, encoding, pageCount, freelist, tables, hasTable, readTable}`）；唯一实现 | `scripts/probe-apkg.mjs`、anki-importer |

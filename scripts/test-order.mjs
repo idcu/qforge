@@ -29,6 +29,7 @@ export const ORDER = [
   'migrate.test.mjs',
   'importers-anki.test.mjs',
   'importers-quizlet.test.mjs',
+  'import-commit.test.mjs',
   'shard.test.mjs',
   'contract.test.mjs',
   'sched.test.mjs',

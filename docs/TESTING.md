@@ -8,12 +8,12 @@
 > 且索引表与 `docs/changelog/` 下的卷**双向一致**（新卷忘了加索引、索引写了却没文件，都会红）。
 > 这份档案只增不改，是唯一"拆分做过一次、但会悄悄长回去"的文档。
 
-> **装配顺序也算一条判据**：这个项目没有打包器，`index.html` 里 81 个 `<script>` 的**顺序就是依赖图**。
+> **装配顺序也算一条判据**：这个项目没有打包器，`index.html` 里 82 个 `<script>` 的**顺序就是依赖图**。
 > `node scripts/check-modules.mjs` 守四条：入口 `js/app.js` 最后、`js/config.js` 最先、每个 `js/**`
 > 都被引用（`js/workers/` 除外）、引用的文件都存在。顺序错不会在启动时报错，
 > 只在某个功能第一次用到时才 `undefined` —— 这类事故最难复现，所以值得一条判据。
 
-合计 **30 个运行项（冒烟 + 29 套件）**：每个套件单独 spawn，末尾打印「通过: N」，本文表格里的数字就是它。
+合计 **31 个运行项（冒烟 + 30 套件）**：每个套件单独 spawn，末尾打印「通过: N」，本文表格里的数字就是它。
 
 **总闸判据（C001）**：`node scripts/test-all.mjs` 不再只看退出码，而是逐套件解析「通过: N」并与
 `scripts/docs-baseline.json` 的计数比对——计数为 0、解析不到计数、与基线不一致、合计不等于基线总数，
@@ -63,8 +63,9 @@
 | `scripts/api-backend.test.mjs` | **310** | **参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；**CORS 默认关闭、显式放行来源预检 204、未放行不带 ACAO**；**content_hash 按合并后完整题目重算、仅改解析不变**；**筛选查询不污染 count 缓存**；**historyAdd 返回形状与 local 一致**、**historyUpdate PATCH（保留 id/created_at、未知 id 404、api 回写得分，6 项）**；**bank.sched 创建/保存/回读**；**题目与题库元数据乐观并发（13+13 项）：base_updated_at 匹配成功/updated_at 单调递增/过期 409 CONFLICT+current/冲突不覆盖；api 适配器 baseUpdatedAt → 409 错误码与消息**；**复习进度多端冲突（12 项）：服务端 `review_rev` 初始 0、PUT 后 +1、`base_rev` 匹配成功、过期 409 CONFLICT + current 且不覆盖；客户端 409 后按 `last` 合并重试一次（merged=true、双方键保留、服务端 rev 递增、revlog 只 1 条）**；**B1 增量写入与 B3 revlog 版本（12 项）：PATCH 只合并增量键、其余键保留、`null` 删除、`rev` 递增、缺 `items` 400、`base_rev` 过期 409 返回 current/rev、本地缓存与 `revlog.revision()` 同步**；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、**`count`/`reviews` 按库缓存命中与写·级联·`backup.import` 后失效（5 项）**、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错（注入 fetch 走**真实网络失败**路径）；**跨布局整链 E2E（33 项）：本地模式造数 → 本地布局备份 → api 模式 `applyBackup` 经 `localToServer` + 真实 `POST /api/backup?mode=replace` → 直读 `GET /api/backup` 核对接管后端口径（snake_case、按库归集、id 保留）→ 再恢复到另一 local 上下文，题库/题目/错题/历史/revlog/权重逐项等价（闭环）**；**可选 Bearer 令牌鉴权（12 项）**；**静态安全头（6 项）**；**作答热路径（16 项）：首次作答 4 请求（含按库读取调度设置，后续缓存命中）、热态 PATCH 1 请求、gradeMany 1 请求；错题额外 1；权重 write 后读缓存命中、remove 后重新 GET；revlog 非数组 400 BAD_REQUEST**；**按 IP 限流（24 项）：窗口限额/429+Retry-After/静态与 health 不受限/窗口重置/trustProxy 分桶/rateLimit:false 关闭，适配器 429 诚实抛出** |
 | `scripts/importers-anki.test.mjs` | **148** | 最小 SQLite 只读（页大小/UTF-16LE/freelist/被删记录/内部页递归/overflow 80KB/rowid 别名/`--` 注释剥离/坏库）、`.apkg` 包识别（Legacy1/Legacy2 取 anki21/缺 anki21 回退/Latest 拒绝并指引导出旧版/损坏 ZIP）、note 粒度导入（Front/Back 字段名映射、judge/single/essay 判定、`1`/`0` 不误判、cloze 降级 essay、媒体入库与缺失占位、多卡丢失项警告、HTML 剥离）、Legacy1/UTF-16/深分页全量、落库去重与 v3 contentHash、首次评分 revlog 写入；**D2：0 题拒绝原因在 UI 可见（.anki21b Legacy 指引 / 坏 SQLite 原因，不再只提示「未解析出任何题目」），错误弹窗挂 `.import-error` 类且无内联颜色** |
 | `scripts/importers-quizlet.test.mjs` | **75** | 分隔符自动识别（Tab/逗号/分号/竖线）与显式自定义覆盖、`Term/Definition` 表头跳过、非两列/空 term/重复行跳过与警告、空文件明确报错、全部落 essay（term 题干 + definition 参考答案）、明确「无选项/无图片/无在线进度」提示、与既有 CSV 的路由边界（表头 CSV 不被劫持）；**D1：粘贴入口复用注册表（Tab/逗号/全角逗号与文件入口结果全等，Markdown/JSON/无法识别分支不回归）** |
+| `scripts/import-commit.test.mjs` | **27** | **C006 导入事务（P1-02）**：容量预检拒绝时 0 次写且原因可见（先于预览）、写入中途超配额回滚到导入前（题数与占用字符数复原、无「导入完成」toast）、正常导入落盘回读一致与内容去重、四条入口共用 `commitImport` 且 `data-io` 只有 1 处 `insertMany`、IDB `flush` 失败不报成功并回滚 |
 | `scripts/a11y.test.mjs` | **101** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、全仓禁止 tabindex>0、模态焦点进入/异步回位链路/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖、**14 项视觉结构回归（含 `.import-error` 10 项：规则唯一、danger 前景/弱底/边框/圆角/换行均为语义令牌、无硬编码色值、两处失败弹窗共用该类且 JS 无内联样式）** |
-| **合计** | **4853 / 4853 通过 · 30 个运行项**（2026-11-03 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+| **合计** | **4880 / 4880 通过 · 31 个运行项**（2026-11-06 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
 
 **真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**：
 - 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。

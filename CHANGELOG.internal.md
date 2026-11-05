@@ -9,6 +9,42 @@
 
 ## 最新记录
 
+### fix(import): 导入容量预检 + 落盘确认 + 失败回滚（C006）
+
+**Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录，与 P0 首批同口径）
+
+**核心改动**
+- 新增公共抽象 `js/utils/quota.js`（`QB.Quota`，容量口径唯一实现）：`limitBytes`（IDB=∞ / LS 读
+  `CONFIG.STORAGE.QUOTA_BYTES`）、`usageBytes/remainingBytes`、`estimateQuestions`（题目 JSON 字节 + 分片清单开销）、
+  `canFitQuestions`、`estimateAsync`（`navigator.storage.estimate`）、`formatBytes`。注册到 `index.html`、
+  `scripts/_harness.mjs` MODULES、`contracts/modules.json`（82 模块）。
+- `js/modules/data-io.js::commitImport`：预览前容量预检，放不下 → **0 次写** + 弹窗「存储空间不足：本次约需
+  …，当前可用 …（已用 … / 上限 …）」，不进入预览；错误 toast 改为「写入失败（已回滚到导入前状态）：原因」；
+  metadata（来源/题包记录）失败不再影响导入结果。
+- `js/data/local-adapter.js::insertMany`：变更前快照 → 写分片 → `persist()`（LS `forceSync()` 抛配额错 /
+  IDB `await Storage.flush()`）→ 落盘回读题数校验；失败用快照 `writeAll` 回滚并再次 `persist()`，随后抛原始错误，
+  不 `bumpRev()`。`QuestionShards.clear` 在 `keys()` 因待写 flush 抛错时降级按清单 sizes 清理（保证回滚不是内存幻觉）。
+- 新增套件 `scripts/import-commit.test.mjs`（27 断言，进 `ORDER`）；文档：`docs/ARCHITECTURE.md` §4.1/§5、
+  `docs/STORAGE.md` §9.1、`docs/user-guide.md` §3。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（HEAD=0a16424 旧代码，同一测试）**：`node scripts/import-commit.test.mjs` →
+  **通过 14 / 失败 13，exit 1**。关键实测：
+  ① 配额 40000 字节下导入 600 题：旧码无预检 → 直接写入 **600 题**、返回非 null、无「存储空间不足」弹窗；
+  ② 中途超配额：旧码返回成功、库内 **600→1100 题**、出现「导入完成」toast（写盘失败被静默吞掉，只剩内存幻觉）；
+  ③ IDB flush 失败：旧码仍返回成功、库内多出 **40 题**、无「写入失败」提示。
+- **绿（本提交）**：同一命令 **通过 27 / 失败 0，exit 0**：预检拒绝 0 次写且先于预览；中途超配额后题数 500→0、
+  占用字符数回到 140（无残片）；正常导入回读 30/30、重复导入 0 新增/30 重复；`data-io` 仅 1 处 `insertMany`、
+  4 个入口共用（`commitImport` 调用 5 处）；IDB flush 失败时 flush 被 await 4 次且库内 0 题。
+- `node scripts/test-all.mjs` → **31 运行项 / 4880 断言 / 失败 0**；`node scripts/docs-check.mjs --static` → 全部一致
+  （基线 `--write` 刷新：runItems 30→31、totalAssertions 4853→4880、首屏 89→90 文件 / 81→82 内联 js /
+  329.7→332.9 KB gzip / 927.9→934.7 KB raw）。
+
+**遗留 / 风险**
+- Node 无真实浏览器配额/隐私模式语义：测试用 harness 按字符计配额复现「中途耗尽」，**真机配额边界未验证**。
+- `QB.Quota.estimateQuestions` 为估算（JSON 字节 ×2 + 清单开销），预检可能偏保守；IDB 后端按设计不设上限。
+- 回滚时若 `keys()` 不可用（待写 flush 抛错），孤儿分片由下一次重写/compact 收敛，回滚后不保证物理零残留。
+
 ### test(gate): bench 默认带 --assert，verify 纳入性能与纪律（C005）
 
 **Commit Hash**：`0cb4c0d`
