@@ -9,6 +9,29 @@
 
 ## 最新记录
 
+### test(gate): test-all 校验逐套件断言数（C001）
+
+**核心改动**
+- `scripts/test-all.mjs` 从「只看退出码」升级为五项判据：套件文件存在、exit=0、末尾「通过: N」可解析且非 0、
+  逐套件与 `scripts/docs-baseline.json` 计数一致、合计等于基线 `totalAssertions`。任一不满足 exit 1。
+- 输出方式由 `stdio:'inherit'` 改为 `pipe + 回放`（保留完整输出，同时拿到计数）；解析失败判失败，不当作跳过。
+- 新增 `--selftest`：注入「通过: 0 且 exit 0」的临时假套件，门禁拦下则 exit 0、放行则 exit 1。
+- 文档：`docs/TESTING.md`（总闸判据与 `--selftest`）、`docs/DEVELOPMENT.md` §2（本地总闸口径）。
+
+**验证数据（同机 Asia/Shanghai）**
+- **红（旧码）**：临时把 `scripts/xml-lite.test.mjs` 替换为只打印「通过: 0，失败: 0」且 exit 0 的假套件 →
+  旧运行器输出「运行项: 30，失败: 0，耗时: 32.3s」「全部套件通过 ✅」，**exit 0**（空跑假绿复现）。
+- **绿（新码）**：同一注入 → **exit 1**，输出「xml-lite.test.mjs（断言数为 0（空跑）」「断言合计 4814 ≠ 基线 4853」；
+  `git checkout` 还原源文件后 `git status` 无 diff。
+- `node scripts/test-all.mjs --selftest` → exit 0，打印「已拦截：断言数为 0（空跑）」。
+- 正常全量：`node scripts/test-all.mjs` → **30 运行项 / 4853 断言 / 失败 0 / 31.7s / exit 0**，逐套件计数与基线 30/30 一致。
+- `node scripts/docs-check.mjs --static` → 仅剩 `docs/BENCH.md:73` 既有漂移（329.8 vs 329.7），本任务未新增漂移（由 C004 修）。
+
+**遗留 / 风险**
+- 自引用 commit hash 无法写进自身提交（内容哈希固定点）：本条目与该提交同一 commit，hash 以 `git log -1` 为准；
+  若要求在文件内回填，需追加一个 docs 提交（待确认）。
+- 计数解析沿用各套件末尾「通过: N」的既有约定；未来新增套件若换输出格式，会被判「未输出计数」而红（有意设计）。
+
 ### docs(arch): 文档库按规模与读者场景重切
 
 **核心改动**

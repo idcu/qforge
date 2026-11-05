@@ -88,6 +88,11 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 
 > 单独成文：[TESTING.md](TESTING.md) —— 逐套件断言数与运行项数、跑法与时区矩阵。
 
+**本地总闸**：`node scripts/test-all.mjs` 逐套件解析「通过: N」并与 `scripts/docs-baseline.json` 比对，
+计数为 0、解析失败、与基线不一致、合计不等于基线总数都会 exit 1（不再只看退出码）。
+新增断言后同 commit 运行 `node scripts/docs-check.mjs --write` 刷新基线；`--selftest` 用「通过: 0」假套件
+证明门禁会失败。CI 侧覆盖口径见 §4（当前仍为逐套件步骤，C002 改为同一命令）。
+
 ## 3. 性能打点与门禁
 
 > 单独成文：[BENCH.md](BENCH.md) —— 性能门禁、容量档位、heap 红线与实测读数。
