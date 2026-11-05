@@ -5,11 +5,15 @@
 > **读数口径**：本文里的数字由 `scripts/docs-check.mjs` 复算校验（它同时读 README / DEVELOPMENT / 本文）。
 
 ```bash
-node --expose-gc scripts/bench.mjs   # 每轮采样 10 次取中位数，输出耗时与 heapUsed（--expose-gc 令 heapUsed 稳定可复核）
-                                     # SRS 相对门禁：11 轮×1000 / 11 轮×200，判定量=同轮标定比值（p50 仅同机参考，见 3-B）
+npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，55 项）
+npm run bench:observe                        # 只观测不判定（记录轮次/容量读数用）
 node --expose-gc scripts/bench.mjs --assert   # 性能门禁：55 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
 node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
+
+> **默认即门禁（C005）**：`npm run bench` 曾只观测、不判定，且 `npm run verify` 不含 bench——
+> 用 `QF_BENCH_INJECT_SLOW=0.1` 注入 10% 慢化后，旧 `npm run bench` 仍 exit 0（仅 `--assert` 才退 1）。
+> 现在 `bench` 直接带 `--assert`，`verify` 也包含它；只想看读数用 `bench:observe`。
 
 > **`--expose-gc` 是门禁前提**：不带该参数时 `heapUsed` 增量含未回收垃圾，`heapUsed ≤ 40MB` 门禁不可信——
 > 同一基线 `740512e` 的独立 worktree 实测 **91.07MB**（同样超限），并非代码回归。CI（`.github/workflows/test.yml`）

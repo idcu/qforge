@@ -9,6 +9,30 @@
 
 ## 最新记录
 
+### test(gate): bench 默认带 --assert，verify 纳入性能与纪律（C005）
+
+**核心改动**
+- `package.json`：`bench` → `node --expose-gc scripts/bench.mjs --assert`（默认即门禁，55 项）；新增 `bench:observe`
+  保留只观测模式；新增 `verify:fast`（原 verify 内容 + `check-ci-coverage`：check-ngm → check-modules →
+  check-changelog → check-deletions → docs-links → check-ci-coverage → test-all → docs-check --static）；
+  `verify` = `verify:fast` + `bench` + `check-discipline --strict`。
+- 文档：`docs/BENCH.md` §1 命令块（默认即门禁 + `bench:observe` + 历史缺陷说明）、`docs/DEVELOPMENT.md` §4（本地全量门禁口径）。
+
+**验证数据（同机 Asia/Shanghai）**
+- **红（旧 scripts）**：`QF_BENCH_INJECT_SLOW=0.1 node --expose-gc scripts/bench.mjs`（旧 `npm run bench` 等价命令）→
+  **exit 0**（只观测不判定）；同一注入加 `--assert` → exit 1（`grade` ratio 2.97 > 2.90、`gradeMany` 5.70 > 5.35）。
+  旧 `verify` 链（HEAD 版）不含 bench/discipline，因此这条慢化在旧全量门禁里不可见。
+- **绿（新 scripts）**：`npm run bench` → **55 个 ✓ / exit 0**（「性能门禁全部通过 ✅」）；
+  `QF_BENCH_INJECT_SLOW=0.1 npm run bench` → **exit 1**（ratio 2.97 / 5.52 超限）。
+- `npm run verify` → **exit 0**：verify:fast 全链通过（check-ngm 正常、check-ci-coverage 30 项、test-all 30/4853、
+  docs-check --static 全部一致）+ bench 55 项 + discipline「12/12 项具备 → L4」。
+- `node scripts/check-discipline.mjs --strict` → exit 0（CI 命令 11/12 可在本地命令/文档命中）。
+
+**遗留 / 风险**
+- `verify` 变慢（多一轮 bench，D9 已接受），故保留 `verify:fast`；文档写清两者差异。
+- 注入慢化负例为手工执行（未固化为 CI 步骤）；CI 侧仍以真实 `bench --assert` 判定。
+- 自引用 commit hash 无法写入自身提交，hash 以 `git log -1` 为准。
+
 ### fix(gate): docs-check 拒绝「删数字 / 改数字 / 改基线」三类静默绿（C004）
 
 **核心改动**

@@ -116,6 +116,8 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 - 已覆盖的复习设置弹窗（三档宽度）：弹窗内容 `scrollWidth == clientWidth`；11 个控件（`#sched-fuzz`、`#sched-fuzzmax`、`#sched-ed0..6`、`#sched-leech-action`、`#sched-leech`）实际点击矩形 ≥44×44（复选框量包裹 label）；复选框 `Space`、下拉 `↓` 可切换；`Esc` 后焦点回位。
 - **未覆盖**：拖拽导入（无稳定可聚焦触发元素，`activeElement` 为 `BODY` 时不回焦）；`backup.js` 恢复确认等「外层弹窗内再开内层弹窗」只验证了 `openModal` 保留外层入口的源码约定，未做真机 Esc 断言；`confirmDialog` 在无弹窗的异步回调中调用；`SyncDAV` 弹窗；键盘操作（仅复习设置弹窗做了真机断言：Tab 循环、复选框 Space、下拉 ↓）；14 份渲染快照之外的动态题型/材料题子问。新增弹窗或入口时必须先补静态断言，再按需补真机用例。
 
+**本地全量门禁**：`npm run verify` = `npm run verify:fast`（check-ngm → check-modules → check-changelog → check-deletions → docs-links → check-ci-coverage → test-all → docs-check --static）→ `npm run bench`（默认带 `--assert`）→ `node scripts/check-discipline.mjs --strict`。只想快速回归用 `npm run verify:fast`（不含性能与纪律，省一轮 bench）。历史缺陷：`bench` 曾不带 `--assert`、`verify` 也不含 bench/discipline，注入 10% 慢化时 `npm run verify` 仍可全绿。
+
 ## 5. 扩展指南（最小改动路径）
 
 ### 5.1 加题型（以「配伍题」为例）
