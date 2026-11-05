@@ -91,12 +91,14 @@ const MODULES = [
 /**
  * @param {string} qbDir 工程根目录（含 js/ 的目录绝对路径）
  * @param {{raw?:Map<string,string>, indexedDB?:Object, BroadcastChannel?:Function,
- *   quotaChars?:number}} [opts]
+ *   quotaChars?:number, storageEstimate?:() => {usage:number, quota:number}}} [opts]
  *   raw：共享底层 localStorage 存储（多标签测试用；两个 harness 传入同一 Map 即模拟两个
  *     标签共享磁盘，各自拥有独立的 Storage 内存缓存）。
  *   indexedDB：注入 IDB 工厂（默认无，模拟不支持 IDB 的环境；测试用
  *     `scripts/lib/idb-memory.mjs` 的 createMemoryIDB）。多个 harness 传同一工厂 = 同一 IDB。
  *   BroadcastChannel：注入跨标签通道实现（默认无）。
+ *   storageEstimate：注入 `navigator.storage.estimate()` 替身（模拟浏览器引擎侧统计；
+ *     不注入则 `QB.Quota.refresh` 在 IDB 下走全量估算回落路径）。
  *   quotaChars：LocalStorage 配额替身（按 `key.length + value.length + 2` 计，超限抛
  *     `QuotaExceededError`；不传则无上限，保持既有测试语义）。
  */
@@ -174,6 +176,12 @@ export async function createHarness(qbDir, opts) {
   window.window = window;
   if (o.indexedDB) window.indexedDB = o.indexedDB;
   if (o.BroadcastChannel) window.BroadcastChannel = o.BroadcastChannel;
+  // navigator.storage.estimate 替身：浏览器真实实现由引擎统计站点占用（应用侧零扫描）。
+  // Node 无该 API，若不注入，QB.Quota.refresh 会走「全量 JSON.stringify」回落路径——
+  // 50k 题库会产生 ~39.6MB 大对象垃圾，属于替身口径失真（不是真实浏览器行为）。
+  if (typeof o.storageEstimate === 'function') {
+    window.navigator = { storage: { estimate: async () => o.storageEstimate() } };
+  }
 
   function load(rel) {
     const code = fs.readFileSync(path.join(qbDir, rel), 'utf8');

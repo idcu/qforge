@@ -9,6 +9,44 @@
 
 ## 最新记录
 
+### fix(quota): 修正 C009 峰值口径——estimate 成功即用 usage，50k/IDB 峰值 59.09→0.27MB（C009 补测）
+
+**Commit Hash**：待回填（本次完成后由 `docs(changelog)` 提交补录）
+
+**背景**：`5a2db3c` 的 C009 条目把「进程峰值 +40.52MB」挂账为「按峰值口径未达标」。按「内存超标必须继续改」的硬规矩补测与修正，不复用旧结论。
+
+**根因（实测，不是推断）**
+- 旧 `Quota.refresh()` 的 IDB 分支要求 `estimate` 的 `quota > 0` 才用 `usage`；Node 替身/未知上限返回 `quota=0` 时**退回全量 `usageBytes()`**（遍历整库 + 逐值 `JSON.stringify`）。
+- 诊断（50k/IDB，`--expose-gc`）：refresh 返回后 heap **+39.62MB**，强制 GC 后 **−1.14MB** → 全部是未回收的大对象字符串垃圾（非驻留）；旧 harness 未注入 `navigator.storage`，等于把「浏览器引擎侧统计」误测成「应用侧全量扫描」。Node 24 无 `navigator.storage`，真实浏览器该 API 存在。
+- 渲染侧 P95 超门槛的根因与此无关（旧码每次 render 内联扫描），仍由 `5a2db3c` 的快照修复解决。
+
+**核心改动**
+- `js/utils/quota.js`：`refresh()` 改为 **estimate 成功即用 `usage`**，`quota` 仅决定 `limitBytes`（0 → 上限未知）；仅 estimate 不可用时才全量估算。
+- `scripts/lib/idb-memory.mjs`：对象仓写入时增量维护 `bytes`（值 JSON + 键 + 2，×2，与应用 `usageBytes` 同口径），删除/clear/事务回滚同步维护；新增 `factory.usageBytes()`（估计时零扫描）。
+- `scripts/_harness.mjs`：新增 `storageEstimate` 注入（`window.navigator.storage.estimate`），模拟浏览器引擎侧统计；不注入时保留回落路径用于对照。
+- `scripts/bench.mjs`：C009 夹具改用独立 IDB 工厂 + estimate 注入；采样峰值并新增门禁「首页渲染 50k · IDB 进程峰值（采样）≤ 40MB」（56→57 项）；refresh 期间用 spy 断言全量扫描次数。
+- `scripts/idb.test.mjs`：新增 8 项（estimate 路径零扫描、quota=0 仍用 usage、上限未知、与驱动记账误差 ≤0.1%、删除后同步下降）。
+- 文档：`docs/BENCH.md`（A/B 60 采样、失真证据、57 项）、`docs/STORAGE.md` §9.1、`docs/ARCHITECTURE.md`（Quota 行）、`docs/TESTING.md`（idb 127 / 合计 4941）。
+
+**A/B 实测（同一 50k/IDB 夹具，同机 Node v24.14.0，`--expose-gc`，各 60 次采样）**
+
+| 口径 | median | P95 | max | 进程峰值（采样） | refresh | refresh 内全量扫描 |
+|---|---|---|---|---|---|---|
+| T0 旧码 `29e1db0`（worktree） | 56.326 ms | 62.224 ms | 81.258 ms | **+59.09 MB** | —（无 Quota） | 每次 render 1 次 |
+| T1 新码 · estimate（浏览器真实路径） | 0.009 ms | 0.054 ms | 0.409 ms | **+0.27 MB** | 0.3 ms | **0** |
+| T1 新码 · 无 estimate（回落对照） | 0.009 ms | 0.063 ms | 0.411 ms | +37.08 MB | 53 ms | 1 |
+
+- 门槛判定：**峰值 +0.27MB ≤ 40MB ✓**；P95 0.054ms ≤ 50ms ✓；T1/T0 = 1/6258（median）。
+- 回落路径 +37.08MB 也 ≤40MB，但它是「estimate 不可用」的降级场景，不进渲染；真实浏览器走 estimate。
+- **bench 门禁（本提交实测）**：57/57 ✓ / exit 0；P95 **0.05 ms**；峰值 **0.73 MB**（refresh 0.45ms、全量扫描 0 次）；全局 heapUsed 增量 **2.71MB ≤ 40MB**。
+- **测试**：`idb` **127/127**、`storage` 54/54、`ui-renderer` 207/207；`test-all` **31 运行项 / 4941 断言 / 失败 0**；`docs-check --static` 一致（基线 `--write`：断言 4933→4941、门禁 56→57、首屏 337.2→337.4 KB gzip / 946.2→946.5 KB raw）。
+
+**遗留 / 风险**
+- 真实浏览器 **未实机**验证 `navigator.storage.estimate()` 的配额值与渲染帧时间；`quota=0` 仅为「上限未知」建模。
+- 峰值是**采样口径**（refresh 同步执行，无法在循环内采样）；采样点 = refresh 返回后 + 每次渲染后。
+- 无 estimate 的环境仍有一次性 53ms / +37MB 瞬时垃圾（GC 可回收，且 ≤40MB），不在渲染路径。
+- 增量记账依赖所有写入走 `Storage` 门面；直写 `QB.Store` 会使快照漂移（同类风险见 `5a2db3c` 条目）。
+
 ### perf(ui): 容量统计移出渲染热路径，50k 题库首页 P95 80.63→0.03 ms（C009）
 
 **Commit Hash**：`5a2db3c`
@@ -51,7 +89,7 @@
 - **峰值口径 vs 门禁口径**：计划门槛「heapUsed 增量 ≤40MB」按既有 bench 门禁口径 **2.69MB 通过**；但临时脚本记录的
   **进程峰值 +40.52MB**（`refresh()` 全量估算的一次性瞬时）**略超 40MB 参考线 0.52MB**。该分配只在启动 `refresh()` 出现、
   不在渲染循环内；真实浏览器 IDB 命中 `navigator.storage.estimate()` 时不会走全量扫描（Node 内存驱动无该 API）。
-  **若按峰值口径判定则该项未达标**，如实标注。
+  **若按峰值口径判定则该项未达标**，如实标注。→ **已由上方「C009 补测」条修正**：根因是 `quota=0` 时不走 estimate + harness 未注入 `navigator.storage`，修正后峰值 **+0.27MB** 达标（A/B 各 60 采样）。
 - `refresh()` 是同步全量估算（Node 无 `navigator.storage.estimate`），50k 时占用一次主线程；真实浏览器 IDB **未实机验证**。
 - `Quota.view()` 在 `refresh()` 完成前 `ready=false`，首屏短暂显示「正在计算存储用量…」而非数字（刻意不阻塞）。
 - 增量计数依赖 `Storage.set/remove` 全部走门面；若未来有代码直写 `QB.Store.set`，快照会漂移（`dirty` 只在负值时置位，

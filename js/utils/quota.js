@@ -167,8 +167,11 @@
     let limit = 0;
     if (isIdb()) {
       const est = await estimateAsync();
-      if (est && est.quota > 0) {
-        limit = est.quota;
+      // estimate 成功即用它：quota 为 0/未知只影响上限展示，不代表 usage 不可用。
+      // （C009 复测：旧逻辑要求 quota>0，Node 替身返回 quota=0 时退回全量扫描，
+      // 50k 题库一次 refresh 产生 39.6MB 大对象垃圾、峰值超 40MB；浏览器真实路径不会这样。）
+      if (est) {
+        limit = est.quota > 0 ? est.quota : 0;
         used = est.usage > 0 ? est.usage : usageBytes();
       } else {
         limit = 0;

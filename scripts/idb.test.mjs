@@ -470,6 +470,47 @@ section('新装空库：无任何数据也直接采用 IDB');
   eq(est.backend, 'idb', 'estimate 报告后端 idb');
 }
 
+section('C009：IDB 用量走 navigator.storage.estimate（quota 未知也用它，不回落全量扫描）');
+{
+  const idb = createMemoryIDB();
+  const h = await makeHarness({
+    indexedDB: idb,
+    // 浏览器由引擎统计占用；替身用驱动侧写入时增量字节（估计时零扫描）
+    storageEstimate: () => ({ usage: idb.usageBytes(), quota: 0 })
+  });
+  const QB = h.QB;
+  QB.Store.writeMarker('idb');
+  await QB.Storage.initStore();
+  QB.DB.init();
+  const bank = await QB.DB.banks.create({ name: 'C009 估算库' });
+  const qs = [];
+  for (let i = 0; i < 10; i++) {
+    qs.push({ type: 'single', question: '估算题' + i + '？', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' });
+  }
+  await QB.DB.questions.insertMany(bank.id, qs, { dedupe: false, mode: 'overwrite' });
+  await QB.Storage.flush();
+  eq(QB.Storage._isIdb(), true, 'IDB 后端');
+  const realUsage = QB.Storage.usageBytes;
+  let scans = 0;
+  QB.Storage.usageBytes = function () { scans++; return realUsage.apply(QB.Storage, arguments); };
+  const v = await QB.Quota.refresh();
+  QB.Storage.usageBytes = realUsage;
+  eq(scans, 0, 'refresh 命中 estimate，未触发全量扫描');
+  eq(v.ready, true, '快照就绪');
+  eq(v.limitBytes, null, 'quota=0 → 上限未知（不套用 LS 配额）');
+  ok(v.usedBytes > 0, 'used 取自 estimate（' + v.usedBytes + ' B）');
+  ok(Math.abs(v.usedBytes - idb.usageBytes()) / Math.max(1, idb.usageBytes()) <= 0.001,
+    'estimate 与驱动侧增量记账误差 ≤0.1%（实测 ' +
+    (Math.abs(v.usedBytes - idb.usageBytes()) / Math.max(1, idb.usageBytes()) * 100).toFixed(4) + '%）');
+  // 删除后驱动记账同步下降，再次 refresh 取到新值（无需全量扫描）
+  const before = idb.usageBytes();
+  await QB.DB.questions.remove((await QB.DB.questions.list(bank.id, { limit: 1 })).items[0].id);
+  await QB.Storage.flush();
+  ok(idb.usageBytes() < before, '删除题后驱动记账下降（' + before + ' → ' + idb.usageBytes() + ' B）');
+  const v2 = await QB.Quota.refresh();
+  ok(v2.usedBytes < v.usedBytes, '再次 refresh 取到更小的 used（' + v.usedBytes + ' → ' + v2.usedBytes + ' B）');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

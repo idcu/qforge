@@ -101,8 +101,17 @@ function createStoreMeta(name, options) {
     autoIncrement: !!o.autoIncrement,
     nextId: 1,
     records: new Map(),
-    indexes: new Map()
+    indexes: new Map(),
+    // 按写入时序列化长度增量维护（供 navigator.storage.estimate 替身读取，避免估计时全量扫描）
+    bytes: 0
   };
+}
+
+/** 记录字节口径与应用侧 QB.Storage.usageBytes 一致：值 JSON + 键 + 2，乘 2（UTF-16 近似） */
+function recordBytes(key, value) {
+  let s = '';
+  try { s = JSON.stringify(value) || ''; } catch (_) { s = ''; }
+  return (s.length + String(key).length + 2) * 2;
 }
 
 function createDatabase(name, version, opts) {
@@ -181,15 +190,23 @@ function createTransaction(db, names, mode) {
     const j = journalOf(storeName);
     if (j.has(key)) return;
     const meta = db.stores.get(storeName);
-    j.set(key, meta.records.has(key) ? meta.records.get(key) : MISSING);
+    j.set(key, meta.records.has(key)
+      ? { v: meta.records.get(key), b: recordBytes(key, meta.records.get(key)) }
+      : MISSING);
   }
   function rollback() {
     journal.forEach((entries, storeName) => {
       const meta = db.stores.get(storeName);
       if (!meta) return;
       entries.forEach((prev, key) => {
-        if (prev === MISSING) meta.records.delete(key);
-        else meta.records.set(key, prev);
+        if (prev === MISSING) {
+          if (meta.records.has(key)) meta.bytes -= recordBytes(key, meta.records.get(key));
+          meta.records.delete(key);
+        } else {
+          if (meta.records.has(key)) meta.bytes -= recordBytes(key, meta.records.get(key));
+          meta.records.set(key, prev.v);
+          meta.bytes += prev.b;
+        }
       });
     });
   }
@@ -255,14 +272,15 @@ function createTransaction(db, names, mode) {
       delete(key) {
         return request((req) => {
           remember(storeName, key);
-          meta.records.delete(key);
+          if (meta.records.has(key)) { meta.bytes -= recordBytes(key, meta.records.get(key)); meta.records.delete(key); }
           fireSuccess(req, undefined);
         });
       },
       clear() {
         return request((req) => {
-          meta.records.forEach((_, k) => remember(storeName, k));
+          meta.records.forEach((v, k) => remember(storeName, k));
           meta.records.clear();
+          meta.bytes = 0;
           fireSuccess(req, undefined);
         });
       },
@@ -316,7 +334,9 @@ function createTransaction(db, names, mode) {
         if (obj && typeof obj === 'object') obj[last] = k;
       }
       remember(storeName, k);
+      if (meta.records.has(k)) meta.bytes -= recordBytes(k, meta.records.get(k));
       meta.records.set(k, stored);
+      meta.bytes += recordBytes(k, stored);
       return k;
     }
     function readAll(query) {
@@ -345,6 +365,16 @@ export function createMemoryIDB(opts) {
   const o = opts || {};
   const databases = new Map();
   const factory = {
+    /**
+     * 当前库内记录的字节估算（写入时增量维护，估计时零扫描）。
+     * 供测试 harness 的 `navigator.storage.estimate` 替身读取；口径与应用
+     * `QB.Storage.usageBytes` 一致（值 JSON + 键 + 2，乘 2），不代表浏览器真实配额占用。
+     */
+    usageBytes() {
+      let total = 0;
+      databases.forEach((db) => db.stores.forEach((meta) => { total += meta.bytes; }));
+      return total;
+    },
     open(name, version) {
       const req = makeRequest();
       const v = version == null ? 1 : Number(version);

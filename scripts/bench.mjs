@@ -1099,11 +1099,20 @@ QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
 /* ---------- 12d. 首页渲染热路径（C009）：50k 题库 / IDB 后端 ----------
  * 旧实现 renderStorageHealth 每次渲染都调 Storage.usageBytes()：遍历整库 + JSON.stringify。
  * 这里先建 50k 真题库并做一次 Quota 基线（启动只做一次），再量渲染本身。
- * T0（旧码同夹具）与 T1 对比、P95 见 CHANGELOG.internal.md C009。
+ * T0（旧码同夹具）与 T1 对比、P95/峰值见 CHANGELOG.internal.md C009。
+ * navigator.storage.estimate 替身由 IDB 驱动写入时增量记账（估计时零扫描），模拟浏览器引擎侧统计；
+ * 不注入会让 refresh 走全量 JSON.stringify 回落路径（Node 替身口径失真，见 2026-11-06 C009 复测）。
  */
+let c009PeakMb = 0;
+let c009RefreshMs = 0;
+let c009UsageCalls = 0;
 {
   // 独立 IDB harness（主 harness 是 LS，不切换它，避免污染后续/报告口径）
-  const h = await createHarness(QB_DIR, { indexedDB: createMemoryIDB() });
+  const c009Idb = createMemoryIDB();
+  const h = await createHarness(QB_DIR, {
+    indexedDB: c009Idb,
+    storageEstimate: () => ({ usage: c009Idb.usageBytes(), quota: 0 })
+  });
   h.window.location = globalThis.location;
   new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(h.window, h.window);
   const HQ = h.QB;
@@ -1124,14 +1133,25 @@ QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
   const writeMs = Number(process.hrtime.bigint() - t0) / 1e6;
   bestEffortGc();
   const c009Heap0 = process.memoryUsage().heapUsed;
+  // refresh 走 estimate 路径：断言它不做全量扫描（真实浏览器由引擎统计占用）
+  const realUsage = HQ.Storage.usageBytes;
+  HQ.Storage.usageBytes = function () { c009UsageCalls++; return realUsage.apply(HQ.Storage, arguments); };
+  const tR = process.hrtime.bigint();
   await HQ.Quota.refresh(); // 基线只算一次（真实启动路径同此）
+  c009RefreshMs = Number(process.hrtime.bigint() - tR) / 1e6;
+  HQ.Storage.usageBytes = realUsage;
+  let peak = process.memoryUsage().heapUsed;
   const c009Counts = { total: 50000, byType: { single: 50000 }, dueReview: 0, wrong: 0 };
   const c009Time = await stableTimed(() => {
     HQ.UIRenderer.renderHome(c009Bank, c009Counts);
+    const hp = process.memoryUsage().heapUsed;
+    if (hp > peak) peak = hp;
   }, 20, 3);
   const c009HeapMb = (bestEffortGc(), (process.memoryUsage().heapUsed - c009Heap0) / 1024 / 1024);
+  c009PeakMb = (peak - c009Heap0) / 1024 / 1024;
   row('首页渲染 HTML 构建（50000 题库 · IDB，C009）', c009Time,
-    '落库 ' + ms(writeMs) + '；Quota 快照只算一次；渲染 50k 视图 heap ' + c009HeapMb.toFixed(2) + ' MB');
+    '落库 ' + ms(writeMs) + '；refresh ' + ms(c009RefreshMs) + '（全量扫描 ' + c009UsageCalls + ' 次）；渲染 50k 视图 heap '
+    + c009HeapMb.toFixed(2) + ' MB；进程峰值（采样）' + c009PeakMb.toFixed(2) + ' MB');
 }
 
 console.log('\n================ 性能打点报告 ================');
@@ -1238,6 +1258,12 @@ if (process.argv.indexOf('--assert') >= 0) {
       + (c009r.samples && c009r.runs ? c009r.samples / c009r.runs : '?') + ' 样本）');
     if (!ok) fails.push('首页渲染 50k · IDB P95 ' + ms(c009r.p95) + ' > 50ms');
   }
+  // C009：进程峰值（采样口径）≤40MB。refresh 是同步的，无法在循环内部采样，取「refresh 返回后」
+  // 与每次渲染后的最大值；走 navigator.storage.estimate 路径，refresh 内不得有全量扫描。
+  const c009PeakOk = c009PeakMb <= 40;
+  console.log((c009PeakOk ? '  ✓ ' : '  ✗ ') + '首页渲染 50k · IDB 进程峰值（采样）：' + c009PeakMb.toFixed(2)
+    + 'MB ≤ 40.00MB（refresh ' + ms(c009RefreshMs) + '，refresh 内全量扫描 ' + c009UsageCalls + ' 次）');
+  if (!c009PeakOk) fails.push('首页渲染 50k · IDB 峰值 ' + c009PeakMb.toFixed(2) + 'MB > 40MB');
   // P1-B 门禁修订：原「历史绝对毫秒基线 ×1.05」（grade 0.0771 / gradeMany 0.2480）对机器频率/负载漂移敏感：
   //   HEAD 实测 0.0902 / 0.2787，同机复跑旧代码 e772e60 也是 0.0882 / 0.2784（同超限）→ 是机器漂移，不是代码回退。
   // 改为「同轮标定比值」：ratio = 本轮被测中位数 / 标定单位耗时（标定工作与被测 patch 同构，见 5b）；
