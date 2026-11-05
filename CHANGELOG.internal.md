@@ -9,6 +9,37 @@
 
 ## 最新记录
 
+### fix(storage): IDB 回落可见化 + 保留可恢复标记 + 回落会话写入即降级（C007）
+
+**Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录）
+
+**核心改动**
+- `js/data/store.js`：新增唯一回落收口 `Store.enterFallback(kind, detail, available)`，`fallbackReason` 只保留三类规范值
+  `idb-unavailable` / `idb-empty` / `idb-read-failed`，原始探测/异常信息进 `fallbackDetail`；`markFallback(reason,{demote})`
+  保留旧入口语义。**原标记为 `'idb'` 且 LS 无业务键时不再永久改写 `ls-fallback`**（数据只可能在 IDB，LS 为空说明
+  只是暂时读不到），下次启动仍尝试 IDB；`idb-empty` 天然有 LS 业务键，仍改写以保证数据可见。
+- `js/utils/storage.js`：`set/setSync` 新增 `_demoteFallbackOnBusinessWrite(key)`——可恢复回落态下第一笔业务写入即
+  `markFallback(...,{demote:true})` 永久降级，防止下次 IDB 恢复按 `idb` 水合、静默丢弃回落期新数据。
+- `js/modules/ui-renderer.js`：新增 `fallbackBanner(reason)`（纯文本，三类原因均含「IndexedDB」「兼容模式」「重试」；
+  空/历史原因返回 `''`）。`js/app.js::boot` 在 `initStore()` 后写入 `State.storageNotice` 并弹一次错误 toast。
+- 文档：`docs/STORAGE.md` §9.3（回落表 + 可恢复标记 + 降级规则）、`docs/user-guide.md` §10、`docs/TESTING.md`、
+  `docs/BENCH.md`（首屏 334.4 KB gzip / 938.3 KB raw）。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（HEAD=`d5a369f` 旧码 + 新测试）**：`node scripts/idb.test.mjs` → **111 通过 / 8 失败**：
+  回落原因仍是原始串（`SecurityError:模拟打开失败`）而非规范值；`fallbackDetail` 为 `undefined`；
+  回落会话写入业务键后标记仍为 `idb`（下次可能覆盖新数据）；`idb-read-failed` 仍是拼接串且 LS 无业务键时标记被写成
+  `ls-fallback`（不可恢复）。`node scripts/ui-renderer.test.mjs` → **TypeError: UI.fallbackBanner is not a function**（exit 1）。
+  `node scripts/migrate.test.mjs` → **290 / 1 失败**（旧原因断言不满足）。
+- **绿（本提交）**：`idb` **119/119**、`ui-renderer` **197/197**、`migrate` **292/292**，exit 0；`test-all` →
+  **31 运行项 / 4908 断言 / 失败 0**；`docs-check --static` 全部一致（基线 `--write`：断言 4880→4908、
+  首屏 332.9→334.4 KB gzip / 934.7→938.3 KB raw）。
+
+**遗留 / 风险**
+- Node 用注入故障工厂模拟「打开失败/读取抛错/IDB 为空」，**未在真实浏览器隐私模式/真实 IDB 损坏下验证**。
+- 无 IDB 的普通浏览器每次启动都会弹一次兼容模式提示（内容属实但可能偏吵）；未做「本机不再提示」。
+- 未实现页面内主动重试按钮：重试依赖用户刷新（`meta:storageBackend` 保留即可触发），故未设自动重试上限（无循环）。
+
 ### fix(import): 导入容量预检 + 落盘确认 + 失败回滚（C006）
 
 **Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录，与 P0 首批同口径）

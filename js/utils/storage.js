@@ -409,6 +409,19 @@
 
     /* ---------------- 错误通知与待写落盘 ---------------- */
 
+    /**
+     * C007：标记仍是 'idb'、但本页因 IDB 不可用已回落 LS（可重试态）时，
+     * 第一笔业务写入就永久降级为 'ls-fallback'——否则下次启动若 IDB 恢复，
+     * 会按 'idb' 水合而静默丢弃本次回落会话写在本地的数据。
+     */
+    _demoteFallbackOnBusinessWrite(key) {
+      if (this._isIdb()) return;
+      const Store = QB.Store;
+      if (!Store || Store.mode !== 'ls' || Store.marker !== 'idb') return;
+      if (isBootstrapKey(key)) return;
+      Store.markFallback('idb-unavailable', { demote: true });
+    },
+
     _notifyError(e) {
       this.lastError = e;
       this._errorListeners.forEach((fn) => { try { fn(e); } catch (_) { /* 忽略监听器异常 */ } });
@@ -532,6 +545,7 @@
       if (isBootstrapKey(key)) {
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
+      this._demoteFallbackOnBusinessWrite(key);
       this._cache.set(key, value);
       this._pending.set(key, value);
       if (this._awaiting) return true; // F2：只排队，不落 LS
@@ -552,6 +566,7 @@
       if (isBootstrapKey(key)) {
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
+      this._demoteFallbackOnBusinessWrite(key);
       this._cache.set(key, value);
       this._pending.set(key, value);
       if (this._awaiting) return true; // F2：只排队，不落 LS

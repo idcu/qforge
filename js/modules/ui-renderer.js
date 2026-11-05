@@ -1172,6 +1172,24 @@
     });
   }
 
+  /**
+   * C007：IDB 回落可见文案（三类规范原因）。
+   * 返回纯文本（调用方写 `textContent`，不经 HTML），空原因返回 ''。
+   * 三条都明确写出「IndexedDB」「兼容模式」并提供重试路径，避免「空库且无提示」。
+   */
+  const FALLBACK_TEXT = {
+    'idb-unavailable': 'IndexedDB 不可用（隐私模式或浏览器策略禁用），已切换到兼容模式（LocalStorage，容量约 5MB）。' +
+      '数据仍可正常读写；退出隐私模式或允许本站存储后刷新页面可重试升级。',
+    'idb-empty': 'IndexedDB 中未找到业务数据，但本地仍保留历史数据，已切换到兼容模式（LocalStorage）以保全数据。' +
+      '请先导出备份；确认环境正常后刷新页面重试，或在「备份与恢复」重新启用 IndexedDB。',
+    'idb-read-failed': '读取 IndexedDB 失败（可能损坏或被其他标签占用），已切换到兼容模式（LocalStorage）。' +
+      '请先导出备份，关闭其他页面后刷新重试；若持续失败请保留备份并反馈。'
+  };
+  function fallbackBanner(reason) {
+    const key = String(reason || '');
+    return FALLBACK_TEXT[key] || '';
+  }
+
   QB.UIRenderer = {
     renderBanks, renderHome, renderQuiz, renderResult,
     renderWrongList, renderFavoritesList, renderHistoryList, renderStats, renderSearch,
@@ -1181,6 +1199,7 @@
     renderAnswerText, emptyState, progressBar,
     renderMixDialog, renderStartDialog,
     renderReviewHistory, renderReviewPlan, renderImportChecksum,
+    fallbackBanner,
     toast, openModal, closeModal, confirmDialog
   };
   QB.UIRenderer.LIST_PAGE_SIZE = LIST_PAGE_SIZE;

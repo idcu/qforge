@@ -42,11 +42,23 @@
 启动路径（`js/app.js::boot` → `QB.Storage.initStore()` → `QB.Store.init()`）：
 
 1. 无 `indexedDB`（或探测打开失败/对象仓缺失）→ 写 `ls-fallback`，继续用 LS（**不白屏**）。
-2. 标记为 `'idb'` → 打开并 `readAll(true,true)` 全量水合；**打开失败、读取失败、或 IDB 无业务键而 LS 仍有业务键**（数据丢失）→ 写 `ls-fallback` 并回落 LS。
+2. 标记为 `'idb'` → 打开并 `readAll(true,true)` 全量水合；**打开失败、读取失败、或 IDB 无业务键而 LS 仍有业务键**（数据丢失）→ 回落 LS。
 3. 标记为 `null` → 保持 LS，由 Migration v6 持锁决定是否升级（`Migration.run` 内部 `migrateV5ToV6`）。
 4. 标记为 `'ls'` → 只走 LS（用户回退后的稳定状态，不自动再升级）。
 
-所有回落都保留原数据可读；`Store.detect()` 的失败原因（`no-indexeddb` / `QuotaExceededError` / 版本冲突等）写进标记并在备份弹窗展示。
+**回落（C007）统一经 `QB.Store.enterFallback(kind, detail, available)` 收口**，`fallbackReason` 只保留三类规范值，原始信息放 `fallbackDetail`：
+
+| `fallbackReason` | 触发条件 | UI 文案（`QB.UIRenderer.fallbackBanner`） |
+|---|---|---|
+| `idb-unavailable` | 探测 `open` 失败（隐私模式/策略禁用/版本冲突） | 已切换到兼容模式（LocalStorage），退出隐私模式/授权后刷新可重试 |
+| `idb-empty` | IDB 可读但无业务键，LS 仍有业务键 | 数据留在本地，已切兼容模式保全；先导出备份再重试/重新启用 |
+| `idb-read-failed` | IDB 打开成功但 `getAll` 抛错（损坏/事务失败） | 已切兼容模式；先导出备份，关闭其他页面后重试 |
+
+- **可恢复标记**：原标记为 `'idb'` 且 LS **无业务键**时，回落**不改写** `meta:storageBackend`（数据只可能在 IDB，LS 为空说明只是暂时读不到）——下次启动会再次尝试打开 IDB，而不是被永久钉在兼容模式。`idb-empty` 天然有 LS 业务键，仍写 `ls-fallback`（数据可见优先）。
+- **回落会话写入即降级**：可恢复状态下若写入任何业务键，`Storage.set/setSync` 立即调 `markFallback(reason,{demote:true})` 写 `ls-fallback`——否则下次 IDB 恢复会按 `idb` 水合，静默丢弃回落期写在本地的数据。
+- **可见性**：`js/app.js::boot` 在 `initStore()` 后把 `fallbackBanner(reason)` 写入状态栏并弹一次错误 toast，避免「空库且无提示」。
+
+所有回落都保留原数据可读；`Store.detect()` 的原始失败原因保留在 `fallbackDetail`，规范原因供 UI 分支。
 
 ### 9.4 schema v6（LocalStorage → IndexedDB）每一步
 

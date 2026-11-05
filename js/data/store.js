@@ -539,6 +539,8 @@
     available: false,
     marker: null,
     fallbackReason: null,
+    /** 回落明细（原始探测/异常信息；`fallbackReason` 只保留三类规范原因，供 UI 分支） */
+    fallbackDetail: null,
     lastInit: null,
 
     isBootstrap: isBootstrap,
@@ -653,33 +655,20 @@
       Store.available = det.ok;
       if (marker === 'idb') {
         if (!det.ok) {
-          Store.mode = 'ls';
-          Store.fallbackReason = det.reason;
-          lsSet(BACKEND_KEY, 'ls-fallback');
-          lsSet('meta:lsBackupState', 'idb-unavailable');
-          Store.lastInit = { mode: 'ls', available: false, fallbackReason: det.reason };
-          return Store.lastInit;
+          return Store.enterFallback('idb-unavailable', det.reason, false);
         }
         let records;
         try {
           records = await Store.readAll(true, true);
         } catch (e) {
           // IDB 打开成功但读取失败（配额/损坏/事务异常）→ 安全回落 LS，不白屏
-          Store.mode = 'ls';
-          Store.fallbackReason = 'idb-read-failed:' + ((e && e.name) || 'error') + ':' + ((e && e.message) || e);
-          Store.writeMarker('ls-fallback');
-          lsSet('meta:lsBackupState', 'idb-unavailable');
-          Store.lastInit = { mode: 'ls', available: false, fallbackReason: Store.fallbackReason };
-          return Store.lastInit;
+          const detail = ((e && e.name) || 'error') + ':' + ((e && e.message) || e);
+          return Store.enterFallback('idb-read-failed', detail, false);
         }
         // IDB 里没有业务键但 LS 仍有保留数据 → 视为 IDB 数据丢失，安全回落 LS（不白屏）
         const domainCount = Array.from(records.keys()).filter((k) => !isBootstrap(k)).length;
         if (!domainCount && Store.hasDomainKeys()) {
-          Store.mode = 'ls';
-          Store.fallbackReason = 'idb-empty';
-          Store.writeMarker('ls-fallback');
-          Store.lastInit = { mode: 'ls', available: true, fallbackReason: 'idb-empty' };
-          return Store.lastInit;
+          return Store.enterFallback('idb-empty', null, true);
         }
         // H3 自动清理：上次迁移已完成且逐键校验通过（lsBackupState='retained'）→ 本次启动
         // 视为「首次启动校验通过」，回收旧 LocalStorage 双份占用。清理失败不影响 IDB 可用性。
@@ -703,10 +692,9 @@
         return Store.lastInit;
       }
       Store.mode = 'ls';
-      Store.lastInit = { mode: 'ls', available: det.ok, fallbackReason: det.ok ? null : det.reason };
+      Store.lastInit = { mode: 'ls', available: det.ok, fallbackReason: det.ok ? null : 'idb-unavailable' };
       if (!det.ok && marker !== 'ls') {
-        Store.markFallback(det.reason);
-        Store.lastInit.fallbackReason = det.reason;
+        Store.enterFallback('idb-unavailable', det.reason, false);
       }
       return Store.lastInit;
     },
@@ -863,11 +851,40 @@
       return det.ok && Store.marker !== 'idb' && Store.marker !== 'ls';
     },
 
-    markFallback(reason) {
-      Store.fallbackReason = reason || 'unavailable';
-      Store.writeMarker('ls-fallback');
-      lsSet('meta:lsBackupState', 'idb-unavailable');
+    /**
+     * C007 统一回落收口（三类规范原因：`idb-unavailable` / `idb-empty` / `idb-read-failed`）。
+     * 关键约束：原标记为 'idb' 且 LS 无业务键时**保留 'idb' 标记**——数据只可能在 IDB，
+     * LS 为空说明回落只是暂时读不到；保留标记让下次启动再次尝试（可恢复），
+     * 而不是永久改写 'ls-fallback' 把用户钉死在兼容模式。
+     * 回落会话一旦写入业务键，Storage 会调 `markFallback(reason,{demote:true})` 永久降级，
+     * 避免下次 IDB 恢复后按 idb 水合、静默丢弃回落期写在本地的数据。
+     * @param {string} kind 规范原因
+     * @param {string|null} [detail] 原始探测/异常信息
+     * @param {boolean} [available] IDB 是否曾成功打开（idb-empty 为 true）
+     */
+    enterFallback(kind, detail, available) {
       Store.mode = 'ls';
+      Store.fallbackReason = kind;
+      Store.fallbackDetail = detail || null;
+      Store.lastInit = { mode: 'ls', available: !!available, fallbackReason: kind, fallbackDetail: detail || null };
+      const retryable = Store.marker === 'idb' && !Store.hasDomainKeys();
+      if (!retryable) Store.writeMarker('ls-fallback');
+      lsSet('meta:lsBackupState', 'idb-unavailable');
+      return Store.lastInit;
+    },
+
+    /**
+     * 回落并写 'ls-fallback' 标记（旧入口；`demote:true` 时即使 LS 目前无业务键也强制降级）。
+     * @param {string} reason
+     * @param {{demote?:boolean}} [opts]
+     */
+    markFallback(reason, opts) {
+      const demote = !!(opts && opts.demote);
+      Store.fallbackReason = reason || 'unavailable';
+      Store.mode = 'ls';
+      lsSet('meta:lsBackupState', 'idb-unavailable');
+      const retryable = !demote && Store.marker === 'idb' && !Store.hasDomainKeys();
+      if (!retryable) Store.writeMarker('ls-fallback');
     },
 
     /**

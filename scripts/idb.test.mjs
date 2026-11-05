@@ -327,7 +327,73 @@ section('回落：IDB 不可用 / 打开失败 → 安全回落 LS');
   await S.initStore();
   eq(S.mode, 'ls', '打开失败时回落 LS');
   eq(S.get('anything', 'ok'), 'ok', '回落 LS 后读写可用');
-  ok(/SecurityError|error/i.test(QB.Store.lastInit.fallbackReason || ''), '回落原因可观测：' + QB.Store.lastInit.fallbackReason);
+  eq(QB.Store.lastInit.fallbackReason, 'idb-unavailable', '回落原因归一到 idb-unavailable（供 UI 分支）');
+  ok(/SecurityError/i.test(QB.Store.lastInit.fallbackDetail || ''), '原始异常保留在 fallbackDetail：' + QB.Store.lastInit.fallbackDetail);
+}
+
+section('C007：回落原因规范可观测 + 可重试标记 + 业务写入降级');
+{
+  // 场景 1：原标记 'idb' + IDB 打不开 + LS 无业务键 → 保留 'idb'（下次启动重试）
+  const failing = {
+    open() {
+      const req = { result: undefined, error: null, onsuccess: null, onerror: null, onupgradeneeded: null };
+      queueMicrotask(() => {
+        req.error = Object.assign(new Error('模拟打开失败'), { name: 'SecurityError' });
+        if (typeof req.onerror === 'function') req.onerror({ target: req });
+      });
+      return req;
+    }
+  };
+  const raw = new Map([['qb:meta:storageBackend', JSON.stringify('idb')]]);
+  const h = await makeHarness({ indexedDB: failing, raw });
+  const { QB } = h;
+  await QB.Storage.initStore();
+  eq(QB.Store.lastInit.fallbackReason, 'idb-unavailable', '原因规范为 idb-unavailable');
+  ok(/SecurityError/i.test(QB.Store.lastInit.fallbackDetail || ''), '明细保留 SecurityError');
+  eq(QB.Store.marker, 'idb', 'LS 无业务键 → 不改写标记，下次启动仍尝试 IDB（可恢复）');
+  eq(QB.Storage.mode, 'ls', '本页仍以 LS 工作');
+  QB.DB.init();
+  await QB.DB.banks.create({ name: '回落会话新库' });
+  eq(QB.Store.marker, 'ls-fallback', '回落会话写入业务键 → 永久降级（防 IDB 恢复后丢新数据）');
+  eq((await QB.DB.banks.list()).length, 1, '降级后数据仍可读写');
+}
+{
+  // 场景 2：IDB 可打开但为空 + LS 有业务键 → idb-empty，回落 LS 并降级
+  const raw = new Map();
+  const a = await makeHarness({ raw });
+  a.QB.DB.init();
+  await a.QB.DB.banks.create({ name: 'LS 保留库' });
+  a.QB.Storage.forceSync();
+  a.QB.Store.writeMarker('idb');
+  const b = await makeHarness({ raw, indexedDB: createMemoryIDB() });
+  const info = await b.QB.Storage.initStore();
+  eq(info.fallbackReason, 'idb-empty', '原因为 idb-empty');
+  eq(b.QB.Store.marker, 'ls-fallback', 'LS 有业务键时改写为 ls-fallback（数据可见优先）');
+  b.QB.DB.init();
+  eq((await b.QB.DB.banks.list()).length, 1, 'LS 保留数据可见（不白屏）');
+}
+{
+  // 场景 3：IDB 打开成功但读取抛错 → idb-read-failed；LS 无业务键时保留可重试标记
+  const broken = {
+    open() {
+      const req = { result: null, error: null, onsuccess: null, onerror: null, onupgradeneeded: null };
+      queueMicrotask(() => {
+        req.result = {
+          objectStoreNames: { contains: () => true },
+          transaction() { throw Object.assign(new Error('模拟读取失败'), { name: 'UnknownError' }); },
+          close() {}
+        };
+        if (typeof req.onsuccess === 'function') req.onsuccess({ target: req });
+      });
+      return req;
+    }
+  };
+  const raw = new Map([['qb:meta:storageBackend', JSON.stringify('idb')]]);
+  const { QB } = await makeHarness({ indexedDB: broken, raw });
+  await QB.Storage.initStore();
+  eq(QB.Store.lastInit.fallbackReason, 'idb-read-failed', '原因为 idb-read-failed');
+  ok(/模拟读取失败/.test(QB.Store.lastInit.fallbackDetail || ''), '明细保留读取异常');
+  eq(QB.Store.marker, 'idb', 'LS 无业务键 → 保留标记可重试');
 }
 
 section('退路：清理旧 LS / 回退（含失败不半切）/ 重新启用');

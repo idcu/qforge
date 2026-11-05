@@ -1470,6 +1470,16 @@
     // 存储底座：有 'idb' 标记则把 IndexedDB 全量水合进 Storage 缓存；否则保持 LocalStorage
     // （v5→v6 迁移会在 Migration.run 里持锁、先备份、逐键校验后切换）。
     try { await QB.Storage.initStore(); } catch (e) { /* detect 已内部回落，启动不因 IDB 不可用失败 */ }
+    // C007：IDB 回落必须可见。隐私模式/IDB 不可用/读取失败时，不能表现为「空库且无提示」；
+    // 文案来自 QB.UIRenderer.fallbackBanner（三类规范原因，纯文本写入状态栏并弹一次）。
+    const fallbackReason = QB.Store && QB.Store.lastInit && QB.Store.lastInit.fallbackReason;
+    if (fallbackReason) {
+      const fallbackText = UI.fallbackBanner(fallbackReason);
+      if (fallbackText) {
+        State.storageNotice = fallbackText;
+        UI.toast(fallbackText, 'err');
+      }
+    }
     QB.DB.init();
     // 刷新/切后台时冲刷会话防抖：考试中最后一次作答不在 500ms 窗口内也能恢复
     const flushSession = () => {

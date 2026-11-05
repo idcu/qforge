@@ -524,7 +524,8 @@ section('F1 SecurityError：IndexedDB open 抛错 → 迁移中止、回落 LS�
   const info = await B.Storage.initStore();
   eq(info.mode, 'ls', 'open 抛错时存储初始化回落 LS（不抛出）');
   eq(B.Store.marker, 'ls-fallback', '后端标记为 ls-fallback（可见、可重试）');
-  ok(/SecurityError|error/i.test(info.fallbackReason || ''), '回落原因可观测：' + info.fallbackReason);
+  eq(info.fallbackReason, 'idb-unavailable', '回落原因归一到 idb-unavailable（UI 可分支）');
+  ok(/SecurityError/i.test(info.fallbackDetail || ''), '原始异常保留在 fallbackDetail：' + info.fallbackDetail);
 
   let threw = null;
   try { await B.Migration.run(); } catch (e) { threw = e; }

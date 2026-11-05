@@ -633,6 +633,19 @@ section('答题卡格级增量：帧稳定 + 子区域仅变化一格 + 计数�
   ok(DP.plan(snap1, r2).unchanged.indexOf('quiz-card') >= 0, 'plan：答题卡在 unchanged（整卡不重建）');
 }
 
+section('C007：IDB 回落提示文案（三类原因可见且可重试）');
+{
+  ['idb-unavailable', 'idb-empty', 'idb-read-failed'].forEach((reason) => {
+    const text = UI.fallbackBanner(reason);
+    ok(text.length > 0, reason + '：有可见文案');
+    ok(text.indexOf('IndexedDB') >= 0, reason + '：点名 IndexedDB');
+    ok(text.indexOf('兼容模式') >= 0, reason + '：说明已切到兼容模式');
+    ok(text.indexOf('重试') >= 0, reason + '：给出重试路径');
+  });
+  eq(UI.fallbackBanner(''), '', '空原因返回空串（不误报）');
+  eq(UI.fallbackBanner('no-indexeddb'), '', '未归一的历史原因不产生误导文案');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
