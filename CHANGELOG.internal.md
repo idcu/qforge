@@ -11,6 +11,8 @@
 
 ### test(gate): bench 默认带 --assert，verify 纳入性能与纪律（C005）
 
+**Commit Hash**：`0cb4c0d`
+
 **核心改动**
 - `package.json`：`bench` → `node --expose-gc scripts/bench.mjs --assert`（默认即门禁，55 项）；新增 `bench:observe`
   保留只观测模式；新增 `verify:fast`（原 verify 内容 + `check-ci-coverage`：check-ngm → check-modules →
@@ -31,9 +33,11 @@
 **遗留 / 风险**
 - `verify` 变慢（多一轮 bench，D9 已接受），故保留 `verify:fast`；文档写清两者差异。
 - 注入慢化负例为手工执行（未固化为 CI 步骤）；CI 侧仍以真实 `bench --assert` 判定。
-- 自引用 commit hash 无法写入自身提交，hash 以 `git log -1` 为准。
+- hash 已回填至条目标题下方（由 `docs(changelog): 回填 P0 首批 hash` 补录）。
 
 ### fix(gate): docs-check 拒绝「删数字 / 改数字 / 改基线」三类静默绿（C004）
+
+**Commit Hash**：`89e913e`
 
 **核心改动**
 - `scripts/docs-check.mjs`：文档里出现 `scripts/<suite>.test.mjs` 却无断言数 → 判红（旧实现直接 `return` 跳过，
@@ -60,6 +64,8 @@
 
 ### fix(gate): check-ngm 缺清单文件必须失败（C003）
 
+**Commit Hash**：`9708124`
+
 **核心改动**
 - `scripts/check-ngm.mjs`：把失败输出与 `exit 1` 收为唯一出口 `reportFailure()`，并在 `if (project && lock)` 块**之外**
   再兜一次——历史缺陷是整段接线校验（含错误汇总）都包在该块内，`ngm.json`/`ngm.lock` 缺失时被整体跳过，静默 exit 0。
@@ -77,9 +83,11 @@
 
 **遗留 / 风险**
 - 配置文件被临时移走/还原的负例是手工执行，未固化为 CI 用例（CI 用 `--selftest` 覆盖同一逻辑）。
-- 自引用 commit hash 无法写入自身提交，hash 以 `git log -1` 为准。
+- hash 已回填至条目标题下方（由 `docs(changelog): 回填 P0 首批 hash` 补录）。
 
 ### test(ci): 逻辑层改用 test-all 单命令，覆盖 30/30 套件（C002）
+
+**Commit Hash**：`a177a3f`
 
 **核心改动**
 - `.github/workflows/test.yml` 的 `logic-tests`：24 个逐套件步骤 → **单步 `node scripts/test-all.mjs`**，
@@ -107,6 +115,8 @@
 
 ### test(gate): test-all 校验逐套件断言数（C001）
 
+**Commit Hash**：`0c2a7bc`
+
 **核心改动**
 - `scripts/test-all.mjs` 从「只看退出码」升级为五项判据：套件文件存在、exit=0、末尾「通过: N」可解析且非 0、
   逐套件与 `scripts/docs-baseline.json` 计数一致、合计等于基线 `totalAssertions`。任一不满足 exit 1。
@@ -124,8 +134,7 @@
 - `node scripts/docs-check.mjs --static` → 仅剩 `docs/BENCH.md:73` 既有漂移（329.8 vs 329.7），本任务未新增漂移（由 C004 修）。
 
 **遗留 / 风险**
-- 自引用 commit hash 无法写进自身提交（内容哈希固定点）：本条目与该提交同一 commit，hash 以 `git log -1` 为准；
-  若要求在文件内回填，需追加一个 docs 提交（待确认）。
+- hash 已回填至条目标题下方（由 `docs(changelog): 回填 P0 首批 hash` 补录）。
 - 计数解析沿用各套件末尾「通过: N」的既有约定；未来新增套件若换输出格式，会被判「未输出计数」而红（有意设计）。
 
 ### docs(arch): 文档库按规模与读者场景重切
