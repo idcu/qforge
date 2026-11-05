@@ -68,6 +68,8 @@ jobs:
           node-version: '24'
       - name: vendor 路径 ↔ ngm.json ↔ ngm.lock
         run: node scripts/check-ngm.mjs
+      - name: vendor 门禁自检（缺清单文件必须失败）
+        run: node scripts/check-ngm.mjs --selftest
 
   ngm-preflight:
     name: ngm binary configuration preflight

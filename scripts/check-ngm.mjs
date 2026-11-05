@@ -10,10 +10,18 @@
  * 只读；不调用 ngm，不访问网络。CI 与本地测试都可直接运行。
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/* --root 仅供 --selftest 在临时根上构造「缺文件」负例；默认仍是仓库根。 */
+const ARGS = process.argv.slice(2);
+const rootIdx = ARGS.indexOf('--root');
+const ROOT = rootIdx >= 0 && ARGS[rootIdx + 1]
+  ? path.resolve(ARGS[rootIdx + 1])
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SELFTEST = ARGS.includes('--selftest');
 const REPO_SLUG = 'gitee:idcu/ngm-repo';
 const VENDOR_REPO = 'gitee.com/idcu/ngm-repo';
 const LOCKFILE_VERSION = '2.0.0';
@@ -23,6 +31,46 @@ const warnings = [];
 const rel = (p) => path.relative(ROOT, p).replace(/\\/g, '/');
 const fail = (msg) => errors.push(msg);
 const warn = (msg) => warnings.push(msg);
+
+/** 唯一的失败出口：缺失/非法清单与任何接线错误都从这里退 1（不允许静默 exit 0） */
+function reportFailure() {
+  console.error(`check-ngm: FAILED (${errors.length} error(s), ${warnings.length} warning(s))`);
+  for (const e of errors) console.error(`  - ${e}`);
+  for (const w of warnings) console.error(`  ! ${w}`);
+  process.exit(1);
+}
+
+/* ---------- 自检：缺 ngm.json / ngm.lock / ngm.mappings.json 都必须 exit 1 ----------
+   历史缺陷：整段接线检查包在 `if (project && lock)` 里，两个清单缺失时连错误汇总都跳过，
+   于是「依赖清单没了」也能 exit 0——门禁在，但它不发火。这里用临时根把三种缺失各跑一遍。 */
+if (SELFTEST) {
+  const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'qforge-ngm-selftest-'));
+  const MANIFESTS = ['ngm.json', 'ngm.lock', 'ngm.mappings.json'];
+  let ok = true;
+  try {
+    MANIFESTS.forEach((missing) => {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+      fs.mkdirSync(tmpRoot, { recursive: true });
+      MANIFESTS.forEach((f) => {
+        if (f !== missing && fs.existsSync(path.join(SRC, f))) {
+          fs.copyFileSync(path.join(SRC, f), path.join(tmpRoot, f));
+        }
+      });
+      const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--root', tmpRoot], {
+        encoding: 'utf8', cwd: tmpRoot
+      });
+      const out = (r.stdout || '') + (r.stderr || '');
+      const hit = r.status === 1 && out.includes('缺少 ' + missing);
+      console.log('[selftest] 缺 ' + missing + ' → exit=' + r.status + ' ' + (hit ? '已拦截' : '未拦截（门禁失效）'));
+      if (!hit) ok = false;
+    });
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+  process.exit(ok ? 0 : 1);
+}
+
 
 function readJson(relPath) {
   const abs = path.join(ROOT, relPath);
@@ -302,13 +350,12 @@ if (project && lock) {
       console.log(`check-ngm: adapters ${listed.size} 条登记 / ${adapterFiles.length} 个实际适配层`);
     }
 
-    if (errors.length) {
-      console.error(`check-ngm: FAILED (${errors.length} error(s), ${warnings.length} warning(s))`);
-      for (const e of errors) console.error(`  - ${e}`);
-      for (const w of warnings) console.error(`  ! ${w}`);
-      process.exit(1);
-    }
+    if (errors.length) reportFailure();
     console.log(`check-ngm: OK (${declared.size} declared, ${locked.size} locked, ${found.size} vendor modules, ${refCount.size} referenced modules, ngm ${ngmVersion})`);
     for (const w of warnings) console.log(`  ! ${w}`);
   }
 }
+
+/* 清单缺失（project/lock 为 null）时上面的整段检查会被跳过——这里必须兜住，
+   否则「缺少 ngm.json」只被记录、不会被读出来，进程仍 exit 0。 */
+if (errors.length) reportFailure();

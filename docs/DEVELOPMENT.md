@@ -106,6 +106,8 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 
 **独立轻量 `docs-check` job**（`scripts/docs-check.mjs --static`）：只读 `scripts/docs-baseline.json` 的套件断言数/门禁数，实时读取运行项与首屏文件/gzip 体积后与 README、本文比对，**不 spawn 套件、不跑 bench**，不拖慢重腿（重腿仍 30 个运行项）。数字有意变化时本地 `node scripts/docs-check.mjs --write` 刷新基线并随代码同 commit 提交；默认 live 模式则实测跑一遍套件与 bench 复算（手动核对用）。
 
+**vendor 自检 `job`**（`node scripts/check-ngm.mjs`）：断言 `ngm.json` ↔ `ngm.lock` ↔ `ngm.vendor` 双向一致、源码中的 vendor 字面路径都能归到已登记模块、适配层清单（`contracts/adapters.json`）与保留名齐全。**清单文件缺失或非法一律 exit 1**——历史缺陷是整段校验包在 `if (project && lock)` 内，`ngm.json`/`ngm.lock` 缺失时连错误汇总都被跳过，进程静默 exit 0；`--selftest` 用三个临时根（逐次缺 `ngm.json` / `ngm.lock` / `ngm.mappings.json`）证明这道闸会失败。
+
 **无障碍真机门禁（非 CI）**：`node scripts/a11y-browser.mjs` 需要本机 Edge，启动 8799 静态服务 + CDP，跑 360 / 768 / 1280 三档 × light/dark 两主题，页面覆盖首页/答题页/结果页/导入预览/三选一弹窗/设置页，共 **374 断言**（新增复习设置弹窗三档宽度：内容溢出、11 个控件 ≥44×44、复选框/下拉键盘操作），输出 `.screenshots/a11y-browser/result.json` 与逐页截图。CI 无浏览器，故**不纳入 CI 门禁**；提交前手动执行，失败退出码 1。Node 侧静态门禁 `a11y.test.mjs` 已进 CI。
 
 **真机门禁覆盖范围（不要用总数推断全覆盖）**：

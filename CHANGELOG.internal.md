@@ -9,6 +9,27 @@
 
 ## 最新记录
 
+### fix(gate): check-ngm 缺清单文件必须失败（C003）
+
+**核心改动**
+- `scripts/check-ngm.mjs`：把失败输出与 `exit 1` 收为唯一出口 `reportFailure()`，并在 `if (project && lock)` 块**之外**
+  再兜一次——历史缺陷是整段接线校验（含错误汇总）都包在该块内，`ngm.json`/`ngm.lock` 缺失时被整体跳过，静默 exit 0。
+- 新增 `--root <dir>`（仅自检用）与 `--selftest`：在临时根上逐次缺 `ngm.json` / `ngm.lock` / `ngm.mappings.json`，
+  断言每次 exit 1 且输出含「缺少 <文件>」。
+- CI `vendor-check` job 增加 `--selftest` 步骤；`docs/DEVELOPMENT.md` §4 补 vendor 门禁行为与历史缺陷说明。
+
+**验证数据（同机 Asia/Shanghai）**
+- **红（旧码，实测）**：逐次移走清单文件 →
+  缺 `ngm.json` → **exit 0**（无输出）、缺 `ngm.lock` → **exit 0**（无输出）；缺 `ngm.mappings.json` → exit 1（此项原本有效）。
+- **绿（新码）**：同样三次 → exit 1，stderr 分别含「缺少 ngm.json」「缺少 ngm.lock」「缺少 ngm.mappings.json」；文件还原后正常路径 exit 0。
+- 正常路径：`check-ngm: OK (6 declared, 6 locked, 6 vendor modules, 6 referenced modules, ngm 0.102.0-dev.1)`，adapters 7/7。
+- `node scripts/check-ngm.mjs --selftest` → exit 0，三例均「已拦截」。
+- `node scripts/docs-check.mjs --static` → 仅剩 `docs/BENCH.md:73` 既有漂移（本任务未新增）。
+
+**遗留 / 风险**
+- 配置文件被临时移走/还原的负例是手工执行，未固化为 CI 用例（CI 用 `--selftest` 覆盖同一逻辑）。
+- 自引用 commit hash 无法写入自身提交，hash 以 `git log -1` 为准。
+
 ### test(ci): 逻辑层改用 test-all 单命令，覆盖 30/30 套件（C002）
 
 **核心改动**
