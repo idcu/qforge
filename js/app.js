@@ -1480,6 +1480,9 @@
         UI.toast(fallbackText, 'err');
       }
     }
+    // C009：存储用量基线只在这里算一次；渲染只读 QB.Quota.view()（O(1)），
+    // 之后由 Storage 写入/删除的字节增量维护（整库清空/后端切换会 reset 后重建）。
+    try { await QB.Quota.refresh(); } catch (e) { /* 用量只影响展示，失败不阻断启动 */ }
     QB.DB.init();
     // 刷新/切后台时冲刷会话防抖：考试中最后一次作答不在 500ms 窗口内也能恢复
     const flushSession = () => {

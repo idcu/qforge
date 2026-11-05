@@ -81,9 +81,116 @@
     return v + ' B';
   }
 
+  /* ---------------- 用量快照（C009）：渲染热路径不再全量 stringify ----------------
+   * 以前 `renderStorageHealth` 每次渲染都调 `Storage.usageBytes()`：IDB 下遍历整库 +
+   * JSON.stringify，50k 题库一次首页可达数十毫秒。这里改为「启动/显式 refresh 时算一次，
+   * 之后按写入增量维护」，渲染只读 `view()`（O(1)）。
+   *
+   * 增量维护的口径与 usageBytes 一致：值 JSON 长度 + 键长 + 2，乘 2（UTF-16）。
+   * 旧值未知时：LS 直接读磁盘原文长度（不 JSON.parse），IDB 视为 0（缓存即权威）。
+   * 增量出现负值/未知删除 → 标记 dirty，下一次 refresh 全量校正（兜底，不静默错账）。
+   */
+  const meter = {
+    ready: false, used: 0, limit: 0, backend: 'ls', at: 0, dirty: false
+  };
+
+  function valueBytes(key, value) {
+    try { return ((JSON.stringify(value) || '').length + String(key).length + 2) * 2; } catch (_) {
+      return (String(key).length + 2) * 2;
+    }
+  }
+
+  function diskBytes(key) {
+    if (isIdb()) return 0;
+    try {
+      const prefix = (QB.CONFIG && (QB.CONFIG.STORAGE_PREFIX || (QB.CONFIG.STORAGE && QB.CONFIG.STORAGE.PREFIX))) || 'qb';
+      const raw = global.localStorage.getItem(prefix + ':' + key);
+      if (raw == null) return 0;
+      return (raw.length + String(key).length + 2) * 2;
+    } catch (_) {
+      return null; // 读不到 → 交给 refresh 校正
+    }
+  }
+
+  /** 写入后按增量调整快照（oldKnown=false 时旧值从磁盘探测） */
+  function trackWrite(key, newValue, oldValue, oldKnown) {
+    if (!meter.ready) return; // 基线未建立：等 refresh 时全量算
+    const nb = valueBytes(key, newValue);
+    const ob = oldKnown ? valueBytes(key, oldValue) : diskBytes(key);
+    if (ob == null) { meter.dirty = true; meter.used += nb; return; }
+    meter.used += nb - ob;
+    meter.at = Date.now();
+    if (meter.used < 0) { meter.used = 0; meter.dirty = true; }
+  }
+
+  /** 删除后按增量调整快照（旧值未知 → dirty，等全量校正） */
+  function trackDelete(key, oldValue, oldKnown) {
+    if (!meter.ready) return;
+    const ob = oldKnown ? valueBytes(key, oldValue) : diskBytes(key);
+    if (ob == null) { meter.dirty = true; return; }
+    meter.used = Math.max(0, meter.used - ob);
+    meter.at = Date.now();
+  }
+
+  /** 后端切换/整库清空：丢弃快照，下一次 refresh 重建基线 */
+  function reset() {
+    meter.ready = false; meter.used = 0; meter.limit = 0; meter.dirty = false; meter.at = 0;
+  }
+
+  /**
+   * 渲染直接读的快照（O(1)，绝不做全量序列化）。
+   * @returns {{ready:boolean, backend:string, usedBytes:number, limitBytes:number, ratio:number|null, dirty:boolean}}
+   */
+  function view() {
+    const limit = meter.limit > 0 ? meter.limit : null;
+    return {
+      ready: meter.ready,
+      backend: meter.backend,
+      usedBytes: Math.max(0, Math.round(meter.used)),
+      limitBytes: limit,
+      ratio: limit ? Math.max(0, meter.used / limit) : null,
+      dirty: meter.dirty,
+      at: meter.at
+    };
+  }
+
+  /**
+   * 重建快照（启动、恢复/导入等低频路径调用一次；不在渲染里调）。
+   * IDB 优先用 `navigator.storage.estimate()` 的真实 usage/quota；拿不到时：
+   * used 走全量估算，limit=0（未知上限，UI 不显示百分比，避免把 5MB LS 配额套到 IDB 上）。
+   * @returns {Promise<object>} view()
+   */
+  async function refresh() {
+    const S = QB.Storage;
+    if (!S) return reset(), view();
+    let used = 0;
+    let limit = 0;
+    if (isIdb()) {
+      const est = await estimateAsync();
+      if (est && est.quota > 0) {
+        limit = est.quota;
+        used = est.usage > 0 ? est.usage : usageBytes();
+      } else {
+        limit = 0;
+        used = usageBytes();
+      }
+    } else {
+      limit = limitBytes();
+      used = usageBytes();
+    }
+    meter.ready = true;
+    meter.backend = isIdb() ? 'idb' : 'ls';
+    meter.used = Math.max(0, Number(used) || 0);
+    meter.limit = Number(limit) || 0;
+    meter.dirty = false;
+    meter.at = Date.now();
+    return view();
+  }
+
   Object.assign(Q, {
     isIdb: isIdb, limitBytes: limitBytes, usageBytes: usageBytes, remainingBytes: remainingBytes,
     shardOverheadBytes: shardOverheadBytes, estimateQuestions: estimateQuestions,
-    canFitQuestions: canFitQuestions, estimateAsync: estimateAsync, formatBytes: formatBytes
+    canFitQuestions: canFitQuestions, estimateAsync: estimateAsync, formatBytes: formatBytes,
+    trackWrite: trackWrite, trackDelete: trackDelete, reset: reset, view: view, refresh: refresh
   });
 })(typeof window !== 'undefined' ? window : globalThis);

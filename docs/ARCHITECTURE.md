@@ -143,7 +143,7 @@ Exporters.openFlow({kind, bank, trigger})   // trigger 可选：异步收集后�
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
 | `QB.Importers.runImport(input)` | **唯一解析入口**：按扩展名 + `priority`/`sniff` 选解析器并合并校验警告；文件/拖拽/URL/粘贴（虚拟文件名）一律经此，`data-io` 不维护第二条解析链 | data-io（四个入口）、测试 |
 | `QB.DataIO.importFailureText(result)` | **0 题拒绝原因唯一文案**：`migration.supported=false.reason` 优先、否则首条 warning，互相包含取更长 | `commitImport` 错误框、来源弹窗内联错误、Node 断言 |
-| `QB.Quota` | **容量口径唯一实现**：`limitBytes/usageBytes/remainingBytes/estimateQuestions/canFitQuestions/estimateAsync/formatBytes`；IDB 后端视为无上限，LS 上限读 `CONFIG.STORAGE.QUOTA_BYTES`（含分片清单开销估算） | 导入预检（`commitImport`）、容量诊断 UI、Node 断言 |
+| `QB.Quota` | **容量口径唯一实现**：`limitBytes/usageBytes/remainingBytes/estimateQuestions/canFitQuestions/estimateAsync/formatBytes`；IDB 后端视为无上限，LS 上限读 `CONFIG.STORAGE.QUOTA_BYTES`（含分片清单开销估算）。**C009 增量快照**：`refresh()` 建立 `meter`（IDB 优先 `navigator.storage.estimate`，拿不到则 limit=0），`Storage.set/remove/clearAll/adoptStore` 维护增量，`view()` O(1) 只读 | 导入预检（`commitImport`）、存储健康卡（`renderStorageHealth` 只读 `view()`）、Node 断言 |
 | `Adapters.mergeAnalysisPieces/appendAnalysis/matchAnalysisMarker` | 解析类多列/多标记（解析/解题思路/考点/释义）合并为单一 `analysis`（唯一实现） | adapters（JSON/表格）、line-parser（DOCX/Markdown/粘贴） |
 | `LineParser.parseLines/blocksToQuestions` | 文本行（DOCX 段落 / Markdown 行）→ 题目块 → 标准题目 | docx-importer、md-importer |
 | `QB.SqliteReader.open(source)` | 只读打开 SQLite 字节（`{pageSize, encoding, pageCount, freelist, tables, hasTable, readTable}`）；唯一实现 | `scripts/probe-apkg.mjs`、anki-importer |

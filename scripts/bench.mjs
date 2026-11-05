@@ -1096,6 +1096,44 @@ for (const tier of [5000, 20000, 50000]) {
 
 QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
 
+/* ---------- 12d. 首页渲染热路径（C009）：50k 题库 / IDB 后端 ----------
+ * 旧实现 renderStorageHealth 每次渲染都调 Storage.usageBytes()：遍历整库 + JSON.stringify。
+ * 这里先建 50k 真题库并做一次 Quota 基线（启动只做一次），再量渲染本身。
+ * T0（旧码同夹具）与 T1 对比、P95 见 CHANGELOG.internal.md C009。
+ */
+{
+  // 独立 IDB harness（主 harness 是 LS，不切换它，避免污染后续/报告口径）
+  const h = await createHarness(QB_DIR, { indexedDB: createMemoryIDB() });
+  h.window.location = globalThis.location;
+  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(h.window, h.window);
+  const HQ = h.QB;
+  HQ.Store.writeMarker('idb');
+  await HQ.Storage.initStore();
+  HQ.DB.init();
+  const c009Bank = await HQ.DB.banks.create({ name: 'C009 50k' });
+  const c009Qs = [];
+  for (let i = 0; i < 50000; i++) {
+    c009Qs.push({
+      type: 'single', question: 'C009 规模题' + i + '？' + 'x'.repeat(i % 40),
+      options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+    });
+  }
+  const t0 = process.hrtime.bigint();
+  await HQ.DB.questions.insertMany(c009Bank.id, c009Qs, { dedupe: false, mode: 'overwrite' });
+  await HQ.Storage.flush();
+  const writeMs = Number(process.hrtime.bigint() - t0) / 1e6;
+  bestEffortGc();
+  const c009Heap0 = process.memoryUsage().heapUsed;
+  await HQ.Quota.refresh(); // 基线只算一次（真实启动路径同此）
+  const c009Counts = { total: 50000, byType: { single: 50000 }, dueReview: 0, wrong: 0 };
+  const c009Time = await stableTimed(() => {
+    HQ.UIRenderer.renderHome(c009Bank, c009Counts);
+  }, 20, 3);
+  const c009HeapMb = (bestEffortGc(), (process.memoryUsage().heapUsed - c009Heap0) / 1024 / 1024);
+  row('首页渲染 HTML 构建（50000 题库 · IDB，C009）', c009Time,
+    '落库 ' + ms(writeMs) + '；Quota 快照只算一次；渲染 50k 视图 heap ' + c009HeapMb.toFixed(2) + ' MB');
+}
+
 console.log('\n================ 性能打点报告 ================');
 console.log('环境：Node ' + process.version + '，采样 ' + N + ' 次取中位数，分片大小 ' + QB.QuestionShards.SHARD_SIZE + '\n');
 const pad = (s, n) => String(s) + ' '.repeat(Math.max(0, n - String(s).length));
@@ -1189,6 +1227,17 @@ if (process.argv.indexOf('--assert') >= 0) {
     console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：' + ms(r.median) + ' ≤ ' + ms(max));
     if (!ok) fails.push(needle + ' ' + ms(r.median) + ' > ' + ms(max));
   });
+  // C009：首页渲染 50k · IDB 的门槛按 P95（计划门槛 ≤50ms；中位数/最大值一并打印便于复核）
+  const c009r = report.find((x) => x.name.indexOf('首页渲染 HTML 构建（50000 题库 · IDB') === 0);
+  if (!c009r) {
+    fails.push('首页渲染 HTML 构建（50000 题库 · IDB 缺失');
+  } else {
+    const ok = c009r.p95 <= 50;
+    console.log((ok ? '  ✓ ' : '  ✗ ') + '首页渲染 50k · IDB P95：' + ms(c009r.p95) + ' ≤ 50ms（中位 '
+      + ms(c009r.median) + '，最大 ' + ms(c009r.max) + '，' + c009r.runs + ' 轮×'
+      + (c009r.samples && c009r.runs ? c009r.samples / c009r.runs : '?') + ' 样本）');
+    if (!ok) fails.push('首页渲染 50k · IDB P95 ' + ms(c009r.p95) + ' > 50ms');
+  }
   // P1-B 门禁修订：原「历史绝对毫秒基线 ×1.05」（grade 0.0771 / gradeMany 0.2480）对机器频率/负载漂移敏感：
   //   HEAD 实测 0.0902 / 0.2787，同机复跑旧代码 e772e60 也是 0.0882 / 0.2784（同超限）→ 是机器漂移，不是代码回退。
   // 改为「同轮标定比值」：ratio = 本轮被测中位数 / 标定单位耗时（标定工作与被测 patch 同构，见 5b）；

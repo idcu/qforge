@@ -200,6 +200,45 @@ section('C008 跨标签 reviewMeta：keys 并集、count=并集长度（消除�
 }
 
 
+section('C009 用量快照：基线同口径 + 增量误差 ≤0.1% + 清空即失效');
+{
+  const S = QB.Storage;
+  const Q = QB.Quota;
+  S.clearAll();
+  Q.reset();
+  S.setSync('k0', 'v0');
+  const base = await Q.refresh();
+  ok(base.ready && base.usedBytes > 0, 'refresh 建立基线');
+  eq(base.usedBytes, S.usageBytes(), '基线 = usageBytes（同一口径）');
+  eq(base.ratio !== null, true, 'LS 模式有有限上限 → ratio 可用');
+  // 5 组固定种子 fixture（可复现）：写入后快照与全量估算的误差
+  let seed = 12345;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  let maxErr = 0;
+  for (let round = 0; round < 5; round++) {
+    const n = 5 + Math.floor(rnd() * 20);
+    for (let i = 0; i < n; i++) {
+      S.setSync('f' + round + '-' + i, { a: 'x'.repeat(1 + Math.floor(rnd() * 200)), b: rnd() });
+    }
+    const view = Q.view();
+    const full = S.usageBytes();
+    maxErr = Math.max(maxErr, Math.abs(view.usedBytes - full) / Math.max(1, full));
+  }
+  ok(maxErr <= 0.001, '5 组 fixture 增量误差 ≤0.1%（实测 ' + (maxErr * 100).toFixed(4) + '%）');
+  // 覆盖 + 删除后仍精确
+  S.setSync('f0-0', { a: 'short' });
+  S.remove('f1-0');
+  const v2 = Q.view();
+  const full2 = S.usageBytes();
+  ok(Math.abs(v2.usedBytes - full2) / Math.max(1, full2) <= 0.001,
+    '覆盖/删除后误差 ≤0.1%（实测 ' + (Math.abs(v2.usedBytes - full2) / Math.max(1, full2) * 100).toFixed(4) + '%）');
+  // 整库清空 → 快照作废（下一次渲染显示「计算中」，而不是旧数字）
+  S.clearAll();
+  eq(Q.view().ready, false, 'clearAll 后快照失效，等待 refresh 重建');
+  Q.reset();
+}
+
+
 section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
 {
   S.clearAll();

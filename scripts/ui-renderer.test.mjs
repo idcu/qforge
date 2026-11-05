@@ -646,6 +646,47 @@ section('C007：IDB 回落提示文案（三类原因可见且可重试）');
   eq(UI.fallbackBanner('no-indexeddb'), '', '未归一的历史原因不产生误导文案');
 }
 
+section('C009 存储健康卡：渲染不触发全量统计 + IDB 不误判满格');
+{
+  const Q = QB.Quota;
+  const origView = Q.view;
+  const origUsage = Q.usageBytes;
+  let usageCalls = 0;
+  Q.usageBytes = function () { usageCalls += 1; return origUsage.apply(Q, arguments); };
+  // 旧实现从 QB.Storage.usageBytes 走（不是 QB.Quota），两处都盯住
+  const S = QB.Storage;
+  const origStorageUsage = S.usageBytes;
+  let storageUsageCalls = 0;
+  S.usageBytes = function () { storageUsageCalls += 1; return origStorageUsage.apply(S, arguments); };
+  const counts = { total: 10, byType: { single: 4, judge: 2, multi: 2, fill: 1, essay: 1 } };
+  const bank = { name: 'C009 健康卡' };
+  // 1) 快照未就绪 → 「计算中」，且不触发全量统计
+  Q.view = () => ({ ready: false, backend: 'ls', usedBytes: 0, limitBytes: null, ratio: null });
+  for (let i = 0; i < 50; i++) UI.renderHome(bank, counts);
+  eq(usageCalls, 0, '未就绪时渲染 50 次：usageBytes 调用 0 次');
+  ok(UI.renderHome(bank, counts).indexOf('正在计算存储用量') >= 0, '未就绪显示「计算中」而非错误数字');
+  // 2) LS 5MB / 90% → 仍标 danger（阈值行为不回归）
+  Q.view = () => ({ ready: true, backend: 'ls', usedBytes: 4.5 * 1024 * 1024, limitBytes: 5 * 1024 * 1024, ratio: 0.9 });
+  const lsHtml = UI.renderHome(bank, counts);
+  ok(lsHtml.indexOf('storage-health danger') >= 0, 'LS 90% 仍标 danger');
+  // 3) IDB 6MB / 600MB → 1%，不误判满格
+  Q.view = () => ({ ready: true, backend: 'idb', usedBytes: 6 * 1024 * 1024, limitBytes: 600 * 1024 * 1024, ratio: 0.01 });
+  const idbHtml = UI.renderHome(bank, counts);
+  ok(idbHtml.indexOf('danger') < 0, 'IDB 6MB 不被判满格（旧实现按 5MB 配额会 100% 红）');
+  ok(idbHtml.indexOf('（1%）') >= 0, '按浏览器真实配额显示 1%');
+  ok(idbHtml.indexOf('IndexedDB') >= 0, '健康卡标明 IndexedDB 后端');
+  // 4) IDB 上限未知 → 不显示百分比、不报红
+  Q.view = () => ({ ready: true, backend: 'idb', usedBytes: 6 * 1024 * 1024, limitBytes: null, ratio: null });
+  const unkHtml = UI.renderHome(bank, counts);
+  ok(unkHtml.indexOf('上限由浏览器管理') >= 0, '上限未知时明确说明，不套 LS 配额');
+  ok(unkHtml.indexOf('danger') < 0, '上限未知时不报红');
+  eq(usageCalls, 0, '所有渲染路径合计 usageBytes 调用 0 次');
+  eq(storageUsageCalls, 0, '渲染路径不再调用 QB.Storage.usageBytes()（全量序列化已移出热路径）');
+  Q.view = origView;
+  Q.usageBytes = origUsage;
+  S.usageBytes = origStorageUsage;
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

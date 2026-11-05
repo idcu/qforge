@@ -9,6 +9,54 @@
 
 ## 最新记录
 
+### perf(ui): 容量统计移出渲染热路径，50k 题库首页 P95 80.63→0.03 ms（C009）
+
+**Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录）
+
+**核心改动**
+- `js/utils/quota.js`：新增 `meter` 快照（`ready/used/limit/backend/at/dirty`）与 `valueBytes`（唯一字节口径：
+  `(JSON.stringify(value).length + key.length + 2) * 2`）、`diskBytes`（LS 读原文长度，不 `JSON.parse`）、
+  `trackWrite`（旧值未知时按磁盘/视为 0，出现负值即 `dirty`）、`trackDelete`、`reset`、`view()`（O(1)，绝不全量序列化）、
+  `refresh()`（IDB 优先 `navigator.storage.estimate()`，拿不到则全量估算且 `limit=0`）。
+- `js/utils/storage.js`：`set/setSync` 调 `_trackQuotaSet`（传缓存旧值）、`remove` 调 `trackDelete`；
+  `clearAll`/`adoptStore` 调 `Quota.reset()`（后端切换/整库清空后快照作废，下次 `refresh` 重建）。
+- `js/modules/ui-renderer.js::renderStorageHealth`：只读 `QB.Quota.view()`；未就绪显示「正在计算存储用量…（不影响答题/导入）」
+  （不阻塞首屏）；IDB 拿不到配额时 `limit=null` → **不画 `role=progressbar` 百分比条**，文案「已用 X（上限由浏览器管理）」，
+  避免把 5MB LocalStorage 配额套到 IDB 上满格报红。
+- `js/app.js`：`initStore()` 后 `await QB.Quota.refresh()`（仅启动一次，失败吞掉不阻塞）。
+- `scripts/bench.mjs`：新增独立 50k/IDB 夹具（独立 `createHarness({indexedDB})` + 手动加载 ui-renderer），
+  打点行「首页渲染 HTML 构建（50000 题库 · IDB，C009）」+ 门禁「首页渲染 50k · IDB P95 ≤ 50 ms」（55→56 项）。
+- 文档：`docs/BENCH.md`（命令块 56 项、首屏 337.2/946.2、C009 验收段）、`docs/STORAGE.md` §9.1（用量快照）、
+  `docs/ARCHITECTURE.md`（`QB.Quota` 行）、`docs/user-guide.md` §10（健康卡口径）、`docs/TESTING.md`。
+- 测试：`scripts/storage.test.mjs`（+6）、`scripts/ui-renderer.test.mjs`（+10）。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0，`--expose-gc`）**
+- **T0（旧码 `29e1db0`，worktree 实测，同一 50k/IDB 夹具）**：`renderHome` 内联 `Storage.usageBytes()` →
+  **median 60.396 ms / P95 80.631 ms / max 103.352 ms**，60 次采样，堆峰值 **+59.08 MB** → 远超 P95 ≤50ms 门槛；
+  `node scripts/bench.mjs --assert`（旧码无 C009 档） → 55 项，无法反映该回归。
+- **红（旧码 + 新测试）**：`node scripts/storage.test.mjs` → **TypeError: Q.reset is not a function**（exit 1）；
+  `node scripts/ui-renderer.test.mjs` → **201 通过 / 6 失败**，含「渲染路径不再调用 `QB.Storage.usageBytes`
+  （期望 0，实际 54）」「上限未知不画进度条」等。
+- **T1（新码，同一夹具）**：**median 0.010 ms / P95 0.081 ms / max 0.397 ms**，堆峰值 **+40.52 MB**
+  （含 `refresh()` 一次性全量估算的瞬时分配，非渲染本身；渲染稳定后 bench 行 heap **−1.10 MB**）。
+  **T1/T0 = 1/6038（median）、P95 = 1/995**，均满足「T1 ≤0.5×T0 且 P95 ≤50ms」。
+- **正式门禁口径**：`node --expose-gc scripts/bench.mjs --assert` → **56/56 ✓ / exit 0**，全局 `heapUsed` 增量
+  **2.69 MB ≤ 40 MB**；C009 行实测 **0.01 ms（max 0.38）/ 落库 458.11 ms / 渲染 50k 视图 heap −1.10 MB**；
+  新门禁行 **「首页渲染 50k · IDB P95：0.03 ms ≤ 50ms」**。
+- **绿（本提交）**：`storage` **54/54**、`ui-renderer` **207/207**、`test-all` → **31 运行项 / 4933 断言 / 失败 0**，
+  `docs-check --static` 全部一致（基线 `--write`：断言 4917→4933、门禁 55→56、首屏 334.9→337.2 KB gzip /
+  939.6→946.2 KB raw）。
+
+**遗留 / 风险**
+- **峰值口径 vs 门禁口径**：计划门槛「heapUsed 增量 ≤40MB」按既有 bench 门禁口径 **2.69MB 通过**；但临时脚本记录的
+  **进程峰值 +40.52MB**（`refresh()` 全量估算的一次性瞬时）**略超 40MB 参考线 0.52MB**。该分配只在启动 `refresh()` 出现、
+  不在渲染循环内；真实浏览器 IDB 命中 `navigator.storage.estimate()` 时不会走全量扫描（Node 内存驱动无该 API）。
+  **若按峰值口径判定则该项未达标**，如实标注。
+- `refresh()` 是同步全量估算（Node 无 `navigator.storage.estimate`），50k 时占用一次主线程；真实浏览器 IDB **未实机验证**。
+- `Quota.view()` 在 `refresh()` 完成前 `ready=false`，首屏短暂显示「正在计算存储用量…」而非数字（刻意不阻塞）。
+- 增量计数依赖 `Storage.set/remove` 全部走门面；若未来有代码直写 `QB.Store.set`，快照会漂移（`dirty` 只在负值时置位，
+  无周期性自校正；目前全仓无直写业务路径，`references.test.mjs` 约束 `QB.Store` 仅经 Storage 使用）。
+
 ### fix(sync): reviewMeta 跨标签按键并集合并，消除孤儿 hash（C008）
 
 **Commit Hash**：待回填（四项 P1 完成后由单独 `docs(changelog)` 提交补录）

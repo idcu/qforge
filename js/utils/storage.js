@@ -80,6 +80,8 @@
     adoptStore(info) {
       const i = info || {};
       this._cancelSchedule();
+      // C009：后端切换后用量口径随之变化（LS 配额 vs IDB estimate），旧快照作废
+      if (QB.Quota && typeof QB.Quota.reset === 'function') QB.Quota.reset();
       if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
       this._ops = new Map();
       this._clearPending = false;
@@ -422,6 +424,16 @@
       Store.markFallback('idb-unavailable', { demote: true });
     },
 
+    /**
+     * C009：把本次写入的字节增量交给 QB.Quota 快照（渲染只读 view()，不再全量 stringify）。
+     * 旧值在缓存里就算精确差值；不在缓存则让 Quota 从磁盘原文探测（LS）或按 0（IDB 缓存权威）。
+     */
+    _trackQuotaSet(key, value) {
+      if (!QB.Quota || typeof QB.Quota.trackWrite !== 'function') return;
+      const oldKnown = this._cache.has(key);
+      QB.Quota.trackWrite(key, value, oldKnown ? this._cache.get(key) : undefined, oldKnown);
+    },
+
     _notifyError(e) {
       this.lastError = e;
       this._errorListeners.forEach((fn) => { try { fn(e); } catch (_) { /* 忽略监听器异常 */ } });
@@ -546,6 +558,7 @@
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
       this._demoteFallbackOnBusinessWrite(key);
+      this._trackQuotaSet(key, value);
       this._cache.set(key, value);
       this._pending.set(key, value);
       if (this._awaiting) return true; // F2：只排队，不落 LS
@@ -567,6 +580,7 @@
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
       this._demoteFallbackOnBusinessWrite(key);
+      this._trackQuotaSet(key, value);
       this._cache.set(key, value);
       this._pending.set(key, value);
       if (this._awaiting) return true; // F2：只排队，不落 LS
@@ -624,6 +638,9 @@
 
     /** 删除；LS 模式同步生效，IDB 模式入队删除（缓存立即失效） */
     remove(key) {
+      const oldKnown = this._cache.has(key);
+      const oldValue = oldKnown ? this._cache.get(key) : undefined;
+      if (QB.Quota && typeof QB.Quota.trackDelete === 'function') QB.Quota.trackDelete(key, oldValue, oldKnown);
       this._cache.delete(key);
       this._pending.delete(key);
       // 引导键（迁移锁/后端标记）删除也必须立即可见：等待期释放锁不能被 _awaitDeletes 拖延
@@ -794,6 +811,8 @@
     },
 
     clearAll() {
+      // C009：整库清空后用量快照必然失效，交给下一次 refresh 重建基线
+      if (QB.Quota && typeof QB.Quota.reset === 'function') QB.Quota.reset();
       if (this._awaiting) {
         // F2：等待期清空只作用于内存；切换后由 _completeMigrationSwitch 补发 clear 到 IDB
         this._cache.clear();

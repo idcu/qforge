@@ -69,10 +69,6 @@
     return html;
   }
 
-  function formatKB(bytes) {
-    return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(2) + ' MB' : Math.round(bytes / 1024) + ' KB';
-  }
-
   /** 本地存储健康卡（占用条 + 配额告警），纯展示 */
   function renderStorageHealth() {
     // API 模式数据在自托管后端，不能再用 localStorage 配额文案误导用户。
@@ -82,21 +78,35 @@
         '请在「备份与恢复」中定期导出后端全量数据。</div>' +
         '<button type="button" class="btn btn-sm btn-ghost" data-action="backup-manage">备份与恢复</button></div>';
     }
-    let used = 0;
-    try { used = QB.Storage.usageBytes() || 0; } catch (e) { used = 0; }
-    const quota = QB.CONFIG.STORAGE_QUOTA_BYTES;
-    const ratio = used / quota;
-    const pct = Math.min(100, Math.round(ratio * 100));
-    const level = ratio >= QB.CONFIG.STORAGE_DANGER_RATIO ? 'danger' :
+    // C009：只读 QB.Quota 快照（O(1)），不再在渲染里遍历整库 / JSON.stringify。
+    const meter = QB.Quota && typeof QB.Quota.view === 'function' ? QB.Quota.view() : null;
+    if (!meter || !meter.ready) {
+      return '<div class="card storage-health"><h3 class="card-title">本地存储</h3>' +
+        '<div class="li-meta sh-label">正在计算存储用量…（不影响答题/导入）</div>' +
+        '<button type="button" class="btn btn-sm btn-ghost" data-action="backup-manage">备份与恢复</button></div>';
+    }
+    const used = meter.usedBytes || 0;
+    const limit = meter.limitBytes;
+    const ratio = limit ? used / limit : null;
+    const pct = ratio == null ? null : Math.min(100, Math.round(ratio * 100));
+    const level = ratio == null ? '' : ratio >= QB.CONFIG.STORAGE_DANGER_RATIO ? 'danger' :
       ratio >= QB.CONFIG.STORAGE_WARN_RATIO ? 'warn' : '';
     const fillCls = level === 'danger' ? ' danger' : level === 'warn' ? ' warn' : '';
     const hint = level === 'danger' ? '占用过高，建议立即「备份与恢复」导出数据' :
-      level === 'warn' ? '占用偏高，可适时备份' : '数据保存在本浏览器，建议定期备份';
+      level === 'warn' ? '占用偏高，可适时备份' :
+      meter.backend === 'idb' ? '数据保存在 IndexedDB，上限由浏览器按站点分配，建议定期备份' : '数据保存在本浏览器，建议定期备份';
+    // 上限未知（IDB 且拿不到 navigator.estimate）时不画百分比进度：避免把 5MB LS 配额套到 IDB 上造成满格红。
+    const bar = pct == null
+      ? '<div class="sh-track"><i class="sh-fill" style="width:0%"></i></div>'
+      : '<div class="sh-track" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' +
+        '<i class="sh-fill' + fillCls + '" style="width:' + pct + '%"></i></div>';
+    const amount = ratio == null
+      ? '已用 ' + QB.Quota.formatBytes(used) + '（上限由浏览器管理）'
+      : '已用 ' + QB.Quota.formatBytes(used) + ' / 约 ' + QB.Quota.formatBytes(limit) + '（' + pct + '%）';
     return '<div class="card storage-health' + (level ? ' ' + level : '') + '">' +
-      '<h3 class="card-title">本地存储</h3>' +
-      '<div class="sh-track" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' +
-      '<i class="sh-fill' + fillCls + '" style="width:' + pct + '%"></i></div>' +
-      '<div class="li-meta sh-label">已用 ' + formatKB(used) + ' / 约 ' + formatKB(quota) + '（' + pct + '%） · ' + esc(hint) +
+      '<h3 class="card-title">' + (meter.backend === 'idb' ? '本地存储（IndexedDB）' : '本地存储') + '</h3>' +
+      bar +
+      '<div class="li-meta sh-label">' + amount + ' · ' + esc(hint) +
       ' <button type="button" class="btn btn-sm btn-ghost" data-action="backup-manage">备份与恢复</button></div></div>';
   }
 

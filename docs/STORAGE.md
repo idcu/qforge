@@ -23,6 +23,7 @@
 - **原子性**：一次评分在同一调用栈里写「状态键 + 尾段日志 + 修订号」，IDB 模式下聚合成**一个事务**；事务失败整体回滚、待写保留、`onError` 通知并重试（不会出现状态写成功、日志丢一半）。
 - **导入事务（C006）**：`insertMany` 先留变更前快照，再写分片 → **显式落盘确认**（LS `forceSync()` 会抛配额错；IDB `await flush()`）→ 回读题数校验；任一步失败即用快照 `writeAll` 回滚并再次落盘确认，然后抛原始错误（不 `bumpRev`、不报成功）。`commitImport` 在预览前用 `QB.Quota.canFitQuestions` 预检，放不下时 **0 次写**并给出「需要 / 可用 / 已用 / 上限」。
   LS 模式的 `set` 是「缓存先行、写盘失败只经 `onError` 通知」——因此**不能只靠 `readAll` 判定成功**（读的是缓存），必须经 `forceSync()` 事务点。
+- **用量快照（C009）**：`QB.Quota` 维护增量 `meter`——启动 `refresh()` 建快照（IDB 优先 `navigator.storage.estimate`，拿不到则 `limitBytes=0`），此后 `Storage.set/setSync/remove/clearAll/adoptStore` 只做 O(1) 增减。存储健康卡 `renderStorageHealth()` **只读 `Quota.view()`**，不再在渲染里 `Storage.usageBytes()` 全量遍历（50k/IDB 首页渲染 P95 由 80.63ms 降到 0.08ms）。上限未知时不画百分比进度条（避免把 5MB LS 配额套到 IDB 上满格报红）。
 - **O(改动数) 写入**：迁移只换后端，不换布局——题目仍 200 题/片、复习仍 per-hash 键、日志仍 200 条/段；单次评分只写 1 个状态键 + 1 个尾段（实测 0.06ms / 213B @20000 题，与 v5 per-hash 基线 0.14ms 同量级，见 [DATABASE.md](DATABASE.md) §9）。
 
 ### 9.2 数据划分
