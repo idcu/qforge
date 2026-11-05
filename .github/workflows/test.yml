@@ -21,6 +21,8 @@ jobs:
           node-version: '24'
       - name: 文档数字校验（静态基线；README / docs/DEVELOPMENT.md）
         run: node scripts/docs-check.mjs --static
+      - name: CI 覆盖自检（logic-tests 单步 + ORDER 与磁盘双向一致）
+        run: node scripts/check-ci-coverage.mjs
       - name: 文档链接 / 锚点 / 版本读数
         run: node scripts/docs-links.mjs
       - name: 装配顺序（81 个 script 的顺序即依赖图）
@@ -46,54 +48,12 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - name: 时区确认（${{ matrix.tz }}）
         run: node -e "console.log('TZ=' + (process.env.TZ || 'system-default'))"
-      - name: 冒烟测试（六题型/真实 541 题/三格式往返/CRUD/答题卡）
-        run: node scripts/smoke-test.mjs
-      - name: 导出单元测试
-        run: node scripts/exporter.test.mjs
-      - name: Office（xlsx/docx）导出往返测试
-        run: node scripts/office-export.test.mjs
-      - name: 极简 XML 解析器测试
-        run: node scripts/xml-lite.test.mjs
-      - name: 题目编辑器测试
-        run: node scripts/editor.test.mjs
-      - name: 富文本渲染器测试
-        run: node scripts/rich-text.test.mjs
-      - name: 图片资产/题库包测试
-        run: node scripts/assets.test.mjs
-      - name: 组卷蓝图测试
-        run: node scripts/blueprint.test.mjs
-      - name: 来源与网络导入测试
-        run: node scripts/source.test.mjs
-      - name: FSRS 调度器测试
-        run: node scripts/fsrs.test.mjs
-      - name: FSRS 参数优化器测试
-        run: node scripts/fsrs-opt.test.mjs
-      - name: SRS 到期/存储测试
-        run: node scripts/srs.test.mjs
-      - name: Storage 可靠性测试
-        run: node scripts/storage.test.mjs
-      - name: 备份恢复测试
-        run: node scripts/backup.test.mjs
-      - name: schema 迁移测试
-        run: node scripts/migrate.test.mjs
-      - name: 题目分片存储测试
-        run: node scripts/shard.test.mjs
-      - name: 数据契约层测试
-        run: node scripts/contract.test.mjs
-      - name: 参考后端 + api 适配器端到端测试
-        run: node scripts/api-backend.test.mjs
-      - name: 今日复习队列 / 复习设置测试
-        run: node scripts/review-queue.test.mjs
-      - name: 静态服务路径守卫测试
-        run: node scripts/static-server.test.mjs
-      - name: WebDAV 云备份测试
-        run: node scripts/sync-dav.test.mjs
-      - name: PWA 资源校验
-        run: node scripts/pwa.test.mjs
-      - name: UI 渲染器弹窗构建测试
-        run: node scripts/ui-renderer.test.mjs
-      - name: DOM 增量更新区域对账测试
-        run: node scripts/dom-patch.test.mjs
+      # 单步跑全量：与本地 `npm test` 同一条命令、同一套件集合。
+      # 逐套件步骤曾长期停留在 24/30——新增套件忘了加步骤时，缺的那些在 CI 里根本不跑，
+      # 而 job 仍是绿的。test-all 自带逐套件断言数比对（见 scripts/test-all.mjs），
+      # 覆盖率由 scripts/check-ci-coverage.mjs 静态断言。
+      - name: 全量逻辑层测试（${{ matrix.node-version }} / ${{ matrix.tz }}）
+        run: node scripts/test-all.mjs
       - name: 性能门禁（Node 24 / Asia-Shanghai）
         if: matrix.node-version == '24' && matrix.tz == 'Asia/Shanghai'
         run: node --expose-gc scripts/bench.mjs --assert

@@ -20,44 +20,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ORDER } from './test-order.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const BASELINE = path.join(__dirname, 'docs-baseline.json');
 const SELFTEST = process.argv.slice(2).includes('--selftest');
 
-const ORDER = [
-  'smoke-test.mjs',
-  'xml-lite.test.mjs',
-  'exporter.test.mjs',
-  'office-export.test.mjs',
-  'editor.test.mjs',
-  'rich-text.test.mjs',
-  'assets.test.mjs',
-  'blueprint.test.mjs',
-  'source.test.mjs',
-  'fsrs.test.mjs',
-  'fsrs-opt.test.mjs',
-  'srs.test.mjs',
-  'storage.test.mjs',
-  'idb.test.mjs',
-  'backup.test.mjs',
-  'migrate.test.mjs',
-  'importers-anki.test.mjs',
-  'importers-quizlet.test.mjs',
-  'shard.test.mjs',
-  'contract.test.mjs',
-  'sched.test.mjs',
-  'references.test.mjs',
-  'api-backend.test.mjs',
-  'review-queue.test.mjs',
-  'sync-dav.test.mjs',
-  'pwa.test.mjs',
-  'ui-renderer.test.mjs',
-  'dom-patch.test.mjs',
-  'a11y.test.mjs',
-  'static-server.test.mjs'
-];
 
 /** 取输出里最后一处「通过: N」（a11y 等套件会先打印「a11y 断言: N，通过: N」） */
 function parseCount(out) {

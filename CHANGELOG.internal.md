@@ -9,6 +9,32 @@
 
 ## 最新记录
 
+### test(ci): 逻辑层改用 test-all 单命令，覆盖 30/30 套件（C002）
+
+**核心改动**
+- `.github/workflows/test.yml` 的 `logic-tests`：24 个逐套件步骤 → **单步 `node scripts/test-all.mjs`**，
+  Node 20/24 × UTC/Asia-Shanghai 四条腿全跑；`bench.mjs --assert` 仍只跑 Node 24 / Asia-Shanghai。
+- 新增 `scripts/check-ci-coverage.mjs`（docs-check job 内运行）：断言单步存在、无逐套件步骤、
+  bench 门禁与单腿条件、ORDER 与磁盘套件双向一致；含 `--selftest` 两个假工作流负例。
+- 新增公共模块 `scripts/test-order.mjs`（`ORDER` 唯一事实源，C002 从 `test-all.mjs` 提取）：
+  `test-all.mjs` 改为 import（顺序与内容不变），`check-ci-coverage.mjs` 复用；`docs-check.mjs` 仍按
+  readdir 派生运行项（口径不变，未受影响）。**影响范围**：仅 `scripts/` 内开发工具，无运行时改动。
+- 文档：`docs/DEVELOPMENT.md` §2/§4（同一命令口径与覆盖自检）、`docs/TESTING.md`（CI 侧说明）。
+
+**验证数据（同机 Asia/Shanghai）**
+- **红（旧工作流）**：`node scripts/check-ci-coverage.mjs` → **exit 1**：
+  「缺少单步 `run: node scripts/test-all.mjs`」「仍有 24 个逐套件步骤」。
+- **绿（新工作流）**：exit 0，「logic-tests 单步运行，ORDER 30 项（冒烟 1 + 套件 29），性能门禁限 Node24/Asia-Shanghai」。
+- 真实负例 1：把 test-all 步骤从 yml 删掉 → exit 1（「缺少单步」），恢复后 exit 0。
+- 真实负例 2：临时新增 `scripts/zz-temp-extra.test.mjs` → exit 1（「磁盘套件未进 ORDER（CI 不会跑）」），删除后 exit 0。
+- `node scripts/check-ci-coverage.mjs --selftest` → exit 0，两例均「已拦截」。
+- 回归：`node scripts/test-all.mjs` → 30/4853/失败 0/31.5s/exit 0。
+
+**遗留 / 风险**
+- CI 实际执行结果需 push 后由远端确认（本轮禁止 push，**未验证**）；本地只验证了 YAML 静态结构与命令可跑。
+- 单步失去「按套件定位」的独立 step 名：`test-all` 失败时打印失败套件名与原因（C001 已实现）。
+- 自引用 commit hash 仍无法写入自身提交，hash 以 `git log -1` 为准。
+
 ### test(gate): test-all 校验逐套件断言数（C001）
 
 **核心改动**

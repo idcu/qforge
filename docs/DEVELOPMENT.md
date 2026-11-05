@@ -91,7 +91,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 **本地总闸**：`node scripts/test-all.mjs` 逐套件解析「通过: N」并与 `scripts/docs-baseline.json` 比对，
 计数为 0、解析失败、与基线不一致、合计不等于基线总数都会 exit 1（不再只看退出码）。
 新增断言后同 commit 运行 `node scripts/docs-check.mjs --write` 刷新基线；`--selftest` 用「通过: 0」假套件
-证明门禁会失败。CI 侧覆盖口径见 §4（当前仍为逐套件步骤，C002 改为同一命令）。
+证明门禁会失败。**本地与 CI 跑同一条命令**（见 §4）。
 
 ## 3. 性能打点与门禁
 
@@ -100,7 +100,9 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 
 ## 4. CI
 
-`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖直跑全部 **30 个运行项（冒烟 + 29 套件）**。无障碍静态检查 `a11y.test.mjs` 随套件进入 CI。时区矩阵用于拦截自然日/到期时间断言的时区回归。
+`.github/workflows/test.yml`：push/PR 到 `main` 触发，矩阵 **Node 20/24 × 时区 UTC/Asia/Shanghai**（共 4 组），`fail-fast: false`，零依赖。
+
+**逻辑层**：单一步骤 `node scripts/test-all.mjs`——与本地 `npm test` **同一条命令、同一套件集合**（30 个运行项：冒烟 + 29 套件，逐套件断言数与基线比对）。此前的逐套件步骤长期只有 24 步，缺失套件在 CI 里不跑而 job 仍绿；这一退化由 `node scripts/check-ci-coverage.mjs` 静态断言拦截（docs-check job 内运行：断言存在单步、无逐套件步骤、`scripts/test-order.mjs` 的 ORDER 与磁盘套件双向一致）。性能门禁 `bench.mjs --assert` 只跑 Node 24 / Asia-Shanghai 一条腿。
 
 **独立轻量 `docs-check` job**（`scripts/docs-check.mjs --static`）：只读 `scripts/docs-baseline.json` 的套件断言数/门禁数，实时读取运行项与首屏文件/gzip 体积后与 README、本文比对，**不 spawn 套件、不跑 bench**，不拖慢重腿（重腿仍 30 个运行项）。数字有意变化时本地 `node scripts/docs-check.mjs --write` 刷新基线并随代码同 commit 提交；默认 live 模式则实测跑一遍套件与 bench 复算（手动核对用）。
 
