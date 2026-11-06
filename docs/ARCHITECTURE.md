@@ -237,6 +237,20 @@ activate → caches.keys()
 - 升级清理语义不变：旧 `qforge-v*` 仍会被删除，`other-app-*` 等保持原样。
 - 未实机验证：真实浏览器多 PWA 共享 origin 时的 CacheStorage 隔离与删除时序。
 
+### 4.13 容量常量单一事实源（R-15）
+
+| 常量 | 值 | 消费方 | 语义 |
+| --- | --- | --- | --- |
+| `ANNOTATION_TOTAL_MAX_BYTES` | 2MiB | `utils/annotation.js`（含兜底） | 单库批注总量（UTF-8 字节） |
+| `BACKUP_LS_WARN_BYTES` | 4MiB | `modules/backup.js` | LocalStorage 模式已用空间告警阈值（不阻断） |
+| `QUIZLET_MAX_TEXT_LENGTH` | 4MiB | `importers/quizlet-importer.js` | 接管判定上限，按 `text.length`（UTF-16 单元）比较 |
+
+- `js/config.js` 的 `LIMITS` 是**唯一允许出现裸 `4 * 1024 * 1024`** 的位置；其余 `js/**` 必须引用常量。
+- `references.test.mjs` 静态扫描 `js/**/*.js`：出现裸 4MiB 即红；并校验 annotation 的
+  `||` 兜底值等于 `LIMITS.ANNOTATION_TOTAL_MAX_BYTES`（修复前兜底 4MiB 与配置 2MiB 漂移）。
+- 行为面：三处阈值数值不变；仅 `annotation.js` 在「配置缺失」这一不可达路径下由 4MiB 纠正为 2MiB。
+- 未实机验证：无（纯常量引用与静态扫描，无浏览器行为）。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |

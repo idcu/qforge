@@ -130,6 +130,33 @@ section('运行时导出集合与全仓引用对账');
   ok(exported.has('Helpers') && typeof QB.Helpers.formatDate === 'function', 'QB.Helpers.formatDate 可调用');
 }
 
+section('容量常量收敛（R-15）：js 下无裸 4MiB，兜底不得另起一套');
+{
+  const { QB: Q } = await createHarness(ROOT);
+  const LIMITS = Q.CONFIG.LIMITS;
+  const files = listJsFiles(path.join(ROOT, 'js'), []);
+  const bare = [];
+  files.forEach((f) => {
+    const rel = path.relative(ROOT, f).replace(/\\/g, '/');
+    if (rel === 'js/config.js') return; // 唯一允许定义裸值的文件
+    if (/(?<![0-9])4\s*\*\s*1024\s*\*\s*1024/.test(fs.readFileSync(f, 'utf8'))) bare.push(rel);
+  });
+  eq(bare.length, 0, '无裸 4 * 1024 * 1024（应引用 QB.CONFIG.LIMITS）'
+    + (bare.length ? '：' + bare.join(', ') : ''));
+  eq(LIMITS.ANNOTATION_TOTAL_MAX_BYTES, 2 * 1024 * 1024, '批注总量上限 = 2MiB');
+  eq(LIMITS.BACKUP_LS_WARN_BYTES, 4 * 1024 * 1024, '备份 LS 告警阈值 = 4MiB（新增常量）');
+  eq(LIMITS.QUIZLET_MAX_TEXT_LENGTH, 4 * 1024 * 1024, 'Quizlet 接管上限 = 4MiB（新增常量，按 text.length）');
+  const bk = fs.readFileSync(path.join(ROOT, 'js/modules/backup.js'), 'utf8');
+  ok(/LIMITS\.BACKUP_LS_WARN_BYTES/.test(bk), 'backup.js 引用 BACKUP_LS_WARN_BYTES');
+  const qz = fs.readFileSync(path.join(ROOT, 'js/importers/quizlet-importer.js'), 'utf8');
+  ok(/LIMITS\.QUIZLET_MAX_TEXT_LENGTH/.test(qz), 'quizlet-importer.js 引用 QUIZLET_MAX_TEXT_LENGTH');
+  const ann = fs.readFileSync(path.join(ROOT, 'js/utils/annotation.js'), 'utf8');
+  const m = /TOTAL_MAX_BYTES = [^;]*\|\|\s*([\d*\s]+);/.exec(ann);
+  const fallback = m ? new Function('return ' + m[1])() : -1;
+  eq(fallback, LIMITS.ANNOTATION_TOTAL_MAX_BYTES,
+    'annotation 兜底值 = LIMITS.ANNOTATION_TOTAL_MAX_BYTES（防 4MiB/2MiB 漂移）');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('FAILED: ' + f)); process.exit(1); }

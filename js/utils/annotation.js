@@ -22,7 +22,8 @@
   const QB = (global.QB = global.QB || {});
 
   const MAX_LENGTH = (QB.CONFIG && QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.ANNOTATION_MAX_LENGTH) || 5000;
-  const TOTAL_MAX_BYTES = (QB.CONFIG && QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.ANNOTATION_TOTAL_MAX_BYTES) || 4 * 1024 * 1024;
+  // 兜底值与 QB.CONFIG.LIMITS.ANNOTATION_TOTAL_MAX_BYTES 同源（2MiB）；禁止另起一套 4MiB 上限
+  const TOTAL_MAX_BYTES = (QB.CONFIG && QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.ANNOTATION_TOTAL_MAX_BYTES) || 2 * 1024 * 1024;
 
   function normalize(value) {
     if (value === null || value === undefined) return '';
