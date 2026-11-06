@@ -11,7 +11,7 @@
 
 ### fix(pwa): SW 预缓存失败不再被吞、非 2xx 导航不覆盖离线壳 + 运行时门禁（C025）
 
-**Commit Hash**：`待回填`
+**Commit Hash**：`d077f9a`
 
 **核心改动**
 - `sw.js`：
