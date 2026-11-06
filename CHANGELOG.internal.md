@@ -11,7 +11,7 @@
 
 ### feat(contract): 声明可选契约并提供统一能力检测（R-06）
 
-**Commit Hash**：`（提交后回填）`
+**Commit Hash**：`12e1029`
 
 **核心改动**
 - `js/data/contracts.js`：新增 `QB.OPTIONAL_CONTRACTS = { reviews: ['get','patch'], revlog: ['revision'] }`、
