@@ -11,7 +11,7 @@
 
 ### refactor(storage): 字节口径唯一化（R-07）
 
-**Commit Hash**：`（本条目提交后回填）`
+**Commit Hash**：`d526b56`
 
 **核心改动**
 - `js/utils/storage.js`：公开 `fullKeyOf(key)`（LS 物理键唯一实现）；`usageBytes()` 的 IDB/LS 两分支
@@ -46,7 +46,7 @@
 
 ### docs(arch): 启动分层水合 spike 判定 no-go（R-10，未实施）
 
-**Commit Hash**：`（本条目提交后回填）`
+**Commit Hash**：`9402aef`
 
 **核心改动**
 - **未修改任何生产代码**。新增临时 spike `.analysis/architecture-audit/r10-spike.mjs`（不入库），
