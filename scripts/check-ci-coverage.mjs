@@ -59,6 +59,21 @@ function inspect(text) {
     problems.push('bench 步骤未限定在 Node 24 / Asia-Shanghai 单腿');
   }
 
+  // a11y 必须有独立 job：只进 test-all 时，无障碍回归会被其它套件噪声掩盖；
+  // 且不得误用 --mutate（变异模式预期失败，放 CI 会永远红）。
+  const a11y = jobLines(text, 'a11y');
+  if (!a11y) {
+    problems.push('缺少 a11y job（静态无障碍门禁需独立进 CI）');
+  } else {
+    const a11yJoined = a11y.join('\n');
+    if (!/run:\s*node scripts\/a11y\.test\.mjs\b/.test(a11yJoined)) {
+      problems.push('a11y job 未运行 `node scripts/a11y.test.mjs`');
+    }
+    if (/--mutate\b/.test(a11yJoined)) {
+      problems.push('a11y job 不得使用 --mutate（变异模式预期失败）');
+    }
+  }
+
   const onDisk = fs.readdirSync(__dirname).filter((f) => f.endsWith('.test.mjs'));
   const missingOnDisk = ORDER.filter((f) => f !== 'smoke-test.mjs' && !onDisk.includes(f));
   const missingInOrder = onDisk.filter((f) => !ORDER.includes(f));
@@ -79,6 +94,10 @@ if (SELFTEST) {
       name: '混入逐套件步骤',
       text: base.replace(/\s*run: node scripts\/test-all\.mjs\n/,
         '\n        run: node scripts/test-all.mjs\n      - name: 逐步回归\n        run: node scripts/storage.test.mjs\n')
+    },
+    {
+      name: '删除 a11y 独立 job',
+      text: base.replace(/^  a11y:[\s\S]*?(?=^  [A-Za-z0-9_.-]+:)/m, '')
     }
   ];
   let ok = true;

@@ -9,6 +9,46 @@
 
 ## 最新记录
 
+### test(a11y): 无障碍静态门禁独立进 CI，弹窗快照缺登记即红（C022）
+
+**Commit Hash**：`待回填`
+
+**核心改动**
+- `.github/workflows/test.yml` 新增独立 `a11y` job（Node 24）运行 `node scripts/a11y.test.mjs`；
+  与 `test-all` 内同一命令并存，提供不被其它套件噪声淹没的红绿信号。
+- `scripts/check-ci-coverage.mjs` 新增静态断言：**必须存在 a11y job、必须运行 a11y.test.mjs、
+  不得使用 `--mutate`**（变异模式预期失败，误进 CI 会永久红）；`--selftest` 增加「删除 a11y job」
+  用例，三种退化均被拦截。
+- `scripts/a11y.test.mjs` 新增：
+  ① **弹窗快照注册自检**——扫描 `UI` 上所有 `render*Dialog` 导出，要求每个至少登记一份快照
+  （新增弹窗忘登记会直接转红）；② **变异模式 `--mutate`**——内存中删除浅色 `--on-solid` 令牌 +
+  剥离全部快照 `aria-checked`，套件必须变红；
+  ③ `SNAPSHOTS` 条目增加渲染器标签（`renderMixDialog` / `renderStartDialog`）。
+- 文档：`docs/TESTING.md` a11y 行与合计、`docs/DEVELOPMENT.md` CI 章节（运行项 35、独立 a11y job、
+  真机结果）；`scripts/docs-baseline.json` 由 `docs-check --write` 刷新。
+- 公共抽象：无新增业务抽象；只扩展测试/CI 门禁。影响面限于 `scripts/**`、`.github/**`、`docs/**`，
+  不改 `js/**` 运行时。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **静止态绿**：`node scripts/a11y.test.mjs` → **103 / 103 通过（exit 0）**（原 101 + 2 项注册自检）。
+- **变异红**：`--mutate` → **95 通过 / 8 失败（exit 1）**：浅色 3 组 `--on-solid` 色对缺失 +
+  单选/多选/判断/材料/已作答 5 份快照 `aria-checked` 违规，证明色对与 ARIA 检查有牙齿。
+- **CI 覆盖自检**：`node scripts/check-ci-coverage.mjs` → exit 0（ORDER 35 项）；
+  `--selftest` → 3/3 均「已拦截」（删 test-all 单步 / 混入逐套件 / 删 a11y job），exit 0。
+- **真机实跑（本机 Edge + CDP，三档 360/768/1280 × light/dark）**：`node scripts/a11y-browser.mjs`
+  → **374 / 374 通过（exit 0）**；越界元素 0、首页/答题/结果/设置四页 `scrollWidth==clientWidth`、
+  四类弹窗无横向溢出、复习设置 11 个控件均 ≥44×44；产物 `.screenshots/a11y-browser/`。
+- **门禁（实跑退出码）**：`node scripts/test-all.mjs` → **35 套件 / 5288 断言 / 基线一致（exit 0，39.5s）**；
+  `npm run verify:fast` → exit 0；`docs-check --static` 一致；`bench --assert` → **62/62 通过（exit 0）**；
+  首屏 **353.3 KB gzip / 989.0 KB raw**（本项零运行时改动）。
+
+**遗留 TODO / 风险**
+- 真机 runner 依赖本机 Edge，**不进 CI**；CI 仅静态断言。静态门禁无法证明真实布局/焦点循环，
+  两者是互补关系（真机覆盖范围与未覆盖项见 `docs/DEVELOPMENT.md` §4）。
+- 「弹窗快照注册自检」只覆盖 `UI.render*Dialog` 导出；app.js 内联构建的复习设置弹窗由
+  源码规则 + 真机 runner 覆盖，不在快照注册表内。
+- 变异模式仅用于人工/本地验证，禁止进 CI（check-ci-coverage 已拦截）。
+
 ### test(app): app.js 运行时覆盖 8 条真实入口，兼作入口接线变异门禁（C021）
 
 **Commit Hash**：`cb0faae`

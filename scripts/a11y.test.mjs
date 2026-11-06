@@ -12,7 +12,11 @@
  * 说明：焦点与布局的「真实行为」由 scripts/a11y-browser.mjs（真机，非 CI）验证；
  * 本脚本只对其实现约定做静态断言，避免在 Node 里重建 DOM。
  *
- * 运行：node scripts/a11y.test.mjs
+ * 负例（变异）：`node scripts/a11y.test.mjs --mutate` 在内存里删掉浅色主题的 `--on-solid`
+ * 令牌、并剥离渲染快照里的 `aria-checked`，本套件必须变红（exit 1），否则说明色对/ARIA
+ * 检查没有牙齿（exit 2）。
+ *
+ * 运行：node scripts/a11y.test.mjs [--mutate]
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,6 +25,7 @@ import { createHarness } from './_harness.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
+const MUTATE = process.argv.slice(2).includes('--mutate');
 const { QB, window } = await createHarness(QB_DIR);
 
 // ui-renderer 是纯 HTML 构建器，按 index.html 的方式手动加载（与 ui-renderer.test.mjs 同法）
@@ -37,7 +42,11 @@ function section(t) { console.log('\n== ' + t + ' =='); }
 
 /* ============================ 1. 色板与对比度 ============================ */
 
-const CSS = fs.readFileSync(path.join(QB_DIR, 'css/style.css'), 'utf8');
+let CSS = fs.readFileSync(path.join(QB_DIR, 'css/style.css'), 'utf8');
+if (MUTATE) {
+  // 负例 1：删掉浅色主题的 --on-solid 令牌（只删第一处，即 :root 块）
+  CSS = CSS.replace(/--on-solid\s*:\s*[^;]+;/i, '');
+}
 
 function cssVars(blockRe) {
   const m = CSS.match(blockRe);
@@ -284,14 +293,29 @@ SNAPSHOTS.push(['结果页', UI.renderResult(
   }),
   { id: 'b1', name: '题库A' }, {}
 )]);
-SNAPSHOTS.push(['组卷弹窗', UI.renderMixDialog(avail, cats)]);
-SNAPSHOTS.push(['开始弹窗-练习', UI.renderStartDialog('practice', avail, cats, {})]);
-SNAPSHOTS.push(['开始弹窗-考试', UI.renderStartDialog('exam', avail, cats, {})]);
+SNAPSHOTS.push(['组卷弹窗', UI.renderMixDialog(avail, cats), 'renderMixDialog']);
+SNAPSHOTS.push(['开始弹窗-练习', UI.renderStartDialog('practice', avail, cats, {}), 'renderStartDialog']);
+SNAPSHOTS.push(['开始弹窗-考试', UI.renderStartDialog('exam', avail, cats, {}), 'renderStartDialog']);
 SNAPSHOTS.push(['搜索页', UI.renderSearch(
   { id: 'b1', name: '题库A' }, 40,
   [{ questionKey: 'k1', question: '题干', type: 'single', category: '分类A' }],
   { keyword: '', type: '', category: '', tag: '' }
 )]);
+if (MUTATE) {
+  // 负例 2：剥离所有 aria-checked（模拟自定义控件漏写状态）
+  SNAPSHOTS.forEach((s) => { s[1] = String(s[1]).replace(/\saria-checked="[^"]*"/g, ''); });
+}
+
+section('弹窗快照注册：每个导出的 render*Dialog 必须至少有一份 a11y 快照');
+{
+  const dialogFns = Object.keys(UI).filter((k) => /^render[A-Z][A-Za-z]*Dialog$/.test(k) && typeof UI[k] === 'function');
+  ok(dialogFns.length > 0, '检测到弹窗渲染器：' + dialogFns.join('、'));
+  const tagged = new Set(SNAPSHOTS.map((s) => s[2]).filter(Boolean));
+  const missing = dialogFns.filter((fn) => !tagged.has(fn));
+  ok(missing.length === 0,
+    '全部弹窗渲染器均已注册快照（新增 renderXDialog 必须同步登记，否则本项转红）',
+    missing.length ? '（缺失：' + missing.join('、') + '）' : '');
+}
 
 section('ARIA / 键盘：代表性渲染快照扫描');
 SNAPSHOTS.forEach(([name, html]) => {
@@ -425,6 +449,13 @@ section('动效：prefers-reduced-motion 分支覆盖 animation / transition');
 const total = pass + failures.length;
 console.log('\n========================================');
 console.log('a11y 断言: ' + total + '，通过: ' + pass + '，失败: ' + failures.length);
+if (MUTATE) {
+  const caught = failures.length > 0;
+  console.log(caught
+    ? '[mutate] 预期红 ✅：删色对/ARIA 后本套件能抓住（失败 ' + failures.length + ' 项，exit 1）'
+    : '[mutate] 未翻红 ❌：色对/ARIA 检查没有牙齿');
+  process.exit(caught ? 1 : 2);
+}
 if (failures.length) {
   console.log('失败项：');
   failures.forEach((f) => console.log('  - ' + f));

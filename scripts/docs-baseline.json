@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-11-06T05:30:30.951Z",
+  "generatedAt": "2026-11-06T05:39:28.874Z",
   "runItems": 35,
   "suiteFiles": 34,
-  "totalAssertions": 5286,
+  "totalAssertions": 5288,
   "gateCount": 62,
   "counts": {
     "smoke-test.mjs": 731,
-    "a11y.test.mjs": 101,
+    "a11y.test.mjs": 103,
     "annotation.test.mjs": 58,
     "api-backend.test.mjs": 310,
     "app-boot.test.mjs": 71,

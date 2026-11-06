@@ -32,6 +32,21 @@ jobs:
       - name: 变更档案分卷（索引 ↔ 卷 双向）
         run: node scripts/check-changelog.mjs
 
+  a11y:
+    # 静态无障碍门禁独立成 job：色对对比度 / ARIA / 焦点约定 / reduced-motion。
+    # test-all 里也会跑同一条命令（本 job 提供独立的红绿信号，避免被其它套件噪声淹没）。
+    # 真机行为（布局溢出、44px 热区、真实焦点循环）由 scripts/a11y-browser.mjs 人工执行，
+    # 需要真实 Edge 窗口，不进入 CI；本 job 只做源码/快照静态断言。
+    name: 无障碍静态门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: 静态无障碍门禁（色对 / ARIA / 焦点约定 / 动效）
+        run: node scripts/a11y.test.mjs
+
   logic-tests:
     runs-on: ubuntu-latest
     strategy:
