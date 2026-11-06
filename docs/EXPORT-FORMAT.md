@@ -29,6 +29,7 @@
 - **格式按对象白名单过滤**：KINDS 项可带 `formats` 数组（如 history 只注册 `['json','csv','xlsx','txt']`）；`FORMATS` 项可带 `kinds` 数组（`html` 仅开放给 `bank/wrong/favorites`）；`chooseFormat` 同时按两者过滤弹窗选项，绕过弹窗直接构建会得到明确的「不支持」抛错。题集三类（bank/wrong/favorites）开放全部 8 格式。
 - qbk/html 为 `async: true`（qbk 需读 IndexedDB，html 需读图片资产），统一入口是 `Exporters.buildAsync(id, payload)`；同步 `buildContent` 对它们明确抛错。图片文件名 = 资产 id（`as<FNV1ahex>-<字节长度>`），缺图时 toast 报缺失数，占位标记仍随 bank.json 导出。
 - 打包经公共模块 `QB.ZipWriter`（`js/utils/zip-writer.js`，stored 不压缩 + CRC32）与 `QB.OfficeWriter`（`js/modules/office-writer.js`，OOXML 部件生成）；采用 stored 是为了让自家 `ZipReader` 在无 `DecompressionStream` 的环境也能闭环回读，代价是体积大于 deflate（538 题 XLSX 约 0.65 MB，对应该库 JSON 载荷约 0.27 MB，见 §6 实测）。
+- **批注总量闸门（C026）**：仅 `qbk`/`json`/`html` 携带 `annotation`。若题集批注总量超过 `CONFIG.LIMITS.ANNOTATION_TOTAL_MAX_BYTES`（2 MiB UTF-8），`Exporters.ensureAnnotationBudget` 会在构建前弹出确认：**「不含批注继续导出」**（剥离导出副本的批注，题目/答案/解析/图片照常，本机数据不变）或**「取消」**（中止导出）。CSV/XLSX/DOCX/Markdown/TXT 不含批注，不触发；任何路径都不静默截断批注。分发题包与分享页走同一闸门。
 
 ### 2.1 JSON 结构
 ```json

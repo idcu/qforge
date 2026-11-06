@@ -64,7 +64,10 @@
     SHARE_MAX_BYTES: 8 * 1024 * 1024,
     SHARE_URL_SOFT_LIMIT: 64 * 1024,
     // 题目批注（C012，纯本地）：单题批注字符上限（超出截断，防止题包/分享码异常膨胀）
-    ANNOTATION_MAX_LENGTH: 5000
+    ANNOTATION_MAX_LENGTH: 5000,
+    // 单库批注总量上限（UTF-8 字节，C026）：写入/导入超限时拒绝并给出可见提示；
+    // 导出超限时先确认「不含批注继续」，不静默截断（2MiB ≈ 540 题 × 5000 字符的 77%）
+    ANNOTATION_TOTAL_MAX_BYTES: 2 * 1024 * 1024
   };
 
   // 题目图片资产（IndexedDB；改库名等于换存储实例，不会迁移旧图）

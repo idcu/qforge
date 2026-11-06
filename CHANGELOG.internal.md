@@ -9,6 +9,67 @@
 
 ## 最新记录
 
+### feat(annotation): 单库批注总量上限（C026）——超限拒绝写入 / 导出前显式确认
+
+**Commit Hash**：`PENDING`
+
+**核心改动**
+- `js/config.js`：`LIMITS.ANNOTATION_TOTAL_MAX_BYTES = 2 * 1024 * 1024`（2 MiB，UTF-8 字节），
+  与既有 `ANNOTATION_MAX_LENGTH` 同一 `CONFIG.LIMITS` 单点定义。
+- `js/utils/annotation.js`（公共抽象扩展）：
+  `byteLength`（UTF-8 字节，`TextEncoder` 优先）、`totalBytes`（只统计顶层题目批注，材料子问不计数）、
+  `checkTotal`（返回 `{ok, bytes, limit, overflow}`）、`overflowText`（统一超限文案：具体字节/上限/
+  超出量 + 处理方式）。上限/单题上限均从 `CONFIG.LIMITS` 读取，不重复定义常量。
+- **写入闸门**（`js/modules/question-editor.js`）：保存普通题/材料题前调用
+  `annotationBudgetError`——仅在本次保存**带非空批注**时读取一次全库题目（无批注保存零额外 I/O），
+  替换/排除正在编辑的旧题后做 `checkTotal`；超限写入 `errBox` 并 **return，不落库**。
+- **导入闸门**（`js/modules/data-io.js`）：`commitImport` 在容量预检之前先做本次题包总量检查，
+  超限**在预览前整包拒绝**（0 次写入）；合并模式在用户选定后追加「库内已有 + 本次」检查
+  （保守口径：不扣除会被去重跳过的重复题）。拒绝文案复用 `overflowText`，明确给出
+  「删减批注 / 导入不含批注版本」的处理方式。
+- **导出闸门**（`js/modules/exporter.js`）：新增 `ensureAnnotationBudget(formatId, payload)`，
+  `qbk`/`json`/`html` 三种携带批注的格式在构建前检查；超限时 `confirmDialog` 明确二选一：
+  「不含批注继续导出」（只剥离导出副本的 annotation，本机数据不变）或「取消」。
+  导出主流程 `openFlow` 与分发/分享 `prepareDistribution` 共用同一闸门；CSV/XLSX/DOCX/MD/TXT
+  不携带批注，不弹窗。不静默截断、不静默丢弃。
+- 文档：`docs/ARCHITECTURE.md`（§4.7 总量上限策略 + `QB.Annotation` 抽象表）、
+  `docs/user-guide.md`（导入/导出两处用户可见行为）、`docs/IMPORT-FORMAT.md`、
+  `docs/EXPORT-FORMAT.md`、`docs/TESTING.md`（annotation 58→90、import-commit 33→40、
+  合计 5325→5364）、`docs/DEVELOPMENT.md`（SW 版本读数 v14→v15）、`docs/BENCH.md`
+  （首屏 353.7/989.9 → 356.9/999.0，**实测**）。
+- `sw.js` `CACHE` v14→v15（本次修改 `js/**`，按既有约定换代）；`scripts/sw-baseline.json`、
+  `scripts/docs-baseline.json` 同步刷新（**未调整任何阈值**）。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **540 题规模字节实测（真实 `TextEncoder` 路径）**：
+  真实批注（`注意单位换算；先统一量纲再计算。错因：漏乘系数。` + 序号）**73 B/题 → 40,392 B（39.4 KiB）**，
+  上限 2,097,152 B（2.00 MiB），**余量 2,056,760 B**；
+  满长汉字批注 `中×5000`/题 → **8,100,000 B（7.72 MiB）**，**超出 6,002,848 B**。
+- **超限负例转绿**：`540 题 × 5000 汉字 = 8,100,000 B > 2 MiB` → `checkTotal.ok=false` 断言通过；
+  导入侧 7 项全绿（`commitImport` 返回 null、写入 0 次、题数不变、弹窗含「批注总量/超过上限/删减批注」、
+  未打开预览）；导出侧取消/确认两条路径均绿，确认后实际 JSON 构建结果无 `annotation` 键，
+  原载荷（本机数据）未被修改；CSV 不弹窗。
+- **边界**：恰好等于上限（2,097,152 B）放行、+1 B 拒绝且 `overflow===1`；
+  ASCII/汉字/emoji 分别 1/3/4 字节，`trim` 后计，`MAX_LENGTH` 截断口径与单题一致。
+- **套件**：`node scripts/annotation.test.mjs` → **90 / 90（exit 0）**；
+  `node scripts/import-commit.test.mjs` → **40 / 40（exit 0）**。
+- **门禁（实跑退出码）**：`npm run verify:fast` → **exit 0**（36 运行项 / **5364** 断言 / 基线一致，
+  44.6s）；`node --expose-gc scripts/bench.mjs --assert` → **62/62 通过（exit 0）**，
+  heapUsed 增量 **2.70 MB**；首屏 **356.9 KB gzip / 999.0 KB raw**。
+- **过程中真实红→绿（非功能缺陷）**：新增 `js/**` 改动未换代导致 `sw-runtime` 基线摘要红、
+  `docs-check` 断言计数/SW 版本读数红 → 按既有约定 bump `CACHE` v15、刷新两份基线、同步文档后全绿；
+  未放宽任何阈值。
+
+**遗留 TODO / 风险**
+- **内存/性能未单独打点**：`checkTotal` 为 O(题数 × 批注长度) 的纯字符串扫描；无批注的保存/导入
+  不触发全库读取，但**带批注的编辑器保存会读一次全库题目**（未纳入 bench 门禁；50k 题库的
+  保存耗时未实测，如实标注「未测」）。
+- 合并导入的总量口径为**保守上界**（不扣除重复题），极端情况下可能比实际落库后的总量更早拒绝；
+  如需精确值需在 `insertMany` 去重后重新结算（本轮未做）。
+- 导出闸门的确认弹窗复用 `confirmDialog`（两按钮），未提供「导出前先展示超限题目清单」；
+  UI 真机行为（弹窗文案换行/移动端宽度）未纳入本轮真机验收。
+- 上限 2 MiB 是策略常量，非实测推导；调整它需同步本文、ARCHITECTURE 与用户文档。
+
 ### test(e2e): 真实浏览器端到端验收（C020/C025/C007/C008/IDB50K）+ C007 真实缺陷修复
 
 **Commit Hash**：`5eb40c0`

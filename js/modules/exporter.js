@@ -526,6 +526,57 @@
     return { kind: kind, bank: bank, entries: entries };
   }
 
+  /* ---------------- C026 批注总量预算 ---------------- */
+
+  // 只有这些格式会携带 annotation（CSV/Markdown/XLSX/DOCX/TXT 本来就不写该字段）
+  const ANNOTATION_FORMATS = { qbk: true, json: true, html: true };
+
+  function payloadQuestions(payload) {
+    return ((payload && payload.entries) || []).map((e) => e.question);
+  }
+
+  /** 去掉题集里所有批注，返回新载荷（不修改原对象；本机数据完全不动） */
+  function stripAnnotations(payload) {
+    return {
+      kind: payload.kind,
+      bank: payload.bank,
+      entries: (payload.entries || []).map((e) => {
+        const q = Object.assign({}, e.question);
+        delete q.annotation;
+        return { question: q, meta: e.meta };
+      })
+    };
+  }
+
+  /**
+   * 导出前的批注总量闸门（导出前提示 + 明确处理方式）：
+   *   - 未超限：原样返回；
+   *   - 超限：确认弹窗二选一（「不含批注继续导出」→ 返回剥离批注的新载荷；
+   *     「取消」→ ok=false，调用方中止导出）。绝不静默截断或静默丢弃批注。
+   * @returns {{ok:boolean, payload:Object, omitted:boolean, budget?:Object, canceled?:boolean}}
+   */
+  async function ensureAnnotationBudget(formatId, payload) {
+    if (!QB.Annotation || typeof QB.Annotation.checkTotal !== 'function' ||
+        !payload || payload.kind === 'history' || !ANNOTATION_FORMATS[formatId]) {
+      return { ok: true, payload: payload, omitted: false };
+    }
+    const check = QB.Annotation.checkTotal(payloadQuestions(payload));
+    if (check.ok) return { ok: true, payload: payload, omitted: false, budget: check };
+    const text = QB.Annotation.overflowText(check, '');
+    let proceed = false;
+    if (QB.UIRenderer && typeof QB.UIRenderer.confirmDialog === 'function') {
+      proceed = await QB.UIRenderer.confirmDialog(null, '不含批注继续导出', {
+        lines: [
+          text,
+          '「不含批注继续导出」：题目、答案、解析与图片照常导出，仅省略批注；本机批注数据不变。',
+          '「取消」：不导出，回到题库删减部分批注后重试。'
+        ]
+      });
+    }
+    if (!proceed) return { ok: false, canceled: true, payload: payload, omitted: false, budget: check };
+    return { ok: true, payload: stripAnnotations(payload), omitted: true, budget: check };
+  }
+
   function buildContent(formatId, payload) {
     const fmt = FORMATS.find((f) => f.id === formatId);
     if (!fmt) throw new Error('不支持的导出格式：' + formatId);
@@ -614,6 +665,15 @@
     const unit = def.unit || '题';
     const formatId = await chooseFormat(payload.entries.length, def.label, def.formats, unit, opts.kind, opts.trigger);
     if (!formatId) return null;
+
+    // C026：批注总量超限 → 导出前确认（不含批注继续 / 取消去清理），不静默丢批注
+    const gate = await ensureAnnotationBudget(formatId, payload);
+    if (!gate.ok) {
+      QB.UIRenderer.toast('已取消导出：批注总量超限，请先删减批注后重试', 'err');
+      return null;
+    }
+    payload = gate.payload;
+    if (gate.omitted) QB.UIRenderer.toast('批注总量超限，已按确认省略批注导出（本机批注不变）', 'err');
 
     let built;
     try {
@@ -712,6 +772,15 @@
       return null;
     }
     if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
+
+    // C026：分发题包 / 分享页都携带批注 → 同样先确认（超限时不含批注继续或取消）
+    const gate = await ensureAnnotationBudget('qbk', payload);
+    if (!gate.ok) {
+      QB.UIRenderer.toast('已取消导出：批注总量超限，请先删减批注后重试', 'err');
+      return null;
+    }
+    payload = gate.payload;
+    if (gate.omitted) QB.UIRenderer.toast('批注总量超限，已按确认省略批注导出（本机批注不变）', 'err');
 
     const info = await askPackageInfo(bank, payload.entries.length, trigger, mode);
     if (!info) return null;
@@ -835,6 +904,7 @@
 
   QB.Exporters = {
     KINDS, FORMATS, collect, buildContent, buildAsync, openFlow, download,
+    ensureAnnotationBudget,
     distributeFlow, shareFlow, openPreview,
     _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines, _historyToTable: historyToTable,
     _packageFilename: packageFilename

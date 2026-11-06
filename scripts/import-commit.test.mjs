@@ -207,6 +207,34 @@ const c1 = await makeQB({});
   ok(!ui.modals.some((h) => h.indexOf('导入预览') >= 0), '拒绝发生在预览之前');
 }
 
+/* ================= 7. C026 批注总量超限 → 拒绝导入，0 落库 ================= */
+{
+  section('批注总量超限：整包拒绝、原因可见、0 次写入');
+  const c7 = await makeQB({});
+  const { QB, ui, bank, controls } = c7;
+  const before = (await QB.DB.questions.list(bank.id, {})).items.length;
+  const dense = Array.from({ length: 540 }, (_, i) => ({
+    type: 'judge', question: '超限题 ' + i, options: [], answer: '正确',
+    annotation: '中'.repeat(QB.Annotation.MAX_LENGTH)
+  }));
+  const payload = {
+    questions: dense, format: 'json', warnings: [], errors: [],
+    stats: { total: dense.length, byType: { judge: dense.length } }, meta: null
+  };
+  const check = QB.Annotation.checkTotal(payload.questions);
+  ok(!check.ok, '前置：540 题满长汉字批注确实超限（' + check.bytes + 'B > ' + check.limit + 'B）');
+  controls.resetSets();
+  const setsBefore = controls.sets;
+  const res = await QB.DataIO.commitImport(bank, payload, 'json');
+  ok(res === null, '超限 → commitImport 返回 null');
+  eq(controls.sets - setsBefore, 0, '超限拒绝时写入次数为 0');
+  eq((await QB.DB.questions.list(bank.id, {})).items.length, before, '题库题数不变');
+  ok(ui.modals.some((h) => h.indexOf('批注总量') >= 0 && h.indexOf('超过上限') >= 0),
+    '拒绝原因可见：弹窗含「批注总量」与「超过上限」');
+  ok(ui.modals.some((h) => h.indexOf('删减批注') >= 0), '弹窗给出明确处理方式（删减批注/导入不含批注版本）');
+  ok(!ui.modals.some((h) => h.indexOf('导入预览') >= 0), '拒绝发生在预览之前');
+}
+
 /* ================= 汇总 ================= */
 console.log('\n========================================');
 console.log('import-commit 断言: ' + (pass + failures.length) + '，通过: ' + pass + '，失败: ' + failures.length);

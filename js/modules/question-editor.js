@@ -273,6 +273,27 @@
   }
 
   /**
+   * C026：保存前的单库批注总量预检。
+   * 仅在「本次保存带非空批注」时读取全库题目（无批注的保存零额外 I/O）；
+   * 超限返回统一可见文案（含当前字节/上限/超出量），由调用方写入 errBox，保存不落库。
+   * @returns {Promise<string>} 空串=通过
+   */
+  async function annotationBudgetError(bank, nextQ, existing) {
+    if (!QB.Annotation || !QB.Annotation.checkTotal || !QB.Annotation.present(nextQ)) return '';
+    let items = [];
+    try {
+      const res = await QB.DB.questions.list(bank.id, {});
+      items = (res && res.items) || [];
+    } catch (e) {
+      return ''; // 读取失败不阻断保存：真正的落盘失败仍由仓储/配额错误反馈
+    }
+    const others = existing ? items.filter((q) => q.id !== existing.id) : items;
+    const check = QB.Annotation.checkTotal(others.concat([nextQ]));
+    if (check.ok) return '';
+    return QB.Annotation.overflowText(check, '请删减已有题目批注后重试；本次保存未写入。');
+  }
+
+  /**
    * 选项/空位增删的公共实现（普通题与材料小问共用）：
    * 在 draft 上执行增删，返回是否发生了变化；调用方负责重渲染作用域。
    * @param {Element} box 作答区容器（普通题 answerbox / 小问卡片）
@@ -570,6 +591,8 @@
           children: collectAll()
         });
         if (built.errors.length) { errBox.textContent = built.errors.join('；'); return; }
+        const budgetErr = await annotationBudgetError(bank, built.question, existing);
+        if (budgetErr) { errBox.textContent = budgetErr; return; }
         try {
           if (existing) await update(existing.id, built.question, { baseUpdatedAt: existing.updatedAt });
           else await create(bank.id, built.question);
@@ -679,6 +702,8 @@
         const data = collectForm(modal, curType);
         const errs = validate(data);
         if (errs.length) { errBox.textContent = errs.join('；'); return; }
+        const budgetErr = await annotationBudgetError(bank, data, existing);
+        if (budgetErr) { errBox.textContent = budgetErr; return; }
         try {
           if (existing) await update(existing.id, data, { baseUpdatedAt: existing.updatedAt });
           else await create(bank.id, data);

@@ -215,6 +215,17 @@
       showImportFailure(result, returnFocusTo);
       return null;
     }
+    // C026：单库批注总量预检（先于容量预检，避免被「存储空间不足」抢先、掩盖真正原因）。
+    // 超限一律拒绝写入并给出可读处理方式，不静默截断/丢弃批注。
+    const annotationCheck = QB.Annotation && QB.Annotation.checkTotal
+      ? QB.Annotation.checkTotal(result.questions) : null;
+    if (annotationCheck && !annotationCheck.ok) {
+      showImportFailure({
+        questions: [],
+        errors: [QB.Annotation.overflowText(annotationCheck, '请删减批注后重试，或导入不含批注的版本；本次未写入任何题目。')]
+      }, returnFocusTo);
+      return null;
+    }
     // G4：分发包重复导入识别（同 id+版本 → 显式选择；同 id 新版本 → 仅提示，按合并去重）
     const manifest = result.meta && result.meta.manifest;
     let presetMode = null;
@@ -252,6 +263,23 @@
     }
     const choice = await showPreview(bank, result, presetMode, returnFocusTo);
     if (!choice) return null;
+    // C026：合并模式要算上库内已有批注（覆盖模式已在上方按本次题包单独判定）。
+    // 保守口径：不扣除与已有题重复（会被跳过）的部分，宁可提前拒绝也不越限写入。
+    if (choice.mode !== 'overwrite' && annotationCheck && annotationCheck.bytes > 0) {
+      try {
+        const existing = (await QB.DB.questions.list(bank.id, {})).items || [];
+        const merged = QB.Annotation.checkTotal(existing.concat(result.questions));
+        if (!merged.ok) {
+          showImportFailure({
+            questions: [],
+            errors: [QB.Annotation.overflowText(merged, '合并后超出上限。请删减批注或改用「覆盖」导入；本次未写入任何题目。')]
+          }, returnFocusTo);
+          return null;
+        }
+      } catch (e) {
+        // 读取失败不在这里阻断：真正的落盘失败仍由 insertMany 回滚 + 错误反馈兜底
+      }
+    }
     try {
       const res = await QB.DB.questions.insertMany(bank.id, result.questions, {
         dedupe: QB.CONFIG.DEDUPE_ON_IMPORT,

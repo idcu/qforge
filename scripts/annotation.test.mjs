@@ -242,7 +242,121 @@ section('分享页：批注只读展示 / 转义 / 换行 / 无脚本 / 0 网络
     '批注样式声明保留换行（white-space:pre-wrap）');
 }
 
-/* ================= 7. 离线断言 ================= */
+/* ================= 7. 批注总量上限（C026） ================= */
+section('Annotation 总量：UTF-8 字节、上限单点定义、边界');
+{
+  eq(QB.Annotation.TOTAL_MAX_BYTES, QB.CONFIG.LIMITS.ANNOTATION_TOTAL_MAX_BYTES,
+    'TOTAL_MAX_BYTES 取自 CONFIG.LIMITS（单一事实源）');
+  eq(QB.Annotation.byteLength(''), 0, '空串 0 字节');
+  eq(QB.Annotation.byteLength('abc'), 3, 'ASCII 按 1 字节');
+  eq(QB.Annotation.byteLength('中文'), 6, '汉字按 3 字节');
+  eq(QB.Annotation.byteLength('😀'), 4, 'emoji（代理对）按 4 字节');
+  eq(QB.Annotation.byteLength('  abc  '), 3, '按 normalize 后计（trim 不计空白）');
+  eq(QB.Annotation.byteLength('a'.repeat(QB.Annotation.MAX_LENGTH + 100)), QB.Annotation.MAX_LENGTH,
+    '与单题上限同口径（先按 MAX_LENGTH 截断再计字节）');
+
+  const mixed = [
+    { annotation: '中文' },                 // 6
+    { annotation: '   ' },                  // 0
+    {},
+    { type: 'material', annotation: '😀', children: [{ annotation: '子问题批注不计数' }] } // 4
+  ];
+  eq(QB.Annotation.totalBytes(mixed), 10, 'totalBytes 只统计顶层非空批注');
+  eq(QB.Annotation.totalBytes(null), 0, '空集合 0 字节');
+
+  const limit = QB.Annotation.TOTAL_MAX_BYTES;
+  const exact = Array.from({ length: 419 }, () => ({ annotation: 'a'.repeat(5000) })); // 2,095,000
+  exact.push({ annotation: 'a'.repeat(limit - 419 * 5000) });
+  const atLimit = QB.Annotation.checkTotal(exact);
+  eq(atLimit.bytes, limit, '边界：恰好等于上限');
+  eq(atLimit.ok, true, '边界：等于上限仍放行');
+  eq(atLimit.overflow, 0, '边界：无超出量');
+  exact.push({ annotation: 'a' });
+  const overByOne = QB.Annotation.checkTotal(exact);
+  eq(overByOne.ok, false, '边界：超出 1 字节即拒绝');
+  eq(overByOne.overflow, 1, '溢出量精确为 1 字节');
+
+  const msg = QB.Annotation.overflowText(overByOne, '请删减批注后重试。');
+  ok(/批注总量/.test(msg) && /超过上限/.test(msg) && /请删减批注后重试/.test(msg),
+    'overflowText 同时给出字节、上限与处理方式');
+}
+
+/* ================= 8. 540 题规模：字节实测 + 超限负例 ================= */
+section('540 题规模：真实批注字节实测 + 满长汉字超限负例');
+{
+  const realisticText = '注意单位换算；先统一量纲再计算。错因：漏乘系数。';
+  const realistic = Array.from({ length: 540 }, (_, i) => ({
+    id: 'q' + i, type: 'single', question: '题 ' + i,
+    annotation: realisticText + (i + 1)
+  }));
+  const bytes540 = QB.Annotation.totalBytes(realistic);
+  const perItem = QB.Annotation.byteLength(realisticText + '1');
+  console.log('[MEASURE] 540 题 · 真实批注 ' + perItem + 'B/题 → 总量 ' + bytes540 + ' B（' +
+    (bytes540 / 1024).toFixed(1) + ' KiB）');
+  eq(bytes540, realistic.reduce((n, q) => n + QB.Annotation.byteLength(q.annotation), 0),
+    'totalBytes 与逐题累加一致');
+  const ok540 = QB.Annotation.checkTotal(realistic);
+  eq(ok540.ok, true, '540 题真实批注未超上限');
+  console.log('[MEASURE] 540 题余量 ' + (ok540.limit - ok540.bytes) + ' B / 上限 ' + ok540.limit + ' B（' +
+    (ok540.limit / 1024 / 1024).toFixed(2) + ' MiB）');
+
+  const dense = Array.from({ length: 540 }, () => ({ annotation: '中'.repeat(QB.Annotation.MAX_LENGTH) }));
+  const denseBytes = QB.Annotation.totalBytes(dense);
+  const denseCheck = QB.Annotation.checkTotal(dense);
+  console.log('[MEASURE] 540 题 · 满长汉字批注 5000 字/题 → 总量 ' + denseBytes + ' B（' +
+    (denseBytes / 1024 / 1024).toFixed(2) + ' MiB），超出 ' + denseCheck.overflow + ' B');
+  eq(denseCheck.bytes, 540 * 5000 * 3, '满长汉字按 3 字节/字计');
+  eq(denseCheck.ok, false, '超限负例：540 题满长汉字批注必须判超限');
+  ok(denseCheck.overflow === denseBytes - denseCheck.limit, '溢出量 = 总量 - 上限');
+}
+
+/* ================= 9. 导出闸门：超限必须显式确认，不静默丢批注 ================= */
+section('导出闸门：超限确认 / 取消 / 非批注格式 / 实际构建不含批注');
+{
+  const denseQuestions = Array.from({ length: 540 }, (_, i) => ({
+    id: 'd' + i, type: 'judge', question: '超限题 ' + i, options: [], answer: '正确',
+    annotation: '中'.repeat(QB.Annotation.MAX_LENGTH)
+  }));
+  const payload = {
+    kind: 'bank', bank: { name: '超限导出库' },
+    entries: denseQuestions.map((q) => ({ question: q, meta: {} }))
+  };
+
+  const prevUI = QB.UIRenderer;
+  QB.UIRenderer = QB.UIRenderer || {};
+  const prevConfirm = QB.UIRenderer.confirmDialog;
+  let confirmText = '';
+  QB.UIRenderer.confirmDialog = async (message, confirmTextArg, opts) => {
+    confirmText = ((opts && opts.lines) || [message || '']).join('\n');
+    return false;
+  };
+  const canceled = await QB.Exporters.ensureAnnotationBudget('json', payload);
+  eq(canceled.ok, false, '用户取消 → 不导出');
+  eq(canceled.canceled, true, '取消标记');
+  ok(confirmText.indexOf('批注总量') >= 0 && confirmText.indexOf('不含批注继续导出') >= 0 &&
+    confirmText.indexOf('删减') >= 0, '提示含超限字节与两种明确处理方式');
+
+  QB.UIRenderer.confirmDialog = async () => true;
+  const allowed = await QB.Exporters.ensureAnnotationBudget('json', payload);
+  eq(allowed.ok, true, '用户确认 → 允许导出');
+  eq(allowed.omitted, true, '标记本次已省略批注');
+  eq(allowed.payload.entries.length, 540, '题目数量不变');
+  ok(!QB.Annotation.present(allowed.payload.entries[0].question), '导出载荷不带批注');
+  eq(allowed.payload.entries[1].question.id, 'd1', '题目其它字段/顺序保留');
+  ok(QB.Annotation.present(payload.entries[0].question), '原载荷（本机数据）未被修改');
+  const gatedJson = JSON.parse(QB.Exporters.buildContent('json', allowed.payload).content);
+  ok(!('annotation' in gatedJson.questions[0]), '实际 JSON 构建结果不含 annotation 键');
+
+  QB.UIRenderer.confirmDialog = async () => { throw new Error('非批注格式不应弹窗'); };
+  const csvOk = await QB.Exporters.ensureAnnotationBudget('csv', payload);
+  eq(csvOk.ok, true, 'CSV 不携带批注 → 不弹窗、直接放行');
+  eq(csvOk.omitted, false, 'CSV 不标记省略');
+
+  QB.UIRenderer.confirmDialog = prevConfirm;
+  QB.UIRenderer = prevUI;
+}
+
+/* ================= 10. 离线断言 ================= */
 section('离线断言');
 eq(fetchCalls, 0, '批注全链路 fetch 调用 0 次（零网络，globalThis + window 双桩计数）');
 

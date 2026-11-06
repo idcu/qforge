@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-11-06T07:03:56.261Z",
+  "generatedAt": "2026-11-06T07:20:55.529Z",
   "runItems": 36,
   "suiteFiles": 35,
-  "totalAssertions": 5325,
+  "totalAssertions": 5364,
   "gateCount": 62,
   "counts": {
     "smoke-test.mjs": 731,
     "a11y.test.mjs": 103,
-    "annotation.test.mjs": 58,
+    "annotation.test.mjs": 90,
     "api-backend.test.mjs": 310,
     "app-boot.test.mjs": 71,
     "assets.test.mjs": 182,
@@ -20,7 +20,7 @@
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
     "idb.test.mjs": 127,
-    "import-commit.test.mjs": 33,
+    "import-commit.test.mjs": 40,
     "importers-anki.test.mjs": 148,
     "importers-quizlet.test.mjs": 75,
     "migrate.test.mjs": 322,
@@ -45,7 +45,7 @@
   "firstScreen": {
     "scripts": 86,
     "files": 94,
-    "rawKB": "989.9",
-    "gzipKB": "353.7"
+    "rawKB": "999.0",
+    "gzipKB": "356.9"
   }
 }
