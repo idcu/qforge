@@ -13,16 +13,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 let pass = 0;
 const failures = [];
-function ok(c, l, extra) { if (c) { pass++; console.log('  ✓ ' + l + (extra ? '  ' + extra : '')); } else { failures.push(l); console.log('  ✗ ' + l + (extra ? '  ' + extra : '')); } }
-function eq(a, b, l) { ok(a === b, l, '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
-function section(t) { console.log('\n== ' + t + ' =='); }
-
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 /** 显式例外：仅允许浏览器启动文件在运行时挂载、且 Node harness 不执行的符号 */
 const ALLOW = new Map([
   ['App', 'js/app.js 在 DOM 启动阶段挂载 QB.App；harness 有意不加载 app.js（纯 DOM 引导）']

@@ -19,16 +19,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 let pass = 0;
 const failures = [];
-function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); } }
-function eq(a, b, l) { ok(JSON.stringify(a) === JSON.stringify(b), l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
-function section(t) { console.log('\n== ' + t + ' =='); }
-
+const A = createAssert({ failures: failures, onPass: () => { pass++; }, deep: true });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 /** 极简 modal 替身：支持 querySelector/appendChild，并在 setup 后自动点「导入」 */
 function makeModalUI() {
   const ui = {

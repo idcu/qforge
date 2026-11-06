@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
 import { probeApkg } from './probe-apkg.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -28,10 +29,10 @@ QB.DB.init();
 
 let pass = 0;
 const failures = [];
-function ok(c, l, extra) { if (c) { pass++; console.log('  ✓ ' + l + (extra ? '  ' + extra : '')); } else { failures.push(l); console.log('  ✗ ' + l + (extra ? '  ' + extra : '')); } }
-function eq(a, b, l) { ok(a === b, l, '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
-function section(t) { console.log('\n== ' + t + ' =='); }
-
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 const bytes = (s) => new TextEncoder().encode(s);
 const arr = (u8) => Array.from(u8);
 function apkg(name) {

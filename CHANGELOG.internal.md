@@ -9,6 +9,40 @@
 
 ## 最新记录
 
+### test(lib): 统一 34 套件断言原语，断言总数与基线不变（C024）
+
+**Commit Hash**：`待回填`
+
+**核心改动**
+- 新增 `scripts/lib/assert.mjs`：`createAssert({ failures, onPass, log, deep })` 返回
+  `{ ok, eq, deepEq, section, throws, failures }`，只负责断言与记录，**不接管汇总、不调用
+  `process.exit`**。各套件继续保留自己的 `let pass = 0; const failures = []`，通过 `onPass`
+  回写 `pass`、通过共享 `failures` 收集失败，因此「通过: N」格式、基线计数与总闸语义完全不变。
+- 34 个 `scripts/*.test.mjs` 的本地 `ok/eq/section` 定义全部替换为共享助手（32 个用一次性
+  codemod 改写，`a11y.test.mjs`（无 `eq`）与 `static-server.test.mjs`（保留本地 `eq2` 但底层
+  改调共享 `ok`）手工改写）；`idb.test.mjs` / `import-commit.test.mjs` 传 `deep: true`。
+  套件特有的 `throwsAsync` / `eq2` / `near` 仍保留本地实现，未强行统一。
+- 文档：`docs/TESTING.md` 增加「断言原语（C024）」段落，说明保留计数器与回写方式。
+- 公共抽象：`scripts/lib/assert.mjs`（`scripts/**` 内 34 个套件复用）。影响面：测试脚本之间
+  的断言行为统一（`eq` 默认严格相等、可为单套件开启深比对）；不改 `js/**` 运行时，不改任何
+  断言阈值与覆盖范围。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **绿**：`node scripts/test-all.mjs` → **35 个运行项 / 5288 断言 / 基线一致（exit 0，48.3s）**；
+  改造前基线同为 5288，逐套件计数未变（无断言被删或跳过硬）。
+- **门禁（实跑退出码）**：`npm run verify:fast` → exit 0；`node --expose-gc scripts/bench.mjs
+  --assert` → **62/62 通过（exit 0）**，`heapUsed 增量 2.72MB ≤ 40MB`；`docs-check --static`
+  → `35 个运行项 / 5288 项断言 / 62 项门禁` 一致。
+- **负例（共享助手确实记录失败）**：`node scripts/a11y.test.mjs --mutate` → **103 项中 95 通过 /
+  8 失败（exit 1）**（变异删除浅色 `--on-solid` + 剥离快照 `aria-checked`）；正常模式 103/103（exit 0）。
+  这说明共享 `ok` 在失败时会写入 `failures` 并让套件以 exit 1 结束，而不是只打印。
+
+**遗留 TODO / 风险**
+- 共享助手只收敛 `ok/eq/deepEq/section/throws`；`throwsAsync`、`near`、`eq2` 等套件特有辅助
+  仍是本地实现，后续如需统一再单独评估（本轮不扩大改动面）。
+- `deep: true` 走 `JSON.stringify` 比较，不支持循环引用 / `undefined` 键语义差异；`idb` 与
+  `import-commit` 的数据均为可序列化对象，如需比对特殊结构应改用显式断言。
+
 ### test(contract): 装配清单 requires DAG 填满 + keeps 导出存在性校验（C023）
 
 **Commit Hash**：`31b5a67`

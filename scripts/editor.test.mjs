@@ -7,6 +7,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
@@ -14,9 +15,10 @@ const { QB } = await createHarness(QB_DIR);
 
 let pass = 0;
 const failures = [];
-function ok(cond, label) { if (cond) { pass++; console.log('  ✓ ' + label); } else { failures.push(label); console.log('  ✗ ' + label); } }
-function eq(actual, expected, label) { ok(actual === expected, label + '（期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual) + '）'); }
-function section(t) { console.log('\n== ' + t + ' =='); }
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 const B = () => QB.QuestionEditor.buildQuestion;
 
 /* ---------------- buildQuestion ---------------- */

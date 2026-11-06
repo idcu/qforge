@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
@@ -27,11 +28,11 @@ const NTYPES = QB.CONFIG.TYPES.length;
 
 let pass = 0;
 const failures = [];
-function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); } }
-function eq(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 function deepEq(a, b, l) { eq(JSON.stringify(a), JSON.stringify(b), l); }
-function section(t) { console.log('\n== ' + t + ' =='); }
-
 const avail = {};
 QB.CONFIG.TYPES.forEach((t, i) => { avail[t] = i + 1; });
 const cats = ['分类A', '分类B', '含<b>标签'];

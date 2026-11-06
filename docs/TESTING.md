@@ -23,6 +23,13 @@
 `node scripts/test-all.mjs --selftest` 注入一个「通过: 0 且 exit 0」的假套件并断言门禁拦下它
 （拦截 = exit 0，放行 = exit 1），用于证明这道闸真的会失败，而不是永远绿。
 
+**断言原语（C024）**：34 个套件的 `ok/eq/deepEq/section/throws` 统一来自 `scripts/lib/assert.mjs`
+的 `createAssert({ failures, onPass })`。各套件**仍保留**自己的 `let pass = 0; const failures = []`，
+通过 `onPass` 回写计数、通过共享 `failures` 数组收集失败——所以「通过: N」的输出格式、基线计数与
+总闸语义完全不变。`createAssert` 只做断言与记录，不接管汇总、不调用 `process.exit`；
+需要深比对的套件（`idb` / `import-commit`）传 `deep: true`。新增断言优先用共享原语，套件内
+特有的辅助（如 `throwsAsync`、`eq2`）仍可保留。
+
 **CI 侧（C002）**：`.github/workflows/test.yml` 的 `logic-tests` 用同一条命令（Node 20/24 × 时区 UTC/Asia/Shanghai
 共 4 条腿），不再维护逐套件步骤；集合一致性由 `node scripts/check-ci-coverage.mjs` 断言
 （单步存在、无逐套件步骤、`scripts/test-order.mjs` 的 ORDER 与磁盘套件双向一致）。

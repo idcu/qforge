@@ -14,6 +14,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
@@ -22,15 +23,10 @@ const { QB, window } = await createHarness(QB_DIR);
 /* ---------------- 断言框架 ---------------- */
 let pass = 0;
 const failures = [];
-function ok(cond, label, extra) {
-  if (cond) { pass++; console.log('  ✓ ' + label + (extra ? '  ' + extra : '')); }
-  else { failures.push(label); console.log('  ✗ ' + label + (extra ? '  ' + extra : '')); }
-}
-function eq(actual, expected, label) {
-  ok(actual === expected, label, '(期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual) + ')');
-}
-function section(t) { console.log('\n== ' + t + ' =='); }
-
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 /* ---------------- 红测试前置：公共抽象未实现即失败 ---------------- */
 if (!QB.Annotation) {
   console.error('✗ QB.Annotation 未定义：C012 红测试（预期失败）');

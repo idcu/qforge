@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
@@ -18,11 +19,11 @@ const DP = win.QB.DomPatch;
 
 let pass = 0;
 const failures = [];
-function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); } }
-function eq(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 function deepEq(a, b, l) { eq(JSON.stringify(a), JSON.stringify(b), l); }
-function section(t) { console.log('\n== ' + t + ' =='); }
-
 const R = (key, html) => ({ key: key, html: html });
 
 section('首次渲染：全部区域为「变化」（需新建）');

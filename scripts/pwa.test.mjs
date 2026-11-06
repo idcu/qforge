@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CSP } from './lib/security-headers.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -14,10 +15,10 @@ const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 let pass = 0;
 const failures = [];
-function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); } }
-function eq(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
-function section(t) { console.log('\n== ' + t + ' =='); }
-
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 section('Web App Manifest');
 const manifest = JSON.parse(read('manifest.webmanifest'));
 eq(manifest.name, '淬题 qforge', 'name');

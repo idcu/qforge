@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
 import { createDom } from './lib/dom-shim.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
@@ -34,16 +35,13 @@ const APP_FOR_ENV = NEGATIVE
 
 let pass = 0;
 const failures = [];
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 const rejections = [];
 process.on('unhandledRejection', (e) => { rejections.push(e); });
 
-function ok(c, l) {
-  if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); }
-}
-function eq(a, b, l) {
-  ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）');
-}
-function section(t) { console.log('\n== ' + t + ' =='); }
 function tick(ms) { return new Promise((r) => setTimeout(r, ms || 0)); }
 async function waitUntil(fn, ms) {
   const limit = ms || 2000;

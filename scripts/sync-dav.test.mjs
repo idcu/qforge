@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
 import { createWebdavServer } from './serve-webdav.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { QB } = await createHarness(path.resolve(__dirname, '..'));
@@ -19,8 +20,10 @@ const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qforge-dav-'));
 
 let pass = 0;
 const failures = [];
-function ok(c, l, extra) { if (c) { pass++; console.log('  ✓ ' + l + (extra ? '  ' + extra : '')); } else { failures.push(l); console.log('  ✗ ' + l + (extra ? '  ' + extra : '')); } }
-function eq(a, b, l) { ok(a === b, l, '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 async function throwsAsync(fn, re, l) {
   try {
     await fn();
@@ -29,8 +32,6 @@ async function throwsAsync(fn, re, l) {
     ok(re.test(e.message), l, '实际：' + e.message);
   }
 }
-function section(t) { console.log('\n== ' + t + ' =='); }
-
 QB.Assets.useDriver(QB.Assets.memoryDriver());
 QB.Storage.remove(QB.KEYS.metaDav);
 const D = QB.SyncDAV;

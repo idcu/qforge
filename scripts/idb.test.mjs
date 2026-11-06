@@ -16,15 +16,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
 import { createMemoryIDB } from './lib/idb-memory.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 let pass = 0;
 const failures = [];
-function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); } }
-function eq(a, b, l) { ok(JSON.stringify(a) === JSON.stringify(b), l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
-function section(t) { console.log('\n== ' + t + ' =='); }
+const A = createAssert({ failures: failures, onPass: () => { pass++; }, deep: true });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 async function throwsAsync(fn, re, l) {
   try { await fn(); ok(false, l + '（未抛错）'); } catch (e) { ok(re ? re.test(String(e && e.message || e)) : true, l + '（' + (e && e.message || e) + '）'); }
 }

@@ -8,6 +8,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolveSafePath } from './lib/static-server.mjs';
+import { createAssert } from './lib/assert.mjs';
 import { CSP, securityHeaders } from './lib/security-headers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,9 +16,10 @@ const ROOT = path.resolve(__dirname, '..');
 
 let pass = 0;
 const failures = [];
-function ok(c, l) { if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); } }
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const section = A.section;
 function eq2(a, b, l) { ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）'); }
-function section(t) { console.log('\n== ' + t + ' =='); }
 
 section('正常路径');
 {

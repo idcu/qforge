@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
@@ -20,14 +21,10 @@ const { QB } = await createHarness(QB_DIR);
 /* ---------------- 断言框架 ---------------- */
 let pass = 0;
 const failures = [];
-function ok(cond, label, extra) {
-  if (cond) { pass++; console.log('  ✓ ' + label + (extra ? '  ' + extra : '')); }
-  else { failures.push(label); console.log('  ✗ ' + label + (extra ? '  ' + extra : '')); }
-}
-function eq(actual, expected, label) {
-  ok(actual === expected, label, '(期望 ' + JSON.stringify(expected) + '，实际 ' + JSON.stringify(actual) + ')');
-}
-function section(t) { console.log('\n== ' + t + ' =='); }
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const eq = A.eq;
+const section = A.section;
 function toArrayBuffer(buf) { return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength); }
 
 /** XML 文本转义还原（与生成端 escapeHtml 对应） */

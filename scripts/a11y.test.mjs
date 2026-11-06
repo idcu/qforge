@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QB_DIR = path.resolve(__dirname, '..');
@@ -34,11 +35,9 @@ const UI = window.QB.UIRenderer;
 
 let pass = 0;
 const failures = [];
-function ok(c, l, extra) {
-  if (c) { pass++; console.log('  ✓ ' + l + (extra ? '  ' + extra : '')); }
-  else { failures.push(l); console.log('  ✗ ' + l + (extra ? '  ' + extra : '')); }
-}
-function section(t) { console.log('\n== ' + t + ' =='); }
+const A = createAssert({ failures: failures, onPass: () => { pass++; } });
+const ok = A.ok;
+const section = A.section;
 
 /* ============================ 1. 色板与对比度 ============================ */
 
