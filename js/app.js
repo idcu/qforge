@@ -538,6 +538,34 @@
     beginQuiz(QB.shuffle(list.map((x) => x.question)).slice(0, QB.CONFIG.QUESTIONS_PER_QUIZ), 'practice', '收藏练习');
   }
 
+  /**
+   * 错题+薄弱一键集训（C010）：错题本 ∪ revlog 薄弱 → 1 次点击直接开练。
+   * 错题页 needsFullQuestions() 为 false，必须显式 loadQuestions，不能依赖 State.allQuestions。
+   */
+  async function startSmartPractice() {
+    if (!State.bankId) { UI.toast('请先打开一个题库', 'err'); return; }
+    const [wrongList, { items }, log] = await Promise.all([
+      QB.WrongBook.list(State.bankId),
+      QB.DB.loadQuestions(State.bankId),
+      reviewLogFor(State.bankId)
+    ]);
+    const built = QB.PracticeBuilder.build({
+      questions: items || [],
+      wrongKeys: (wrongList || []).map((w) => w.questionKey),
+      revlog: log,
+      bankId: State.bankId,
+      limit: QB.CONFIG.LIMITS.QUESTIONS_PER_QUIZ,
+      seed: Date.now() % 2147483647
+    });
+    if (!built.questions.length) {
+      UI.toast('没有错题或薄弱点（薄弱 = 作答≥' + QB.CONFIG.LIMITS.WEAK_MIN_ATTEMPTS +
+        ' 且正确率<' + QB.CONFIG.LIMITS.WEAK_ACCURACY + '%）', 'ok');
+      return;
+    }
+    beginQuiz(built.questions, 'practice',
+      '错题+薄弱集训（' + built.counts.total + ' 题：错题 ' + built.counts.wrong + ' / 薄弱 ' + built.counts.weak + '）');
+  }
+
   /** 当前题 FSRS 状态（本场开练时快照；无快照返回 null） */
   function quizReviewState(q) {
     if (!q || !State.quizMeta.reviewMap) return null;
@@ -711,6 +739,8 @@
         return openMixedDialog();
       case 'start-wrong':
         return openWrongDialog();
+      case 'start-smart-practice':
+        return startSmartPractice();
       case 'start-favorite':
         return startFavoriteQuiz();
       case 'start-chapter':

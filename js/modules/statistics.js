@@ -118,6 +118,29 @@
       }
       if (!out.length) out.push('整体表现稳定，建议加大练习量巩固记忆。');
       return out;
+    },
+
+    /**
+     * 逐题作答聚合（C010）：只读现有 revlog，不新增进度键。
+     * 正确 = 评分 >= good（FSRS log 的 r：1=again / 2=hard / 3=good / 4=easy）；
+     * hard 计入作答但不计正确，与「正确率」一词的用户直觉一致。
+     * @param {Array<{t,h,r,b}>} revlog 评分日志
+     * @param {string} [bankId] 只统计该题库（缺省统计全部）
+     * @returns {Map<string,{answered:number,correct:number,accuracy:number}>}
+     */
+    reviewStats(revlog, bankId) {
+      const out = new Map();
+      const minGood = QB.FSRS.RATINGS.good;
+      (revlog || []).forEach((e) => {
+        if (!e || typeof e.h !== 'string') return;
+        if (bankId && e.b !== bankId) return;
+        let s = out.get(e.h);
+        if (!s) { s = { answered: 0, correct: 0, accuracy: 0 }; out.set(e.h, s); }
+        s.answered += 1;
+        if (Number(e.r) >= minGood) s.correct += 1;
+      });
+      out.forEach((s) => { s.accuracy = s.answered ? (s.correct / s.answered) * 100 : 0; });
+      return out;
     }
   };
 })(window);

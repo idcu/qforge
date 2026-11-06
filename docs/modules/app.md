@@ -35,6 +35,7 @@
 | `modules/migrate.js` | `QB.Migration.run({force?})`：本地 schema 版本化迁移（**当前 schema=5**；v1→v2 contentHash、v2→v3 题目分片、v3→v4 分片一致修复、**v4→v5 hash 64 位 + 复习 per-hash + 日志分段一次性迁移**），按 `fromVersion` 链式执行；分片复用 `QB.QuestionShards.writeAll`、hash 重映射复用 `QB.HashRemap`、旧布局归一复用 `QB.ReviewStore/RevlogStore/ensureLayout`。**可靠性**：迁移前全量键快照（失败 `restoreAll` 原子回滚）；`meta:migrationLock`（owner/at，30s 陈旧锁可接管）+ 模块级 inflight 单飞 + 二读确认，保证多标签只迁移一次；中断后重入从头安全重跑（幂等）；备份恢复用 `force:true` 自愈「版本戳已为 5 但载荷仍旧」。返回 `{migrated, sharded, repaired, layout}`（见 [DATABASE.md](../) §4） |
 | `modules/sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象异步备份（Basic Auth，fetch 可注入测试）；CORS 受限如实报错 |
 | `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |
+| `modules/practice-builder.js` | `QB.PracticeBuilder`（C010）：错题 ∪ 薄弱（`reviewStats` 口径：正确率<60% 且作答≥2）一键组卷；纯函数、零写入，阈值取 `CONFIG.LIMITS.WEAK_MIN_ATTEMPTS/WEAK_ACCURACY`；与错题本、revlog 复用同一 contentHash |
 | `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT/**只读分享页 HTML** 八格式（qbk 异步读 IndexedDB、html 异步读图片资产），题库/错题/收藏；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder）；格式可按 `formats`（对象白名单）与 `kinds`（格式白名单）双重过滤；材料题在 MD/DOCX/TXT 经公共 `materialBlock` 行式分流（M2-A），见 [EXPORT-FORMAT.md](../) |
 | `modules/share-page.js` | `QB.SharePage`：只读分享页构建（复用 `RichText.questionAssetIds` 收集图片、`Assets.getMap` 读字节并内嵌 data URL、`RichText.render` 转义渲染）；`buildHTML(payload, assetMap)` 纯构建可测，`build(payload)` 异步读资产；无脚本/无网络请求/可打印 |
 

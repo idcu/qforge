@@ -169,6 +169,7 @@
       { action: 'start-exam', ico: '⏱️', label: '考试模式', sub: '限时 / 交卷' },
       { action: 'start-mixed', ico: '🎲', label: '组卷', sub: '题型/分类/难度' },
       { action: 'start-wrong', ico: '📕', label: '错题重练', sub: '错题本' },
+      { action: 'start-smart-practice', ico: '🧩', label: '错题+薄弱集训', sub: '错题 ∪ 正确率<60%（作答≥2）' },
       { action: 'start-favorite', ico: '⭐', label: '收藏练习', sub: '收藏夹' },
       { action: 'start-chapter', ico: '📖', label: '章节顺序练', sub: '按分类原序' },
       { action: 'nav-search', ico: '🔍', label: '题目搜索', sub: '关键词/筛选' }
@@ -663,6 +664,7 @@
     const regions = [];
     regions.push({ key: 'wrong-toolbar', html: '<div class="toolbar" data-region="wrong-toolbar">' +
       '<button class="btn" data-action="start-wrong">错题重练</button>' +
+      '<button class="btn btn-ghost" data-action="start-smart-practice">错题+薄弱集训</button>' +
       '<button class="btn btn-ghost" data-action="export-wrong">导出错题</button>' +
       '<button class="btn btn-ghost" data-action="wrong-clear">清空错题本</button></div>' });
     win.items.forEach((it) => {

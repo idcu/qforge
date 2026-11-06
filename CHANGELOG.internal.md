@@ -9,6 +9,54 @@
 
 ## 最新记录
 
+### feat(practice): 错题与薄弱点一键组卷，10k 组卷 P95 5.59ms（C010）
+
+**Commit Hash**：`<C010-HASH>`（回填见后续 `docs(changelog)` 提交）
+
+**核心改动**
+- `js/modules/statistics.js`：新增纯函数 `reviewStats(revlog, bankId)`——按 `e.b===bankId` 过滤，逐题聚合
+  `{answered,correct,accuracy}`；`r >= FSRS.RATINGS.good`（good/easy）计正确，hard 计作答不计正确。
+  只读现有 revlog，**不新增进度键**；现有统计调用方零改动。
+- 新增 `js/modules/practice-builder.js`（`QB.PracticeBuilder`）：`weakKeys`（正确率 <60% 且作答 ≥2）+
+  `build({questions,wrongKeys,revlog,bankId,limit,seed})`——错题集合 ∪ 薄弱集合、内容键去重、
+  `QB.shuffle(seed)` 后裁剪；纯函数、零写入。阈值统一放 `CONFIG.LIMITS.WEAK_MIN_ATTEMPTS/WEAK_ACCURACY`。
+- `js/app.js`：新增 `startSmartPractice()`——`WrongBook.list` 取错题键 + **显式 `DB.loadQuestions`**
+  （错题页 `needsFullQuestions()` 为 false，不能依赖 `State.allQuestions`）+ `reviewLogFor` → `beginQuiz`；
+  空池 toast 说明口径。首页菜单与错题页工具栏共用 `start-smart-practice`（**1 次点击即生成**）。
+- `scripts/bench.mjs`：新增 10k 组卷打点（T0=`Blueprint.compose` 全库对照，T1=`PracticeBuilder.build`）与
+  第 58 项门禁「智能组卷 10k · P95 ≤ 300ms」。
+- 文档：`docs/user-guide.md`（练习方式表 + 口径）、`docs/ARCHITECTURE.md` §5（两个公共抽象）、
+  `docs/modules/app.md`、`docs/modules.md`（83 scripts）、`docs/TESTING.md`（32 运行项 / 4972 断言）、
+  `docs/BENCH.md`（58 项、C010 验收段、首屏 339.8 KB gzip / 952.0 KB raw）；`sw.js` CACHE v9→v10。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0，`--expose-gc`）**
+- **红（实现前）**：`node scripts/practice-builder.test.mjs` → `QB.Statistics.reviewStats` 未实现，
+  首次聚合处抛 `TypeError`（exit 1）；`node scripts/ui-renderer.test.mjs` → **207 通过 / 3 失败**：
+  首页菜单与错题页工具栏均缺 `data-action="start-smart-practice"`、缺「错题+薄弱」文案。
+- **绿（本提交）**：`practice-builder` **28 / 28**；`ui-renderer` **210 / 210**（+3 入口断言）；
+  `test-all` → **32 运行项 / 4972 断言 / 失败 0**；`docs-check --static` 全部一致
+  （基线 `--write`：断言 4941→4972、门禁 57→58、首屏 337.4→339.8 KB gzip / 946.5→952.0 KB raw）。
+- **10k 组卷**（10k 单选含 contentHash + 2,400 条 revlog（800 薄弱键）+ 1,000 错题键，limit=50，
+  20 轮×3 组共 60 采样）：
+  - T0 旧手动路径 `Blueprint.compose` 全库：**median 0.63 ms / max 3.12 ms**（仅单步组卷，不含弹窗点击）；
+  - T1 `PracticeBuilder.build`：**median 1.53 ms / P95 5.59 ms / max 12.41 ms**（同机另一轮 1.36 / 2.04 / 6.63），
+    T1/T0=2.44×；候选池 1,000（错题 1,000 / 薄弱 800，含 800 重叠），产出 50 题；
+  - 门禁：**P95 5.59 ms ≤ 300 ms**（余量 ≥53×）；诊断轮不预置 contentHash（每题现算哈希）P95 77.36ms 仍达标，
+    正式夹具按真实落库形态预置，避免把哈希成本算进组卷。
+- **bench 另测**：58/58 ✓ / exit 0；全局 `heapUsed` 增量 **2.70 MB ≤ 40 MB**（before 8.81 → after 11.51）。
+- **零写入证据**：测试预置收藏/复习键后对整库 raw 键值快照，`build()` 前后逐项一致（28 断言含非空证明）。
+
+**影响范围与公共抽象**
+- 新增 `QB.Statistics.reviewStats`、`QB.PracticeBuilder`、`CONFIG.LIMITS.WEAK_*`；
+  仅新增只读函数/常量，`statistics` 现有调用方与所有存储键均未改动。
+- 新模块需四处注册：`index.html`、`contracts/modules.json`、`scripts/_harness.mjs`、`scripts/test-order.mjs`。
+
+**遗留 / 风险**
+- 薄弱口径依赖 revlog 保留量（20k FIFO 截断）与日志是否带 `b`；早期无 `b` 的日志会被按题库过滤掉，
+  可能低估「作答≥2」，已在 user-guide 写明，不新造进度键来补齐。
+- 真实浏览器「点击→生成→进答题页」的端到端耗时（含 `beginQuiz` 渲染）**未打点**；bench 只测纯函数。
+- T0 是旧路径单步组卷的对照，不含多级弹窗与用户点击成本；T1 多了并集/去重/洗牌，2.44× 属口径差异，非回归。
+
 ### fix(quota): 修正 C009 峰值口径——estimate 成功即用 usage，50k/IDB 峰值 59.09→0.27MB（C009 补测）
 
 **Commit Hash**：`6afab24`

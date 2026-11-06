@@ -687,6 +687,23 @@ section('C009 存储健康卡：渲染不触发全量统计 + IDB 不误判满�
   S.usageBytes = origStorageUsage;
 }
 
+section('C010 一键组卷入口（首页 + 错题页共用同一 action）');
+{
+  const byType = {};
+  QB.CONFIG.TYPES.forEach((t) => { byType[t] = 1; });
+  const counts = { total: QB.CONFIG.TYPES.length, byType: byType, dueReview: 0, queue: { total: 0 } };
+  const home = UI.renderHome({ name: '入口库' }, counts);
+  ok(home.indexOf('data-action="start-smart-practice"') >= 0, '首页菜单含 start-smart-practice');
+  ok(home.indexOf('错题+薄弱') >= 0, '首页入口文案含「错题+薄弱」');
+  const regions = UI.renderWrongListRegions([{
+    questionKey: 'h1',
+    wrongCount: 1,
+    question: { type: 'single', question: '入口题', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' }
+  }], 0);
+  const toolbar = regions.find((r) => r.key === 'wrong-toolbar');
+  ok(toolbar && toolbar.html.indexOf('data-action="start-smart-practice"') >= 0, '错题页工具栏含同一 action');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

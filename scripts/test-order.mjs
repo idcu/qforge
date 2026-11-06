@@ -19,6 +19,7 @@ export const ORDER = [
   'rich-text.test.mjs',
   'assets.test.mjs',
   'blueprint.test.mjs',
+  'practice-builder.test.mjs',
   'source.test.mjs',
   'fsrs.test.mjs',
   'fsrs-opt.test.mjs',

@@ -5,9 +5,9 @@
 > **读数口径**：本文里的数字由 `scripts/docs-check.mjs` 复算校验（它同时读 README / DEVELOPMENT / 本文）。
 
 ```bash
-npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，57 项）
+npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，58 项）
 npm run bench:observe                        # 只观测不判定（记录轮次/容量读数用）
-node --expose-gc scripts/bench.mjs --assert   # 性能门禁：57 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
+node --expose-gc scripts/bench.mjs --assert   # 性能门禁：58 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
 node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
 
@@ -74,7 +74,7 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 > **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账（列表 + 答题区，含**答题卡格级增量**）。**列表侧**——错题本移除一条仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）。**答题区**——勾选选项时顶层仅重建 3/5 区域（占字节 15.6%）；答题卡由「整卡单区域」细化为 `frame` + `sub`：帧跨作答逐字节不变（整张 `<details>` 不重建，展开态不丢），仅按 key 就地替换变化的 **3/52** 子节点（计数 + 受影响格，占整卡 HTML 字节 2.0%）。相较细化前（整卡占答题区字节约 95.6%），答题热路径重建量 **由 95.6% 降至 15.6%**。**浏览器实机验证**：折叠答题卡后作答，卡片保持折叠（证明 `<details>` 未被重建）；作答使选项态/提交按钮/计数/当前格状态同步更新，控制台无报错。
 > `insertMany` 落库耗时以 v3（64 位）contentHash 语义哈希重算为主（约 11.32 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体）远低于旧单键写。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化；v3 的 BigInt 64 位哈希比 v2 的 32 位慢（单次约 2 倍），仍在门禁（≤30 ms）内。
 
-bench 全程 heapUsed：8.72 → 11.39/11.42 MB（**+2.66～+2.69 MB**，两轮 `--expose-gc` 实跑；3000 题规模库末态 20.32 MB；DOM 增量末态 20.52 MB）。首屏静态体积（index.html + css + 82 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 90 个文件，逐文件 `gzip -9` 合计；2026-11-06 复测）：**337.4 KB gzip / 946.5 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：8.72 → 11.39/11.42 MB（**+2.66～+2.69 MB**，两轮 `--expose-gc` 实跑；3000 题规模库末态 20.32 MB；DOM 增量末态 20.52 MB）。首屏静态体积（index.html + css + 83 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 91 个文件，逐文件 `gzip -9` 合计；2026-11-06 复测）：**339.8 KB gzip / 952.0 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > **首页渲染 50k 题库验收（C009，2026-11-06 复测，同机 `--expose-gc`，同一 50k/IDB 夹具 A/B 各 60 采样）**
 > - **T0 旧码（`29e1db0`，worktree）**：`renderHome` 内联 `Storage.usageBytes()`（遍历全部键 + 逐值 `JSON.stringify`）→ **median 56.33 ms / P95 62.22 ms / max 81.26 ms，峰值 +59.09 MB**，两项均超门槛。
@@ -83,6 +83,13 @@ bench 全程 heapUsed：8.72 → 11.39/11.42 MB（**+2.66～+2.69 MB**，两轮 
 > - **代码修正**：`Quota.refresh()` 旧逻辑要求 `estimate` 的 `quota>0` 才用 `usage`，`quota=0/未知` 时仍退回全量扫描——已改为 **estimate 成功即用 `usage`，`quota=0` 只表示上限未知**（不套 5MB LS 配额）。**测量修正**：harness 新增 `storageEstimate` 注入，由内存 IDB 驱动在写入时增量记账（估计时零扫描），口径与应用 `usageBytes` 一致（误差 0.0000%）。
 > - **bench 新增两项门禁**（第 56/57 项）：「首页渲染 50k · IDB P95 ≤ 50 ms」→ 实测 **0.05 ms**；「首页渲染 50k · IDB 进程峰值（采样）≤ 40 MB」→ 实测 **0.73 MB**，`refresh` 0.45 ms、全量扫描 0 次。峰值取 `refresh` 返回后与每次渲染后的最大 `heapUsed`（refresh 同步执行，无法在循环内采样）。
 > - **未验证**：真实浏览器 IDB 的 `navigator.storage.estimate()` 实际配额与渲染帧时间未实测；本文 `quota=0` 为「上限未知」建模，不是浏览器实测值。
+
+> **错题/薄弱一键组卷验收（C010，2026-11-06，同机 `--expose-gc`，10,000 题库）**
+> - 夹具：10k 单选（含 contentHash 持久化形态，与落库后一致）+ 3,200 条 revlog（800 个薄弱键：3 次 1 对）+ 1,000 个错题键；`limit=50`，每次 20 轮 × 3 组共 60 采样。
+> - **T0 对照（现有手动路径 `QB.Blueprint.compose` 全库按题型过滤+抽样）**：median **0.63 ms** / max **3.12 ms**（只代表旧路径的单步组卷，不含多级弹窗与用户点击成本）。
+> - **T1 新码 `QB.PracticeBuilder.build`**：**median 1.53 ms / P95 5.59 ms / max 12.41 ms**，候选池 1,000（错题 1,000 / 薄弱 800，含 800 重叠），产出 50 题；**T1/T0 = 2.44×（单次纯函数调用对比）**。同机另一轮为 median 1.36 ms / P95 2.04 ms / max 6.63 ms，波动属正常抖动。
+> - **门禁**（第 58 项）：「智能组卷 10k · P95 ≤ 300 ms」→ 实测 **5.59 ms**（最差一轮 5.59 ms），余量 ≥53×。诊断轮曾不预置 `contentHash`（每题现算语义哈希）→ P95 **77.36 ms** 仍达标；正式夹具按真实落库形态预置，避免把哈希成本算进组卷。
+> - **未验证**：真实浏览器点击到答题页的端到端耗时（含 `beginQuiz` 渲染）未打点；本文只度量组卷纯函数。
 
 > **耗时口径（F4，2026-11-02）**：上列与 `bench.mjs` 输出中的毫秒/内存数值均为**同机参考值**（Node v24.14.0、当前机器负载），跨机器/跨轮次会波动；`scripts/docs-check.mjs --static` **只校验运行项、断言数、门禁数与首屏体积**，**不把耗时数字纳入校验**，故上述耗时仅作趋势参考，不构成文档门禁。
 

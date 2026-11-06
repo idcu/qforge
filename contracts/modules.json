@@ -580,10 +580,17 @@
       "requires": []
     },
     {
+      "id": "modules.practice-builder",
+      "file": "js/modules/practice-builder.js",
+      "layer": "modules",
+      "at": 82,
+      "requires": []
+    },
+    {
       "id": "app",
       "file": "js/app.js",
       "layer": "entry",
-      "at": 82,
+      "at": 83,
       "requires": []
     }
   ]

@@ -85,7 +85,8 @@ const MODULES = [
   'js/modules/backup.js',
   'js/modules/migrate.js',
   'js/modules/sync-dav.js',
-  'js/modules/blueprint.js'
+  'js/modules/blueprint.js',
+  'js/modules/practice-builder.js'
 ];
 
 /**

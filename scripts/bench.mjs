@@ -1154,6 +1154,52 @@ let c009UsageCalls = 0;
     + c009HeapMb.toFixed(2) + ' MB；进程峰值（采样）' + c009PeakMb.toFixed(2) + ' MB');
 }
 
+/* ---------- 13.5 错题/薄弱一键组卷（C010）：10k 题库 P95 门禁 ----------
+ * T0 = 现有手动路径（Blueprint.compose 对全库按题型过滤后抽样），仅作对照、不设阈值；
+ * T1 = QB.PracticeBuilder.build（错题 ∪ 薄弱，纯函数）。P95 ≤ 300ms 为计划门槛。 */
+{
+  const N10K = 10000;
+  const questions = [];
+  const wrongKeys = [];
+  const revlog = [];
+  for (let i = 0; i < N10K; i++) {
+    const q = {
+      type: 'single',
+      question: '智能组卷压测第 ' + (i + 1) + ' 题',
+      options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }, { letter: 'C', text: '丙' }, { letter: 'D', text: '丁' }],
+      answer: 'A', category: '分类' + (i % 10), difficulty: (i % 5) + 1
+    };
+    questions.push(q);
+    // 与落库后的真实形态一致：contentHash 在写入时已持久化，组卷不应把哈希当成本
+    const h = QB.makeContentHash(q);
+    q.contentHash = h;
+    if (i < 1000) wrongKeys.push(h);
+    // 800 个薄弱键：3 次作答 1 对（33%），与错题集合部分重叠
+    if (i < 800) {
+      revlog.push({ t: 1, h: h, r: QB.FSRS.RATINGS.good, b: 'bench-c010' });
+      revlog.push({ t: 2, h: h, r: QB.FSRS.RATINGS.again, b: 'bench-c010' });
+      revlog.push({ t: 3, h: h, r: QB.FSRS.RATINGS.again, b: 'bench-c010' });
+    }
+  }
+  const specs = { items: QB.CONFIG.TYPES.map((t) => ({ type: t, count: 50 })), seed: 11 };
+  const t0 = await stableTimed(async () => { QB.Blueprint.compose(questions, specs); }, 20, 3);
+  const t1 = await stableTimed(async () => {
+    QB.PracticeBuilder.build({
+      questions: questions, wrongKeys: wrongKeys, revlog: revlog,
+      bankId: 'bench-c010', limit: 50, seed: 11
+    });
+  }, 20, 3);
+  const built = QB.PracticeBuilder.build({
+    questions: questions, wrongKeys: wrongKeys, revlog: revlog, bankId: 'bench-c010', limit: 50, seed: 11
+  });
+  row('智能组卷 T0 对照（Blueprint.compose 全库 10k）', t0,
+    '旧手动路径：7 题型 × 全库过滤 + 抽样；产出 ' + specs.items.reduce((n, it) => n + it.count, 0) + ' 题');
+  row('智能组卷（10000 题库 · 错题+薄弱，C010）', t1,
+    '候选池 ' + built.counts.pool + '（错题 ' + built.counts.wrong + ' / 薄弱 ' + built.counts.weak + '），产出 '
+    + built.counts.total + ' 题；revlog ' + revlog.length + ' 条；T1/T0=' + (t1.median / t0.median).toFixed(3)
+    + '；P95 ' + ms(t1.p95));
+}
+
 console.log('\n================ 性能打点报告 ================');
 console.log('环境：Node ' + process.version + '，采样 ' + N + ' 次取中位数，分片大小 ' + QB.QuestionShards.SHARD_SIZE + '\n');
 const pad = (s, n) => String(s) + ' '.repeat(Math.max(0, n - String(s).length));
@@ -1264,6 +1310,17 @@ if (process.argv.indexOf('--assert') >= 0) {
   console.log((c009PeakOk ? '  ✓ ' : '  ✗ ') + '首页渲染 50k · IDB 进程峰值（采样）：' + c009PeakMb.toFixed(2)
     + 'MB ≤ 40.00MB（refresh ' + ms(c009RefreshMs) + '，refresh 内全量扫描 ' + c009UsageCalls + ' 次）');
   if (!c009PeakOk) fails.push('首页渲染 50k · IDB 峰值 ' + c009PeakMb.toFixed(2) + 'MB > 40MB');
+  // C010：10k 题库「错题+薄弱」一键组卷 P95 ≤ 300ms（计划门槛；T0 对照只打印不断言）
+  const c010r = report.find((x) => x.name.indexOf('智能组卷（10000 题库 · 错题+薄弱') === 0);
+  if (!c010r) {
+    fails.push('智能组卷（10000 题库 · 错题+薄弱 缺失');
+  } else {
+    const ok = c010r.p95 <= 300;
+    console.log((ok ? '  ✓ ' : '  ✗ ') + '智能组卷 10k · P95：' + ms(c010r.p95) + ' ≤ 300ms（中位 '
+      + ms(c010r.median) + '，最大 ' + ms(c010r.max) + '，' + c010r.runs + ' 轮×'
+      + (c010r.samples && c010r.runs ? c010r.samples / c010r.runs : '?') + ' 样本）');
+    if (!ok) fails.push('智能组卷 10k P95 ' + ms(c010r.p95) + ' > 300ms');
+  }
   // P1-B 门禁修订：原「历史绝对毫秒基线 ×1.05」（grade 0.0771 / gradeMany 0.2480）对机器频率/负载漂移敏感：
   //   HEAD 实测 0.0902 / 0.2787，同机复跑旧代码 e772e60 也是 0.0882 / 0.2784（同超限）→ 是机器漂移，不是代码回退。
   // 改为「同轮标定比值」：ratio = 本轮被测中位数 / 标定单位耗时（标定工作与被测 patch 同构，见 5b）；

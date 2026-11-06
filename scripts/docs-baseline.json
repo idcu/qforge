@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-11-05T23:53:11.649Z",
-  "runItems": 31,
-  "suiteFiles": 30,
-  "totalAssertions": 4941,
-  "gateCount": 57,
+  "generatedAt": "2026-11-06T01:44:26.958Z",
+  "runItems": 32,
+  "suiteFiles": 31,
+  "totalAssertions": 4972,
+  "gateCount": 58,
   "counts": {
     "smoke-test.mjs": 724,
     "a11y.test.mjs": 101,
@@ -23,6 +23,7 @@
     "importers-quizlet.test.mjs": 75,
     "migrate.test.mjs": 292,
     "office-export.test.mjs": 1150,
+    "practice-builder.test.mjs": 28,
     "pwa.test.mjs": 90,
     "references.test.mjs": 13,
     "review-queue.test.mjs": 51,
@@ -34,13 +35,13 @@
     "static-server.test.mjs": 29,
     "storage.test.mjs": 54,
     "sync-dav.test.mjs": 45,
-    "ui-renderer.test.mjs": 207,
+    "ui-renderer.test.mjs": 210,
     "xml-lite.test.mjs": 39
   },
   "firstScreen": {
-    "scripts": 82,
-    "files": 90,
-    "rawKB": "946.5",
-    "gzipKB": "337.4"
+    "scripts": 83,
+    "files": 91,
+    "rawKB": "952.0",
+    "gzipKB": "339.8"
   }
 }
