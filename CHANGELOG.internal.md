@@ -11,7 +11,7 @@
 
 ### fix(judge): 非法判断答案返回 pending；调度缓存即时失效（C019）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`b49559a`
 
 **核心改动**
 - **缺陷 A（P2-09，先红）**：`js/utils/judge-answer.js` 判断题对「题干答案非法」或「用户作答非法」一律返回
