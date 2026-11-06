@@ -11,7 +11,7 @@
 
 ### test(lib): 统一 34 套件断言原语，断言总数与基线不变（C024）
 
-**Commit Hash**：`待回填`
+**Commit Hash**：`6100643`
 
 **核心改动**
 - 新增 `scripts/lib/assert.mjs`：`createAssert({ failures, onPass, log, deep })` 返回
