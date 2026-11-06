@@ -11,7 +11,7 @@
 
 ### test(app): app.js 运行时覆盖 8 条真实入口，兼作入口接线变异门禁（C021）
 
-**Commit Hash**：`待回填`
+**Commit Hash**：`cb0faae`
 
 **核心改动**
 - **新增** `scripts/lib/dom-shim.mjs`：Node 侧最小 DOM 垫片（元素注册表 / 事件注册与派发 /
