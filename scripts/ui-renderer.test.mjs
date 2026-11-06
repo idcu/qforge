@@ -704,6 +704,22 @@ section('C010 一键组卷入口（首页 + 错题页共用同一 action）');
   ok(toolbar && toolbar.html.indexOf('data-action="start-smart-practice"') >= 0, '错题页工具栏含同一 action');
 }
 
+section('C011 分享入口与 manifest.packageId 展示');
+{
+  const counts = { total: 1, byType: { single: 1 }, dueReview: 0 };
+  const home = UI.renderHome({ name: '分享入口库' }, counts);
+  ok(home.indexOf('data-action="bank-share"') >= 0, '首页数据管理含 bank-share 入口');
+  ok(home.indexOf('分享链接/码') >= 0, '分享入口文案可见');
+  const html = UI.renderImportChecksum({
+    manifest: {
+      packageId: 'pkg-0123456789abcdef', version: '1.0.0', title: '分享包',
+      questionCount: 1, checksum: '3:abcdef0123456789', author: ''
+    },
+    manifestChecksumOk: true, manifestOk: true
+  });
+  ok(html.indexOf('pkg-0123456789abcdef') >= 0, '导入预览显示 manifest.packageId');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

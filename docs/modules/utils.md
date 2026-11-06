@@ -12,6 +12,7 @@
 | `utils/storage.js` | `QB.Storage` | 内存缓存 + 200ms 防抖批写（批量路径）+ `setSync` 同步穿透（学习数据/权重/级联，失败即抛）+ `forceSync/onError`；`storage` 事件跨标签同步缓存，且支持 `registerMerge(match, merge)` 对指定键做按键合并（当前用于 `user:review:*` / `user:reviewRev:*`，复用 `QB.ReviewMerge`）；`getFresh()` 绕过缓存直读（写前重读）；visibility/beforeunload 落盘；`usageBytes()`。**双后端门面（v6）**：接口/同步读语义不变，后端由 `QB.Store` 决定——IDB 模式下写先更新缓存并聚合成**一个微任务 IDB 事务**（同调用栈内多次 `setSync` 原子提交，失败整体回滚并保留待写重试），确认落盘用 `await Storage.flush()`；引导标记仍同步写 LS，且等待切换期（`_awaiting`）不被门控（业务键门控不变），否则接管方写的迁移锁只留本页内存 |
 | `utils/fnv.js` | `QB.FNV` | FNV-1a 散列唯一实现：32 位 `hashString`（UTF-16 码元）/`hashBytes`/`toHex`（资产 id、来源/URL checksum），**64 位 `hashString64`/`hashBytes64`（BigInt，16 hex）**（contentHash v3、导出内容校验和）；question-id/assets/source/exporter 共用（serve-api 为 Node ESM 独立实现，等价性由 E2E 守护） |
 | `utils/random.js` | `QB.mulberry32` | 确定性 PRNG 唯一实现（`[0,1)`），供 `QB.shuffle`/`shuffleOptions` 与 FSRS fuzz 共用 |
+| `utils/base64.js` | `QB.Base64` | **C011 Base64 唯一实现**：`encodeBytes/decodeToBytes/toUrlSafe/fromUrlSafe`；Node 走 Buffer、浏览器分块 btoa；输出与原 `share-page` 内联实现逐字节一致。分享页 data URL 与 `QB.ShareLink` 共用 |
 | `utils/answer-text.js` | `QB.AnswerText` | 填空答案拼接/回退与按题型答案行文本：`joinBlanks/blankAnswers/answerText`；exporter/share-page/question-editor/adapters/judge-answer 共用 |
 | `utils/shuffle.js` | `QB.shuffle`/`QB.sampleN`/`QB.shuffleOptions`/`QB.shuffleChildren` | 基于 `QB.mulberry32` 的种子化洗牌/抽样；选项乱序（单选/多选/不定项）并同步重映射答案；材料题小问乱序保留原 contentHash（整题身份不随展示顺序变化） |
 | `utils/answer-normalize.js` | `QB.normalizeAnswer`/`QB.parseBoolean`/`QB.normalizeLetters` | 全角转半角、去空白、去标点、大小写归一；布尔归一 |

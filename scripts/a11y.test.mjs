@@ -339,7 +339,7 @@ section('焦点管理：模态焦点进入/回位/Tab 循环/Esc 关闭（源码
     /commitImport\(bank, result, source, returnFocusTo\)/.test(ioSrc),
     'importUrlFlow 解析后再弹预览仍使用入口触发元素');
   ok(/function chooseFormat\(count, kindLabel, allowedIds, unit, kindId, returnFocusTo\)/.test(exportSrc) &&
-    /opts\.trigger/.test(exportSrc) && /function askPackageInfo\(bank, count, returnFocusTo\)/.test(exportSrc),
+    /opts\.trigger/.test(exportSrc) && /function askPackageInfo\(bank, count, returnFocusTo(?:, mode)?\)/.test(exportSrc),
     '导出/分发题包：异步收集完成后再打开的弹窗同样携带入口触发元素');
   ok(/const trigger = el;/.test(appSrc) && /importFlow\(State\.bank, trigger\)/.test(appSrc) && /trigger: trigger/.test(appSrc),
     'app.js 在事件入口统一捕获 trigger 并随调用链传递（不在各调用点重复记录逻辑）');

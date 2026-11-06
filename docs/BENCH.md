@@ -74,7 +74,7 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 > **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账（列表 + 答题区，含**答题卡格级增量**）。**列表侧**——错题本移除一条仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）。**答题区**——勾选选项时顶层仅重建 3/5 区域（占字节 15.6%）；答题卡由「整卡单区域」细化为 `frame` + `sub`：帧跨作答逐字节不变（整张 `<details>` 不重建，展开态不丢），仅按 key 就地替换变化的 **3/52** 子节点（计数 + 受影响格，占整卡 HTML 字节 2.0%）。相较细化前（整卡占答题区字节约 95.6%），答题热路径重建量 **由 95.6% 降至 15.6%**。**浏览器实机验证**：折叠答题卡后作答，卡片保持折叠（证明 `<details>` 未被重建）；作答使选项态/提交按钮/计数/当前格状态同步更新，控制台无报错。
 > `insertMany` 落库耗时以 v3（64 位）contentHash 语义哈希重算为主（约 11.32 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体）远低于旧单键写。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化；v3 的 BigInt 64 位哈希比 v2 的 32 位慢（单次约 2 倍），仍在门禁（≤30 ms）内。
 
-bench 全程 heapUsed：8.72 → 11.39/11.42 MB（**+2.66～+2.69 MB**，两轮 `--expose-gc` 实跑；3000 题规模库末态 20.32 MB；DOM 增量末态 20.52 MB）。首屏静态体积（index.html + css + 83 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 91 个文件，逐文件 `gzip -9` 合计；2026-11-06 复测）：**339.8 KB gzip / 952.0 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：8.72 → 11.39/11.42 MB（**+2.66～+2.69 MB**，两轮 `--expose-gc` 实跑；3000 题规模库末态 20.32 MB；DOM 增量末态 20.52 MB）。首屏静态体积（index.html + css + 85 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 93 个文件，逐文件 `gzip -9` 合计；2026-11-06 C011 复测）：**345.0 KB gzip / 966.2 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > **首页渲染 50k 题库验收（C009，2026-11-06 复测，同机 `--expose-gc`，同一 50k/IDB 夹具 A/B 各 60 采样）**
 > - **T0 旧码（`29e1db0`，worktree）**：`renderHome` 内联 `Storage.usageBytes()`（遍历全部键 + 逐值 `JSON.stringify`）→ **median 56.33 ms / P95 62.22 ms / max 81.26 ms，峰值 +59.09 MB**，两项均超门槛。
@@ -90,6 +90,15 @@ bench 全程 heapUsed：8.72 → 11.39/11.42 MB（**+2.66～+2.69 MB**，两轮 
 > - **T1 新码 `QB.PracticeBuilder.build`**：**median 1.53 ms / P95 5.59 ms / max 12.41 ms**，候选池 1,000（错题 1,000 / 薄弱 800，含 800 重叠），产出 50 题；**T1/T0 = 2.44×（单次纯函数调用对比）**。同机另一轮为 median 1.36 ms / P95 2.04 ms / max 6.63 ms，波动属正常抖动。
 > - **门禁**（第 58 项）：「智能组卷 10k · P95 ≤ 300 ms」→ 实测 **5.59 ms**（最差一轮 5.59 ms），余量 ≥53×。诊断轮曾不预置 `contentHash`（每题现算语义哈希）→ P95 **77.36 ms** 仍达标；正式夹具按真实落库形态预置，避免把哈希成本算进组卷。
 > - **未验证**：真实浏览器点击到答题页的端到端耗时（含 `beginQuiz` 渲染）未打点；本文只度量组卷纯函数。
+
+> **分享回链/粘贴码验收（C011，2026-11-06，Node v24 本机单轮实测）**
+> - 夹具三库各 1 题：图片库（1 张 `asset:` 内嵌图）、公式库（`\frac{1}{2}+\frac{3}{4}`）、材料库（1 父题 + 2 小问）。链路：`collect` → `buildAsync('qbk', distribute:true)` → `ShareLink.encode` → `ShareLink.decode` → `Importers.runImport`。
+> - **三库往返 3/3**：`manifestChecksumOk=true`、`countOk=true`，contentHash 集合逐库 100% 相等，包字节校验和相等；图片资产回写成功，材料父子与正文无损。
+> - 体积与耗时（单次参考，非门禁）：图片库 qbk **1,431 B**（1 asset）/ 码 **1,917 字符** / 回链 **1,954 字符**，build 4.73 ms、encode 0.26 ms、decode+import 1.65 ms；公式库 **1,273 B** / 1,707 / 1,744 字符，1.41 / 0.023 / 0.33 ms；材料库 **1,883 B** / 2,520 / 2,557 字符，0.77 / 0.028 / 0.40 ms。
+> - **离线证明**：`scripts/share-link.test.mjs` 在 `globalThis.fetch` / `window.fetch` 装计数桩后跑完整条链，**fetch 调用 0 次**（81 断言全绿）；SQLite/网络/账号均未参与。
+> - 只读分享页：三库 HTML 分别 3,226 / 3,423 / 3,375 B，**均无 `<script>` 与内联事件**；图片以 `data:image/png;base64,` 内嵌；公式页含真实 `<span class="rt-frac">` 元素（并用图片页断言排除「仅样式表命中」的假绿）。
+> - 软阈值：回链 > 64 KB（`SHARE_URL_SOFT_LIMIT`）时弹窗提示优先发送分享码；硬上限 8 MB（`SHARE_MAX_BYTES`，与 URL 快照上限一致）。本次三库回链均远低于阈值。
+> - **未验证**：真实浏览器端「生成 → 复制 → 另一标签打开回链」的交互链路未做浏览器自动化；本机只覆盖纯函数与 Node 导入链。
 
 > **耗时口径（F4，2026-11-02）**：上列与 `bench.mjs` 输出中的毫秒/内存数值均为**同机参考值**（Node v24.14.0、当前机器负载），跨机器/跨轮次会波动；`scripts/docs-check.mjs --static` **只校验运行项、断言数、门禁数与首屏体积**，**不把耗时数字纳入校验**，故上述耗时仅作趋势参考，不构成文档门禁。
 

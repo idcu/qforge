@@ -627,21 +627,28 @@
     return { kind: opts.kind, format: formatId, count: payload.entries.length, filename: filename, assetCount: built.assetCount };
   }
 
-  /** 分发题包信息弹窗：版本/作者/描述；返回 null（取消）或 {preview:true} 或 {version, author, description} */
-  function askPackageInfo(bank, count, returnFocusTo) {
+  /**
+   * 分发题包信息弹窗：版本/作者/描述
+   * @param {'download'|'share'} [mode] share 模式只生成回链/分享码，不下载
+   * @returns null（取消）或 {preview:true} 或 {version, author, description}
+   */
+  function askPackageInfo(bank, count, returnFocusTo, mode) {
+    const share = mode === 'share';
     return new Promise((resolve) => {
       QB.UIRenderer.openModal(
-        '<h3>导出分发题包 · ' + QB.escapeHtml(bank.name) + '</h3>' +
-        '<p class="li-meta">分发包在 .qbk 内附加 manifest.json（题包 id / 版本 / 题数 / 内容校验和），' +
-        '对方导入时会核对清单与校验和。共 ' + count + ' 题，含图片一并打包。</p>' +
+        '<h3>' + (share ? '分享题包 · ' : '导出分发题包 · ') + QB.escapeHtml(bank.name) + '</h3>' +
+        '<p class="li-meta">' + (share
+          ? '生成自包含 .qbk 并转成 #share 回链 / 粘贴码，对方离线导入（无账号、不访问服务器）。'
+          : '分发包在 .qbk 内附加 manifest.json（题包 id / 版本 / 题数 / 内容校验和），' +
+            '对方导入时会核对清单与校验和。') + '共 ' + count + ' 题，含图片一并打包。</p>' +
         '<div class="qe-grid"><div><label class="qe-label">版本</label>' +
         '<input id="pkg-version" value="1.0.0" placeholder="如 1.0.0" /></div>' +
         '<div><label class="qe-label">作者（可选）</label><input id="pkg-author" placeholder="留空则不署名" /></div></div>' +
         '<label class="qe-label">描述（可选）</label>' +
         '<input id="pkg-desc" value="' + QB.escapeHtml(bank.description || '') + '" />' +
         '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
-        '<button class="btn btn-ghost" data-action="pkg-preview">只读预览</button>' +
-        '<button class="btn" data-action="modal-ok">导出题包</button></div>',
+        (share ? '' : '<button class="btn btn-ghost" data-action="pkg-preview">只读预览</button>') +
+        '<button class="btn" data-action="modal-ok">' + (share ? '生成分享链接/码' : '导出题包') + '</button></div>',
         (modal) => {
           const readInfo = () => ({
             version: (modal.querySelector('#pkg-version').value || '').trim() || '1.0.0',
@@ -649,7 +656,8 @@
             description: (modal.querySelector('#pkg-desc').value || '').trim()
           });
           modal.querySelector('[data-action="modal-cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
-          modal.querySelector('[data-action="pkg-preview"]').onclick = () => { QB.UIRenderer.closeModal(); resolve({ preview: true }); };
+          const preview = modal.querySelector('[data-action="pkg-preview"]');
+          if (preview) preview.onclick = () => { QB.UIRenderer.closeModal(); resolve({ preview: true }); };
           modal.querySelector('[data-action="modal-ok"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(readInfo()); };
         },
         undefined,
@@ -682,43 +690,55 @@
   }
 
   /**
-   * 分发题包流程：收集 → 填题包信息 → 构建（含 manifest.json）→ 下载；也可只生成只读预览
-   * @param {{bank:Object, kind?:string}} opts
+   * 分发公共步骤：收集 → 填题包信息 → 构建 qbk（distribute:true，含 manifest.json）
+   * distributeFlow 与 shareFlow 共用，禁止各自复制一套 collect/buildAsync。
+   * @param {'download'|'share'} [mode]
+   * @returns null | {preview:true,payload} | {payload,info,built}
    */
-  async function distributeFlow(opts) {
-    const kind = (opts && opts.kind) || 'bank';
+  async function prepareDistribution(kind, bank, trigger, mode) {
     const def = KINDS[kind];
     if (!def) { QB.UIRenderer.toast('不支持的导出对象', 'err'); return null; }
-    if (!opts.bank) { QB.UIRenderer.toast('请先选择题库', 'err'); return null; }
+    if (!bank) { QB.UIRenderer.toast('请先选择题库', 'err'); return null; }
 
     let payload;
     try {
-      payload = await collect(kind, opts.bank);
+      payload = await collect(kind, bank);
     } catch (e) {
       QB.UIRenderer.toast('导出失败：' + e.message, 'err');
       return null;
     }
     if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
 
-    const info = await askPackageInfo(opts.bank, payload.entries.length, opts.trigger);
+    const info = await askPackageInfo(bank, payload.entries.length, trigger, mode);
     if (!info) return null;
-    if (info.preview) {
-      await openPreview(payload);
-      return { preview: true };
-    }
+    if (info.preview) return { preview: true, payload };
 
-    let built;
     try {
-      built = await buildAsync('qbk', payload, {
+      const built = await buildAsync('qbk', payload, {
         distribute: true,
         version: info.version,
         author: info.author,
         description: info.description
       });
+      return { payload, info, built };
     } catch (e) {
       QB.UIRenderer.toast('导出失败：' + e.message, 'err');
       return null;
     }
+  }
+
+  /**
+   * 分发题包流程：收集 → 填题包信息 → 构建（含 manifest.json）→ 下载；也可只生成只读预览
+   * @param {{bank:Object, kind?:string}} opts
+   */
+  async function distributeFlow(opts) {
+    const prep = await prepareDistribution((opts && opts.kind) || 'bank', opts && opts.bank, opts && opts.trigger, 'download');
+    if (!prep) return null;
+    if (prep.preview) {
+      await openPreview(prep.payload);
+      return { preview: true };
+    }
+    const { payload, info, built } = prep;
     const filename = packageFilename(opts.bank.name, info.version, payload.entries.length);
     download(filename, built.mime, built.content);
     const kb = (built.content.byteLength / 1024).toFixed(1);
@@ -732,9 +752,86 @@
     };
   }
 
+  /** 复制到剪贴板：成功返回 true；不可用/被拒返回 false（由调用方降级为手动复制） */
+  async function copyText(text) {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(String(text || ''));
+        return true;
+      }
+    } catch (e) { /* 用户拒绝或非安全上下文，走手动复制 */ }
+    return false;
+  }
+
+  /** 分享结果弹窗：manifest（packageId/version/checksum）+ 回链 + 粘贴码，双形态可复制 */
+  function showShareOptions(bank, prep, code, link, tooLong, returnFocusTo) {
+    const esc = QB.escapeHtml;
+    const m = prep.built.manifest || {};
+    const count = prep.payload.entries.length;
+    const kb = (prep.built.content.byteLength / 1024).toFixed(1);
+    const imgNote = prep.built.assetCount ? '，含图片 ' + prep.built.assetCount + ' 张' : '';
+    QB.UIRenderer.openModal(
+      '<h3>分享题包 · ' + esc(bank.name) + '</h3>' +
+      '<p class="li-meta">已生成自包含 .qbk（' + count + ' 题' + imgNote + '，' + kb + ' KB）。' +
+      '对方打开回链或粘贴分享码即可离线导入：无账号、不访问服务器。</p>' +
+      '<p class="li-meta">题包 <code>' + esc(m.packageId || '') + '</code> · v' + esc(m.version || '') +
+      ' · 校验和 <code>' + esc(m.checksum || '') + '</code></p>' +
+      (tooLong
+        ? '<p class="li-meta">回链 ' + link.length + ' 字符，超过聊天软件常见上限；建议优先发送下方「分享码」。</p>'
+        : '') +
+      '<label class="qe-label">回链（#share= 片段）</label>' +
+      '<textarea id="share-link" readonly rows="3" class="share-box">' + esc(link) + '</textarea>' +
+      '<div class="toolbar"><button class="btn btn-sm btn-ghost" data-action="share-copy" data-copy="share-link">复制回链</button></div>' +
+      '<label class="qe-label">分享码（粘贴导入）</label>' +
+      '<textarea id="share-code" readonly rows="4" class="share-box">' + esc(code) + '</textarea>' +
+      '<div class="toolbar"><button class="btn btn-sm btn-ghost" data-action="share-copy" data-copy="share-code">复制分享码</button></div>' +
+      '<div class="modal-actions"><button class="btn" data-action="modal-ok">完成</button></div>',
+      (modal) => {
+        modal.querySelectorAll('[data-action="share-copy"]').forEach((btn) => {
+          btn.onclick = async () => {
+            const target = modal.querySelector('#' + btn.getAttribute('data-copy'));
+            const text = target ? target.value : '';
+            if (await copyText(text)) {
+              btn.textContent = '已复制';
+              QB.UIRenderer.toast('已复制到剪贴板', 'ok');
+            } else if (target) {
+              target.focus();
+              target.select();
+              QB.UIRenderer.toast('请手动复制（Ctrl+C）', 'ok');
+            }
+          };
+        });
+        modal.querySelector('[data-action="modal-ok"]').onclick = () => QB.UIRenderer.closeModal();
+      },
+      undefined,
+      returnFocusTo
+    );
+  }
+
+  /**
+   * 分享流程：与分发共用 prepareDistribution，构建后不下载，改为生成 #share 回链 + 粘贴码
+   * @param {{bank:Object, kind?:string}} opts
+   */
+  async function shareFlow(opts) {
+    if (!QB.ShareLink) { QB.UIRenderer.toast('分享码模块未加载', 'err'); return null; }
+    const prep = await prepareDistribution((opts && opts.kind) || 'bank', opts && opts.bank, opts && opts.trigger, 'share');
+    if (!prep) return null;
+    if (prep.preview) { await openPreview(prep.payload); return { preview: true }; }
+    const code = QB.ShareLink.encode(prep.built.content);
+    const base = (typeof location !== 'undefined' && location.href) ? location.href : '';
+    const link = QB.ShareLink.buildLink(base, code);
+    const tooLong = link.length > ((QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.SHARE_URL_SOFT_LIMIT) || 64 * 1024);
+    showShareOptions(opts.bank, prep, code, link, tooLong, opts && opts.trigger);
+    return {
+      kind: 'share', format: 'qbk', count: prep.payload.entries.length,
+      bytes: prep.built.content.byteLength, assetCount: prep.built.assetCount,
+      code: code, link: link, tooLong: tooLong, manifest: prep.built.manifest
+    };
+  }
+
   QB.Exporters = {
     KINDS, FORMATS, collect, buildContent, buildAsync, openFlow, download,
-    distributeFlow, openPreview,
+    distributeFlow, shareFlow, openPreview,
     _toPlain: toPlain, _toTable: toTable, _toDocLines: toDocLines, _historyToTable: historyToTable,
     _packageFilename: packageFilename
   };

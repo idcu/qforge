@@ -695,6 +695,10 @@
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
         return QB.Exporters.distributeFlow({ kind: 'bank', bank: State.bank, trigger: trigger });
       }
+      case 'bank-share': {
+        if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        return QB.Exporters.shareFlow({ kind: 'bank', bank: State.bank, trigger: trigger });
+      }
       case 'export-wrong': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
         return QB.Exporters.openFlow({ kind: 'wrong', bank: State.bank, trigger: trigger });
@@ -1305,6 +1309,59 @@
     );
   }
 
+  /**
+   * 分享回链（C011）：读取 #share=<code> → 解码 → 复用导入预览/重复/容量校验 → 落库。
+   * 无题库时按题包 manifest.title 新建（取消/失败则清理空库）；处理完立即清 hash，避免刷新重复导入。
+   * 全程离线（不 fetch、不需账号），复用 QB.DataIO.commitImport 的 revision/409 语义。
+   */
+  async function handleShareHash() {
+    if (typeof location === 'undefined' || !QB.ShareLink || !QB.DataIO) return null;
+    const code = QB.ShareLink.readHash(location.hash || '');
+    if (!code) return null;
+    try {
+      history.replaceState(null, '', location.pathname + location.search);
+    } catch (e) { /* file:// 等环境可能限制 replaceState，忽略即可（刷新会再弹预览） */ }
+    UI.toast('正在读取分享题包…');
+    let result;
+    try {
+      result = await QB.DataIO.parseShareCode(code);
+    } catch (e) {
+      UI.toast('分享码无效：' + e.message, 'err');
+      return null;
+    }
+    if (!result || !(result.questions || []).length) {
+      UI.toast('分享码内没有可导入的题目', 'err');
+      return null;
+    }
+    let target = State.bank;
+    let created = false;
+    if (!target) {
+      const m = result.meta && result.meta.manifest;
+      target = await QB.DB.banks.create({
+        name: (m && m.title) || '分享题包',
+        description: (m && m.description) || '',
+        category: '分享'
+      });
+      created = true;
+    }
+    const source = QB.Source.makeSource(QB.Source.KINDS.PASTE, { uri: '分享回链' });
+    const res = await QB.DataIO.commitImport(target, result, source);
+    if (!res) {
+      // 用户取消预览或导入失败：清理刚建的空库，避免留下垃圾题库
+      if (created) {
+        try { await QB.DB.banks.remove(target.id); } catch (e) { /* 清理失败不阻断 */ }
+      }
+      return null;
+    }
+    State.banks = await QB.DB.banks.list();
+    State.bankId = target.id;
+    await QB.DB.setCurrentBankId(target.id);
+    State.view = 'home';
+    invalidateBanks();
+    await render();
+    return res;
+  }
+
   function bindGlobal() {
     const themeBtn = document.getElementById('btn-theme');
     if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
@@ -1337,6 +1394,9 @@
     const bottomBtn = document.getElementById('btn-bottom');
     if (bottomBtn) bottomBtn.addEventListener('click', () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }));
     window.addEventListener('scroll', syncScrollButtons, { passive: true });
+
+    // C011：页面已在运行时用户粘贴/打开新的 #share 回链，同样触发导入（与首屏等价）
+    window.addEventListener('hashchange', () => { handleShareHash(); });
 
     // 顶栏/菜单栏高度随窗口宽度变化（换行），重算 sticky 偏移与悬浮按钮显隐
     window.addEventListener('resize', () => { syncStickyOffset(); syncScrollButtons(); });
@@ -1625,6 +1685,7 @@
     State.view = State.bankId ? 'home' : 'banks';
     await render();
     await maybeResume();
+    await handleShareHash();
     registerSW();
     // 运行时 LocalStorage 配额探测放到首屏空闲期（首次约数百 ms，之后命中缓存 ~0.x ms）：
     // IDB 可用时预检恒定放行，容量只用于 nearLimit 提示；IDB 不可用会在预检里同步探测。

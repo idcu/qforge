@@ -194,6 +194,7 @@
       urlImportBtn + refreshBtn +
       '<button class="btn btn-ghost" data-action="bank-export">导出题目</button>' +
       '<button class="btn btn-ghost" data-action="bank-package" title="导出含 manifest/版本/校验的分发题包，可发给他人一键导入">导出分发题包</button>' +
+      '<button class="btn btn-ghost" data-action="bank-share" title="生成 #share 回链或粘贴分享码，对方离线导入（无账号、不访问服务器）">分享链接/码</button>' +
       '<button class="btn btn-ghost" data-action="backup-manage">备份与恢复</button>' +
       '<button class="btn btn-ghost" data-action="questions-manage">题目管理（新增/编辑/删除）</button>' +
       '</div>';
@@ -818,6 +819,7 @@
       const state = meta.manifestOk === false ? 'warn' : 'ok';
       html += '<div class="li-meta" data-import-manifest="' + state + '">题包 <b>' + esc(m.title || '未命名') +
         '</b> v' + esc(m.version || '') + ' · ' + (m.questionCount || 0) + ' 题' +
+        (m.packageId ? ' · id <code>' + esc(m.packageId) + '</code>' : '') +
         (m.author ? ' · 作者 ' + esc(m.author) : '') +
         ' · 清单校验和 <code>' + esc(m.checksum || '') + '</code> ' + ck + '</div>';
     }

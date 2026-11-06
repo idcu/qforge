@@ -14,21 +14,10 @@
 
   function esc(s) { return QB.escapeHtml(s == null ? '' : String(s)); }
 
-  /** 字节 → base64（浏览器用 btoa 分块，Node 用 Buffer；避免大图 apply 栈溢出） */
-  function bytesToBase64(bytes) {
-    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
-    if (typeof Buffer !== 'undefined') return Buffer.from(u8).toString('base64');
-    let bin = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < u8.length; i += chunk) {
-      bin += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
-    }
-    return global.btoa(bin);
-  }
-
   function dataUrl(rec) {
     if (!rec || !rec.bytes) return '';
-    return 'data:' + (rec.mime || 'application/octet-stream') + ';base64,' + bytesToBase64(rec.bytes);
+    // Base64 唯一实现见 utils/base64.js（C011 抽取，输出与原 bytesToBase64 逐字节一致）
+    return 'data:' + (rec.mime || 'application/octet-stream') + ';base64,' + QB.Base64.encodeBytes(rec.bytes);
   }
 
   const IMG_TAG_RE = /<img class="rt-img" data-asset="([^"]+)" alt="([^"]*)" \/>/g;

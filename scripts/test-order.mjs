@@ -20,6 +20,7 @@ export const ORDER = [
   'assets.test.mjs',
   'blueprint.test.mjs',
   'practice-builder.test.mjs',
+  'share-link.test.mjs',
   'source.test.mjs',
   'fsrs.test.mjs',
   'fsrs-opt.test.mjs',

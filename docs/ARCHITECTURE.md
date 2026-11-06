@@ -120,6 +120,23 @@ Exporters.openFlow({kind, bank, trigger})   // trigger 可选：异步收集后�
 ```
 > 注册表（kind × format）与各格式细节见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md)。
 
+### 4.6 分享回链 / 粘贴码（C011）
+```
+Exporters.shareFlow({kind, bank, trigger})
+  → prepareDistribution（与 distributeFlow 共用 collect → askPackageInfo(mode='share') → buildAsync('qbk', distribute:true)）
+  → ShareLink.encode(built.content)           // qfshare1:<url-safe base64>，无随机/无时间戳
+  → ShareLink.buildLink(location.href, code)  // 丢弃旧 fragment，拼 #share=
+  → 弹窗展示 manifest(packageId/version/checksum) + 回链 + 粘贴码（剪贴板优先，降级手动选中）
+
+接收方（离线）：
+  启动 handleShareHash()：location.hash → ShareLink.readHash → history.replaceState 清 hash
+    → DataIO.parseShareCode(code) → ShareLink.decode → Importers.runImport({name:'分享码.qbk'})
+    → commitImport（复用预览/重复识别/容量预检/revision 乐观并发）
+    → 无题库时按 manifest.title 新建；取消/失败清理空库
+  粘贴入口：parsePastedText 开头识别 qfshare1: / #share=，同样走 parseShareCode
+```
+> 全程 0 网络、0 账号；分享页保持只读（无 `<script>`）。格式与上限见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) §2.5、[IMPORT-FORMAT-BINARY.md](IMPORT-FORMAT-BINARY.md) §9。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -136,6 +153,8 @@ Exporters.openFlow({kind, bank, trigger})   // trigger 可选：异步收集后�
 | `QB.ReviewMerge` | 多端/多标签复习合并（纯函数）：`mergeMaps` 同键保留 `last` 更大者；`mergeMeta` 清单 `keys` 并集、`count`=并集长度（C008，消除孤儿 hash） | api-adapter 409 合并重试、local-adapter 写前合并、Storage 跨标签合并、migrate/backup、storage 双标签回归 |
 | `QB.Statistics.reviewStats(revlog, bankId)` | **C010 逐题作答聚合（纯函数）**：只读现有 revlog，按 `e.b===bankId` 过滤；`r>=FSRS.RATINGS.good`（good/easy）计正确，hard 计作答不计正确；返回 `Map<hash,{answered,correct,accuracy}>` | PracticeBuilder、统计/测试；不新增进度键 |
 | `QB.PracticeBuilder` | **C010 错题/薄弱一键组卷（纯函数）**：`weakKeys`（<60% 且作答≥2）、`build({questions,wrongKeys,revlog,bankId,limit,seed})` → 候选并集/内容键去重/种子洗牌/裁剪；零写入 | app.js `startSmartPractice`（首页与错题页共用 action）；阈值读 `CONFIG.LIMITS` |
+| `QB.Base64` | **C011 Base64 唯一实现**：`encodeBytes/decodeToBytes/toUrlSafe/fromUrlSafe`；Node 走 Buffer、浏览器分块 btoa；输出与原 `bytesToBase64` 逐字节一致 | `SharePage.dataUrl`（内嵌图片）、`ShareLink` |
+| `QB.ShareLink` | **C011 分享码/回链（纯函数、零网络）**：`PREFIX='qfshare1:'`；`encode(ArrayBuffer)` 确定性、`decode` 校验前缀/字符集/字节上限、`buildLink(base,code)` → `#share=`、`readHash/extractCode` 双形态 | `Exporter.shareFlow`（生成）、`DataIO.parseShareCode`（粘贴/回链导入）、app 启动 `handleShareHash` |
 | `reviews.record(bankId, map, logs)` | 调度状态 + 评分日志一次提交（api 模式 1 个 PUT；local 模式写前重读合并 + 状态/日志/版本快照提交，失败回滚） | 旧调用方/第三方适配器回退路径 |
 | `reviews.patch(bankId, delta, logs)`（可选） | 增量提交：api 模式只上行本批改动键（PATCH，O(改动数)）；local 与 record 共用同一合并/回滚实现；适配器未实现时 `SRSStore` 回退 `record` | srs-store.grade/gradeMany |
 | `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | app.js 统计页缓存诊断结果，避免每次 render 全量扫 revlog |

@@ -9,6 +9,58 @@
 
 ## 最新记录
 
+### feat(share): 分享回链与粘贴码离线往返，三库 3/3、fetch 0 次（C011）
+
+**Commit Hash**：`<C011-HASH>`（回填见后续 `docs(changelog)` 提交）
+
+**核心改动**
+- 新增 `js/utils/base64.js`（`QB.Base64`）：`encodeBytes/decodeToBytes/toUrlSafe/fromUrlSafe`。
+  Node 走 Buffer、浏览器分块 btoa；**替换 `share-page.js` 内联 `bytesToBase64`，输出逐字节一致**（消除第二份 Base64 实现）。
+- 新增 `js/modules/share-link.js`（`QB.ShareLink`）：`PREFIX='qfshare1:'`；`encode(bytes)` 确定性（无随机/时间戳）；
+  `decode` 校验前缀、字符集、空载荷、8MB 上限；`buildLink(base,code)` 丢弃旧 fragment 后拼 `#share=`；
+  `readHash/extractCode` 同时支持完整回链与纯粘贴码。纯函数、零网络。
+- `js/modules/exporter.js`：**抽取 `prepareDistribution(kind,bank,trigger,mode)`**，`distributeFlow` 与新增
+  `shareFlow` 共用「collect → 题包信息（`askPackageInfo` 新增 share 文案/按钮）→ `buildAsync('qbk', distribute:true)`」；
+  `shareFlow` 生成回链/粘贴码并弹窗展示 manifest + 双形态复制（`navigator.clipboard` 优先，失败降级选中文本）。
+  `distributeFlow` 下载行为与参数保持不变。
+- `js/modules/data-io.js`：新增并导出 `parseShareCode(code)`（`ShareLink.decode → Importers.runImport({name:'分享码.qbk'})`）；
+  `parsePastedText` 开头识别 `qfshare1:` / `#share=`，复用同一 qbk 解析链（不新建第二条）。
+- `js/app.js`：`case 'bank-share'` → `Exporters.shareFlow`；启动尾部 `handleShareHash()`：
+  `location.hash` → `readHash` → `history.replaceState` 清 hash → `parseShareCode` → `commitImport`
+  （复用预览/重复三选一/容量预检/revision 乐观并发）；无题库时按 `manifest.title` 新建，取消/失败清理空库；注册 `hashchange`。
+- `js/config.js`：`LIMITS.SHARE_MAX_BYTES=8MB`、`LIMITS.SHARE_URL_SOFT_LIMIT=64KB`（软阈值只提示不阻断）。
+- `ui-renderer`：数据管理工具栏新增 `bank-share`「分享链接/码」；导入预览补显 `manifest.packageId`。
+- 注册：`index.html`（base64 入 utils 段、share-link 在 share-page 后）、`contracts/modules.json`（85 条）、
+  `scripts/_harness.mjs`、`scripts/test-order.mjs`；`sw.js` CACHE v10→v11。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（实现前）**：`node scripts/share-link.test.mjs` → `QB.Base64 / QB.ShareLink 未定义`（exit 1）；
+  `ui-renderer` → **210 通过 / 3 失败**（缺 `bank-share`、缺「分享链接/码」、预览缺 `packageId`）。
+- **绿（本提交）**：`share-link` **81 / 81**；`ui-renderer` **213 / 213**（+3）；`test-all`
+  → **33 运行项 / 5056 断言 / 失败 0**；`docs-check --static` 全部一致（首屏 339.8→345.0 KB gzip / 952.0→966.2 KB raw）。
+- **三库往返 3/3**（图片 / 公式 / 材料题）：`manifestChecksumOk=true`、`countOk=true`，contentHash 集合逐库 **100% 相等**，
+  包字节校验和相等；图片资产回写、材料父子与正文无损；qbk **1,431 / 1,273 / 1,883 B**，
+  分享码 **1,917 / 1,707 / 2,520 字符**（build 4.73 / 1.41 / 0.77 ms，encode 0.26 / 0.023 / 0.028 ms，
+  decode+import 1.65 / 0.33 / 0.40 ms，单轮参考）。
+- **离线证明**：测试在 `globalThis.fetch` 与 `window.fetch` 双桩计数下跑完整链，**fetch 调用 0 次**。
+- **只读分享页**：三库 HTML 3,226 / 3,423 / 3,375 B，**无 `<script>` / 无内联事件**；图片 `data:image/png;base64,`
+  内嵌；公式页含真实 `<span class="rt-frac">` 元素（并以图片页反向断言排除样式表误判）。
+- **确定性**：同一份 qbk 字节重复编码 → 同码（测试断言）；跨时刻重新导出含新 `exportedAt/createdAt`，属另一份包、码不同（文档已写明）。
+
+**影响范围与公共抽象**
+- 新增 `QB.Base64`、`QB.ShareLink`、`CONFIG.LIMITS.SHARE_*`、`Exporters.shareFlow`、`Exporters.prepareDistribution`（内部复用）、
+  `DataIO.parseShareCode`。
+- **行为变更**：`share-page` 的 data URL 改由 `QB.Base64` 生成（输出不变，已有分享页测试全绿）；`askPackageInfo` 增加可选
+  第 4 参 `mode`（缺省等同旧 download 行为）；`a11y` 静态判据同步接受 `(…, returnFocusTo, mode)` 签名（意图不变）。
+- **未改动**：qbk 容器/manifest 结构、`commitImport` 的重复/容量/409 语义、分享页只读约束、所有存储键。
+
+**遗留 TODO / 风险**
+- **「评论」未实现**：用户任务卡提到 Top2 含评论，但已批准计划只覆盖「分享码/回链/manifest/回导」，且评论需要可写分享页或后端，
+  与「无 `<script>`、0 fetch、不引入服务端」硬约束冲突。**未自行扩权**；待确认是否用「本地批注另存为分享页」的只读方案。
+- **浏览器端交互未自动化**：生成 → 复制 → 另一标签打开回链的真实浏览器链路未验证；Node 侧只覆盖纯函数与导入链。
+- 超长回链的聊天软件截断行为未实测（仅给出 64KB 软阈值提示）。
+- 大包（接近 8MB）生成/解码的内存峰值未打点。
+
 ### feat(practice): 错题与薄弱点一键组卷，10k 组卷 P95 5.59ms（C010）
 
 **Commit Hash**：`<C010-HASH>`（回填见后续 `docs(changelog)` 提交）

@@ -269,7 +269,18 @@
   }
 
   /**
+   * 分享码 / 回链 → runImport 结果（复用 qbk 导入器，不新建解析链）。
+   * ShareLink.decode 只做字符集/前缀/字节上限校验；题包结构仍由 QbkImporter 统一校验。
+   */
+  async function parseShareCode(code) {
+    if (!QB.ShareLink) throw new Error('分享码模块未加载');
+    const arrayBuffer = QB.ShareLink.decode(code);
+    return QB.Importers.runImport({ name: '分享码.qbk', arrayBuffer: arrayBuffer });
+  }
+
+  /**
    * 粘贴文本嗅探：不再维护第二条解析链，统一复用导入器注册表。
+   *   0) C011：qfshare1: 分享码 / #share= 回链优先走 qbk 导入器；
    *   1) 以 { / [ 开头先按虚拟 .json 走 runImport（[材料题] 行式块在 JSON 语法失败时回退）；
    *   2) 再以虚拟 .txt 走 runImport，由 Quizlet（priority+sniff）接管两列 term/definition；
    *   3) 注册表无解析器接受（如 Markdown 标题行式）→ 回退 MdImporter，保持原行为。
@@ -278,6 +289,11 @@
   async function parsePastedText(text) {
     const trimmed = String(text || '').trim();
     if (!trimmed) throw new Error('内容为空');
+    // C011：分享码（qfshare1:…）或完整回链（…#share=…）优先走 qbk 导入器
+    if (QB.ShareLink) {
+      const shareCode = QB.ShareLink.extractCode(trimmed);
+      if (shareCode) return parseShareCode(shareCode);
+    }
     // 以 [ 开头的行式材料块（[材料题]）不能直接当 JSON；仅“JSON 语法失败”回退后续入口。
     if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
       try {
@@ -469,7 +485,7 @@
 
   QB.DataIO = {
     pickFile, importFlow, importFile, importTextFlow, importUrlFlow, refreshUrlFlow,
-    parsePastedText, parseFile, commitImport, stampSource,
+    parsePastedText, parseShareCode, parseFile, commitImport, stampSource,
     /** 0 题错误提示文案（纯函数；UI 与测试共用，避免两套文案） */
     importFailureText
   };

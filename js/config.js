@@ -53,7 +53,10 @@
     REVIEW_PER_DAY: 200,         // 每日到期复习上限
     // 错题/薄弱一键组卷（C010）：薄弱 = 逐题正确率 < WEAK_ACCURACY% 且作答 >= WEAK_MIN_ATTEMPTS
     WEAK_MIN_ATTEMPTS: 2,
-    WEAK_ACCURACY: 60
+    WEAK_ACCURACY: 60,
+    // 分享回链/粘贴码（C011）：硬上限 = qbk 字节；软阈值 = 回链字符数（超过提示优先发分享码）
+    SHARE_MAX_BYTES: 8 * 1024 * 1024,
+    SHARE_URL_SOFT_LIMIT: 64 * 1024
   };
 
   // 题目图片资产（IndexedDB；改库名等于换存储实例，不会迁移旧图）

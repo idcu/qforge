@@ -30,6 +30,7 @@ assets/asyyyyyyyy-456.png
   - 弹窗按钮 `data-action`：`dup-skip` / `dup-merge` / `dup-over`；上次导入时间用 `QB.Helpers.formatDate` 渲染。
   - 同一 `packageId` 但**版本不同**：不弹窗，提示「新版本 vX（已导入 vY）」，按合并去重导入；跨题包的重复题目仍按 contentHash 处理。
 - **导出端**：JSON/CSV/XLSX/DOCX/Markdown 导出均只保留图片占位文本，不携带图片字节（带图导出唯 .qbk）；**导入端**例外：DOCX 文件解析时会提取其内嵌图片（§5.1），其余文本格式不携带图片。
+- **分享码 / 回链（C011）**：`qfshare1:<URL-safe Base64(qbk 字节)>` 不是新容器格式，解码后仍是上面这份 stored ZIP。入口两处：①「粘贴文本导入」的 `parsePastedText` 开头识别 `qfshare1:` 前缀或 `#share=` 片段 → `QB.ShareLink.decode` → `Importers.runImport({name:'分享码.qbk', arrayBuffer})`；②页面启动 `handleShareHash` 读 `location.hash` 后走同一 `DataIO.parseShareCode`。两条路径共用 qbk 导入器，因此 manifest 校验、图片回写、重复三选一、容量预检与本地选文件完全一致；坏前缀/非法字符/超 8MB 在解码阶段直接报错，不进入解析器。全程 0 网络、0 账号。
 
 ## 10. 样例文件
 
