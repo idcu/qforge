@@ -93,10 +93,17 @@ function apiStub(stat) {
 async function makeEnv(opts) {
   const o = opts || {};
   const stat = {
-    toasts: [], data: [], exports: [], backup: 0, migration: 0, dbInit: 0, fetch: 0, api: []
+    toasts: [], data: [], exports: [], backup: 0, migration: 0, dbInit: 0, fetch: 0, api: [],
+    blobs: [], revoked: []
   };
   const { QB, window } = await createHarness(QB_DIR);
   const dom = createDom({ nullIds: ['toast-wrap'] });
+
+  // 观测「下载诊断信息」真实路径：createObjectURL 记录 Blob，供断言其内容
+  const realCreateObjectURL = URL.createObjectURL;
+  const realRevokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = (blob) => { stat.blobs.push(blob); return realCreateObjectURL(blob); };
+  URL.revokeObjectURL = (url) => { stat.revoked.push(url); return realRevokeObjectURL(url); };
 
   // 让 ui-renderer 里的自由变量 document/location 也能解析到垫片（app.js 用显式参数）
   const prevDocument = globalThis.document;
@@ -163,18 +170,34 @@ async function makeEnv(opts) {
   if (o.shareCode || o.share) dom.location.hash = (o.share && o.share.hash) || '#share=SHARE1';
 
   const source = o.appSource || APP_FOR_ENV;
+  // 启动失败注入：DB.init 之后把首个数据读取替换为 reject（模拟 IDB 损坏 / 适配器异常）
+  if (o.bootFail) {
+    const origSelect = QB.DB.init;
+    QB.DB.init = function (...args) {
+      const r = origSelect.apply(QB.DB, args);
+      QB.DB.banks.list = async () => { throw new Error(o.bootFail); };
+      return r;
+    };
+  }
   new Function('window', 'globalThis', 'document', 'location', 'navigator',
     'requestIdleCallback', 'setTimeout', 'history', source)(
     window, window, dom.document, dom.location, dom.navigator,
     dom.requestIdleCallback, setTimeout, dom.history);
 
-  const booted = await waitUntil(() => window.QB.App && window.QB.App.State.banksLoaded === true);
+  const booted = await waitUntil(() => window.QB.App && window.QB.App.State.banksLoaded === true,
+    o.bootFail ? 80 : 2000);
+  if (o.bootFail) await waitUntil(() => window.QB.App && window.QB.App.State.bootError, 1500);
   stat.booted = booted;
   stat.QB = window.QB;
   stat.window = window;
   stat.dom = dom;
   stat.prevDocument = prevDocument;
-  stat.restore = () => { globalThis.fetch = realFetch; globalThis.document = prevDocument; };
+  stat.restore = () => {
+    globalThis.fetch = realFetch;
+    globalThis.document = prevDocument;
+    URL.createObjectURL = realCreateObjectURL;
+    URL.revokeObjectURL = realRevokeObjectURL;
+  };
   return stat;
 }
 
@@ -381,6 +404,44 @@ section('api 分支：跳过本地迁移 + 适配器接线');
   eq(QB.App.State.view, 'banks', '空后端首屏进入题库管理');
   ok(viewHtml(env).indexOf('还没有题库') >= 0, '空后端渲染空态');
   eq(env.fetch, 0, 'api 分支替身下零 fetch（真实网络另由 api-backend.test 覆盖）');
+  env.restore();
+}
+
+/* ============================================================
+ * 5. boot 失败：可见错误态 + 无未处理 rejection + 诊断可下载
+ * ============================================================ */
+section('boot 失败：可见错误态 + 无未处理 rejection + 诊断可下载');
+{
+  const env = await makeEnv({ bootFail: 'banks list boom' });
+  const QB = env.QB;
+  eq(env.booted, false, '数据读取失败时 boot 不宣告成功（banksLoaded 保持 false）');
+  ok(!!QB.App.State.bootError, '失败被兜住并记录 State.bootError');
+  ok(viewHtml(env).indexOf('启动失败') >= 0, '#view 渲染可见错误态');
+  ok(viewHtml(env).indexOf('data-action="boot-diagnostics"') >= 0, '错误态提供「下载诊断信息」');
+  ok((env.dom.document.getElementById('status-text').textContent || '').indexOf('启动失败') >= 0,
+    '状态栏同步显示启动失败');
+  eq(rejections.length, 0, 'boot 失败不产生未处理 rejection');
+
+  const anchors = [];
+  const origCreate = env.dom.document.createElement;
+  env.dom.document.createElement = (tag) => {
+    const el = origCreate(tag);
+    if (String(tag).toLowerCase() === 'a') anchors.push(el);
+    return el;
+  };
+  await clickAction(env, 'boot-diagnostics');
+  await tick(10);
+  eq(env.blobs.length, 1, '点击诊断按钮生成一个 JSON Blob');
+  eq(anchors.length, 1, '通过 <a download> 触发下载');
+  ok(anchors[0] && String(anchors[0].download || '').indexOf('qforge-boot-') === 0,
+    '下载文件名带 qforge-boot- 前缀');
+  if (env.blobs.length) {
+    const report = JSON.parse(await env.blobs[0].text());
+    ok(String(report.error && report.error.message).indexOf('banks list boom') >= 0,
+      '诊断内容含真实错误信息');
+    ok(String(report.error && report.error.stack || '').length > 0, '诊断内容保留调用栈');
+    eq(report.state && report.state.banksLoaded, false, '诊断内容含当时的启动状态');
+  }
   env.restore();
 }
 

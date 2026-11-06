@@ -161,6 +161,24 @@ Exporters.shareFlow({kind, bank, trigger})
   「不含批注继续导出 / 取消」，只有用户确认才剥离**导出副本**的批注，本机数据不变——任何路径都不静默
   截断或静默丢批注。无批注的保存/导入零额外全库扫描（编辑器仅在保存带批注时读取一次题目列表）。
 
+### 4.8 启动失败兜底（R-21）
+
+```
+boot() = try { startApp() } catch (e) → State.bootError = e
+  → console.error('[qforge] 启动失败：', e)        // 保留原始栈供开发者定位
+  → renderBootFailure(e)                          // #view 错误态 + 状态栏「启动失败：<message>」
+  → bindView()（幂等）                            // 失败发生在 bindView 之前时补绑，诊断按钮仍可点
+  → 用户点「下载诊断信息」→ BootDiagnosticsReport（只读）
+       {app, ts, href, ua, error:{name,message,stack}, state:{view,bankId,banksLoaded,banksCount},
+        backend, storage:{mode,marker,fallbackReason}}
+    → Blob(application/json) → <a download="qforge-boot-<ts>.json"> → revokeObjectURL
+```
+
+- 覆盖范围是**整个 `startApp()`**：存储初始化/配额刷新/迁移等待/`DB.init`/首屏读取/渲染/分享回链/SW 注册任一步抛错都落到同一错误态。
+- 兜底不修改任何本地数据；迁移失败仍按既有语义「保持兼容模式、版本号不推进」，本兜底只负责可见性与诊断。
+- 诊断报告**不含题目内容、备份数据或密码**，只含错误栈与存储状态；`boot-diagnostics` 是本层唯一新增 action。
+- 未实机验证：真实浏览器中「下载触发」依赖 `<a download>` + Blob URL，Node 垫片只验证到创建 Blob / 触发 click，不代表磁盘落盘行为。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
