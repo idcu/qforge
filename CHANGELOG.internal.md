@@ -11,7 +11,7 @@
 
 ### fix(render): 渲染代次守卫，过期 render 不得覆盖新视图（R-01）
 
-**Commit Hash**：`（提交后回填）`
+**Commit Hash**：`183ebef`
 
 **核心改动**
 - `js/app.js`：新增模块级 `renderSeq`；`render()` 入口取号 `seq = ++renderSeq`，在
