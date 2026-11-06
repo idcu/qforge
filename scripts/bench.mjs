@@ -111,6 +111,8 @@ const report = [];
 // R-02 收卷错题写放大门禁读数（2c 段赋值，--assert 段判定）
 let r02CallsRatio = 0;
 let r02BytesCut = 0;
+// R-19 分享前估算门禁读数（11d 段赋值：540 题 + 8MB 边界估算与真实编码字符数一致的项数，满 2）
+let r19EstExact = 0;
 function row(name, timeTriple, extra) {
   report.push({
     name, median: timeTriple.median, best: timeTriple.best,
@@ -1373,10 +1375,11 @@ for (const tier of [5000, 20000, 50000]) {
   });
 }
 
-/* ---------- 11d. 阶段 0：分享码体积估算（540 题 / 8MB 边界） ----------
+/* ---------- 11d. 阶段 0 / R-19：分享码体积估算（540 题 / 8MB 边界） ----------
  * 口径：ShareLink.encode 输入为 UTF-8 字节；540 题用 JSON 序列化近似（真实 .qbk 还含资产，
  * 本项不含资产打包，标注为「估算」）。8MB 边界取 CONFIG.LIMITS.SHARE_MAX_BYTES 上限值。
- * 公式对照：4*ceil(n/3)+前缀长；实际输出字符数应接近该值。堆增量为编码后（未 GC）差值。 */
+ * R-19 对照：estimateChars(n)（纯算术、不分配字符串） vs encode(同字节) 的字符数与耗时/内存；
+ * 两者字符数必须逐字一致（门禁），否则「先估算后编码」的判据不成立。 */
 {
   const seen = new Set();
   const uniq = [];
@@ -1387,11 +1390,19 @@ for (const tier of [5000, 20000, 50000]) {
     uniq.push(q);
   }
   const json540 = new Uint8Array(Buffer.from(JSON.stringify(uniq), 'utf8'));
-  // 前缀长：3 字节 → 4 个 URL-safe Base64 字符（无 padding），差值即前缀
-  const prefixLen = QB.ShareLink.encode(new Uint8Array(3)).length - 4;
   const chars540 = QB.ShareLink.encode(json540).length;
-  const est540 = 4 * Math.ceil(json540.length / 3) + prefixLen;
+  const est540 = QB.ShareLink.estimateChars(json540.length);
+  const estExact540 = est540 === chars540;
   const t540 = await timed(async () => { QB.ShareLink.encode(json540); }, 5);
+  const tEst540 = await timed(async () => { QB.ShareLink.estimateChars(json540.length); }, 20);
+
+  // 估算零分配验证：2000 次估算（未 GC），heap/external 增量应≈0
+  bestEffortGc();
+  const estMem0 = process.memoryUsage();
+  for (let i = 0; i < 2000; i++) QB.ShareLink.estimateChars(json540.length);
+  const estMem1 = process.memoryUsage();
+  const estHeapMb = Math.max(0, (estMem1.heapUsed - estMem0.heapUsed) / 1024 / 1024);
+  const estExtMb = Math.max(0, (estMem1.external - estMem0.external) / 1024 / 1024);
 
   const maxBytes = QB.CONFIG.LIMITS.SHARE_MAX_BYTES;
   const maxPayload = new Uint8Array(maxBytes);
@@ -1400,18 +1411,21 @@ for (const tier of [5000, 20000, 50000]) {
   const codeMax = QB.ShareLink.encode(maxPayload);
   const memAfter = process.memoryUsage();
   const charsMax = codeMax.length;
+  const estMax = QB.ShareLink.estimateChars(maxBytes);
+  if (estExact540) r19EstExact++;
+  if (estMax === charsMax) r19EstExact++;
   const peakMb = Math.max(0, (memAfter.heapUsed - mem0.heapUsed) / 1024 / 1024);
   const extMb = Math.max(0, (memAfter.external - mem0.external) / 1024 / 1024);
-  const estMax = 4 * Math.ceil(maxBytes / 3) + prefixLen;
   bestEffortGc();
 
   report.push({
     name: '分享码生成（540 题 JSON / ' + (maxBytes / 1024 / 1024).toFixed(0) + 'MB 边界）',
     median: t540.median, min: t540.min, max: t540.max,
-    extra: '540 题 JSON ' + json540.length + ' B → ' + chars540 + ' 字符（' + (chars540 / json540.length).toFixed(3)
-      + '×，公式值 ' + est540 + '）；边界 ' + maxBytes + ' B → ' + charsMax + ' 字符（'
-      + (charsMax / maxBytes).toFixed(3) + '×，公式值 ' + estMax + '，编码 ' + ms(tMax.median)
-      + '）；编码后 heapUsed +' + peakMb.toFixed(2) + ' MB，external +' + extMb.toFixed(2)
+    extra: '540 题 JSON ' + json540.length + ' B → 编码 ' + chars540 + ' 字符（' + (chars540 / json540.length).toFixed(3)
+      + '×），估算 ' + est540 + ' 字符（' + tEst540.median.toFixed(4) + ' ms，2000 次 heap +' + estHeapMb.toFixed(4)
+      + ' / external +' + estExtMb.toFixed(4) + ' MB）；边界 ' + maxBytes + ' B → 编码 ' + charsMax + ' 字符（'
+      + (charsMax / maxBytes).toFixed(3) + '×），估算 ' + estMax + ' 字符；编码 ' + ms(tMax.median)
+      + '；编码后 heapUsed +' + peakMb.toFixed(2) + ' MB，external +' + extMb.toFixed(2)
       + ' MB（Base64 大字符串计入 external，不体现在 heapUsed；均未 GC）'
   });
 }
@@ -1825,6 +1839,10 @@ if (process.argv.indexOf('--assert') >= 0) {
   console.log((r02Ok ? '  ✓ ' : '  ✗ ') + 'R-02 收卷错题批量写：set 减少 ' + r02CallsRatio.toFixed(1)
     + '×（要求 ≥25×），累计字节减少 ' + (r02BytesCut * 100).toFixed(1) + '%（要求 ≥90%）');
   if (!r02Ok) fails.push('R-02 收卷错题批量写不达标：' + r02CallsRatio.toFixed(1) + '× / ' + (r02BytesCut * 100).toFixed(1) + '%');
+  // R-19：分享前估算——540 题与 8MB 边界，estimateChars 必须与真实 encode 字符数逐字一致（2/2）
+  const r19Ok = r19EstExact === 2;
+  console.log((r19Ok ? '  ✓ ' : '  ✗ ') + 'R-19 分享前估算：估算字符数与真实编码一致 ' + r19EstExact + '/2（540 题 / 8MB 边界）');
+  if (!r19Ok) fails.push('R-19 分享前估算与真实编码字符数不一致：' + r19EstExact + '/2');
   console.log('-------------------------------------------');
   if (fails.length) {
     fails.forEach((f) => console.log('  - ' + f));

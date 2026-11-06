@@ -125,6 +125,8 @@ Exporters.openFlow({kind, bank, trigger})   // trigger 可选：异步收集后�
 ```
 Exporters.shareFlow({kind, bank, trigger})
   → prepareDistribution（与 distributeFlow 共用 collect → askPackageInfo(mode='share') → buildAsync('qbk', distribute:true)）
+  → ShareLink.estimateChars(built.content.byteLength) + buildLink(base,'').length  // 纯算术估算回链字符数（不分配字符串）
+  → 估算 > SHARE_URL_SOFT_LIMIT(64 KB) → confirmDialog；取消则 toast 并返回 null（不 encode）
   → ShareLink.encode(built.content)           // qfshare1:<url-safe base64>，无随机/无时间戳
   → ShareLink.buildLink(location.href, code)  // 丢弃旧 fragment，拼 #share=
   → 弹窗展示 manifest(packageId/version/checksum) + 回链 + 粘贴码（剪贴板优先，降级手动选中）
@@ -277,6 +279,17 @@ activate → caches.keys()
   `commitImport` 才提示「导入完成」；中途失败回滚到导入前状态。
 - 未实机验证：真实浏览器大文件内存峰值、真实 IDB 配额拒写与事务回滚。
 
+### 4.16 分享前体积估算（R-19）
+
+- `QB.ShareLink.estimateChars(bytes)`：纯算术 `PREFIX.length + 4*ceil(n/3) - padding(n%3)`，不分配字符串；
+  与 `encode(bytes).length` 逐字一致（1..256 字节、540 题题包、8MB 边界均有断言）。
+- `Exporters.shareFlow`：`prepareDistribution` 之后、`encode` 之前，用 `estimateChars(content.byteLength)`
+  + 回链固定部分（`buildLink(base,'').length`）估算总字符数；超过 `SHARE_URL_SOFT_LIMIT`（64 KB）先
+  `confirmDialog`；取消 → `toast('已取消分享…')` 并 `return null`，**不执行 Base64 编码、不构建 1.333× 大字符串**。
+- 返回对象新增 `estimatedChars`（预计回链字符数）；`tooLong` 仍按真实回链长度判定（仅提示，不阻断）。
+- 影响面：分享成功路径的弹窗与返回结构只增不改；新增「超限取消」分支（用户可拒绝生成超长回链）。
+- 未实机验证：真实浏览器弹窗交互，以及真实聊天软件对超长 URL 的截断表现。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -295,7 +308,7 @@ activate → caches.keys()
 | `QB.Statistics.reviewStats(revlog, bankId)` | **C010 逐题作答聚合（纯函数）**：只读现有 revlog，按 `e.b===bankId` 过滤；`r>=FSRS.RATINGS.good`（good/easy）计正确，hard 计作答不计正确；返回 `Map<hash,{answered,correct,accuracy}>` | PracticeBuilder、统计/测试；不新增进度键 |
 | `QB.PracticeBuilder` | **C010 错题/薄弱一键组卷（纯函数）**：`weakKeys`（<60% 且作答≥2）、`build({questions,wrongKeys,revlog,bankId,limit,seed})` → 候选并集/内容键去重/种子洗牌/裁剪；零写入 | app.js `startSmartPractice`（首页与错题页共用 action）；阈值读 `CONFIG.LIMITS` |
 | `QB.Base64` | **C011 Base64 唯一实现**：`encodeBytes/decodeToBytes/toUrlSafe/fromUrlSafe`；Node 走 Buffer、浏览器分块 btoa；输出与原 `bytesToBase64` 逐字节一致 | `SharePage.dataUrl`（内嵌图片）、`ShareLink` |
-| `QB.ShareLink` | **C011 分享码/回链（纯函数、零网络）**：`PREFIX='qfshare1:'`；`encode(ArrayBuffer)` 确定性、`decode` 校验前缀/字符集/字节上限、`buildLink(base,code)` → `#share=`、`readHash/extractCode` 双形态 | `Exporter.shareFlow`（生成）、`DataIO.parseShareCode`（粘贴/回链导入）、app 启动 `handleShareHash` |
+| `QB.ShareLink` | **C011 分享码/回链（纯函数、零网络）**：`PREFIX='qfshare1:'`；`encode(ArrayBuffer)` 确定性、`decode` 校验前缀/字符集/字节上限、`buildLink(base,code)` → `#share=`、`readHash/extractCode` 双形态；**R-19 `estimateChars(n)` 纯算术估算字符数（不分配字符串）** | `Exporter.shareFlow`（生成；R-19 编码前估算）、`DataIO.parseShareCode`（粘贴/回链导入）、app 启动 `handleShareHash` |
 | `reviews.record(bankId, map, logs)` | 调度状态 + 评分日志一次提交（api 模式 1 个 PUT；local 模式写前重读合并 + 状态/日志/版本快照提交，失败回滚） | 旧调用方/第三方适配器回退路径 |
 | `QB.WrongBook.addMany(bankId, questions)` | **R-02 错题批量写唯一入口**：一次筛选 + 一次整表读改写；适配器无 `wrongAddMany` 时串行 `wrongAdd` 降级 | `app.js recordWrongs`、第三方适配器回退 |
 | `QB.CONFIG.LIMITS.IMPORT_MAX_BYTES` + `runImport` 前置预检（R-20） | **导入体积唯一口径**：File/Blob `size`、二进制快照 `arrayBuffer.byteLength`；超限返回统一失败结构，读取前拒绝 | 文件/拖拽/URL 导入入口（全部经 `runImport`） |

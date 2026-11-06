@@ -5,9 +5,9 @@
 > **读数口径**：本文里的数字由 `scripts/docs-check.mjs` 复算校验（它同时读 README / DEVELOPMENT / 本文）。
 
 ```bash
-npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，63 项）
+npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，64 项）
 npm run bench:observe                        # 只观测不判定（记录轮次/容量读数用）
-node --expose-gc scripts/bench.mjs --assert   # 性能门禁：63 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
+node --expose-gc scripts/bench.mjs --assert   # 性能门禁：64 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
 node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
 
@@ -74,7 +74,7 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 > **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账（列表 + 答题区，含**答题卡格级增量**）。**列表侧**——错题本移除一条仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）。**答题区**——勾选选项时顶层仅重建 3/5 区域（占字节 15.6%）；答题卡由「整卡单区域」细化为 `frame` + `sub`：帧跨作答逐字节不变（整张 `<details>` 不重建，展开态不丢），仅按 key 就地替换变化的 **3/52** 子节点（计数 + 受影响格，占整卡 HTML 字节 2.0%）。相较细化前（整卡占答题区字节约 95.6%），答题热路径重建量 **由 95.6% 降至 15.6%**。**浏览器实机验证**：折叠答题卡后作答，卡片保持折叠（证明 `<details>` 未被重建）；作答使选项态/提交按钮/计数/当前格状态同步更新，控制台无报错。
 > `insertMany` 落库耗时以 v3（64 位）contentHash 语义哈希重算为主（约 11.32 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体）远低于旧单键写。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化；v3 的 BigInt 64 位哈希比 v2 的 32 位慢（单次约 2 倍），仍在门禁（≤30 ms）内。
 
-bench 全程 heapUsed：8.98 → 13.84 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.93 MB；DOM 增量末态 38.13 MB）。首屏静态体积（index.html + css + 86 个 index 内联 js（含 `@idcu` 模块适配层，C012 新增 `js/utils/annotation.js`）+ FSRS 训练 Worker + sw.js + manifest/icon，共 94 个文件，逐文件 `gzip -9` 合计；2026-11-06 C027 + R-21/R-01/R-06/R-14/R-11/R-15/R-02/R-20 复测）：**364.1 KB gzip / 1019.9 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 86 个 index 内联 js（含 `@idcu` 模块适配层，C012 新增 `js/utils/annotation.js`）+ FSRS 训练 Worker + sw.js + manifest/icon，共 94 个文件，逐文件 `gzip -9` 合计；2026-11-06 C027 + R-21/R-01/R-06/R-14/R-11/R-15/R-02/R-20/R-19 复测）：**364.6 KB gzip / 1021.4 KB raw**；图片字节在 IndexedDB，不计入首屏包。
 
 > **导入去重索引与单题定位验收（C018，2026-11-06，同机 `--expose-gc`）**
 > - **T0 旧码（本次改动前）**：10k merge 重复导入 冷 **98.89 ms** / 热 **95.55 ms**（比值 0.97）；空载荷 merge 去重准备（`readAll`+Set）**1.76 ms**；50k IDB `questions.get` P95 **0.19 ms**；1000 个新 hash 写入 `user:reviewMeta` 累计 meta **3346.1 KB**、末次清单 **6919 B**。
@@ -142,6 +142,14 @@ bench 全程 heapUsed：8.98 → 13.84 MB（**+4.86 MB**，`--expose-gc` 实跑�
 > - 耗时 A/B（每轮先清空错题表）：LS **0.52 / 0.44 ms**（各 10 轮）；IDB **1.08 / 0.53 ms**（各 5 轮）。
 > - 新增门禁（第 63 项）：`Storage.set` 次数减少 **≥25×** 且累计序列化字节减少 **≥90%**；实测 50.0× / 96.1% 通过。
 > - 未实机验证：真实浏览器 200ms 防抖落盘、真实 IDB 事务合并；IDB 批次在 Node 计数口径下为 18 次（await 间隔决定合并粒度）。
+
+> **阶段 2 R-19 复测（2026-11-06，同机同轮，Node v24.14.0 / Windows / `--expose-gc`）**
+> 新路径为**生产** `QB.ShareLink.estimateChars`（纯算术，不分配字符串）；旧路径为 `encode` 后取 `.length`（先构建 1.333× 大字符串）。
+> - 540 题 JSON（216,695 B，估算口径）：`estimateChars` **288,936 字符**，与真实 `encode(...).length` **逐字相等**（旧阶段 0 公式忽略末尾补位，曾报 288,937）；估算 20 次 median **0.0004 ms**，2000 次估算 heap **+0.03 MB** / external **+0.00 MB**（未 GC）。
+> - 8 MB 边界（`SHARE_MAX_BYTES`）：`estimateChars` **11,184,820 字符** = 真实编码字符数；真实编码 median **15.01 ms**，编码后 heapUsed +0.01 MB、external **+18.67 MB**。
+> - 分享流程（`shareFlow`）：540 题题包预计回链 **539,401 字符** > 软阈值 65,536；确认取消后 `ShareLink.encode` 调用 **0 次**（不构建大字符串），返回 `null`，仅打开题包信息弹窗。
+> - 新增门禁（第 64 项）：540 题与 8MB 边界的 `estimateChars` 必须与真实编码字符数一致（**2/2**）。
+> - 未实机验证：真实浏览器弹窗交互与真实聊天软件对超长 URL 的截断；Node 计时为同机参考值。
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 

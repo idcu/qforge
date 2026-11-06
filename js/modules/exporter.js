@@ -883,6 +883,8 @@
 
   /**
    * 分享流程：与分发共用 prepareDistribution，构建后不下载，改为生成 #share 回链 + 粘贴码
+   * R-19：编码（Base64 约 1.33× 放大）之前先用字节数精确估算回链字符数；
+   * 超软阈值先确认，取消则不编码、不构建大字符串。
    * @param {{bank:Object, kind?:string}} opts
    */
   async function shareFlow(opts) {
@@ -890,15 +892,33 @@
     const prep = await prepareDistribution((opts && opts.kind) || 'bank', opts && opts.bank, opts && opts.trigger, 'share');
     if (!prep) return null;
     if (prep.preview) { await openPreview(prep.payload); return { preview: true }; }
-    const code = QB.ShareLink.encode(prep.built.content);
+
     const base = (typeof location !== 'undefined' && location.href) ? location.href : '';
+    const softLimit = (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.SHARE_URL_SOFT_LIMIT) || 64 * 1024;
+    const estimatedChars = QB.ShareLink.estimateChars(prep.built.content.byteLength) +
+      QB.ShareLink.buildLink(base, '').length;
+    if (estimatedChars > softLimit) {
+      const go = await QB.UIRenderer.confirmDialog(
+        '预计分享回链 ' + estimatedChars + ' 字符，超过分享链接上限 ' + softLimit + ' 字符（' +
+        (prep.built.content.byteLength / 1024).toFixed(1) + ' KB 题包经 Base64 约放大 1.33 倍）。' +
+        '继续将生成完整回链，对方可能无法直接打开；建议改为只发送分享码或导出分发题包文件。',
+        '继续生成'
+      );
+      if (!go) {
+        QB.UIRenderer.toast('已取消分享（题包过大，建议导出分发题包文件）', 'info');
+        return null;
+      }
+    }
+
+    const code = QB.ShareLink.encode(prep.built.content);
     const link = QB.ShareLink.buildLink(base, code);
-    const tooLong = link.length > ((QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.SHARE_URL_SOFT_LIMIT) || 64 * 1024);
+    const tooLong = link.length > softLimit;
     showShareOptions(opts.bank, prep, code, link, tooLong, opts && opts.trigger);
     return {
       kind: 'share', format: 'qbk', count: prep.payload.entries.length,
       bytes: prep.built.content.byteLength, assetCount: prep.built.assetCount,
-      code: code, link: link, tooLong: tooLong, manifest: prep.built.manifest
+      code: code, link: link, tooLong: tooLong, estimatedChars: estimatedChars,
+      manifest: prep.built.manifest
     };
   }
 
