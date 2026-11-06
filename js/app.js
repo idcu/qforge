@@ -53,6 +53,9 @@
 
   const view = () => document.getElementById('view');
   let viewBound = false;
+  // 渲染代次（R-01）：每次 render 取号；await 结束后若已被更新的 render 取代，丢弃本次结果，
+  // 避免「慢的旧渲染」覆盖用户已经切到的新视图（典型：列表/统计页在慢读盘期间切换标签）。
+  let renderSeq = 0;
 
   /* ---------------- 主题 ---------------- */
 
@@ -220,10 +223,12 @@
   /* ---------------- 渲染分发 ---------------- */
 
   async function render() {
+    const seq = ++renderSeq;
     const active = document.activeElement;
     const wasSearch = !!(active && active.getAttribute && active.getAttribute('data-action') === 'search-input');
 
     await loadBankData();
+    if (seq !== renderSeq) return; // 期间已发起更新的渲染，本次结果过期
     if (!State.bankId && State.view !== 'banks') State.view = 'banks';
 
     syncBankSwitch();
@@ -315,6 +320,7 @@
         html = UI.renderHome(State.bank, State.counts);
     }
 
+    if (seq !== renderSeq) return; // case 分支内的 await 期间视图已切换，禁止回写
     if (regions) {
       QB.DomPatch.patch(view(), regions); // 局部回填：仅重建内容变化的区域（列表 / 答题区）
     } else {

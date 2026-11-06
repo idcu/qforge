@@ -446,6 +446,41 @@ section('boot 失败：可见错误态 + 无未处理 rejection + 诊断可下�
 }
 
 /* ============================================================
+ * 6. 渲染代次守卫（R-01）：慢的旧 render 不得覆盖新视图
+ * ============================================================ */
+section('渲染代次守卫（R-01）：旧 render 不得覆盖新视图');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  const bank = await QB.DB.banks.create({ name: '竞态库', description: '' });
+  QB.App.State.bankId = bank.id;
+  QB.App.State.banksLoaded = false;
+  await QB.DB.setCurrentBankId(bank.id);
+  await QB.App.render();
+
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const realForecast = QB.SRSStore.forecast;
+  // 旧视图（统计）在 case 分支内 await 挂起；期间用户切回首页并完成新渲染
+  QB.SRSStore.forecast = async () => { await gate; return null; };
+  QB.App.State.view = 'stats';
+  const stale = QB.App.render();
+  await tick(20); // 让 stale render 越过 loadBankData，卡在 SRSStore.forecast 上
+  QB.App.State.view = 'home';
+  await QB.App.render();
+  ok(viewHtml(env).indexOf('该题库还没有题目。') >= 0, '新视图（首页）已渲染');
+
+  release();
+  await stale;
+  ok(viewHtml(env).indexOf('该题库还没有题目。') >= 0, '旧 render 完成后不覆盖新视图');
+  ok(viewHtml(env).indexOf('复习调度（FSRS）') < 0, '旧视图（统计）内容未回写');
+  ok(env.dom.document.getElementById('tabs').innerHTML.indexOf('class="tab active" data-tab="home"') >= 0,
+    '标签栏保持新视图（首页激活）');
+  QB.SRSStore.forecast = realForecast;
+  env.restore();
+}
+
+/* ============================================================
  * 汇总
  * ============================================================ */
 if (rejections.length) {

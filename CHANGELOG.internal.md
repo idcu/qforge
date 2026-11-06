@@ -9,6 +9,39 @@
 
 ## 最新记录
 
+### fix(render): 渲染代次守卫，过期 render 不得覆盖新视图（R-01）
+
+**Commit Hash**：`183ebef`
+
+**核心改动**
+- `js/app.js`：新增模块级 `renderSeq`；`render()` 入口取号 `seq = ++renderSeq`，在
+  `await loadBankData()` 之后与「写 DOM 前」各判一次 `seq !== renderSeq`，过期即丢弃本次结果。
+  写入（`DomPatch.patch` / `innerHTML`）与最后一次检查之间无 await，保证同一时刻只有一个写入者。
+- 保护的典型场景：统计/错题等 case 分支内存在慢读盘 `await`，期间用户切标签并完成新渲染，
+  旧渲染完成后会把旧视图回写覆盖新视图（触发渲染竞态）。
+- `sw.js`：`CACHE` v17 → v18（改动 `js/app.js`），刷新 `scripts/sw-baseline.json`。
+- 文档：`docs/ARCHITECTURE.md` §4.9（代次判定位置与边界）、`docs/TESTING.md`（app-boot 83→87、
+  合计 5397→5401）、`docs/BENCH.md`（首屏体积复测）、`docs/DEVELOPMENT.md`（SW 版本读数）。
+- **影响面**：正常路径行为不变（只增加两次整数比较）；过期渲染仍会做只读计算，但不再产生任何 DOM 写入。
+  用户可见变化仅是消除「切换标签后旧页面闪回」。
+
+**验证数据（Node v24.14.0，Windows，Asia/Shanghai）**
+- **先红**：`node scripts/app-boot.test.mjs` → **exit 1**，`通过: 86，失败: 1`。
+  失败项：`旧 render 完成后不覆盖新视图`（统计页 `SRSStore.forecast` 被 gate 挂起 → 切首页完成渲染 →
+  释放旧渲染后 `#view` 被统计页覆盖，首页文案丢失）。
+- **后绿**：同命令 → **exit 0**，`通过: 87，失败: 0`（4 项守卫断言：新视图已渲染、旧渲染不覆盖、
+  旧统计内容不回写、标签栏保持首页激活）。
+- **套件牙齿**：`node scripts/app-boot.test.mjs --mutate-commit-import` → **exit 1**，`通过: 79，失败: 8`。
+- **配套门禁**：`npm run verify:fast` → **exit 0**（36 运行项 / 5401 断言 / 0 失败，`docs-check --static` 一致）；
+  `npm run bench` → **exit 0**（62/62 性能门禁）。
+- `node scripts/sw-runtime.test.mjs --write-baseline` → `qforge-v18 / 93 files / 2adaf249c8b1…`，套件 32 项通过。
+- 断言只增不减（app-boot 83→87，合计 5397→5401），未调整阈值/基线。
+
+**遗留 TODO / 风险**
+- **未实机验证**：真实浏览器慢 IO（大库读盘）下切换标签的视觉闪烁是否完全消除；Node 用例只覆盖
+  「慢分支挂起后切视图」这一确定性时序，不覆盖多标签/后台节流等浏览器调度差异。
+- 只保护 DOM 写入，不取消已发出的 IO；过期渲染仍可能浪费一次读盘（后续 R 项如需要可再加 AbortController）。
+
 ### fix(app): boot 整体兜底——启动失败可见错误态 + 诊断下载（R-21）
 
 **Commit Hash**：`6024900`

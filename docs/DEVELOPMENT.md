@@ -10,7 +10,7 @@
 
 | 读数 | 当前值 | 事实源 |
 | --- | --- | --- |
-| SW 缓存版本 | qforge-v17 | `sw.js` 的 `CACHE`（改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+| SW 缓存版本 | qforge-v18 | `sw.js` 的 `CACHE`（改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
 | 数据 schemaVersion | 6 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
 | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
 
