@@ -11,7 +11,7 @@
 
 ### feat(share): 分享回链与粘贴码离线往返，三库 3/3、fetch 0 次（C011）
 
-**Commit Hash**：`<C011-HASH>`（回填见后续 `docs(changelog)` 提交）
+**Commit Hash**：`a27191b`（feat(share): 分享回链与粘贴码离线回导…）
 
 **核心改动**
 - 新增 `js/utils/base64.js`（`QB.Base64`）：`encodeBytes/decodeToBytes/toUrlSafe/fromUrlSafe`。
@@ -63,7 +63,7 @@
 
 ### feat(practice): 错题与薄弱点一键组卷，10k 组卷 P95 5.59ms（C010）
 
-**Commit Hash**：`<C010-HASH>`（回填见后续 `docs(changelog)` 提交）
+**Commit Hash**：`0741b4d`（feat(practice): 错题与薄弱点一键组卷…）
 
 **核心改动**
 - `js/modules/statistics.js`：新增纯函数 `reviewStats(revlog, bankId)`——按 `e.b===bankId` 过滤，逐题聚合
