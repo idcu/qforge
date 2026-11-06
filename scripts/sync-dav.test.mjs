@@ -94,6 +94,31 @@ section('上传使用解密后的密码（C027）');
     'u:s3cret-pw', '上传读取的是解密后的密码');
 }
 
+section('设置弹窗不把密码写入 HTML 属性（R-14）');
+{
+  const SECRET = 'p"w<x>&y';
+  await D.saveConfig({ baseUrl: CONF.baseUrl, user: CONF.user, pass: SECRET });
+  const captured = {};
+  // 本套件不加载 ui-renderer（_harness 跳过）：用最小替身捕获 openModal 的 HTML 与回调
+  const realOpen = QB.UIRenderer && QB.UIRenderer.openModal;
+  QB.UIRenderer = QB.UIRenderer || {};
+  QB.UIRenderer.openModal = (html, cb) => { captured.html = html; captured.cb = cb; };
+  await D.openFlow();
+  ok(captured.html && captured.html.indexOf(SECRET) < 0, '密码原文不出现在弹窗 HTML');
+  ok(captured.html && captured.html.indexOf(QB.Helpers.escapeHtml(SECRET)) < 0,
+    '密码的 HTML 转义形态也不出现（防属性注入/转义后泄露）');
+  ok(!/data-dav="pass"[^>]*\bvalue=/.test(captured.html || ''), 'password 输入框不带 value 属性');
+  const els = {};
+  const modal = {
+    querySelector(sel) { if (!els[sel]) els[sel] = { value: '', onclick: null }; return els[sel]; }
+  };
+  captured.cb(modal);
+  eq(els['[data-dav="pass"]'] && els['[data-dav="pass"]'].value, SECRET,
+    '密码改经 DOM value 属性回填，上传仍可用');
+  await D.saveConfig(CONF);
+  if (realOpen) QB.UIRenderer.openModal = realOpen;
+}
+
 section('校验与 URL 拼接');
 eq(D.targetUrl('https://a.com/dav/'), 'https://a.com/dav/' + D.FILE_NAME, '带尾斜杠');
 eq(D.targetUrl('https://a.com/dav'), 'https://a.com/dav/' + D.FILE_NAME, '无尾斜杠自动补');

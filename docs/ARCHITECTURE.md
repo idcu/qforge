@@ -214,6 +214,16 @@ QB.assertOptional(adapter, name)           ← DB.init 在 assertAdapter 之后�
 - 新增可选方法时必须同时登记本表与 `QB.OPTIONAL_CONTRACTS`，否则第三方适配器无法判断合规边界。
 - 未实机验证：真实浏览器/多标签下的降级路径时序（Node 用例覆盖语义等价与调用次数）。
 
+### 4.11 WebDAV 密码渲染（R-14）
+
+- 设置弹窗的密码输入框 `<input type="password" data-dav="pass">` **不带 `value` 属性**；
+  密码在 `openModal` 回调里通过 `element.value = cfg.pass` 回填。
+- 原因：拼接进 `innerHTML` 的密码（即使 HTML 转义）仍是明文派生，会随 DOM 序列化、
+  截图、浏览器扩展读取、以及任何页面快照泄露；DOM `value` 仅在运行时属性中存在。
+- 边界：**不防同源 XSS / 恶意扩展 / 同机读盘**；落盘密文（AES-GCM）仍由 C027 负责，
+  本项只收紧「渲染面」。
+- 未实机验证：真实浏览器扩展/序列化路径；Node 用例只断言 `openModal` HTML 字符串与回调 `value`。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |

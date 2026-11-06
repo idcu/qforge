@@ -9,6 +9,41 @@
 
 ## 最新记录
 
+### fix(security): WebDAV 密码不再写入 HTML 属性（R-14）
+
+**Commit Hash**：`7452aa8`
+
+**核心改动**
+- `js/modules/sync-dav.js`：设置弹窗的密码输入框由
+  `<input type="password" data-dav="pass" value="' + esc(cfg.pass) + '">`
+  改为不带 `value` 属性；`openModal` 回调里通过 `passInput.value = cfg.pass` 回填。
+- 密码在 HTML 字符串中彻底消失（含转义形态），不再随 `innerHTML`/DOM 序列化/截图/扩展读取泄露；
+  上传与下载读取 `modal.querySelector('[data-dav="pass"]').value` 的逻辑不变。
+- 文档：`docs/ARCHITECTURE.md` §4.11（原因与边界）、`docs/user-guide.md` §1 安全说明、
+  `docs/TESTING.md`（sync-dav 65→69、合计 5422→5426）、`docs/BENCH.md`（首屏体积复测）、
+  `docs/DEVELOPMENT.md`（SW 版本读数）。
+- `sw.js`：`CACHE` v19 → v20，刷新 `scripts/sw-baseline.json`。
+- **影响面**：弹窗首次打开时密码框仍显示已保存密码（行为不变）；仅渲染载体从 HTML 属性改为 DOM 属性。
+  不防同源 XSS/恶意扩展/同机读盘（与原有 AES-GCM 落盘边界一致）。
+
+**验证数据（Node v24.14.0，Windows，Asia/Shanghai）**
+- **先红**：`node scripts/sync-dav.test.mjs` → 汇总 `通过: 66，失败: 3`，失败项：
+  `密码的 HTML 转义形态也不出现`（`p&quot;w&lt;x&gt;&amp;y` 出现在 `value` 属性）、
+  `password 输入框不带 value 属性`、`密码改经 DOM value 属性回填，上传仍可用`。
+  注：该次运行在打印失败汇总后触发 Node/libuv 退出断言（exit `-1073740791`），属失败路径的退出噪声，
+  断言失败本身可复现；绿跑退出正常。
+- **后绿**：同命令 → **exit 0**，`通过: 69，失败: 0`（新增 4 项：原文不出现、转义形态不出现、
+  无 `value` 属性、回调回填后上传仍可用）。
+- **配套门禁**：`npm run verify:fast` → **exit 0**（36 运行项 / 5426 断言 / 0 失败，`docs-check --static` 一致）；
+  `npm run bench` → **exit 0**（62/62 性能门禁）。
+- `node scripts/sw-runtime.test.mjs --write-baseline` → `qforge-v20 / 93 files / dc10ddd9b11f…`，套件 32 项通过。
+- 断言只增不减（sync-dav 65→69，合计 5422→5426），未调整阈值/基线。
+
+**遗留 TODO / 风险**
+- **未实机验证**：真实浏览器 DOM 序列化 / 扩展读取 / 截图路径；Node 用例只断言 `openModal` 收到的
+  HTML 字符串与回调写入的 `value`。
+- 密码仍存在于运行时 DOM `value` 属性（这是可用的必要代价）；同源 XSS 仍可读取。
+
 ### feat(contract): 声明可选契约并提供统一能力检测（R-06）
 
 **Commit Hash**：`12e1029`
