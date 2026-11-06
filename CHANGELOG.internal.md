@@ -9,6 +9,40 @@
 
 ## 最新记录
 
+### test(contract): 装配清单 requires DAG 填满 + keeps 导出存在性校验（C023）
+
+**Commit Hash**：`待回填`
+
+**核心改动**
+- `contracts/modules.json`：**86 条**（计划写 81，实际清单已随 C021/C022 长到 86）逐条补齐
+  `requires` 与 `keeps`。`requires` 由源码 `QB.X` 引用 × 各模块导出定义自动推导，并**只登记
+  排在前的模块**（运行期才用到的后置模块不登记，避免与真实加载顺序冲突）；59 条有前置依赖，
+  共登记 **120 个导出符号**；vendor 的 UMD 全局（`__idcuUtil`/`Zip`/`XmlLite`/`Xlsx`/
+  `__idcuXlsx`/`__idcuAssets`/`DSV`）单独登记。
+- `scripts/check-modules.mjs`：新增第 4 条判据 **`keeps` 导出存在性**（源码里必须能找到对应
+  赋值，防误删导出后其它模块静默 `undefined`）；`at` 必须与序号一致；`requires/keeps` 必须是数组、
+  `requires` 不许重复。校验逻辑抽成纯函数 `checkManifest(mods, sources)`，主流程与自检共用同一实现。
+- **负例自检** `--selftest`：① 乱序（交换第 2/3 项）→「项不一致」；② `requires` 指向 `ghost.module`
+  →「不存在的 id」；③ 删掉 `QB.Storage =` 赋值 →「未导出声明的 QB.Storage」。要求 3/3 全部拦截。
+- 文档：`docs/modules.md` 判据 6→7 条 + 牙齿测试 + 加脚本流程（`keeps`）；
+  `docs/TESTING.md` 装配判据说明；`README.md` 81→86。`contracts/modules.json` 的 description 同步语义。
+- 公共抽象：无新增业务抽象；校验逻辑抽为 `checkManifest`（`scripts/**` 内复用，主流程 + 自检）。
+  影响面：新增脚本必须同时在 `contracts/modules.json` 填 `requires/keeps`，否则 `verify:fast` 红；
+  不改 `js/**` 运行时。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **绿**：`node scripts/check-modules.mjs` → `79 本地 + 7 vendor / 86 条清单 / 8 层 / 120 导出符号 / 0 处违约`（exit 0）。
+- **负例**：`node scripts/check-modules.mjs --selftest` → **3/3 已拦截（exit 0）**；未拦截会 exit 1。
+- **门禁（实跑退出码）**：`node scripts/test-all.mjs` → **35 套件 / 5288 断言 / 基线一致（exit 0，41.9s）**；
+  `npm run verify:fast` → exit 0；`docs-check --static` 一致；`bench --assert` → **62/62 通过（exit 0）**；
+  首屏 **353.3 KB gzip / 989.0 KB raw**（零运行时改动，本项只动契约与校验脚本）。
+
+**遗留 TODO / 风险**
+- `requires` 由「引用符号的首次定义者」推导，只保证**顺序**成立；若某模块在顶层执行时依赖
+  后置模块的副作用（现有代码没有），该依赖不会被登记，需人工在 `requires` 补录。
+- `keeps` 为静态赋值存在性校验，不执行模块；运行时导出对象真实性由 test-all 的加载套件覆盖。
+- `at` 现在参与判据：插入脚本后必须重排后续 `at`，否则红（`docs/modules.md` 已写明）。
+
 ### test(a11y): 无障碍静态门禁独立进 CI，弹窗快照缺登记即红（C022）
 
 **Commit Hash**：`45bb8f0`

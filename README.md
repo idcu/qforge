@@ -129,7 +129,7 @@ qb/
 - [测试矩阵](docs/TESTING.md) —— 逐套件断言数与运行项数、跑法、时区矩阵
 - [性能打点](docs/BENCH.md) —— 性能门禁、容量档位、heap 红线与实测读数
 - [删除记录](docs/deletions.md) —— 结构性删除 / 出库的账本（判据校验：字段齐全、无假删除）
-- [模块分层](docs/modules.md) —— 81 个 `<script>` 的装配清单与加载顺序（唯一事实源：`contracts/modules.json`）
+- [模块分层](docs/modules.md) —— 86 个 `<script>` 的装配清单与加载顺序（唯一事实源：`contracts/modules.json`）
 - [第三方迁移桥 · 结论与计划](docs/MIGRATION-BRIDGE-PLAN.md) —— 要不要做、先做哪个、风险在哪（§5 排期）
 - [第三方迁移桥 · 事实基线](docs/MIGRATION-BRIDGE-FACTS.md) —— 逐来源字段表、能力对照、映射、SQLite 可行性
 - [间隔重复（FSRS-6）](docs/SRS.md) —— 公式、状态机、优化器、数据结构
