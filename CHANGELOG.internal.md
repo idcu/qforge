@@ -11,7 +11,7 @@
 
 ### fix(sw): 缓存清理收窄到本站命名空间（R-11）
 
-**Commit Hash**：`（提交后回填）`
+**Commit Hash**：`7ac18bf`
 
 **核心改动**
 - `sw.js`：新增 `CACHE_PREFIX = 'qforge-'`；activate 的清理从 `keys.filter(k => k !== CACHE)`
