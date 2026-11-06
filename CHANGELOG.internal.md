@@ -9,6 +9,42 @@
 
 ## 最新记录
 
+### fix(app): boot 整体兜底——启动失败可见错误态 + 诊断下载（R-21）
+
+**Commit Hash**：`（提交后回填）`
+
+**核心改动**
+- `js/app.js`：`boot()` 改为 `try { await startApp() } catch` 整体兜底；原 boot 主体改名为 `startApp()`，行为不变。
+  失败时 `console.error('[qforge] 启动失败：', e)` 保留原始栈，`State.bootError = e`，`renderBootFailure(e)`
+  在 `#view` 渲染「启动失败」错误态并同步状态栏；`bindView()` 改为幂等（`viewBound` 守卫），
+  失败早于正常绑定也会补绑，保证诊断按钮可点。
+- 新增 `bootDiagnosticsReport()` / `downloadBootDiagnostics()` 与 `data-action="boot-diagnostics"`：
+  报告只含 `{app, ts, href, ua, error:{name,message,stack}, state, backend, storage}`，
+  **不含题目内容/备份数据/密码**；经 Blob + `<a download="qforge-boot-<ts>.json">` 下载并 `revokeObjectURL`。
+- `sw.js`：`CACHE` v16 → v17（改了 `js/app.js` 必须换代，避免升级后仍命中旧缓存），并刷新 `scripts/sw-baseline.json`。
+- 文档：`docs/ARCHITECTURE.md` §4.8（兜底调用链与报告字段）、`docs/user-guide.md` §1（用户可见行为）、
+  `docs/TESTING.md`（app-boot 71→83、合计 5385→5397）、`docs/BENCH.md`（首屏体积复测）、`docs/DEVELOPMENT.md`（SW 版本读数）。
+- **影响面**：启动任一步抛错时，用户从「白屏/空库无提示」变为「可见错误态 + 可下载诊断」；正常启动路径与数据不变。
+  SW 缓存换代后，已有用户在下次加载时重新预缓存并删除 v16 缓存（本项未实机验证 SW 生命周期）。
+
+**验证数据（Node v24.14.0，Windows，Asia/Shanghai）**
+- **先红**：`node scripts/app-boot.test.mjs` → **exit 1**，`通过: 72，失败: 9`，`存在 1 个未处理 rejection`。
+  失败项：`State.bootError` 未记录、`#view` 无「启动失败」、无诊断按钮、状态栏未同步、未处理 rejection、
+  诊断 Blob/`<a download>`/文件名断言全 0。
+- **后绿**：`node scripts/app-boot.test.mjs` → **exit 0**，`通过: 83，失败: 0`；
+  红例注入方式：`QB.DB.init` 后把 `banks.list` 替换为 `async () => { throw new Error('banks list boom') }`。
+- **套件牙齿**：`node scripts/app-boot.test.mjs --mutate-commit-import` → **exit 1**，`通过: 75，失败: 8`（变异仍被抓住）。
+- **配套门禁**：`npm run verify:fast` → **exit 0**（36 运行项 / 5397 断言 / 0 失败，`docs-check --static` 全部一致）；
+  `npm run bench` → **exit 0**（62/62 性能门禁通过）；`node scripts/sw-runtime.test.mjs --write-baseline`
+  → `qforge-v17 / 93 files / c6e00a9881f7…`，随后套件 32 项通过（exit 0）。
+- 断言只增不减：app-boot 71 → 83；未调整任何阈值/基线。
+
+**遗留 TODO / 风险**
+- **未实机验证**：真实浏览器中 Blob + `<a download>` 的实际落盘、启动失败时 `#view` 的真实布局、
+  SW v17 activate 的生命周期与缓存删除时序；Node 垫片只验证到「创建 Blob / 触发 click / 报告内容」。
+- 诊断报告在 `QB.Store` 不可用（极早期失败）时省略 `storage` 字段，属预期降级。
+- 未处理 rejection 断言依赖测试进程级监听；真实浏览器需另测。
+
 ### test(bench): 阶段 0 度量基线（写放大 / 启动水合 / 分享体积）
 
 **Commit Hash**：`8d97075`
