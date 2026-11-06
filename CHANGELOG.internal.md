@@ -11,7 +11,7 @@
 
 ### perf(progress): 收卷错题改为一次读改写（R-02）
 
-**Commit Hash**：`<提交后回填>`
+**Commit Hash**：`c3a3121`
 
 **核心改动**
 - `js/data/contracts.js`：`OPTIONAL_CONTRACTS` 增 `progress: ['wrongAddMany']`（缺失时领域层降级）。
