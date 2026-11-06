@@ -11,7 +11,7 @@
 
 ### fix(storage): reviewMeta 改为 v4 紧凑标记，消除随库线性膨胀（P2-06）
 
-**Commit Hash**：`<待回填>`
+**Commit Hash**：`8725a89`
 
 **核心改动**
 - **缺陷（先红）**：`user:reviewMeta:<bankId>` 为 `{v:3,count,keys}` 全量 hash 清单，**每次新 hash 评分整份重写**。
