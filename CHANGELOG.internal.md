@@ -9,6 +9,39 @@
 
 ## 最新记录
 
+### test(bench): 阶段 0 度量基线（写放大 / 启动水合 / 分享体积）
+
+**Commit Hash**：`8d97075`
+
+**核心改动**
+- `scripts/bench.mjs` 新增 3 组**观测行**（不新增门禁、不调阈值）：
+  ① 收卷错题写放大（50 题 · 旧逐题 vs 单次读改写，LS + IDB 双口径）；
+  ② 启动全量水合（5000 / 50000 题 · IDB 第二轮启动：`Store.init()` → `readAll(true,true)` → `Storage.adoptStore`）；
+  ③ 分享码体积（540 题 JSON / 8 MB 边界，含 `heapUsed` 与 `external` 两项内存口径）。
+- `docs/BENCH.md` 新增「阶段 0 度量基线」段，记录命令、样本数、原始打点与口径。
+- **未改** `js/**`、`sw.js`、`contracts/`、`index.html`；`docs-baseline.json` 不变（运行项 36 / 断言 5385 / 门禁 62 / 首屏 94 文件）。
+
+**验证数据（Node v24.14.0，Windows，Asia/Shanghai，`--expose-gc`）**
+- **先红**：`node .analysis/architecture-audit/baselines/stage0-probe.mjs` → **exit 1**
+  旧路径 `QB.Storage.set` **50 次 / 累计序列化 95,675 B**（批量目标 ≤1 次）；单次读改写对照 **1 次 / 3,751 B**。
+  输出：`[RED] 旧路径写放大成立：50 次写（批量目标 ≤1）`。
+- **后绿**：`node --expose-gc scripts/bench.mjs --assert` → **62/62 通过，exit 0**；新增行实测：
+  - 写放大：LS 旧 **50 次 / 93.4 KB**（真实落盘 1 次，200 ms 防抖合并），对照 **1 次 / 3.7 KB**；
+    IDB 旧 `Store.batch` **7 次 / 15.3 KB**，对照 **1 次 / 3.7 KB**；耗时 A/B：LS **0.54 / 0.41 ms**（10 轮）、IDB **0.97 / 0.48 ms**（5 轮）。
+  - 水合：5000 题 **8.63 ms / 5056 记录 / 2.35 MB / heap 边界 +5.85 MB（驻留 +3.08 MB）**；
+    50000 题 **52.90 ms / 50356 记录 / 21.38 MB / heap 边界 +50.27 MB（驻留 +26.42 MB）**。
+  - 分享：540 题 JSON 216,695 B → **288,936 字符（1.333×）**，median 0.60 ms；
+    8 MB → **11,184,820 字符（1.333×）**，median 17.92 ms，`heapUsed` +0.01 MB、`external` +18.67 MB。
+- **配套门禁**：`node scripts/test-all.mjs` → **36 运行项 / 5385 断言 / 0 失败，exit 0**；
+  `node scripts/docs-check.mjs --static` → 全部一致，exit 0；`node scripts/docs-links.mjs` → 368 链接 / 0 broken，exit 0。
+
+**口径与遗留 TODO / 风险**
+- 写放大的「累计序列化字节」是 API 层整表重写量，**不等于真实落盘字节**；IDB 旧路径仅 7 次 `batch`（await 间隔内多次 set 被合并），真实浏览器时序可能不同。
+- 阶段 0 的「单次读改写」是对照模拟，**不是生产 API**；`wrongAddMany` 属阶段 2，本轮未实现。
+- Node 内存 IDB 的字符串按引用共享，水合 heap 增量主要反映 Map/克隆结构，**不代表浏览器冷启动反序列化**；真实浏览器 IDB 配额、事务时序、SW 生命周期、真实竞态均**未实机验证**。
+- 分享体积累计为纯 JSON 近似（216,695 B，不含 `.qbk` 资产打包），只量编码，不含下载/分享页渲染；8 MB 大字符串计入 V8 `external`，不能只看 `heapUsed`。
+- 本轮未进入阶段 1；门禁阈值与 `docs-baseline.json` 均未调整。
+
 ### feat(security): WebDAV 密码 AES-GCM 加密落盘 + 旧明文迁移（C027）
 
 **Commit Hash**：`2d20821`

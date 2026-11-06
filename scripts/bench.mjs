@@ -181,6 +181,137 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
   QB.Storage.forceSync();
 }, 5), '重写全部分片（写放大 O(库规模)）');
 
+/* ---------- 2c. 阶段 0：收卷错题写放大（50 题 · 旧逐题 vs 单次读改写） ----------
+ * 旧路径对应 js/app.js:396-402：每题一次 QB.DB.progress.wrongAdd → local-adapter
+ * js/data/local-adapter.js:757-769 每次「整表读 + 整表写」。
+ * 阶段 0 只测基线，不实现 wrongAddMany；「单次读改写」是对照模拟（非生产路径）。
+ * 口径：
+ *   - LS：计数 QB.Storage.set 调用与累计 JSON.stringify 字节（API 层写放大），
+ *     同时计数真实 localStorage.setItem（200ms 防抖会把同键多次写合并成 1 次落盘）；
+ *   - IDB：计数 QB.Store.batch 中命中 wrong 键的事务（IDB 模式每次 set 在 await 间隔内落一事务）；
+ *   - 耗时 A/B 各 10 轮（每轮先清空错题表，A/B 同口径）。
+ * 注意：Node 内存 IDB 不是浏览器真实 IDB；真实配额/事务语义未实机验证。 */
+{
+  const WRONG_N = QB.CONFIG.LIMITS.QUESTIONS_PER_QUIZ;
+  const seen = new Set();
+  const wrongQs = [];
+  for (const q of parsed.questions) {
+    const h = QB.makeContentHash(q);
+    if (seen.has(h)) continue;
+    seen.add(h);
+    wrongQs.push(q);
+    if (wrongQs.length >= WRONG_N) break;
+  }
+  const K = QB.KEYS.wrong(benchBank.id);
+  const resetWrong = () => { QB.Storage.setSync(K, []); QB.Storage.forceSync(); };
+  const mergeBatch = () => {
+    const list = QB.Storage.get(K, []).slice();
+    for (const q of wrongQs) {
+      const key = QB.makeQuestionKey(q);
+      const found = list.find((w) => w.questionKey === key);
+      if (found) { found.wrongCount = (found.wrongCount || 1) + 1; found.lastAt = Date.now(); }
+      else list.push({ questionKey: key, wrongCount: 1, lastAt: Date.now() });
+    }
+    QB.Storage.set(K, list);
+  };
+
+  // LS 计数（API 层 set 次数/字节 + 真实落盘次数）
+  let setCalls = 0;
+  let setBytes = 0;
+  let diskWrites = 0;
+  const origSet = QB.Storage.set;
+  const origLsSet = window.localStorage.setItem;
+  QB.Storage.set = function (k, v) {
+    if (k === K) { setCalls += 1; setBytes += Buffer.byteLength(JSON.stringify(v), 'utf8'); }
+    return origSet.call(QB.Storage, k, v);
+  };
+  window.localStorage.setItem = function (k, v) {
+    if (k.indexOf('user:wrong:') >= 0) diskWrites += 1;
+    return origLsSet.call(window.localStorage, k, v);
+  };
+  resetWrong(); setCalls = 0; setBytes = 0; diskWrites = 0;
+  for (const q of wrongQs) await QB.DB.progress.wrongAdd(benchBank.id, q);
+  QB.Storage.forceSync();
+  const oldCalls = setCalls, oldBytes = setBytes, oldDisk = diskWrites;
+  resetWrong(); setCalls = 0; setBytes = 0; diskWrites = 0;
+  mergeBatch(); QB.Storage.forceSync();
+  const batchCalls = setCalls, batchBytes = setBytes, batchDisk = diskWrites;
+  QB.Storage.set = origSet;
+  window.localStorage.setItem = origLsSet;
+
+  const tOld = await timed(async () => {
+    resetWrong();
+    for (const q of wrongQs) await QB.DB.progress.wrongAdd(benchBank.id, q);
+    QB.Storage.forceSync();
+  }, 10);
+  const tBatch = await timed(async () => {
+    resetWrong(); mergeBatch(); QB.Storage.forceSync();
+  }, 10);
+
+  // IDB 模式：独立 harness，量「真实事务次数」
+  const idb = createMemoryIDB();
+  const ih = await createHarness(QB_DIR, { indexedDB: idb });
+  ih.QB.Store.writeMarker('idb');
+  await ih.QB.Storage.initStore();
+  const IQ = ih.QB;
+  IQ.DB.init();
+  const ibank = await IQ.DB.banks.create({ name: '阶段0-写放大-IDB' });
+  await IQ.DB.questions.insertMany(ibank.id, wrongQs, { dedupe: true, mode: 'overwrite' });
+  const IK = IQ.KEYS.wrong(ibank.id);
+  const resetIdb = async () => { IQ.Storage.setSync(IK, []); await IQ.Storage.flush(); };
+  let batches = 0;
+  let batchBytesIdb = 0;
+  const origBatch = IQ.Store.batch;
+  IQ.Store.batch = function (payload) {
+    const ops = (payload || []).filter((op) => op && op.key === IK);
+    if (ops.length) { batches += 1; batchBytesIdb += Buffer.byteLength(JSON.stringify(ops), 'utf8'); }
+    return origBatch.call(IQ.Store, payload);
+  };
+  await resetIdb(); batches = 0; batchBytesIdb = 0;
+  for (const q of wrongQs) await IQ.DB.progress.wrongAdd(ibank.id, q);
+  await IQ.Storage.flush();
+  const iOldBatches = batches, iOldBytes = batchBytesIdb;
+  await resetIdb(); batches = 0; batchBytesIdb = 0;
+  const ilist = IQ.Storage.get(IK, []).slice();
+  for (const q of wrongQs) {
+    const key = IQ.makeQuestionKey(q);
+    const found = ilist.find((w) => w.questionKey === key);
+    if (found) { found.wrongCount = (found.wrongCount || 1) + 1; found.lastAt = Date.now(); }
+    else ilist.push({ questionKey: key, wrongCount: 1, lastAt: Date.now() });
+  }
+  IQ.Storage.set(IK, ilist);
+  await IQ.Storage.flush();
+  const iBatchBatches = batches, iBatchBytes = batchBytesIdb;
+  IQ.Store.batch = origBatch;
+
+  // IDB 耗时 A/B（恢复 batch 原函数，避免计数侧的 JSON.stringify 影响计时）
+  const tOldIdb = await timed(async () => {
+    await resetIdb();
+    for (const q of wrongQs) await IQ.DB.progress.wrongAdd(ibank.id, q);
+    await IQ.Storage.flush();
+  }, 5);
+  const tBatchIdb = await timed(async () => {
+    await resetIdb();
+    const l = IQ.Storage.get(IK, []).slice();
+    for (const q of wrongQs) {
+      const key = IQ.makeQuestionKey(q);
+      const found = l.find((w) => w.questionKey === key);
+      if (found) { found.wrongCount = (found.wrongCount || 1) + 1; found.lastAt = Date.now(); }
+      else l.push({ questionKey: key, wrongCount: 1, lastAt: Date.now() });
+    }
+    IQ.Storage.set(IK, l);
+    await IQ.Storage.flush();
+  }, 5);
+
+  row('收卷错题写放大（' + wrongQs.length + ' 题 · 旧逐题 vs 单次读改写）', tOld,
+    'LS：旧 set ' + oldCalls + ' 次/累计 ' + (oldBytes / 1024).toFixed(1) + ' KB，真实落盘 ' + oldDisk
+    + ' 次（防抖合并）；对照 set ' + batchCalls + ' 次/' + (batchBytes / 1024).toFixed(1) + ' KB，落盘 ' + batchDisk + ' 次。'
+    + 'IDB：旧 batch ' + iOldBatches + ' 次/累计 ' + (iOldBytes / 1024).toFixed(1) + ' KB；对照 batch '
+    + iBatchBatches + ' 次/' + (iBatchBytes / 1024).toFixed(1) + ' KB。'
+    + '耗时 A/B：LS ' + ms(tOld.median) + ' / ' + ms(tBatch.median)
+    + '，IDB ' + ms(tOldIdb.median) + ' / ' + ms(tBatchIdb.median) + '（各 10/10/5/5 轮）');
+}
+
 /* ---------- 3. buildIndex ---------- */
 row('buildIndex（contentHash 索引）', await timed(async () => {
   await QB.DB.buildIndex(benchBank.id);
@@ -1072,7 +1203,41 @@ async function idbMigrationPass(tier, mode) {
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   const peakMb = (inst.tracker.peak - heap0) / 1024 / 1024;
   const heapAfter = (bestEffortGc(), process.memoryUsage().heapUsed);
-  return { Q, h, legacy, lsBefore, migRes, ms, peakMb, heapAfter, samples: inst.tracker.samples };
+  return { Q, h, idb, legacy, lsBefore, migRes, ms, peakMb, heapAfter, samples: inst.tracker.samples };
+}
+
+/**
+ * 阶段 0：启动全量水合（第二轮启动，共享同一 IDB）。
+ * 口径：新建 harness（脚本已加载完毕后计时）→ 写 idb 标记 → Store.init() 全量 readAll
+ * → Storage.adoptStore() 复制进内存缓存。heap 在「readAll 返回的记录 Map」与
+ * 「adoptStore 复制后的 _cache」两个边界采样，取较大值；不是连续采样峰值。
+ * Node 内存 IDB 的数据本身也在 JS 堆里，故绝对值偏大；浏览器真实堆占用未实测。
+ */
+async function hydrationPass(idb, tier) {
+  const h = await createHarness(QB_DIR, { indexedDB: idb });
+  h.QB.Store.writeMarker('idb');
+  const heap0 = (bestEffortGc(), process.memoryUsage().heapUsed);
+  let peak = heap0;
+  const t0 = process.hrtime.bigint();
+  const info = await h.QB.Store.init();
+  peak = Math.max(peak, process.memoryUsage().heapUsed);
+  h.QB.Storage.adoptStore(info);
+  peak = Math.max(peak, process.memoryUsage().heapUsed);
+  const msHydrate = Number(process.hrtime.bigint() - t0) / 1e6;
+  const recs = info.records || new Map();
+  let bytes = 0;
+  let domain = 0;
+  recs.forEach((v, k) => {
+    if (k.indexOf('meta:') === 0 || k.indexOf('boot:') === 0) return;
+    domain += 1;
+    bytes += Buffer.byteLength(k, 'utf8')
+      + Buffer.byteLength(typeof v === 'string' ? v : JSON.stringify(v), 'utf8');
+  });
+  const cache = h.QB.Storage._cache.size;
+  const heapPeakMb = (peak - heap0) / 1024 / 1024;
+  bestEffortGc();
+  const retainedMb = Math.max(0, (process.memoryUsage().heapUsed - heap0) / 1024 / 1024);
+  return { tier, ms: msHydrate, records: recs.size, domain, bytes, cache, heapPeakMb, retainedMb };
 }
 
 for (const tier of [5000, 20000, 50000]) {
@@ -1163,6 +1328,18 @@ for (const tier of [5000, 20000, 50000]) {
     median: w.median, min: w.min, max: w.max,
     extra: '1 状态键 + 尾段日志聚合 1 事务，上行 ' + idbWriteBytes + ' B'
   });
+
+  // 阶段 0：启动全量水合（同机第二轮启动，复用本档迁移后的 IDB；只取 5k/50k 两档）
+  if (tier === 5000 || tier === 50000) {
+    const hyd = await hydrationPass(pass.idb, tier);
+    report.push({
+      name: '启动全量水合（' + tier + ' 题 · IDB）',
+      median: hyd.ms, min: hyd.ms, max: hyd.ms,
+      extra: '记录 ' + hyd.records + '（业务 ' + hyd.domain + '），序列化 ' + mb(hyd.bytes)
+        + '，_cache ' + hyd.cache + ' 键，heap 边界峰值 +' + hyd.heapPeakMb.toFixed(2)
+        + ' MB（GC 后驻留 +' + hyd.retainedMb.toFixed(2) + ' MB，含 Node 内存 IDB 拷贝）'
+    });
+  }
 }
 
 /* ---------- 13. 分发题包（.qbk + manifest.json）：5000 题构建/导入观测 ----------
@@ -1211,6 +1388,49 @@ for (const tier of [5000, 20000, 50000]) {
   report.push({
     name: '分发题包 5k：导入（QbkImporter 含清单校验）', median: tImport.median, min: tImport.min, max: tImport.max,
     extra: '资产入库 + JSON 适配 + 清单/校验和核对'
+  });
+}
+
+/* ---------- 11d. 阶段 0：分享码体积估算（540 题 / 8MB 边界） ----------
+ * 口径：ShareLink.encode 输入为 UTF-8 字节；540 题用 JSON 序列化近似（真实 .qbk 还含资产，
+ * 本项不含资产打包，标注为「估算」）。8MB 边界取 CONFIG.LIMITS.SHARE_MAX_BYTES 上限值。
+ * 公式对照：4*ceil(n/3)+前缀长；实际输出字符数应接近该值。堆增量为编码后（未 GC）差值。 */
+{
+  const seen = new Set();
+  const uniq = [];
+  for (const q of parsed.questions) {
+    const h = QB.makeContentHash(q);
+    if (seen.has(h)) continue;
+    seen.add(h);
+    uniq.push(q);
+  }
+  const json540 = new Uint8Array(Buffer.from(JSON.stringify(uniq), 'utf8'));
+  // 前缀长：3 字节 → 4 个 URL-safe Base64 字符（无 padding），差值即前缀
+  const prefixLen = QB.ShareLink.encode(new Uint8Array(3)).length - 4;
+  const chars540 = QB.ShareLink.encode(json540).length;
+  const est540 = 4 * Math.ceil(json540.length / 3) + prefixLen;
+  const t540 = await timed(async () => { QB.ShareLink.encode(json540); }, 5);
+
+  const maxBytes = QB.CONFIG.LIMITS.SHARE_MAX_BYTES;
+  const maxPayload = new Uint8Array(maxBytes);
+  const tMax = await timed(async () => { QB.ShareLink.encode(maxPayload); }, 3);
+  const mem0 = (bestEffortGc(), process.memoryUsage());
+  const codeMax = QB.ShareLink.encode(maxPayload);
+  const memAfter = process.memoryUsage();
+  const charsMax = codeMax.length;
+  const peakMb = Math.max(0, (memAfter.heapUsed - mem0.heapUsed) / 1024 / 1024);
+  const extMb = Math.max(0, (memAfter.external - mem0.external) / 1024 / 1024);
+  const estMax = 4 * Math.ceil(maxBytes / 3) + prefixLen;
+  bestEffortGc();
+
+  report.push({
+    name: '分享码生成（540 题 JSON / ' + (maxBytes / 1024 / 1024).toFixed(0) + 'MB 边界）',
+    median: t540.median, min: t540.min, max: t540.max,
+    extra: '540 题 JSON ' + json540.length + ' B → ' + chars540 + ' 字符（' + (chars540 / json540.length).toFixed(3)
+      + '×，公式值 ' + est540 + '）；边界 ' + maxBytes + ' B → ' + charsMax + ' 字符（'
+      + (charsMax / maxBytes).toFixed(3) + '×，公式值 ' + estMax + '，编码 ' + ms(tMax.median)
+      + '）；编码后 heapUsed +' + peakMb.toFixed(2) + ' MB，external +' + extMb.toFixed(2)
+      + ' MB（Base64 大字符串计入 external，不体现在 heapUsed；均未 GC）'
   });
 }
 

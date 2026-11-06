@@ -115,6 +115,26 @@ bench 全程 heapUsed：8.88 → 11.60 MB（**+2.72 MB**，`--expose-gc` 实跑�
 
 > **分发题包验收（2026-11-03，`bench.mjs --assert` 观测项，不设门禁）**：5,000 题合成库（无图片）普通 `.qbk` **3,234,267 B / 构建 76.62 ms**；分发版（含 `manifest.json`）**3,234,729 B（增量 462 B，+0.014%）/ 构建 76.87 ms**；解包 `Qbk.parseBundle` **9.03 ms**；导入 `QbkImporter.parse`（含 `QB.Package` 清单/校验和核对、资产入库）**137.02 ms**。往返与四类异常（manifest 缺失/损坏/校验和不符/题数不符）断言共 52 项，见 `assets.test.mjs`；id 冲突为 UI 弹窗三选一（识别与并存/覆盖落库语义已断言，**弹窗本身无 DOM 测试**）。构建耗时由 JSON 序列化 + stored ZIP 打包主导，跨机波动，故只观测。
 
+> **阶段 0 度量基线（2026-11-06，Node v24.14.0，Windows，`--expose-gc`）**
+> 目的：为后续「写路径性能 / 读路径与内存」阶段建立改造前同机对照；**只新增观测行，不新增门禁、不调阈值**（门禁仍为 62 项）。
+> 复现：`node --expose-gc scripts/bench.mjs --assert`（原始输出与红/绿探针留档于 `.analysis/architecture-audit/baselines/`）。
+> - **收卷错题写放大（50 题 = `LIMITS.QUESTIONS_PER_QUIZ`）**
+>   - 旧路径：逐题 `QB.DB.progress.wrongAdd`（对应 `js/app.js:396-402` → `js/data/local-adapter.js:757-769`）。
+>   - LS 模式：`QB.Storage.set` **50 次 / 累计序列化 93.4 KB**；受 200 ms 防抖影响，真实 `localStorage.setItem` **1 次**。
+>   - IDB 模式（Node 内存 IDB）：`QB.Store.batch` **7 次 / 累计 15.3 KB**（await 间隔内多次 set 被合并，故不是 50）。
+>   - 对照（阶段 0 的单次读改写模拟，**非生产 API**，阶段 2 才实现 `wrongAddMany`）：LS 1 次 / 3.7 KB，IDB 1 次 / 3.7 KB。
+>   - 耗时 A/B：LS **0.54 / 0.41 ms**（各 10 轮）、IDB **0.97 / 0.48 ms**（各 5 轮）；每轮先清空错题表。
+>   - 口径：LS 的「累计序列化字节」是 API 层整表重写量，不等于真实落盘字节；IDB 批次为真实 `batch` 调用数。
+> - **启动全量水合（IDB 第二轮启动：`Store.init()` → `readAll(true,true)` → `Storage.adoptStore`）**
+>   - 5000 题：**8.63 ms**，5056 记录（业务 5055），序列化 **2.35 MB**，`_cache` 5056 键，heap 边界 **+5.85 MB**（GC 后驻留 +3.08 MB）。
+>   - 50000 题：**52.90 ms**，50356 记录（业务 50355），序列化 **21.38 MB**，`_cache` 50356 键，heap 边界 **+50.27 MB**（GC 后驻留 +26.42 MB）。
+>   - 口径：heap 在「readAll 返回的 Map」与「adoptStore 复制后的 `_cache`」两个边界采样，取较大值，不是连续峰值。
+>   - **未实机验证**：Node 内存 IDB 的字符串按引用共享，heap 增量主要反映 Map/克隆结构，不代表浏览器冷启动反序列化；真实浏览器 IDB 配额、事务时序、SW 生命周期均未实测。
+> - **分享码体积（`ShareLink.encode`，硬上限 8 MB = `SHARE_MAX_BYTES`）**
+>   - 540 题 JSON（216,695 B，未打包资产，**估算口径**）→ **288,936 字符（1.333×）**，median 0.60 ms；公式 `4*ceil(n/3)+9` 为 288,937，差 1 是 URL-safe 去掉补位 `=`。
+>   - 8 MB 边界 → **11,184,820 字符（1.333×）**，median 17.92 ms；编码后 `heapUsed` +0.01 MB、**`external` +18.67 MB**（Base64 大字符串计入 V8 external，不体现在 heapUsed；均未 GC）。
+>   - 口径：540 题为纯 JSON 近似，真实 `.qbk` 还含资产；本项只量编码，不含打包/下载/分享页渲染。
+
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 
 ### 3-B. SRS 相对门禁（同轮标定比值）
