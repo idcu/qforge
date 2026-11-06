@@ -11,7 +11,7 @@
 
 ### fix(backup): 恢复后失效题目缓存并递增 rev（C016）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`b6d8ee7`
 
 **核心改动**
 - **缺陷复现（先红）**：备份恢复通过 `QB.Backup.applyData` 直写存储键，绕过 `insertMany` 等题目写路径，
