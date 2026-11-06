@@ -35,6 +35,8 @@
     _timer: null,
     _errorListeners: [],
     _mergeHooks: [],
+    /** 物理键唯一实现（R-07）：LocalStorage 前缀由本函数统一拼接，Quota 复用 */
+    fullKeyOf: fullKeyOf,
 
     /** 当前后端：'ls' | 'idb' */
     mode: 'ls',
@@ -847,24 +849,24 @@
       } catch (e) { /* ignore */ }
     },
 
-    /** 估算当前占用字节数（键+值，UTF-16 近似：每个字符 2 字节） */
+    /** 估算当前占用字节数（键+值，UTF-16 近似：每个字符 2 字节）；值字节统一走 Quota.bytesOfValue（R-07） */
     usageBytes() {
+      const Q = QB.Quota;
+      let total = 0;
       if (this._isIdb()) {
-        let total = 0;
         this._cache.forEach((v, k) => {
           if (v === undefined) return;
-          total += (JSON.stringify(v).length + k.length + 2) * 2;
+          total += Q.bytesOfValue(k, v);
         });
         this._pending.forEach((v, k) => {
           if (v === undefined || this._cache.has(k)) return;
-          total += (JSON.stringify(v).length + k.length + 2) * 2;
+          total += Q.bytesOfValue(k, v);
         });
         return total;
       }
-      let total = 0;
       this.keys().forEach((k) => {
-        const raw = global.localStorage.getItem(fullKeyOf(k)) || '';
-        total += (raw.length + k.length + 2) * 2;
+        const disk = Q.diskBytes(k);
+        total += disk == null ? Q.bytesOfValue(k, this._cache.get(k)) : disk;
       });
       return total;
     },

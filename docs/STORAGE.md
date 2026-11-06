@@ -26,6 +26,7 @@
 - **落盘语义（C017）**：`forceSync()` 在 IDB 模式**返回落盘 Promise**（事务失败从该 Promise 上抛），备份恢复 `applyData` 会 `await`；
   旧调用点不 await 时内部 no-op handler 只避免 unhandledRejection，不影响 await 方拿到错误。LS 模式仍同步抛错。
 - **用量快照（C009）**：`QB.Quota` 维护增量 `meter`——启动 `refresh()` 建快照（IDB 用 `navigator.storage.estimate`）；**estimate 成功即用其 `usage`，`quota=0` 只表示上限未知**（不退回全量扫描、不套 5MB LS 配额）。仅当 estimate 不可用（隐私模式/旧浏览器）才回落全量估算（50k 一次约 53ms / 峰值 +37MB 瞬时垃圾，可接受但不进渲染）。此后 `Storage.set/setSync/remove/clearAll/adoptStore` 只做 O(1) 增减。存储健康卡 `renderStorageHealth()` **只读 `Quota.view()`**，不再在渲染里 `Storage.usageBytes()` 全量遍历（50k/IDB 首页渲染 P95 由 62.22ms 降到 0.05ms、峰值 +59.09MB 降到 +0.27MB）。上限未知时不画百分比进度条（避免把 5MB LS 配额套到 IDB 上满格报红）。
+- **字节口径唯一化（R-07）**：值字节统一 `QB.Quota.bytesOfValue(key,value)`（JSON 长度 + 键长 + 2，×2 UTF-16），`Storage.usageBytes()` 的 IDB/LS 两分支与快照增量都复用它；LS 物理键统一 `QB.Storage.fullKeyOf(key)`，`Quota.diskBytes` 不再自行拼前缀。固定夹具断言 `usageBytes` 增量 = Σ `bytesOfValue`（storage.test 6 项）。
 - **O(改动数) 写入**：迁移只换后端，不换布局——题目仍 200 题/片、复习仍 per-hash 键、日志仍 200 条/段；单次评分只写 1 个状态键 + 1 个尾段（实测 0.06ms / 213B @20000 题，与 v5 per-hash 基线 0.14ms 同量级，见 [DATABASE.md](DATABASE.md) §9）。
 
 ### 9.2 数据划分
