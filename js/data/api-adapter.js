@@ -509,6 +509,7 @@
         reviewCache.clear();
         reviewRevCache.clear();
         weightsCache = null;
+        bumpRev(); // C016：题目写修订号 +1，使 QB.DB.loadQuestions 的整库缓存失效
         bumpLogRev(); // 备份载荷可能替换 revlog，统计页派生数据失效
       }
     }

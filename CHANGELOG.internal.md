@@ -9,6 +9,38 @@
 
 ## 最新记录
 
+### fix(backup): 恢复后失效题目缓存并递增 rev（C016）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- **缺陷复现（先红）**：备份恢复通过 `QB.Backup.applyData` 直写存储键，绕过 `insertMany` 等题目写路径，
+  未递增题目写修订号；`QB.DB.loadQuestions` 以 `(bankId, revision)` 判缓存，恢复后仍命中旧数组 ——
+  用户恢复备份后首页/答题继续看到恢复前的题目。
+- `js/data/local-adapter.js`：`backup.import` 在 `applyData` 的 `finally` 中 `bumpRev()`（失败/回滚也失效，防半写假读），
+  `revlogRev` 语义不变（仅成功后 +1）。
+- `js/data/api-adapter.js`：`backup.import` 的 `finally` 同步补 `bumpRev()`，与 local 后端口径一致
+  （原实现只清 count/review/weights 缓存，题目整库缓存仍可能命中旧数据）。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（实现前）**：`node scripts/backup.test.mjs` → 131 断言中 **2 失败**：
+  「恢复后题目写修订号递增（1 → 1）」、`loadQuestions` 期望「恢复后的新题」实际「备份题」。
+- **绿（本提交）**：131/131 通过；修订号 **2 → 3**，`loadQuestions` 返回「恢复后的新题」；`revision` 读取 4 项断言全绿。
+- **全量门禁（实跑）**：`test-all` **34 运行项 / 5141 断言 / 0 失败（38.4s，exit 0）**；`docs-check --static` 全部一致；
+  `verify:fast` exit 0（36.2s）。首屏 **94 文件 / 86 内联 js / 348.2 KB gzip / 973.8 KB raw**（C015 348.0，+0.2 KB）。
+- `bench --assert` 说明（如实记录）：**第 1 次 exit 1**：`heapUsed 增量 53.66MB > 40MB`（`未 --expose-gc`，
+  运行在 test-all 之后，判定为 GC 抖动）；**第 2 次同命令 exit 0**：`heapUsed 增量 22.01MB ≤ 40MB`，58 项门禁全过；
+  另跑 `node --expose-gc scripts/bench.mjs --assert` exit 0：**heapUsed 增量 2.71MB**，58 项门禁全过。
+  未调整任何阈值；第 1 次失败不是代码回归（两次同代码、仅 GC 采样差异），但按纪律记录在案。
+
+**影响范围与公共抽象**
+- 未新增抽象：复用既有 `questions.revision()` + `bumpRev()` 机制（既不新增缓存失效 API，也不改 DB 缓存结构）。
+- **行为变更**：恢复后整库题目缓存必然失效并重读一次（正确性修复）；`count`/review 缓存与 revlog 行为不变。
+- 未改备份文件格式、schema、存储键、迁移逻辑。
+
+**遗留 TODO / 风险**
+- 仅 Node harness 覆盖（本地后端 + 内存 Storage）；api 后端的 `bumpRev` 为同一机制的一行 parity，随 api 适配器测试覆盖，未起真实服务端。
+
 ### fix(import): 材料题单小问不再导入即死路（C015）
 
 **Commit Hash**：`0a09372`

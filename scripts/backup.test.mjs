@@ -83,6 +83,28 @@ eq(qs.items[0].question, '备份题', '题目内容一致');
 const srs = await QB.SRSStore.getState(bank.id, qs.items[0]);
 ok(srs && srs.algo === 'fsrs' && srs.stability > 0, 'SRS（FSRS）复习状态一并恢复');
 
+section('恢复后题目缓存失效（P2-01）');
+{
+  // 1) 先让整库读缓存装载旧题（模拟首页/答题已经渲染过）
+  const cached = await QB.DB.loadQuestions(bank.id);
+  eq(cached.items[0].question, '备份题', '恢复前：loadQuestions 缓存装载旧题');
+  const revBefore = QB.DB.questions.revision();
+
+  // 2) 造一份同题库 id、但题目内容不同的备份（直接替换分片内容，绕过题目写路径）
+  const backup2 = JSON.parse(JSON.stringify(backup));
+  const shardKey = QB.KEYS.questionShard(bank.id, 0);
+  ok(Array.isArray(backup2.data[shardKey]) && backup2.data[shardKey].length === 1,
+    '备份含题目分片键 ' + shardKey);
+  backup2.data[shardKey][0].question = '恢复后的新题';
+
+  // 3) 恢复：必须使题目写修订号递增，否则 DB.loadQuestions 会命中旧缓存
+  await QB.Backup.applyBackup(backup2);
+  const revAfter = QB.DB.questions.revision();
+  ok(revAfter > revBefore, '恢复后题目写修订号递增（' + revBefore + ' → ' + revAfter + '）');
+  const after = await QB.DB.loadQuestions(bank.id);
+  eq(after.items[0].question, '恢复后的新题', '恢复后 loadQuestions 返回新题（旧缓存不命中）');
+}
+
 section('合并恢复');
 clearAll();
 await QB.DB.banks.create({ name: '现有库' });

@@ -1318,7 +1318,14 @@
     import(payload, mode) {
       const data = payload && payload.data;
       if (!data || typeof data !== 'object') throw new Error('backup.import 需要 { data } 载荷');
-      const out = QB.Backup.applyData(data, mode);
+      let out;
+      try {
+        out = QB.Backup.applyData(data, mode);
+      } finally {
+        // C016：恢复同样是一次整库题目写（绕过 insertMany 等写路径），
+        // 必须递增题目写修订号，否则 QB.DB.loadQuestions 会继续命中恢复前的旧缓存。
+        bumpRev();
+      }
       revlogRev += 1; // 备份可能替换 revlog，统计页派生数据失效（B3）
       if (QB.Storage.mode === 'idb' && typeof QB.Storage.flush === 'function') {
         return QB.Storage.flush().then(() => out);
