@@ -11,7 +11,7 @@
 
 ### refactor(config): 容量阈值收敛到 LIMITS 单一事实源（R-15）
 
-**Commit Hash**：`（提交后回填）`
+**Commit Hash**：`f81fbf1`
 
 **核心改动**
 - `js/config.js`：`LIMITS` 新增 `BACKUP_LS_WARN_BYTES = 4MiB`、`QUIZLET_MAX_TEXT_LENGTH = 4MiB`
