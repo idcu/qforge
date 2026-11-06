@@ -9,6 +9,39 @@
 
 ## 最新记录
 
+### fix(sw): 缓存清理收窄到本站命名空间（R-11）
+
+**Commit Hash**：`（提交后回填）`
+
+**核心改动**
+- `sw.js`：新增 `CACHE_PREFIX = 'qforge-'`；activate 的清理从 `keys.filter(k => k !== CACHE)`
+  改为 `keys.filter(k => k.indexOf(CACHE_PREFIX) === 0 && k !== CACHE)`。
+  同源下其他 PWA/工具的 CacheStorage 不再被本站 SW 误删；旧 `qforge-v*` 仍照常清理。
+- `sw.js`：`CACHE` v20 → v21（SW 逻辑变更需换缓存名以推动客户端更新）。
+- `scripts/pwa.test.mjs`：静态守卫从「删除非当前版本」改为「前缀一致 + 只删本站前缀内非当前版本」。
+- `scripts/sw-runtime.test.mjs`：activate 用例 seed `other-app-v1`，断言其不被删除且内容保留。
+- 文档：`docs/ARCHITECTURE.md` §4.12（删除范围与未实机验证边界）、`docs/TESTING.md`
+  （sw-runtime 32→34、pwa 92→93、合计 5426→5429）、`docs/BENCH.md`（首屏体积复测）、
+  `docs/DEVELOPMENT.md`（SW 版本读数）。
+- **影响面**：SW 升级清理范围从「除当前缓存外全删」收窄为「只删 `qforge-*` 且非当前」。
+  本站离线缓存行为不变；同源其他应用缓存得以保留。未改任何网络策略或缓存命中逻辑。
+
+**验证数据（Node v24.14.0，Windows，Asia/Shanghai）**
+- **先红**：`node scripts/sw-runtime.test.mjs` → **exit 1**，`通过: 32，失败: 2`。
+  失败项：`同源其他应用缓存不被删除（R-11：只清理本站前缀）`、`其他应用缓存内容仍在（未被误删）`
+  （`other-app-v1` 被旧 `k !== CACHE` 谓词删除）。
+- **后绿**：同命令 → **exit 0**，`通过: 34，失败: 0`（旧 `qforge-v1` 仍被删、当前缓存保留、
+  `other-app-v1` 未删且内容存在）。`node scripts/pwa.test.mjs` → **exit 0**，`通过: 93，失败: 0`。
+- **配套门禁**：`npm run verify:fast` → **exit 0**（36 运行项 / 5429 断言 / 0 失败，`docs-check --static` 一致）；
+  `npm run bench` → **exit 0**（62/62 性能门禁）。
+- `node scripts/sw-runtime.test.mjs --write-baseline` → `qforge-v21 / 93 files / dc10ddd9b11f…`。
+- 断言只增不减（sw-runtime 32→34、pwa 92→93，合计 5426→5429），未调整阈值/基线。
+
+**遗留 TODO / 风险**
+- **未实机验证**：真实浏览器下多 PWA 共享 origin 的 CacheStorage 隔离、activate 删除时序、
+  以及升级后首屏缓存命中/回源行为；Node VM 只覆盖谓词与可观察删除结果。
+- 前缀 `qforge-` 为硬约束：未来若重命名应用缓存，必须同步 `CACHE` 与 `CACHE_PREFIX`（pwa 静态守卫会转红）。
+
 ### fix(security): WebDAV 密码不再写入 HTML 属性（R-14）
 
 **Commit Hash**：`7452aa8`

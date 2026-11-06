@@ -41,8 +41,11 @@ ok(sw.indexOf("'/api/'") >= 0, '后端 REST /api 前缀被排除（api 模式不
 // 缓存名必须换代（≥ v4：v2→v3 清残留 /api 条目，v3→v4 让改动过 js 的版本确定性生效）
 const cacheVer = /qforge-v(\d+)/.exec(sw);
 ok(!!cacheVer && Number(cacheVer[1]) >= 4, 'SW 缓存版本已换代（当前 ' + (cacheVer ? cacheVer[0] : '缺失') + '，须 ≥ qforge-v4）');
-ok(/\.filter\(\s*\(k\)\s*=>\s*k\s*!==\s*CACHE\s*\)/.test(sw) && /caches\.delete\(k\)/.test(sw),
-  'activate 删除非当前版本缓存（换代后旧缓存被清 → 新 SW 首次请求未命中即回源，不再吃一次刷新延迟）');
+ok(sw.indexOf("const CACHE_PREFIX = 'qforge-'") >= 0 && cacheVer && cacheVer[0].indexOf('qforge-') === 0,
+  '缓存命名空间前缀与 CACHE 一致（qforge-*）');
+ok(/\.filter\(\s*\(k\)\s*=>\s*k\.indexOf\(CACHE_PREFIX\)\s*===\s*0\s*&&\s*k\s*!==\s*CACHE\s*\)/.test(sw) &&
+  /caches\.delete\(k\)/.test(sw),
+  'activate 只删本站前缀内的非当前版本缓存（R-11：同源其他应用缓存不受影响）');
 ok(sw.indexOf('http://') < 0 && sw.indexOf('https://') < 0, '不硬编码绝对 URL');
 
 section('FSRS 训练 Worker');
