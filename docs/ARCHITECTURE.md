@@ -194,6 +194,26 @@ render() → seq = ++renderSeq（模块级计数器）
 - 判定依据是**发起顺序**而不是完成顺序；同步段（检查到写入之间无 await）保证同一时刻只有一个写入者。
 - 未实机验证：真实浏览器慢 IO（大库读盘）下的视觉闪烁是否完全消除；Node 用例只覆盖「慢分支后切换视图」这一确定性时序。
 
+### 4.10 可选契约与能力检测（R-06）
+
+```
+QB.CONTRACTS          必需：缺失即 assertAdapter 抛错（不得启动）
+QB.OPTIONAL_CONTRACTS 可选：reviews[get,patch]、revlog[revision]
+QB.hasCapability(adapter, group, method)   ← 领域模块唯一能力检测入口
+QB.assertOptional(adapter, name)           ← DB.init 在 assertAdapter 之后执行：
+                                              方法可缺失（undefined/null），提供则必须是函数
+```
+
+| 可选方法 | 缺失时的降级路径 |
+| --- | --- |
+| `reviews.get` | `SRSStore.stateFor/statesFor` 回退整表 `list`（多一次反序列化，语义不变） |
+| `reviews.patch` | `SRSStore.commitGraded` 回退 `record` 整表提交（上行体积变大，语义不变） |
+| `revlog.revision` | 统计页诊断缓存无修订号可比 → 每次重算（正确性不变，性能回退） |
+
+- `api-adapter` 只实现 `patch`、不实现 `get`（REST 无单键端点）：这是**声明过的合法状态**，不是缺陷。
+- 新增可选方法时必须同时登记本表与 `QB.OPTIONAL_CONTRACTS`，否则第三方适配器无法判断合规边界。
+- 未实机验证：真实浏览器/多标签下的降级路径时序（Node 用例覆盖语义等价与调用次数）。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -216,6 +236,7 @@ render() → seq = ++renderSeq（模块级计数器）
 | `reviews.record(bankId, map, logs)` | 调度状态 + 评分日志一次提交（api 模式 1 个 PUT；local 模式写前重读合并 + 状态/日志/版本快照提交，失败回滚） | 旧调用方/第三方适配器回退路径 |
 | `reviews.patch(bankId, delta, logs)`（可选） | 增量提交：api 模式只上行本批改动键（PATCH，O(改动数)）；local 与 record 共用同一合并/回滚实现；适配器未实现时 `SRSStore` 回退 `record` | srs-store.grade/gradeMany |
 | `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | app.js 统计页缓存诊断结果，避免每次 render 全量扫 revlog |
+| `QB.OPTIONAL_CONTRACTS` + `QB.hasCapability` + `QB.assertOptional`（R-06） | 可选契约的**唯一判定入口**：`reviews[get,patch]`、`revlog[revision]` 可缺失；`DB.init` 校验「提供则必须是函数」；领域模块用 `hasCapability` 检测并走文档化降级 | `SRSStore`（get/patch 降级）、`app.js` 统计页（revision 降级）、第三方适配器合规判定 |
 | `questions.revision()` + `bumpRev()` | **整库题目读缓存失效唯一机制**：任意题目写路径（create/update/remove/insertMany/级联/备份恢复）同步 +1；`QB.DB.loadQuestions` 以 `(bankId, rev)` 判定命中 | local-adapter / api-adapter 的 `backup.import`（C016：恢复也 bumpRev）、`DB.loadQuestions`、Node 断言 |
 | `QB.LocalAdapter.questions` 内存索引（C018） | **id → {bankId, idx \| legacy, pos} + bankId → Set(contentHash)**：`get/update/remove` 命中 O(1)，merge 去重直接复用哈希集、不再 `readAll`；**仅内存、不写新键、不升 schema**。一致性：`QuestionShards.writeAll/append/clear/compact`、`remove/removeMany`、`backup.import`、migrate 直写分片后的 `QuestionShards.invalidateIndex()` 与跨标签 `questions:*` 合并钩子同步失效/增量维护；冷启首次访问 O(n) 重建 | local-adapter 内部实现 + `QB.QuestionShards.invalidateIndex()`（低层写后失效钩子，供 migrate 使用）；所有 `QB.DB.questions.get/update/remove/insertMany` 调用方透明受益、`scripts/shard.test.mjs` 断言 |
 | `QB.SchedSettings.ofBankId/invalidate`（C019） | 按库缓存的**唯一失效契约**：`save` 写库后覆盖缓存；`banks.update`（含 `sched`）、`banks.remove`、`backup.import`（local/api 双后端）与跨标签 `banks` 合并钩子立即 `invalidate`；**不在每次 `ofBankId` 重读 bank**（避免 API 模式评分多一个 GET） | `SRSStore.grade/gradeMany`、local-adapter/api-adapter、Storage 合并钩子、`scripts/sched.test.mjs` |

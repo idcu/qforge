@@ -72,6 +72,42 @@
    */
   QB.ASSET_DRIVER_CONTRACT = ['put', 'get', 'all', 'ids', 'remove', 'clear'];
 
+  /**
+   * 可选契约（R-06）：适配器**可以不实现**的方法，缺失时必须走文档化的降级路径。
+   * - reviews.get：单题调度状态 O(1) 读取；缺失时 SRSStore.stateFor/statesFor 回退整表 list。
+   * - reviews.patch：作答热路径增量提交；缺失时 SRSStore.commitGraded 回退 record 整表提交。
+   * - revlog.revision：同步写修订号（供统计页派生缓存失效）；缺失时调用方按「无修订信息」处理。
+   * 第三方适配器只需满足 QB.CONTRACTS（必需）；实现可选方法可提升性能，但不得改变语义。
+   */
+  QB.OPTIONAL_CONTRACTS = {
+    reviews: ['get', 'patch'],
+    revlog: ['revision']
+  };
+
+  /** 能力检测唯一入口（可选契约）：领域模块不得各写 typeof 判断 */
+  QB.hasCapability = function hasCapability(adapter, group, method) {
+    const repo = adapter && adapter[group];
+    return !!repo && typeof repo[method] === 'function';
+  };
+
+  /**
+   * 校验可选契约：方法允许缺失（undefined/null），一旦提供必须是函数。
+   * 必需方法仍由 assertAdapter 负责，二者互不替代。
+   */
+  QB.assertOptional = function assertOptional(adapter, name) {
+    const invalid = [];
+    Object.keys(QB.OPTIONAL_CONTRACTS).forEach((group) => {
+      const repo = adapter && adapter[group];
+      if (!repo) return; // 整组缺失由 assertAdapter 报错
+      QB.OPTIONAL_CONTRACTS[group].forEach((m) => {
+        const v = repo[m];
+        if (v != null && typeof v !== 'function') invalid.push(group + '.' + m);
+      });
+    });
+    if (invalid.length) throw new Error((name || '适配器') + ' 可选契约方法类型非法：' + invalid.join(', '));
+    return adapter;
+  };
+
   /** 校验适配器是否满足契约 */
   QB.assertAdapter = function assertAdapter(adapter, name) {
     const missing = [];
