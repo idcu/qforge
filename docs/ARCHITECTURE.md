@@ -63,7 +63,8 @@
          · JSON/CSV/XLSX → Adapters 直接建模
          · DOCX（zip→段落行）/ Markdown（清洗行）→ LineParser.parseLines → blocksToQuestions → Adapters.toStandard
      → Adapters.toStandard（统一标准模型）
-     → validateQuestions（总数/各题型/警告/文件内重复）
+     → validateQuestions（总数/各题型/警告/致命 errors/文件内重复）
+     → 有 errors（材料题 <2 小问）→ 整包拒绝，0 次写，不进入预览（C015/D5=A）
      → QB.Quota.canFitQuestions（容量预检：放不下直接拒绝，0 次写，不进入预览）
      → 预览弹窗（显示统计，选目标题库 + 合并/覆盖）
      → QuestionRepo.insertMany(bankId, questions, {mode, dedupe})
@@ -181,8 +182,9 @@ Exporters.shareFlow({kind, bank, trigger})
 | `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步/按键合并；`getFresh` 写前重读 | local-adapter 及所有持久化 |
 | `QB.DB` + Repo 接口 | 数据访问统一入口，屏蔽后端差异 | 全部业务模块 |
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
-| `QB.Importers.runImport(input)` | **唯一解析入口**：按扩展名 + `priority`/`sniff` 选解析器并合并校验警告；文件/拖拽/URL/粘贴（虚拟文件名）一律经此，`data-io` 不维护第二条解析链 | data-io（四个入口）、测试 |
-| `QB.DataIO.importFailureText(result)` | **0 题拒绝原因唯一文案**：`migration.supported=false.reason` 优先、否则首条 warning，互相包含取更长 | `commitImport` 错误框、来源弹窗内联错误、Node 断言 |
+| `Adapters.validateQuestions(questions)` | 校验汇总：`warnings`（可继续导入）+ **`errors`（致命，整包拒绝）**。当前唯一致命项 = 材料题小问 `< MATERIAL_MIN_CHILDREN(2)` | `registry.runImport`、`data-io` 粘贴回退、Node 断言 |
+| `QB.Importers.runImport(input)` | **唯一解析入口**：按扩展名 + `priority`/`sniff` 选解析器并合并校验警告/致命错误；文件/拖拽/URL/粘贴（虚拟文件名）一律经此，`data-io` 不维护第二条解析链 | data-io（四个入口）、测试 |
+| `QB.DataIO.importFailureText(result)` | **拒绝原因唯一文案**：`errors[0]`（致命）优先，其次 `migration.supported=false.reason`，最后首条 warning；互相包含取更长 | `commitImport` 错误框、来源弹窗内联错误、Node 断言 |
 | `QB.Quota` | **容量口径唯一实现**：`limitBytes/usageBytes/remainingBytes/estimateQuestions/canFitQuestions/estimateAsync/formatBytes`；IDB 后端上限优先取 `navigator.storage.estimate()`（`quota` 未知只置 limit=0，**仍用其 `usage`**），LS 上限读 `CONFIG.STORAGE.QUOTA_BYTES`（含分片清单开销估算）。**C009 增量快照**：`refresh()` 建立 `meter`，`Storage.set/remove/clearAll/adoptStore` 维护增量，`view()` O(1) 只读；estimate 不可用时才全量估算（不进渲染路径） | 导入预检（`commitImport`）、存储健康卡（`renderStorageHealth` 只读 `view()`）、Node 断言 |
 | `Adapters.mergeAnalysisPieces/appendAnalysis/matchAnalysisMarker` | 解析类多列/多标记（解析/解题思路/考点/释义）合并为单一 `analysis`（唯一实现） | adapters（JSON/表格）、line-parser（DOCX/Markdown/粘贴） |
 | `LineParser.parseLines/blocksToQuestions` | 文本行（DOCX 段落 / Markdown 行）→ 题目块 → 标准题目 | docx-importer、md-importer |

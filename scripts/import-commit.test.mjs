@@ -183,6 +183,29 @@ const c1 = await makeQB({});
   QB.Storage._isIdb = origIsIdb;
 }
 
+/* ================= 6. C015 单小问材料题 → 拒绝导入，0 落库 ================= */
+{
+  section('单小问材料题：导入期拒绝，0 落库');
+  const c6 = await makeQB({});
+  const { QB, ui, bank, controls } = c6;
+  const before = (await QB.DB.questions.list(bank.id, {})).items.length;
+  // 同一文件里放 1 道正常题 + 1 道单小问材料题：拒绝必须整包生效，正常题也不得落库
+  const payload = JSON.stringify([
+    { type: 'single', question: '正常题', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' },
+    { type: 'material', material: '共享材料', question: '引导语', children: [{ type: 'judge', question: '唯一小问', answer: '正确' }] }
+  ]);
+  const parsed = await QB.Importers.runImport({ name: '单小问材料.json', text: payload });
+  eq((parsed.errors || []).length, 1, 'runImport 标记 1 条致命错误');
+  controls.resetSets();
+  const setsBefore = controls.sets;
+  const res = await QB.DataIO.commitImport(bank, parsed, 'paste');
+  ok(res === null, '拒绝导入 → commitImport 返回 null');
+  eq(controls.sets - setsBefore, 0, '拒绝时写入次数为 0');
+  eq((await QB.DB.questions.list(bank.id, {})).items.length, before, '题库题数不变（同包正常题也不落库）');
+  ok(ui.modals.some((h) => h.indexOf('至少 2 个') >= 0), '错误原因可见：弹窗含「至少 2 个」');
+  ok(!ui.modals.some((h) => h.indexOf('导入预览') >= 0), '拒绝发生在预览之前');
+}
+
 /* ================= 汇总 ================= */
 console.log('\n========================================');
 console.log('import-commit 断言: ' + (pass + failures.length) + '，通过: ' + pass + '，失败: ' + failures.length);

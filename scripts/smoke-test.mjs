@@ -534,6 +534,23 @@ section('材料题模型 / 判分 / 引擎 / 哈希');
   const nested = QB.Adapters.toStandard({ type: 'material', material: 'm', children: [{ type: 'material', material: 'x', question: 'y' }, { type: 'judge', question: 'z', answer: '正确' }] });
   ok(nested.warnings.some((w) => w.indexOf('不能再嵌套') >= 0), '二层嵌套警告并跳过');
 
+  // C015（P2-03）：1 小问材料题是「导入即死路」——引擎 canSubmit 要求 ≥2 小问，
+  // 即使唯一小问答完也永远无法提交。导入期必须给出致命错误并拒绝（D5=A）。
+  const oneChildRun = await QB.Importers.runImport({
+    name: '单小问材料.json',
+    text: JSON.stringify([{
+      type: 'material', material: '单小问材料', question: '引导语',
+      children: [{ type: 'judge', question: '唯一小问', answer: '正确' }]
+    }])
+  });
+  const oneChildErrors = oneChildRun.errors || [];
+  ok(oneChildErrors.length >= 1 && oneChildErrors[0].indexOf('至少 2 个') >= 0,
+    '单小问材料题：runImport 返回致命错误（明确「至少 2 个」）');
+  const One = new QB.QuizEngine();
+  One.loadQuestions(oneChildRun.questions, 'mixed', { shuffleOptions: false });
+  One.selectAnswer(true, 0);
+  eq(One.canSubmit(), false, '死路复现：唯一小问答完仍不可提交（kids.length>=2 门禁）');
+
   // 引擎：作答收集 / canSubmit / 提交 / 自评 / 得分
   const E = new QB.QuizEngine();
   E.loadQuestions([MQ], 'mixed', { shuffleOptions: false });

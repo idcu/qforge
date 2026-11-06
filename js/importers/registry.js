@@ -103,6 +103,8 @@
     return {
       questions: result.questions || [],
       warnings: (result.warnings || []).concat(validated.warnings || []),
+      // errors = 致命错误（材料题 <2 小问）：调用方必须整包拒绝，0 落库（C015/D5=A）
+      errors: validated.errors || [],
       format: result.format || ext,
       stats: validated.stats,
       ext: ext,

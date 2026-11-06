@@ -620,9 +620,14 @@
     return { questions, warnings, format: 'table' };
   }
 
-  /** 校验并汇总 */
+  /**
+   * 校验并汇总
+   * errors = 致命错误：调用方必须整包拒绝导入（0 落库），不得只当警告展示。
+   * 唯一致命项：材料题小问 < 2 —— 引擎 canSubmit 要求 ≥2，落库后该题永远不可提交（P2-03）。
+   */
   function validateQuestions(questions) {
     const warnings = [];
+    const errors = [];
     const stats = { total: questions.length, byType: {}, byDifficulty: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, tagCount: 0 };
     QB.CONFIG.TYPES.forEach((t) => { stats.byType[t] = 0; });
     const tagSet = new Set();
@@ -643,8 +648,11 @@
       if (q.type === 'material') {
         const kids = Array.isArray(q.children) ? q.children : [];
         if (!q.material) warnings.push('第 ' + (i + 1) + ' 题（材料）缺少共享材料');
-        if (kids.length < 2) warnings.push('第 ' + (i + 1) + ' 题（材料）子问题不足 2 个');
-        if (kids.length > 10) warnings.push('第 ' + (i + 1) + ' 题（材料）子问题超过 10 个');
+        if (kids.length < MATERIAL_MIN_CHILDREN) {
+          errors.push('第 ' + (i + 1) + ' 题（材料题）只有 ' + kids.length + ' 个小问，至少 2 个；' +
+            '已拒绝本次导入（0 落库）。请改用普通题，或补充小问后重试');
+        }
+        if (kids.length > MATERIAL_MAX_CHILDREN) warnings.push('第 ' + (i + 1) + ' 题（材料）子问题超过 ' + MATERIAL_MAX_CHILDREN + ' 个');
         kids.forEach((cq, j) => {
           if (cq.type === 'material') { warnings.push('第 ' + (i + 1) + ' 题材料题嵌套了二层材料（第 ' + (j + 1) + ' 小问）'); return; }
           if (!cq.question) warnings.push('第 ' + (i + 1) + ' 题第 ' + (j + 1) + ' 小问缺少题干');
@@ -667,7 +675,7 @@
     });
     stats.inFileDuplicates = dup;
     stats.tagCount = tagSet.size;
-    return { stats, warnings };
+    return { stats, warnings, errors };
   }
 
   QB.Adapters = {

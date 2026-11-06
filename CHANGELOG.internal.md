@@ -9,6 +9,41 @@
 
 ## 最新记录
 
+### fix(import): 材料题单小问不再导入即死路（C015）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- **缺陷复现（先红）**：1 小问材料题可正常导入并落库，但 `QuizEngine.canSubmit` 对 material 要求 `children.length >= 2`，
+  唯一小问答完也永远不能提交 —— 导入即死路；同包其他正常题一起落库，用户只看到普通成功提示。
+- `js/importers/adapters.js`：`validateQuestions` 新增 `errors`（致命）返回；材料题 `children < MATERIAL_MIN_CHILDREN(2)` 由
+  warning 升级为 `errors[0]`（文案含「至少 2 个」「已拒绝本次导入（0 落库）」）；`>10` 仍为 warning。
+- `js/importers/registry.js`：`runImport` 透传 `errors`（唯一解析入口，四个入口共用）。
+- `js/modules/data-io.js`：`commitImport` 在「0 题」判断**之前**检查 `errors` → 整包拒绝、0 次写、不进入预览；
+  `importFailureText` 优先展示 `errors[0]`（其次 migration.reason / 首条 warning）；`showImportFailure` 拒绝态标题文案区分
+  「导入已被拒绝（未写入任何题目）」；`parsePastedText` 的 Markdown 回退路径同步透传 `errors`。
+- 决策 **D5=A**：导入期拒绝 + 明确错误 + 0 落库；编辑器原本已要求 ≥2（`buildMaterialQuestion`），两条入口口径一致，无冲突。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（实现前）**：`node scripts/smoke-test.mjs` → **726 断言 / 通过 725 / 失败 1**（`runImport` 无致命错误）；
+  `node scripts/import-commit.test.mjs` → **33 断言 / 通过 27 / 失败 6**：`errors=0`、`commitImport` 返回非 null、
+  **写入 3 个键、题库题数 0→2（含死路材料题）**、错误弹窗缺失、预览照常打开。
+- **绿（本提交）**：`smoke-test` **726 / 726**；`import-commit` **33 / 33**（拒绝时 `sets` 增量 0、题数不变、弹窗含「至少 2 个」且未打开预览）。
+- **全量门禁（本提交实跑，退出码 0）**：`test-all` **34 运行项 / 5137 断言 / 失败 0 / 35.1s**；
+  `bench --assert` **58 项门禁全部通过**；`docs-check --static` 全部一致；`npm run verify:fast` exit 0。
+  首屏 **94 文件 / 86 内联 js / 348.0 KB gzip / 973.4 KB raw**（C012 347.5 / 972.0，+0.5 KB gzip，来自新增校验文案与拒绝分支）。
+
+**影响范围与公共抽象**
+- 公共抽象：`Adapters.validateQuestions` 返回值新增 `errors`（向后兼容：既有调用方只读 `warnings/stats` 不受影响）；
+  `registry.runImport` / `data-io` 结果对象新增可选 `errors`。
+- **行为变更**：含 1 小问材料题的导入从「警告后照常落库」改为「整包拒绝、0 落库」；其余 warning 语义不变；
+  材料题小问 ≥2 的合法导入、编辑器保存、导出/往返均不受影响。
+- 未改 qbk schema / contentHash / 存储键 / 编辑器校验阈值。
+
+**遗留 TODO / 风险**
+- 现只有「<2」升级为致命；材料题嵌套二层、小问缺答案等仍为 warning（与既有 SPEC 口径一致，未扩大拒绝面）。
+- 未覆盖真实浏览器文件选择 UI 的弹窗截图；Node 侧覆盖 `commitImport` 弹窗 HTML 与 0 次写断言。
+
 ### feat(annotation): 本地批注随题包往返与分享页只读展示（C012）
 
 **Commit Hash**：`ba07af3`（feat(annotation): 本地批注随题包往返与分享页只读展示…）

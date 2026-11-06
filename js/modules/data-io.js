@@ -147,29 +147,33 @@
 
   /**
    * 0 题 / 拒绝导入的可读原因（唯一实现）：
-   * 优先取 migration.supported=false 的拒绝原因，再补首条 warning；
-   * 两者互相包含时只保留更长的一条，避免重复。
+   * 优先取致命 errors（如材料题 <2 小问，整包拒绝），再取 migration.supported=false 的拒绝原因，
+   * 最后补首条 warning；相同/包含关系只保留更长的一条，避免重复。
    * 无任何原因时保持旧文案「未解析出任何题目」。
    */
   function importFailureText(result) {
+    const errors = ((result && result.errors) || []).filter(Boolean).map((e) => String(e).trim());
+    const firstError = errors.length ? errors[0] : '';
     const mig = result && result.meta && result.meta.migration;
     const reason = mig && mig.supported === false && mig.reason ? String(mig.reason).trim() : '';
     const warnings = ((result && result.warnings) || []).filter(Boolean).map((w) => String(w).trim());
     const first = warnings.length ? warnings[0] : '';
-    if (!reason && !first) return '未解析出任何题目';
-    if (!reason) return first;
-    if (!first) return reason;
-    if (first.indexOf(reason) >= 0 || reason.indexOf(first) >= 0) return reason.length >= first.length ? reason : first;
-    return reason + '\n' + first;
+    const primary = firstError || reason;
+    if (!primary && !first) return '未解析出任何题目';
+    if (!primary) return first;
+    if (!first) return primary;
+    if (first.indexOf(primary) >= 0 || primary.indexOf(first) >= 0) return primary.length >= first.length ? primary : first;
+    return primary + '\n' + first;
   }
 
   /** 0 题且原因可读时弹可停留错误弹窗；无原因时保留旧 toast（D2：拒绝原因不能被吞） */
   function showImportFailure(result, returnFocusTo) {
     const text = importFailureText(result);
     if (text === '未解析出任何题目') { UI.toast(text, 'err'); return; }
+    const rejected = ((result && result.errors) || []).length > 0;
     UI.openModal(
       '<h3>导入未完成</h3>' +
-      '<div class="li-meta">没有可导入的题目，原因如下：</div>' +
+      '<div class="li-meta">' + (rejected ? '导入已被拒绝（未写入任何题目），原因如下：' : '没有可导入的题目，原因如下：') + '</div>' +
       '<div class="import-error" role="alert">' +
       QB.escapeHtml(text) + '</div>' +
       '<div class="modal-actions"><button class="btn" data-action="modal-ok">关闭</button></div>',
@@ -201,6 +205,12 @@
 
   /** 解析结果 → 预览 → 落库（文件/粘贴/拖拽/URL 共用）；source 为来源描述 */
   async function commitImport(bank, result, source, returnFocusTo) {
+    // C015：致命校验错误（材料题 <2 小问）→ 整包拒绝，0 次写、不进入预览。
+    // 必须先于「0 题」判断：此时 questions 可能非空（同包还有正常题），拒绝必须覆盖整包。
+    if (result.errors && result.errors.length) {
+      showImportFailure(result, returnFocusTo);
+      return null;
+    }
     if (!result.questions.length) {
       showImportFailure(result, returnFocusTo);
       return null;
@@ -314,6 +324,7 @@
     return {
       questions: md.questions || [],
       warnings: (md.warnings || []).concat(validated.warnings || []),
+      errors: validated.errors || [],
       format: md.format || 'markdown',
       stats: validated.stats,
       meta: null

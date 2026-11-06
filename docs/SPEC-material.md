@@ -52,7 +52,7 @@
 | 规则 | 说明 |
 | --- | --- |
 | 一层嵌套 | `children[*].type` ∈ 现有六题型，**不得**再为 `material`（validate 拒绝） |
-| 子问题数 | 2–10（<2 应直接用普通题；>10 警告，防止误解析把整篇文档吞成一题） |
+| 子问题数 | 2–10（<2 应直接用普通题；**导入期整包拒绝并明确错误、0 落库**，因为引擎 `canSubmit` 要求 ≥2，落库后该题永远不可提交；>10 警告，防止误解析把整篇文档吞成一题） |
 | 子问题字段 | 复用各题型既有字段（options/answer/blanks/reference_answer/analysis）；不设独立 category/difficulty/tags（继承父题） |
 | 父题占位字段 | `options=[]`、`answer=''`、`blanks=[]` 保持，以兼容现有标准模型与导出二维表 |
 | 图片 | material 与子问题文本均可含 `![](asset:id)`，走既有 `QB.Assets` 管线 |
@@ -122,6 +122,8 @@ type='material' → hash 输入 = "material|" + stem + "||" + normalize(material
 ### 6.1 JSON（一等公民，无损往返）
 
 直接承载 §2.1 嵌套结构；`Adapters.toStandard` 识别 `type=material` 后递归转换/校验子问题。往返保证：题量、type、children 数、各小问题型与答案、contentHash 集合不变（纳入 smoke 与 exporter 往返断言）。
+
+导入拒绝（C015 / 决策 D5=A）：`Adapters.validateQuestions` 对 `children.length < 2` 产出 **致命 `errors`**（不只是 warning）；`runImport` 透传给 `commitImport`，后者在预览与落库之前整包拒绝，**同包其他正常题也不写入（0 落库）**，错误弹窗写明「至少 2 个」并建议改用普通题或补充小问。编辑器侧同样要求 ≥2，两条入口口径一致。
 
 ### 6.2 Markdown / DOCX（共用 LineParser，新增材料块）
 
