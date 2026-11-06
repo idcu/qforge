@@ -11,7 +11,7 @@
 
 ### perf(data): 导入去重索引与单题 O(1) 定位（C018）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`9fb8ad0`
 
 **核心改动**
 - **缺陷 A（先红）**：`local-adapter.questions.get(id)` 逐库调用 `QuestionShards.locate`（逐分片 `findIndex`），
