@@ -11,7 +11,7 @@
 
 ### fix(security): WebDAV 密码不再写入 HTML 属性（R-14）
 
-**Commit Hash**：`（提交后回填）`
+**Commit Hash**：`7452aa8`
 
 **核心改动**
 - `js/modules/sync-dav.js`：设置弹窗的密码输入框由
