@@ -11,7 +11,7 @@
 
 ### fix(backup): 资产恢复先写后切，失败保持旧资产（C017）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`6d53512`
 
 **核心改动**
 - **缺陷 A（先红）**：`restoreAssets` 在 replace 模式**先 `QB.Assets.clear()` 再 `putEntries`**；图片写入失败（配额/IDB 异常）
