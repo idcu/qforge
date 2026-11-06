@@ -11,7 +11,7 @@
 
 ### fix(app): boot 整体兜底——启动失败可见错误态 + 诊断下载（R-21）
 
-**Commit Hash**：`（提交后回填）`
+**Commit Hash**：`6024900`
 
 **核心改动**
 - `js/app.js`：`boot()` 改为 `try { await startApp() } catch` 整体兜底；原 boot 主体改名为 `startApp()`，行为不变。
