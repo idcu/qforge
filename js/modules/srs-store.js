@@ -28,7 +28,7 @@
    */
   async function commitGraded(bankId, delta, entries) {
     const repo = QB.DB.reviews;
-    if (typeof repo.patch === 'function') return await repo.patch(bankId, delta, entries);
+    if (QB.hasCapability(QB.DB, 'reviews', 'patch')) return await repo.patch(bankId, delta, entries);
     // 旧第三方适配器：无 patch 时读整表、加上本批改动后整表提交（行为不变）
     const map = await readMap(bankId);
     Object.keys(delta || {}).forEach((k) => {
@@ -43,7 +43,7 @@
   /** 单题状态读取：适配器支持 get 时 O(1)，否则回退整表 list（第三方适配器兼容） */
   async function stateFor(bankId, key) {
     const repo = QB.DB.reviews;
-    if (typeof repo.get === 'function') return await repo.get(bankId, key);
+    if (QB.hasCapability(QB.DB, 'reviews', 'get')) return await repo.get(bankId, key);
     const map = await readMap(bankId);
     return map[key] || null;
   }
@@ -52,7 +52,7 @@
   async function statesFor(bankId, keys) {
     const repo = QB.DB.reviews;
     const uniq = Array.from(new Set(keys));
-    if (typeof repo.get !== 'function') return await readMap(bankId);
+    if (!QB.hasCapability(QB.DB, 'reviews', 'get')) return await readMap(bankId);
     const out = {};
     await Promise.all(uniq.map(async (k) => { out[k] = await repo.get(bankId, k); }));
     return out;

@@ -120,7 +120,8 @@
 ## 6. 资源：间隔重复（SRS）
 
 > **契约归属（2026-10-19 阶段 C 起，已落地并接线）**：SRS 三块存储原语已进入 `QB.CONTRACTS`——
-> `reviews:[list,save,remove,record,patch]`、`revlog:[list,append,revision]`、`weights:[read,write,remove]`，并已由
+> **必需** `reviews:[list,save,remove,record]`、`revlog:[list,append]`、`weights:[read,write,remove]`；
+> **可选** `reviews:[get,patch]`、`revlog:[revision]`（缺失时按 §9「可选契约」降级，不视为不合规），并已由
 > `local-adapter`（**直读写 LocalStorage，是唯一存储权威**）与 `api-adapter`（REST）双双实现；
 > 领域模块 `SRSStore`/`FSRSOpt` 只保留算法与作用域过滤，存储一律经 `QB.DB.reviews/revlog/weights`
 > 委托（均为异步，见 §9 接线进度）。参考后端 `scripts/serve-api.mjs` 实现了下表端点。**未实现**：
@@ -183,14 +184,17 @@
 | `progress.historyList/historyAdd/historyUpdate/historyRemove/historyClear` | history 端点（`historyUpdate` → `PATCH /api/history/{id}`） |
 | `progress.sessionSave/sessionLoad/sessionClear` | session 端点 |
 | `reviews.list(bankId)` / `reviews.save(bankId, map)` / `reviews.remove(bankId)` / `reviews.record(bankId, map, entries)` | `GET`/`PUT`/`DELETE` `§6 /api/banks/{id}/reviews`；`record` 复用 `PUT`（body 携 `revlog`，状态+日志一次提交，并带缓存来的 `base_rev`）；`save`/`remove` 为整表写，成功或失败后都失效 reviews/rev 缓存；`record` 遇 409 按 `QB.ReviewMerge.mergeMaps`（同键保留 `last` 更大者）合并后重试一次 |
+| `reviews.get(bankId, hash)`（可选） | 前端单题 O(1) 读取；REST 无单键端点，故 `api-adapter` 不实现 → `SRSStore` 回退整表 `GET` |
 | `reviews.patch(bankId, delta, entries)`（可选，B1） | `PATCH §6 /api/banks/{id}/reviews`；仅上行 `delta` 改动键；409 时只重试我方 `last` 更大的键；适配器未实现时 `SRSStore` 回退 `record` 整表 |
-| `revlog.list()` / `revlog.append(entries)` / `revlog.revision()` | `GET`/`POST` `§6 /api/revlog`；`revision()` 为同步本地写修订号（append/record/backup 后自增，供统计页派生数据缓存失效，B3） |
+| `revlog.list()` / `revlog.append(entries)` / `revlog.revision()`（`revision` 可选） | `GET`/`POST` `§6 /api/revlog`；`revision()` 为同步本地写修订号（append/record/backup 后自增，供统计页派生数据缓存失效，B3） |
 | `weights.read()` / `weights.write(store)` / `weights.remove(scope)` | `GET`/`PUT`/`DELETE` `§6 /api/fsrs-weights[/{scope}]` |
 | `backup.export()` / `backup.import({data}, mode)` | `GET`/`POST` `§7 /api/backup?mode=` |
 | 资产驱动（`QB.ASSET_DRIVER_CONTRACT`：`put/get/all/ids/remove/clear`） | `§8 /api/assets`（原始字节上传，见下） |
 | `QB.Assets.useDriver(restDriver)` | 由 `QB.DB.init()` 在 `DATA_BACKEND='api'` 时装配 |
 
 > **契约归属（2026-10-19 阶段 C 起）**：`reviews/revlog/weights/backup` 已进入 `QB.CONTRACTS`（只暴露「存储原语」，算法留在领域模块）；**资产不进 `QB.CONTRACTS`**，改走独立的 `QB.ASSET_DRIVER_CONTRACT`（避免 `DB.init → useDriver → getDriver` 自递归）。
+>
+> **可选契约（R-06）**：`QB.OPTIONAL_CONTRACTS = { reviews: ['get','patch'], revlog: ['revision'] }`。第三方适配器实现 `QB.CONTRACTS` 即合规；可选方法可缺失，一旦提供必须是函数。能力检测唯一入口 `QB.hasCapability(adapter, group, method)`（领域模块不再自写 `typeof`）；`QB.DB.init()` 在 `assertAdapter` 之后执行 `QB.assertOptional`。降级路径：`reviews.get` 缺失 → `SRSStore.stateFor/statesFor` 回退整表 `list`；`reviews.patch` 缺失 → `SRSStore.commitGraded` 回退整表 `record`；`revlog.revision` 缺失 → 统计页诊断缓存按「无修订信息」处理（每次重算）。`api-adapter` 因此只需实现 `patch`，`get` 缺失是**声明过的合法状态**而非缺陷。
 >
 > **接线进度（诚实标注）**：契约与两个适配器已就位，且领域模块**已完成接线**——`srs-store.js`/`fsrs-opt.js`/`backup.js` 的存储读写全部改为「经 `QB.DB.*` 异步仓库」（`SRSStore`/`FSRSOpt`/`Backup` 只保留算法与作用域过滤），`sync-dav.js` 与 `app.js` 的调用点补齐 `await`。**断开自递归**的关键：`local-adapter` 的 `reviews/revlog/weights` 直接读写 LocalStorage，**不反向调用**领域模块（否则与「领域模块 → `QB.DB.*`」互为委托死循环）；`SRSStore.readMap`/`FSRSOpt.readLog` 等改为委托 `QB.DB.*`。
 >

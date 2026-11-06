@@ -9,6 +9,48 @@
 
 ## 最新记录
 
+### feat(contract): 声明可选契约并提供统一能力检测（R-06）
+
+**Commit Hash**：`12e1029`
+
+**核心改动**
+- `js/data/contracts.js`：新增 `QB.OPTIONAL_CONTRACTS = { reviews: ['get','patch'], revlog: ['revision'] }`、
+  `QB.hasCapability(adapter, group, method)`（领域模块唯一能力检测入口）、
+  `QB.assertOptional(adapter, name)`（方法可缺失 `undefined/null`，一旦提供必须是函数）。
+  `QB.CONTRACTS`/`assertAdapter` 的必需边界保持不变。
+- `js/data/db.js`：`DB.init` 在 `assertAdapter` 之后执行 `assertOptional`（半实现的可选方法启动即失败）。
+- `js/modules/srs-store.js`：3 处 `typeof repo.get/patch === 'function'` 改为 `QB.hasCapability(QB.DB, …)`；
+  `js/app.js` 统计页 `revlog.revision` 检测同步替换。
+- 文档：`docs/API-CONTRACT.md`（必需/可选项拆分 + 降级表 + `reviews.get` 行）、
+  `docs/ARCHITECTURE.md` §4.10 与 §5 公共抽象、`docs/TESTING.md`（contract 66→87、合计 5401→5422）、
+  `docs/BENCH.md`（首屏体积复测）、`docs/DEVELOPMENT.md`（SW 版本读数）。
+- **影响面**：`api-adapter` 缺 `reviews.get` 由「未声明的隐性差异」变为「声明过的合法状态」；
+  `DB.init` 新增一次校验——若第三方适配器把可选方法写成 truthy 非函数（如 `get: 'x'`），
+  现在会在启动时快速失败，而不是静默降级。内置 local/api 适配器不受影响。
+- **公共抽象清单（新增/调整）**
+  - 新增 `QB.OPTIONAL_CONTRACTS`、`QB.hasCapability`、`QB.assertOptional`；
+  - 调整调用方：`SRSStore.stateFor/statesFor/commitGraded`、`app.js` 统计页诊断缓存 →
+    统一走 `hasCapability`（语义等价，无行为变化）。
+
+**验证数据（Node v24.14.0，Windows，Asia/Shanghai）**
+- **先红**：`node scripts/contract.test.mjs` → **exit 1**，`通过: 66，失败: 5`。
+  失败项：`QB.OPTIONAL_CONTRACTS` 未声明（1）、keys/reviews 清单断言（2）、
+  `QB.hasCapability` 缺失（1）、`QB.assertOptional` 缺失（1）。
+- **后绿**：同命令 → **exit 0**，`通过: 87，失败: 0`（新增 21 项：契约形状 5 + 校验语义 4 +
+  降级行为 6 + 能力矩阵/revlog 3，另含既有的 `assertOptional` 非法类型与 `null` 合法用例）。
+  降级实测：无 `get` → `SRSStore.getState` 回退整表 `list` 读到 `stability=1`；
+  无 `patch` → `grade` 回退 `record`，`recorded=1` 且提交 map 含新键并保留既有 2 键（共 3）；
+  有 `patch` → `patched=1`、`recorded` 保持 1。
+- **配套门禁**：`npm run verify:fast` → **exit 0**（36 运行项 / 5422 断言 / 0 失败，`docs-check --static` 一致）；
+  `npm run bench` → **exit 0**（62/62 性能门禁）。
+- `node scripts/sw-runtime.test.mjs --write-baseline` → `qforge-v19 / 93 files / bec1f573cb19…`，套件 32 项通过。
+- 断言只增不减（contract 66→87，合计 5401→5422），未调整阈值/基线。
+
+**遗留 TODO / 风险**
+- **未实机验证**：真实浏览器/多标签下降级路径的时序与性能回退幅度；Node 用例只验证语义等价与调用次数。
+- `reviews.get` 目前仅 local-adapter 实现；若后端未来提供单键端点，需同时更新 `QB.CONTRACTS` 语义与本表。
+- `assertOptional` 只校验类型，不校验签名；签名仍以 `docs/API-CONTRACT.md` 为准。
+
 ### fix(render): 渲染代次守卫，过期 render 不得覆盖新视图（R-01）
 
 **Commit Hash**：`183ebef`

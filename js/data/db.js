@@ -33,6 +33,7 @@
         adapter = QB.LocalAdapter;
       }
       QB.assertAdapter(adapter, backend + '-adapter');
+      QB.assertOptional(adapter, backend + '-adapter');
       this.backend = backend;
       this.banks = adapter.banks;
       this.questions = adapter.questions;

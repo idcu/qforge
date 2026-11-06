@@ -275,7 +275,7 @@
       case 'stats': {
         const fc = State.bankId ? await QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
         // B3：诊断需扫全量 revlog；按适配器写修订号缓存，重复打开统计页不再重复读/扫描
-        const logRev = typeof QB.DB.revlog.revision === 'function' ? QB.DB.revlog.revision() : null;
+        const logRev = QB.hasCapability(QB.DB, 'revlog', 'revision') ? QB.DB.revlog.revision() : null;
         if (!State.fsrsDiag || State.fsrsDiag.rev !== logRev) {
           State.fsrsDiag = { rev: logRev, value: await QB.FSRSOpt.diagnose() };
         }

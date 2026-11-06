@@ -61,6 +61,68 @@ section('assertDriver（资产驱动契约校验）');
   throws(() => QB.assertDriver({ put() {}, all() {}, ids() {}, remove() {}, clear() {} }, 'x'), /get/, '缺 get 时精确报 get');
 }
 
+section('可选契约（R-06）：声明 + 校验 + 缺失时的降级路径');
+{
+  const OPT = QB.OPTIONAL_CONTRACTS;
+  ok(!!OPT, 'QB.OPTIONAL_CONTRACTS 已声明');
+  eq(OPT ? Object.keys(OPT).join(',') : '', 'reviews,revlog', '可选契约仅 reviews/revlog 两组');
+  eq(OPT && OPT.reviews ? OPT.reviews.join(',') : '', 'get,patch', 'reviews 可选项 = get/patch');
+  eq(OPT && OPT.revlog ? OPT.revlog.join(',') : '', 'revision', 'revlog 可选项 = revision');
+  ok(typeof QB.hasCapability === 'function', '提供 QB.hasCapability 作为唯一能力检测入口');
+  ok(typeof QB.assertOptional === 'function', '提供 QB.assertOptional 校验可选方法类型');
+
+  if (OPT && typeof QB.hasCapability === 'function' && typeof QB.assertOptional === 'function') {
+    const sig = (a) => OPT.reviews.map((m) => m + '=' + QB.hasCapability(a, 'reviews', m)).join(' ');
+    eq(sig(QB.LocalAdapter), 'get=true patch=true', 'local-adapter 提供 get/patch');
+    eq(sig(QB.ApiAdapter), 'get=false patch=true', 'api-adapter 无 get（降级 list）、有 patch');
+    ok(QB.hasCapability(QB.LocalAdapter, 'revlog', 'revision'), 'local-adapter 提供 revlog.revision');
+    ok(QB.hasCapability(QB.ApiAdapter, 'revlog', 'revision'), 'api-adapter 提供 revlog.revision');
+    eq(QB.hasCapability({ revlog: { list() {}, append() {} } }, 'revlog', 'revision'), false,
+      '第三方缺 revision 时能力检测为 false（调用方按无修订信息降级）');
+    ok(QB.assertOptional(QB.LocalAdapter, 'local') === QB.LocalAdapter, 'local 通过可选契约校验');
+    ok(QB.assertOptional(QB.ApiAdapter, 'api') === QB.ApiAdapter, 'api 缺 get 视为合法');
+    throws(() => QB.assertOptional({ reviews: { get: 'nope' } }, 'x'), /reviews\.get/,
+      '可选方法存在但非函数时报 reviews.get');
+    ok(QB.assertOptional({ reviews: { get: null } }, 'x'), 'null 视为未提供（合法）');
+
+    // 领域模块降级：无 get / 无 patch 的适配器仍能读单题与完成评分
+    const b = 'ct-bank-optional';
+    const map = { h1: { algo: 'fsrs', stability: 1 }, h2: { algo: 'fsrs', stability: 2 } };
+    const realReviews = QB.DB.reviews;
+    let recorded = 0;
+    let savedMap = null;
+    let patched = 0;
+    QB.DB.reviews = {
+      list: async () => map,
+      save: async () => {},
+      remove: async () => {},
+      record: async (bankId, full, entries) => {
+        recorded++;
+        savedMap = full;
+        return { saved: Object.keys(full).length, logged: (entries || []).length };
+      }
+    };
+    const st = await QB.SRSStore.getState(b, { contentHash: 'h1' });
+    eq(st && st.stability, 1, '无 get 时单题读取回退整表 list');
+    await QB.SRSStore.grade(b, { contentHash: 'h9' }, 3, 1000);
+    eq(recorded, 1, '无 patch 时热路径回退 record 整表提交');
+    ok(savedMap && savedMap.h9, '回退提交包含本次改动键');
+    eq(Object.keys(savedMap || {}).length, 3, '回退提交保留既有键（整表语义）');
+
+    QB.DB.reviews = {
+      list: async () => map,
+      save: async () => {},
+      remove: async () => {},
+      record: async () => { recorded++; return { saved: 0, logged: 0 }; },
+      patch: async () => { patched++; return { saved: 1, logged: 1 }; }
+    };
+    await QB.SRSStore.grade(b, { contentHash: 'h9' }, 3, 1000);
+    eq(patched, 1, '有 patch 时优先增量提交');
+    eq(recorded, 1, '有 patch 时不调用 record（recorded 保持 1）');
+    QB.DB.reviews = realReviews;
+  }
+}
+
 section('reviews 仓库（本地）');
 {
   const b = 'ct-bank-reviews';
