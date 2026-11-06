@@ -11,7 +11,7 @@
 
 ### feat(annotation): 单库批注总量上限（C026）——超限拒绝写入 / 导出前显式确认
 
-**Commit Hash**：`PENDING`
+**Commit Hash**：`c58fa49`
 
 **核心改动**
 - `js/config.js`：`LIMITS.ANNOTATION_TOTAL_MAX_BYTES = 2 * 1024 * 1024`（2 MiB，UTF-8 字节），
