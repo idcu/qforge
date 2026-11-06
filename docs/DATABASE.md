@@ -50,7 +50,7 @@ users 1 ──<（wrong_questions / favorites / attempts / sessions）   # 多�
 | `qb:user:reviewRev:<bankId>` | 本地同步元数据 | 单调递增的本地复习版本号（服务端 `review_rev` 的本地对应物）；用于 storage 事件按版本合并与写前重读，不进备份 |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
 | `qb:user:session` | `sessions` | 单条会话快照 |
-| `qb:user:revlogMeta` | `review_log`（分段清单） | `{v:2, segSize:200, first, last, count}`；单次评分只重写尾段 |
+| `qb:user:revlogMeta` | `review_log`（分段清单） | `{v:2, segSize:200, first, last, count}`；单次评分只重写尾段；**旧日志为空/不存在时 `convertLegacy` 不写空清单**（避免启动期业务键让 IDB 回落标记误降级，C007） |
 | `qb:user:revlog:<i>` | `review_log`（分段） | 第 i 段 ≤200 条，元素 `{id,h,r,t,b?}`（`b`=bankId） |
 | `qb:user:revlog` | `review_log`（旧整表） | 兼容读：清单缺失时回退整表；写路径不再产生此键 |
 | `qb:meta:fsrsWeights` | —（前端偏好） | 个性化 FSRS 权重与训练元数据 |

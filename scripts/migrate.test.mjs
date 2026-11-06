@@ -407,6 +407,18 @@ section('多标签并发：共享磁盘，只迁移一次且无覆盖');
   ok(!owner.QB.Storage.keys().includes(owner.QB.KEYS.metaSchema + 'x'), '无异常键');
 }
 
+section('无旧整表日志时不写空清单（C007 回落标记不被误降级）');
+{
+  QB.Storage.clearAll();
+  QB.Storage.set(QB.KEYS.metaSchema, 6);
+  eq(QB.RevlogStore.convertLegacy(), false, '无旧日志时 convertLegacy 返回 false');
+  ok(!QB.Storage.keys().includes(QB.KEYS.revlogMeta), '不写空日志清单（避免启动期业务键）');
+  ok(!QB.Storage.keys().includes(QB.KEYS.revlog), '旧整表日志键不存在');
+  QB.Storage.set(QB.KEYS.revlog, []);
+  eq(QB.RevlogStore.convertLegacy(), false, '旧日志为空数组时仍返回 false');
+  ok(!QB.Storage.keys().includes(QB.KEYS.revlogMeta), '空数组转换后仍无日志清单');
+}
+
 section('ensureLayout：幂等布局归一（备份恢复用）');
 {
   QB.Storage.clearAll();

@@ -10,7 +10,7 @@
 
 | 读数 | 当前值 | 事实源 |
 | --- | --- | --- |
-| SW 缓存版本 | qforge-v13 | `sw.js` 的 `CACHE`（改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+| SW 缓存版本 | qforge-v14 | `sw.js` 的 `CACHE`（改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
 | 数据 schemaVersion | 6 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
 | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
 
@@ -109,6 +109,8 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 **vendor 自检 `job`**（`node scripts/check-ngm.mjs`）：断言 `ngm.json` ↔ `ngm.lock` ↔ `ngm.vendor` 双向一致、源码中的 vendor 字面路径都能归到已登记模块、适配层清单（`contracts/adapters.json`）与保留名齐全。**清单文件缺失或非法一律 exit 1**——历史缺陷是整段校验包在 `if (project && lock)` 内，`ngm.json`/`ngm.lock` 缺失时连错误汇总都被跳过，进程静默 exit 0；`--selftest` 用三个临时根（逐次缺 `ngm.json` / `ngm.lock` / `ngm.mappings.json`）证明这道闸会失败。
 
 **独立 `a11y` job**（`node scripts/a11y.test.mjs`，**103** 项断言）：与 `test-all` 内的同一命令并行存在，只提供无障碍的独立红绿信号，避免回归被其它套件噪声淹没。静态门禁自身带变异模式 `node scripts/a11y.test.mjs --mutate`（删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked`，预期 95 通过 / 8 失败、exit 1）；**该模式不得进 CI**（预期失败）。新增弹窗渲染器时，套件的「弹窗快照注册自检」会在未登记快照时转红。
+
+**端到端真机门禁（非 CI）**：`node scripts/e2e-browser.mjs` 需要本机 Edge，进程内启动 8811/8813 静态源与 8812 跨源 API，覆盖 C020 跨源 CSP（默认拦截 + `CSP_CONNECT_ALLOWLIST`/`index.html` meta/`security-headers.mjs` 三处白名单的部署模拟）、C025 SW（install 预缓存失败、导航 500 不覆盖离线壳、CACHE 版本生效）、C007 InPrivate/IDB 不可用回落与可恢复标记、C008 双标签并发评分、IDB 50k `storage.estimate` 与渲染帧时间；支持 `--only=c020,sw,c007,c008,idb50k`。证据写入 `.screenshots/e2e-browser/`，**不入库**；无法真机执行时如实标记「未测」并 exit 1。
 
 **无障碍真机门禁（非 CI）**：`node scripts/a11y-browser.mjs` 需要本机 Edge，启动 8799 静态服务 + CDP，跑 360 / 768 / 1280 三档 × light/dark 两主题，页面覆盖首页/答题页/结果页/导入预览/三选一弹窗/设置页，共 **374 断言**（新增复习设置弹窗三档宽度：内容溢出、11 个控件 ≥44×44、复选框/下拉键盘操作），输出 `.screenshots/a11y-browser/result.json` 与逐页截图。CI 无浏览器，故**不纳入 CI 门禁**；提交前手动执行，失败退出码 1。Node 侧静态门禁 `a11y.test.mjs` 已进 CI（独立 `a11y` job）。**2026-11-06 本机 Edge 实机实跑：374/374 通过（exit 0，三档两主题、越界元素 0、复习设置 11 控件均 ≥44×44）**。
 

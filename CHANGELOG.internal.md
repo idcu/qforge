@@ -9,6 +9,70 @@
 
 ## 最新记录
 
+### test(e2e): 真实浏览器端到端验收（C020/C025/C007/C008/IDB50K）+ C007 真实缺陷修复
+
+**Commit Hash**：`PENDING`
+
+**核心改动**
+- 新增 `scripts/e2e-browser.mjs`（**手动真机门禁，不进 CI**）：复用 `scripts/lib/cdp.mjs` /
+  `static-server.mjs` / `security-headers.mjs`，本机 Edge + CDP，进程内启动 8811（应用源）、
+  8812（跨源 API）、8813（白名单部署模拟）三端口。支持 `--only=c020,sw,c007,c008,idb50k`。
+  证据（`result.json` / `run.log` / `*.png`）写入 `.screenshots/e2e-browser/`，**不入库**；
+  场景无法真机执行时明确标记「未测」并 exit 1，禁止用 Node 替身冒充真机结果。
+- 白名单部署模拟**只改写响应内容**、不永久放宽工作区 CSP：`index.html` 的
+  `connect-src 'self'` → `connect-src 'self' http://127.0.0.1:8812`、`js/config.js` 的
+  `CSP_CONNECT_ALLOWLIST: []` → `['http://127.0.0.1:8812']`、HTTP CSP 头同步替换。
+- **C007 真实缺陷修复**（`js/data/local-adapter.js`）：
+  ① `RevlogStore.convertLegacy()` 在无旧整表日志时不再写空 `user:revlogMeta`——旧实现即使
+  `legacy` 不存在也写清单，启动期产生业务键，触发 `Storage` 回落降级，导致 IDB 不可用时
+  `qb:meta:storageBackend` 从 `idb` 被改写为 `ls-fallback`、恢复后无法回切 IDB。
+  ② 顺带修复由 ① 引出的 `appendInternal` 元数据 `count` 为 `NaN`（`prevMeta` 为空时未给默认值），
+  否则既有迁移/日志套件 8 项转红。
+- `sw.js` `CACHE` 由 `qforge-v13` 升到 `qforge-v14`（修改 `js/**` 触发 SW 基线，按既有约定换代）；
+  `scripts/sw-baseline.json`、`scripts/docs-baseline.json` 同步刷新。
+- `scripts/migrate.test.mjs` 新增 5 条回归断言（无旧日志/旧日志为空数组时不写清单）。
+- 文档：`docs/TESTING.md`（migrate 317→322、合计 5320→5325、pwa 版本读数 v14、新增「真实浏览器
+  端到端验收」章节）、`docs/DEVELOPMENT.md`（SW 版本读数 v14、新增端到端真机门禁说明）、
+  `docs/DATABASE.md`（`qb:user:revlogMeta` 行为注明）、`docs/BENCH.md`（首屏 353.6/989.5 →
+  353.7/989.9）。
+- 公共抽象：无新增运行时抽象。`scripts/e2e-browser.mjs` 是新的**验证入口**（仅 `scripts/**`），
+  影响面：需要真机 Edge 手动执行，不参与 CI。
+
+**验证数据（同机 Asia/Shanghai，本机 Edge + CDP，2026-11-06）**
+- **真机全量绿**：`node scripts/e2e-browser.mjs` → **49 / 49 断言通过（exit 0）**，耗时
+  约 2 分 25 秒（06:51:46–06:54:11 UTC）。
+  - **C020 7/7**：默认源同源 fetch 200；跨源 fetch `{"ok":false,"error":"Failed to fetch"}`，
+    CDP 捕获 CSP 日志（`connect-src 'self'` 拦截 + `Refused to connect`）；白名单部署后
+    config `["http://127.0.0.1:8812"]`、`index.html` meta、HTTP 响应头三处均含 origin，跨源
+    fetch 返回 `{"ok":true,...}`。
+  - **C025 12/12**：install 预缓存 404 → 注册未建立、无 controller、无 active、安装序列无
+    `activated`；导航 500 后缓存 `index.html` 文本逐字节不变；offline 导航回退缓存壳
+    （title/`#brand` 命中）；`reg.update()` 后 `qforge-v12` 旧缓存删除、只剩 `qforge-e2e-bump`。
+  - **C007 11/11**：InPrivate 下 IDB 可用（`storageMode=idb`，无回落提示）；注入 `indexedDB=undefined`
+    后 `idb-unavailable`、marker 保持 `idb`、`lsBackupState=idb-unavailable`、提示含
+    「IndexedDB / 兼容模式 / 重试」；移除注入重载后恢复 IDB；写业务键后按预期降级 `ls-fallback`。
+  - **C008 12/12**：旧 v3 清单内存并集 `[h1,h2]`、磁盘仅保留最后写入；并发
+    `QB.DB.reviews.patch` 后两侧 `Storage.keys()` 与 `ReviewStore.readMap()` 均含两题，
+    `reviewMeta` 为 `{v:4}`（前后键值对照见 `result.json`）。
+  - **IDB50K 7/7**（真实路径，**非替身**）：`250×200` 题写入 50k（fill 21.6s）；`storage.estimate`
+    前 `quota=10,737,522,345`（约 10.0 GiB）/ usage 104,105 B，后 `quota=10,744,886,793` /
+    usage **7,468,553 B（indexedDB 7,369,872 B）**；`QB.App.render()` 51.9 ms；10 帧 rAF
+    P50 16.7 ms / P95 **16.8 ms** / max 16.8 ms；`usedJSHeapSize` 13.76 MB。
+    （首帧 −27.1 ms 为 `rAF` 时间戳基准差，非负耗时；`renderedRows=0` 因首页不渲染题行。）
+- **门禁（实跑退出码）**：`npm run verify:fast` → exit 0（`test-all` **36 个运行项 / 5325
+  断言 / 基线一致**）；`node --expose-gc scripts/bench.mjs --assert` → **62/62 通过（exit 0）**；
+  首屏 **353.7 KB gzip / 989.9 KB raw**。
+- **红→绿**：C007 修复前真机断言为红（marker 被误降级、移除注入后无法恢复 IDB）；修复后
+  C007 11/11 绿，`migrate.test.mjs` 5 条回归断言与既有 322 项全绿。
+
+**遗留 TODO / 风险**
+- 证据目录 `.screenshots/e2e-browser/` 未入库（含 run.log / result.json / 截图），仅本次运行
+  可复现；后续复跑会覆盖同目录结果。
+- 白名单部署是**响应改写模拟**，未验证真实生产源站配置（DNS/反向代理/证书链路不在覆盖范围）。
+- C025 的 500 场景由进程内服务器注入，真实 CDN/网关错误页未验证。
+- IDB50K 首页不渲染题行（`renderedRows=0`），渲染帧时间只代表首页组卷路径，不代表答题页
+  长列表滚动；答题页帧时间**未测**。
+
 ### fix(pwa): SW 预缓存失败不再被吞、非 2xx 导航不覆盖离线壳 + 运行时门禁（C025）
 
 **Commit Hash**：`d077f9a`

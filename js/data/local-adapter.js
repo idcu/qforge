@@ -1186,6 +1186,12 @@
       }
       const legacy = Storage.getFresh(K.revlog, null);
       const list = Array.isArray(legacy) ? legacy.slice(-REVLOG_MAX) : [];
+      // 无旧整表数据时不写空清单：避免启动期把内部初始化写成“业务键”，
+      // 导致 IDB 不可用回落时 marker 被误降级为 ls-fallback（C007）。
+      if (!list.length) {
+        if (legacy !== undefined) Storage.remove(K.revlog);
+        return false;
+      }
       const segs = [];
       for (let i = 0; i < list.length; i += REVLOG_SEG_SIZE) segs.push(list.slice(i, i + REVLOG_SEG_SIZE));
       segs.forEach((seg, i) => Storage.setSync(K.revlogSeg(i), seg));
@@ -1235,7 +1241,7 @@
       const touch = (i) => {
         if (!touched.has(i)) touched.set(i, Storage.getFresh(K.revlogSeg(i), null));
       };
-      const meta = Object.assign({}, prevMeta);
+      const meta = Object.assign({ v: REVLOG_LAYOUT_VERSION, segSize: REVLOG_SEG_SIZE, first: 0, last: 0, count: 0 }, prevMeta || {});
       let idx = meta.count ? meta.last : 0;
       if (!meta.count) { meta.first = 0; meta.last = 0; }
       const rollback = function () {
