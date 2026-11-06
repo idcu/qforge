@@ -36,9 +36,9 @@
 | `modules/sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象异步备份（Basic Auth，fetch 可注入测试）；CORS 受限如实报错 |
 | `modules/blueprint.js` | 组卷蓝图：题型×分类×难度×数量抽题 |
 | `modules/practice-builder.js` | `QB.PracticeBuilder`（C010）：错题 ∪ 薄弱（`reviewStats` 口径：正确率<60% 且作答≥2）一键组卷；纯函数、零写入，阈值取 `CONFIG.LIMITS.WEAK_MIN_ATTEMPTS/WEAK_ACCURACY`；与错题本、revlog 复用同一 contentHash |
-| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT/**只读分享页 HTML** 八格式；**C011 `shareFlow`** 与 `distributeFlow` 共用 `prepareDistribution`（collect → 题包信息 → qbk+manifest），改为输出回链/粘贴码（qbk 异步读 IndexedDB、html 异步读图片资产），题库/错题/收藏；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder）；格式可按 `formats`（对象白名单）与 `kinds`（格式白名单）双重过滤；材料题在 MD/DOCX/TXT 经公共 `materialBlock` 行式分流（M2-A），见 [EXPORT-FORMAT.md](../) |
+| `modules/exporter.js` | 导出注册表（kind × format）：`collect`/`buildContent`/`buildAsync`/`openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT/**只读分享页 HTML** 八格式；**C011 `shareFlow`** 与 `distributeFlow` 共用 `prepareDistribution`（collect → 题包信息 → qbk+manifest），改为输出回链/粘贴码（qbk 异步读 IndexedDB、html 异步读图片资产），题库/错题/收藏；**R-19 分享前用 `ShareLink.estimateChars` 估算回链字符数，超 64 KB 先确认，取消则不编码**；另注册非题集 `history`（白名单仅 json/csv/xlsx/txt，专用 builder）；格式可按 `formats`（对象白名单）与 `kinds`（格式白名单）双重过滤；材料题在 MD/DOCX/TXT 经公共 `materialBlock` 行式分流（M2-A），见 [EXPORT-FORMAT.md](../) |
 | `modules/share-page.js` | `QB.SharePage`：只读分享页构建（复用 `RichText.questionAssetIds` 收集图片、`Assets.getMap` 读字节并内嵌 data URL、`RichText.render` 转义渲染）；`buildHTML(payload, assetMap)` 纯构建可测，`build(payload)` 异步读资产；无脚本/无网络请求/可打印；data URL 复用 `QB.Base64.encodeBytes` |
-| `modules/share-link.js` | `QB.ShareLink`（C011）：分享码 `qfshare1:` + URL-safe Base64；`encode` 确定性、`decode` 校验前缀/字符集/8MB 上限、`buildLink/readHash/extractCode` 支持回链与纯码双形态；纯函数、零网络 |
+| `modules/share-link.js` | `QB.ShareLink`（C011）：分享码 `qfshare1:` + URL-safe Base64；`encode` 确定性、`decode` 校验前缀/字符集/8MB 上限、`buildLink/readHash/extractCode` 支持回链与纯码双形态；**R-19 `estimateChars(n)` 纯算术估算字符数（不分配字符串，精确等于 `encode(...).length`）**，供 `shareFlow` 编码前判软阈值；纯函数、零网络 |
 
 ### 3.6 复习调度参数（唯一解析入口）
 

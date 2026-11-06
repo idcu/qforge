@@ -177,6 +177,7 @@ qfshare1:<URL-safe Base64(qbk 字节)>
 - **粘贴码形态**：整串 `qfshare1:…` 直接粘进「粘贴文本导入」。两种形态解码后得到同一份字节。
 - **确定性**：编码只用 `Base64`，无随机数、无时间戳；同一份 `.qbk` 字节永远得到同一个码。跨时刻重新导出会写入新的 `exportedAt/createdAt`，属于另一份包，因此码不同（题包 `checksum` 仍相同）。
 - **上限**：`CONFIG.LIMITS.SHARE_MAX_BYTES = 8 MB`（与网络导入快照上限一致，硬拒绝）；`CONFIG.LIMITS.SHARE_URL_SOFT_LIMIT = 64 KB`（回链字符数软阈值，超过只提示优先发分享码，不阻断）。
+- **先估算后编码（R-19）**：`shareFlow` 在 `encode` 前用 `ShareLink.estimateChars(qbk 字节数) + 回链固定部分长度` 精确估算字符数；超过软阈值先弹窗确认，用户取消则不编码、不生成 1.333× 大字符串（返回 `null`）。返回对象含 `estimatedChars`。
 - **零网络**：生成端只做 `ShareLink.encode`；接收端 `ShareLink.decode → Importers.runImport({name:'分享码.qbk'})`，与本地选文件导入同一条解析链（含 manifest 校验、图片回写、重复识别）。全程无 fetch、无账号。
 - **唯一实现**：`QB.Base64`（`js/utils/base64.js`）与 `QB.ShareLink`（`js/modules/share-link.js`）；分享页 data URL 也复用 `QB.Base64`，不再保留第二份 btoa 逻辑。
 - 实测：图片/公式/材料三库往返 3/3，qbk 1,431 / 1,273 / 1,883 B，分享码 1,917 / 1,707 / 2,520 字符；fetch 0 次（见 `docs/BENCH.md` C011 段）。

@@ -238,7 +238,92 @@ section('粘贴入口识别分享码 / 回链');
   eq(typeof QB.Exporters.shareFlow, 'function', 'Exporters.shareFlow 已导出');
 }
 
-/* ================= 7. 离线断言 ================= */
+/* ================= 7. R-19 分享体积：先估算、后编码 ================= */
+section('分享体积：estimateChars 精确一致 + 软阈值前不编码');
+{
+  ok(typeof QB.ShareLink.estimateChars === 'function', 'ShareLink.estimateChars 已导出');
+
+  // 逐字节一致：1..256 字节（覆盖 3 种 padding 余数）+ 代表性大样本
+  let mismatch = 0;
+  let firstBad = '';
+  for (let n = 1; n <= 256; n++) {
+    const buf = new Uint8Array(n);
+    for (let i = 0; i < n; i++) buf[i] = (i * 37 + n) & 255;
+    const est = QB.ShareLink.estimateChars(n);
+    const real = QB.ShareLink.encode(buf).length;
+    if (est !== real) { mismatch++; if (!firstBad) firstBad = n + ': est=' + est + ' real=' + real; }
+  }
+  eq(mismatch, 0, '1..256 字节：estimateChars 与 encode(...).length 完全一致' + (firstBad ? '（首个不符 ' + firstBad + '）' : ''));
+  const edge = [1024, 65536, 540 * 400, 8 * 1024 * 1024];
+  edge.forEach((n) => {
+    const buf = new Uint8Array(n);
+    eq(QB.ShareLink.estimateChars(n), QB.ShareLink.encode(buf).length, '边界 ' + n + ' B：估算与编码长度一致');
+  });
+
+  // 540 题大包：超软阈值时确认发生在编码前；用户取消 → 0 次编码、无分享弹窗
+  const bigBank = await QB.DB.banks.create({ name: 'R-19 大包分享' });
+  const bigQs = [];
+  for (let i = 0; i < 540; i++) {
+    let text = '';
+    let seed = i + 1;
+    for (let j = 0; j < 160; j++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      text += String.fromCharCode(0x4e00 + (seed % 3000));
+    }
+    bigQs.push({ type: 'essay', question: 'R19-' + i + ' ' + text, reference_answer: '答 ' + i });
+  }
+  await QB.DB.questions.insertMany(bigBank.id, bigQs, { dedupe: false });
+
+  const built = await QB.Exporters.buildAsync('qbk',
+    await QB.Exporters.collect('bank', bigBank), { distribute: true, version: '1.0.0' });
+  const soft = QB.CONFIG.LIMITS.SHARE_URL_SOFT_LIMIT;
+  const estCode = QB.ShareLink.estimateChars(built.content.byteLength);
+  const estLink = estCode + QB.ShareLink.buildLink('https://example.com/q/', '').length;
+  ok(estLink > soft, '540 题题包预计回链 ' + estLink + ' 字符 > 软阈值 ' + soft);
+
+  const realUI = QB.UIRenderer;
+  let confirmCalls = 0;
+  let modalCalls = 0;
+  let encodeCalls = 0;
+  let confirmMsg = '';
+  const origEncode = QB.ShareLink.encode;
+  QB.ShareLink.encode = function () { encodeCalls++; return origEncode.apply(QB.ShareLink, arguments); };
+  QB.UIRenderer = {
+    toast() {},
+    closeModal() {},
+    openModal(html, setup) {
+      modalCalls++;
+      const els = {};
+      setup({
+        querySelector(sel) {
+          if (!els[sel]) els[sel] = { value: sel === '#pkg-version' ? '1.0.0' : '', onclick: null };
+          return els[sel];
+        }
+      });
+      const okBtn = els['[data-action="modal-ok"]'];
+      if (okBtn && okBtn.onclick) okBtn.onclick();
+    },
+    confirmDialog(message, confirmText) {
+      confirmCalls++;
+      confirmMsg = message;
+      return Promise.resolve(false);
+    }
+  };
+  let shareRes;
+  try {
+    shareRes = await QB.Exporters.shareFlow({ bank: bigBank });
+  } finally {
+    QB.ShareLink.encode = origEncode;
+    if (realUI) QB.UIRenderer = realUI; else delete QB.UIRenderer;
+  }
+  eq(confirmCalls, 1, '超过软阈值时先弹确认（1 次）');
+  ok(confirmMsg.indexOf('超过') >= 0 && confirmMsg.indexOf('上限') >= 0, '确认文案说明超过链接上限');
+  eq(encodeCalls, 0, '用户取消后不调用 encode（0 次，不构建 1.333× 大字符串）');
+  eq(shareRes, null, '取消后不返回分享结果');
+  eq(modalCalls, 1, '仅打开题包信息弹窗，未打开分享结果弹窗（modalCalls=1）');
+}
+
+/* ================= 8. 离线断言 ================= */
 section('离线断言');
 eq(fetchCalls, 0, '全程 fetch 调用 0 次（离线可用）');
 eq(QB.CONFIG.LIMITS.SHARE_MAX_BYTES, 8 * 1024 * 1024, '分享码硬上限 8MB');

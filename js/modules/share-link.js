@@ -21,6 +21,18 @@
     return (QB.CONFIG && QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.SHARE_MAX_BYTES) || 8 * 1024 * 1024;
   }
 
+  /**
+   * 字节数 → 分享码字符数（精确，不分配字符串；R-19 分享前估算用）
+   * 与 encode() 同口径：PREFIX + URL-safe Base64（完整 Base64 为 4*ceil(n/3)，再丢弃末尾补位 =）
+   */
+  function estimateChars(bytes) {
+    const n = Number(bytes);
+    if (!(n >= 0)) throw new Error('字节数无效');
+    const rem = n % 3;
+    const padding = rem === 0 ? 0 : (rem === 1 ? 2 : 1);
+    return PREFIX.length + 4 * Math.ceil(n / 3) - padding;
+  }
+
   /** 字节 → 分享码（确定性；空内容/超上限抛错） */
   function encode(bytes) {
     if (!bytes) throw new Error('分享码内容为空');
@@ -69,5 +81,5 @@
     return extractCode(hash);
   }
 
-  QB.ShareLink = { PREFIX, HASH_KEY, encode, decode, buildLink, readHash, extractCode };
+  QB.ShareLink = { PREFIX, HASH_KEY, encode, decode, estimateChars, buildLink, readHash, extractCode };
 })(window);

@@ -9,6 +9,46 @@
 
 ## 最新记录
 
+### perf(share): 分享前先精确估算回链体积（R-19）
+
+**Commit Hash**：`（本条目提交后回填）`
+
+**核心改动**
+- `js/modules/share-link.js`：新增 `QB.ShareLink.estimateChars(bytes)`，纯算术
+  `PREFIX.length + 4*ceil(n/3) - padding(n%3)`，不分配字符串；与 `encode(...).length` 逐字一致。
+- `js/modules/exporter.js`：`shareFlow` 在 `encode` **之前**用 `estimateChars(content.byteLength)`
+  + `buildLink(base,'').length` 估算回链字符数；超 `SHARE_URL_SOFT_LIMIT`（64 KB）先 `confirmDialog`，
+  取消则 `toast` 并返回 `null`（**0 次 encode，不构建 1.333× 大字符串**）；返回对象新增 `estimatedChars`。
+- `scripts/bench.mjs`：分享码行改为「生产 `estimateChars` vs 真实 `encode`」同口径对照（540 题 / 8MB 边界），
+  并量估算耗时与 2000 次估算的 heap/external 增量；新增第 64 项门禁（估算字符数必须与真实编码一致 2/2）。
+- `sw.js`：`CACHE` v24 → v25，刷新 `scripts/sw-baseline.json`。
+- 文档：`docs/ARCHITECTURE.md` §4.6 流程 + §4.16 + §5 抽象表、`docs/EXPORT-FORMAT.md` §2.5、
+  `docs/modules/app.md`、`docs/user-guide.md`、`docs/TESTING.md`（share-link 81→93、合计 5464→5476、SW v25）、
+  `docs/BENCH.md`（R-19 复测、门禁 64、首屏 364.6 KB gzip）、`docs/DEVELOPMENT.md`（SW 版本）。
+- **影响面**：分享成功路径的弹窗与返回结构字段只增不改；新增「超限先确认、取消即不生成」分支。
+  `QB.ShareLink` 公开导出新增 `estimateChars`，属向后兼容扩展。
+
+**验证数据（实测）**
+- 红：`node scripts/share-link.test.mjs` → 第一节 `ShareLink.estimateChars 已导出` 失败；随后在
+  `share-link.test.mjs:252` 以 `TypeError: QB.ShareLink.estimateChars is not a function` 中止（exit 1）。
+  原始输出：`.analysis/architecture-audit/stage2-red-r19.txt`。
+- 绿：同套件 **93 断言 / 93 通过 / 0 失败**；540 题大包预计回链 539,401 字符 > 65,536，确认取消后
+  `encode` 调用 **0 次**、返回 `null`、仅打开题包信息弹窗。原始输出：`.analysis/architecture-audit/stage2-green-r19.txt`。
+- Bench（`node --expose-gc scripts/bench.mjs --assert`，同轮对照）：
+  - 540 题 JSON 216,695 B：`estimateChars` **288,936 字符** = 真实编码字符数（旧公式漏算补位曾报 288,937）；
+    估算 median **0.0004 ms**；2000 次估算 heap **+0.03 MB** / external **+0.00 MB**（未 GC）。
+  - 8 MB 边界：`estimateChars` **11,184,820 字符** = 真实编码字符数；真实编码 median **15.01 ms**，
+    编码后 external **+18.67 MB**（未 GC）。
+  - 门禁 **64/64** 通过；原始输出：`.analysis/architecture-audit/stage2-bench-r19.txt`。
+- 门禁：`verify:fast` exit 0（36 运行项 / 5476 断言）；`bench --assert` 64/64（exit 0）；`docs-check --static` exit 0。
+
+**遗留 TODO / 风险**
+- **未实机验证**：真实浏览器弹窗交互、真实聊天软件对超长 URL 的截断；Node 计时为同机参考值。
+- 估算值只覆盖分享码 + 回链固定部分长度；不含浏览器对 URL 的额外编码（当前分享码字符集为
+  `[A-Za-z0-9_-]`，无需百分号编码）。
+- 公共抽象：新增 `QB.ShareLink.estimateChars`（唯一「字节数 → 分享码字符数」口径），复用
+  `buildLink` 与 `SHARE_URL_SOFT_LIMIT`，未新增第二套 Base64 长度公式。
+
 ### fix(import): 导入体积在读取前预检（R-20）
 
 **Commit Hash**：`4d75763`
