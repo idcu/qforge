@@ -9,6 +9,61 @@
 
 ## 最新记录
 
+### fix(storage): reviewMeta 改为 v4 紧凑标记，消除随库线性膨胀（P2-06）
+
+**Commit Hash**：`<待回填>`
+
+**核心改动**
+- **缺陷（先红）**：`user:reviewMeta:<bankId>` 为 `{v:3,count,keys}` 全量 hash 清单，**每次新 hash 评分整份重写**。
+  实测 1000 个新 hash：meta 写入 **1000 次 / 累计 3,426,388B（3346.1KB）/ 末次 6919B**，随库 N 线性放大、累计 O(N²)。
+- **布局 v4（D6 已放开）**：`user:reviewMeta:<bankId>` 只存 `{v:4}` 标记（7B）；键集合改由物理键
+  `user:review:<bankId>:<hash>` 前缀枚举（`ReviewStore.stateKeys`）。per-hash 状态键本就是事实源，
+  删除重复索引后**结构上不可能产生孤儿 hash**，稳态新 hash **0 次 meta 写入**。
+- `js/data/local-adapter.js`：`writeMeta(keys)` → `writeMarker()`；`put` 只在无标记/旧 v3 清单时写一次标记；
+  `removeHash`/`remap` 不再重写 meta；`count` = 物理键 ∪ 旧整表额外条目；`readMap` 语义不变；
+  `save`/`convertLegacy` 写状态后写标记。
+- `js/utils/review-merge.js`：`mergeMeta` 对 v4 标记返回 `{v:4}`（任一侧仍有旧 keys 才并集），跨标签不再搬运大清单。
+- **迁移路径**：新增 `ReviewStore.convertMetaLayout(bankId)` / `convertMetaLayouts()`：
+  ① 旧 v3 清单 vs 物理键集合逐键比对；② 完全一致才写 `{v:4}` 并回读校验；③ 不一致保留原清单并记 anomalia；
+  ④ 写失败恢复旧 meta 缓存值。挂到 `Migration.run()` 的「已是最新版本」早退分支（现有 v6 用户下次启动即迁移）、
+  `doRun` 与备份恢复 `ensureLayout()`；幂等，失败不阻断启动。
+- **降级行为**：旧代码读 v4 标记时 `meta()` 判 null → 回退物理键枚举，`put` 时重建 v3 清单；**不丢数据**。
+  全局 schema 仍为 6，reviewMeta 子布局版本独立（v3→v4）。
+- 文档同步：`DATABASE.md`（键表/schema 说明）、`SCHEMA.md`（本地布局）、`SRS.md`（键表）、`STORAGE.md`（合并策略）、
+  `BENCH.md`（前后实测/推算 + 门禁 62 项）、`TESTING.md`（storage 61 / migrate 317 / 合计 5215）、`scripts/docs-baseline.json`。
+- 公共抽象：`QB.ReviewStore.writeMarker` 取代 `writeMeta`（调用点 4 处已迁移）；`convertMetaLayout(s)` 为迁移唯一入口；
+  `ReviewMerge.mergeMeta` 语义升级为「标记优先」。无重复实现。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（仅加测试、未改实现）**：`node scripts/storage.test.mjs` → **通过 51 / 失败 10（exit 1）**：
+  `1000 新 hash meta 写入 1000 次`、`累计 3,426,388B > 64B`、`末次 6919B > 16B`、`meta v=3 且含 keys`；
+  `node scripts/migrate.test.mjs` → 291 项通过后在新负例 `r.reviewMeta` 处 **TypeError（exit 1）**。
+- **绿（本提交）**：`storage.test` **61/61**（C008 8 + P2-06 8 新增/重写）；`migrate.test` **317/317**。
+  - 迁移一致性：v3 清单 3 键 → v4 标记 **7B**；`readMap` **逐键 Deep-equal**（h1/h2/h3）、`count=3`（不重复计分）、
+    错题/收藏 JSON **逐字节未变**；二次运行 `migrated=0`；注入 meta 写失败 → 原 v3 清单 3 键 + 3 个状态键完整保留。
+- **实测字节（bench 拦截真实 `Storage.setSync`）**：
+  | 规模 | 旧 v3 | 新 v4 |
+  | --- | --- | --- |
+  | 1000 新 hash | 1000 次 / 累计 3346.1KB / 末次 6919B（实测） | **1 次 / 累计 7B / 末次 7B（实测，3.57ms）** |
+  | 10000 新 hash | 累计 ≈334.6MB / 末次 ≈67.6KB（**推算**：逐次整表重写，∝N² / ∝N） | **1 次 / 累计 7B / 末次 7B（实测，35.44ms）** |
+- **门禁（实跑退出码）**：`node scripts/test-all.mjs` → **34 套件 / 5215 断言 / 基线一致（exit 0，36.2s）**；
+  `node --expose-gc scripts/bench.mjs --assert` → **62 项全过（exit 0）**（新增 2 项：1000/10000 新 hash meta 写入 ≤1 次且 ≤64B；
+  heapUsed 增量 +2.72 MB）；`npm run verify:fast` → **exit 0（40.8s）**；`docs-check --static` 一致；
+  首屏 **353.3 KB gzip / 989.0 KB raw**（+1.1 KB gzip）。
+
+**影响范围**
+- 读取接口（`get/readMap/count/stateKeys/bankIds`）语义不变；`stateKeys` 返回物理键集合，旧清单中无状态的悬空项不再出现。
+- 写入接口 `writeMeta(bankId, keys)` 被移除，改为 `writeMarker(bankId)`（内部 4 处 + bench 已迁移）。
+- 旧 v3 清单与物理键集合不一致（孤儿索引/缺状态）时：启动期**不覆盖**清单；该库首次评分时 `put` 会压缩为标记
+  （仅丢弃指向不存在状态的悬空索引项，所有可读状态保留）。
+- 备份格式不变：reviewMeta 仍属运行态键不入备份；旧备份导入后 `ensureLayout()` 写 v4 标记。
+
+**遗留 TODO / 风险**
+- `count()` 改为前缀枚举（O(键数)），仅用于整表 `record` 路径；单题 `patch` 不受影响。
+- 跨标签新增 hash 后本地 `reviewKeySets` 缓存不主动失效（只影响 `put` 的 `isNew` 返回值，不影响读/写落盘）。
+- 未在真实浏览器 IndexedDB 长时验证 10k+ 状态下的前缀枚举耗时；10k 旧布局字节为推算，非实测。
+- 旧 v3 清单 anomalia 仅记录返回值，未在 UI 暴露。
+
 ### fix(security): CSP 默认 self + 显式白名单，标注明文风险（C020）
 
 **Commit Hash**：`c439bc1`

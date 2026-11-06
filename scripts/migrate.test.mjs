@@ -49,9 +49,9 @@ function q2() {
 
 section('布局版本常量');
 {
-  eq(QB.REVIEW_LAYOUT_VERSION, 3, '复习状态布局版本=3');
+  eq(QB.REVIEW_LAYOUT_VERSION, 4, '复习状态布局版本=4（紧凑标记）');
   eq(QB.REVLOG_LAYOUT_VERSION, 2, '评分日志布局版本=2');
-  eq(QB.ReviewStore.LAYOUT_VERSION, 3, 'ReviewStore 暴露布局版本');
+  eq(QB.ReviewStore.LAYOUT_VERSION, 4, 'ReviewStore 暴露布局版本');
   eq(QB.RevlogStore.SEG_SIZE, 200, '日志分段 200 条/段');
 }
 
@@ -132,8 +132,9 @@ section('v1→v5：hash 64 + 复习 per-hash + 日志分段，用户数据全部
   ok(keys.includes(QB.KEYS.reviewState(bank.id, n1.contentHash)), 'per-hash 状态键已写入（q1）');
   ok(keys.includes(QB.KEYS.reviewState(bank.id, n2.contentHash)), 'per-hash 状态键已写入（q2）');
   const meta = QB.Storage.get(QB.KEYS.reviewMeta(bank.id));
-  eq(meta.v, 3, '复习清单版本=3');
-  eq(meta.count, 2, '复习清单状态数=2');
+  eq(meta.v, 4, '复习布局标记版本=4');
+  ok(!Array.isArray(meta.keys), 'v4 标记不含 keys 数组（P2-06）');
+  eq(QB.ReviewStore.stateKeys(bank.id).length, 2, '物理状态键 2 条');
   eq(JSON.stringify(QB.Storage.get(QB.KEYS.reviewState(bank.id, n1.contentHash))), JSON.stringify(legacyStates[h1old]), 'q1 状态逐字段与旧值一致');
   eq(JSON.stringify(QB.Storage.get(QB.KEYS.reviewState(bank.id, n2.contentHash))), JSON.stringify(legacyStates[h2old]), 'q2 状态逐字段与旧值一致');
   // 对外读路径语义不变
@@ -308,7 +309,8 @@ section('迁移中断：抛错回滚到迁移前快照，重入后数据正确')
   const n = (await QB.DB.questions.list(bank.id, {})).items[0];
   eq(n.contentHash, newHash, '题目 hash 已升级');
   const m = QB.Storage.get(QB.KEYS.reviewMeta(bank.id));
-  eq(m.count, 1, '状态清单 1 条');
+  eq(m.v, 4, '状态布局标记版本=4');
+  eq(QB.ReviewStore.stateKeys(bank.id).length, 1, '物理状态键 1 条');
   eq(QB.Storage.get(QB.KEYS.reviewState(bank.id, newHash)).stability, 1.5, '状态随映射迁移且值一致');
   eq(QB.DB.revlog.list()[0].h, newHash, '日志随映射迁移');
   ok(!QB.Storage.keys().includes(QB.KEYS.review(bank.id)), '旧整表已清理');
@@ -343,7 +345,8 @@ section('断点重入：映射已落盘、题目未改写、版本戳未更新')
   eq(items[0].contentHash, n1hash, 'q1 按已存映射改写（不重算漂移）');
   eq(items[1].contentHash, n2hash, 'q2 按已存映射改写');
   const m = QB.Storage.get(QB.KEYS.reviewMeta(bank.id));
-  eq(m.count, 2, '状态数=2（无重复键）');
+  eq(m.v, 4, '状态布局标记版本=4');
+  eq(QB.ReviewStore.stateKeys(bank.id).length, 2, '状态数=2（无重复键）');
   eq(QB.Storage.get(QB.KEYS.reviewState(bank.id, n1hash)).stability, 2.2, 'q1 状态值一致');
   eq(QB.Storage.get(QB.KEYS.reviewState(bank.id, n2hash)).stability, 3.3, 'q2 状态值一致');
   ok(!QB.Storage.keys().includes(QB.KEYS.review(bank.id)), '旧整表已清理');
@@ -393,7 +396,8 @@ section('多标签并发：共享磁盘，只迁移一次且无覆盖');
   eq(q.length, 2, '题目仍 2 道（无重复/丢失）');
   q.forEach((item) => ok(QB.isCurrentHash(item.contentHash), 'hash 已升级到 v3：' + item.id));
   const m = owner.QB.Storage.get(owner.QB.KEYS.reviewMeta(bank.id));
-  eq(m.count, 2, '状态清单 2 条');
+  eq(m.v, 4, '状态布局标记版本=4');
+  eq(owner.QB.ReviewStore.stateKeys(bank.id).length, 2, '状态清单 2 条（物理键）');
   const map = owner.QB.DB.reviews.list(bank.id);
   eq(Object.keys(map).length, 2, '两条状态完整（无覆盖丢失）');
   eq(owner.QB.DB.revlog.list().length, 1, '日志 1 条（未重复追加）');
@@ -965,6 +969,67 @@ section('N4 探测残留：完成 / 中断 / 失败三种情况键集合增删�
     ok(!raw.has('qb:meta:lsQuotaProbe'), '被拒后探测键已删除');
   }
   console.log('  [N4] 完成/中断/失败三例：业务键与引导键集合增删均为 0，探测键无残留');
+}
+
+section('P2-06 reviewMeta v3→v4：逐键一致、迁移失败保留原清单');
+{
+  QB.Storage.clearAll();
+  QB.Storage.set(QB.KEYS.metaSchema, 6);
+  const bank = await QB.DB.banks.create({ name: 'reviewMeta 布局库' });
+  const mk = QB.KEYS.reviewMeta(bank.id);
+  const hashes = ['h1', 'h2', 'h3'];
+  const states = {
+    h1: { algo: 'fsrs', stability: 2.1, reps: 1, last: T0, due: T0 + DAY },
+    h2: { algo: 'fsrs', stability: 4.2, reps: 3, last: T0 - DAY, due: T0 + 2 * DAY },
+    h3: { algo: 'fsrs', stability: 1.7, reps: 2, last: T0 - 2 * DAY, due: T0 }
+  };
+  hashes.forEach((h) => QB.Storage.setSync(QB.KEYS.reviewState(bank.id, h), states[h]));
+  QB.Storage.setSync(mk, { v: 3, count: 3, keys: hashes.slice() });
+  const wrongKey = QB.KEYS.wrong(bank.id);
+  const favKey = QB.KEYS.favorite(bank.id);
+  const wrong = JSON.stringify([{ hash: 'h1', at: T0 }]);
+  const fav = JSON.stringify(['h1', 'h2']);
+  QB.Storage.setSync(wrongKey, JSON.parse(wrong));
+  QB.Storage.setSync(favKey, JSON.parse(fav));
+  const beforeMap = QB.ReviewStore.readMap(bank.id);
+  const beforeMeta = QB.Storage.getFresh(mk, null);
+  eq(QB.ReviewStore.count(bank.id), 3, '迁移前计数 3');
+
+  const r = await QB.Migration.run();
+  eq(r.reviewMeta && r.reviewMeta.migrated, 1, '启动期迁移压缩 1 个库清单');
+  eq(r.reviewMeta.failed, 0, '迁移无失败');
+  const afterMeta = QB.Storage.getFresh(mk, null);
+  eq(afterMeta.v, 4, '迁移后布局版本=4');
+  ok(!Array.isArray(afterMeta.keys), '迁移后不再保存 keys 数组');
+  ok(Buffer.byteLength(JSON.stringify(afterMeta)) <= 16, '迁移后 meta 载荷 ≤16B（实测 ' + Buffer.byteLength(JSON.stringify(afterMeta)) + 'B）');
+  eq(QB.ReviewStore.stateKeys(bank.id).length, 3, '物理状态键 3 个');
+  eq(QB.ReviewStore.count(bank.id), 3, '迁移后计数仍为 3（不重复计分）');
+  const afterMap = QB.ReviewStore.readMap(bank.id);
+  eq(Object.keys(afterMap).length, Object.keys(beforeMap).length, '迁移前后键数一致');
+  hashes.forEach((h) => eq(JSON.stringify(afterMap[h]), JSON.stringify(states[h]), '迁移后逐键状态一致：' + h));
+  eq(JSON.stringify(QB.Storage.getFresh(wrongKey, null)), wrong, '错题键逐字节未变');
+  eq(JSON.stringify(QB.Storage.getFresh(favKey, null)), fav, '收藏键逐字节未变');
+  eq(QB.ReviewStore.get(bank.id, 'h1').stability, 2.1, '复习状态可按键读取');
+
+  const again = await QB.Migration.run();
+  eq(again.reviewMeta.migrated, 0, '二次启动幂等（不再写 meta）');
+
+  // 迁移写失败：保留原 v3 清单与全部状态
+  QB.Storage.setSync(mk, beforeMeta);
+  const origSync = QB.Storage.setSync;
+  QB.Storage.setSync = function (k, v) {
+    if (k === mk) throw new Error('injected reviewMeta write failure');
+    return origSync.call(QB.Storage, k, v);
+  };
+  let ran = null;
+  try { ran = await QB.Migration.run(); } finally { QB.Storage.setSync = origSync; }
+  eq(ran.reviewMeta.failed, 1, '迁移写入失败被记录而非静默成功');
+  const kept = QB.Storage.getFresh(mk, null);
+  eq(kept.v, 3, '写入失败后保留原 v3 清单');
+  eq((kept.keys || []).join(','), hashes.join(','), '原清单逐键保留（可回退）');
+  eq(QB.ReviewStore.stateKeys(bank.id).length, 3, '失败后物理状态键未丢');
+  eq(QB.ReviewStore.count(bank.id), 3, '失败后计数不变');
+  console.log('  [P2-06] 迁移前 v3 清单 3 键 → v4 标记 7B；逐键一致、错题/收藏未变、失败保留原清单');
 }
 
 console.log('\n================ 汇总 ================');

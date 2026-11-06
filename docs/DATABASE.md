@@ -45,7 +45,7 @@ users 1 ──<（wrong_questions / favorites / attempts / sessions）   # 多�
 | `qb:user:wrong:<bankId>` | `wrong_questions` | `{questionKey, wrongCount, lastAt}` |
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
 | `qb:user:review:<bankId>:<hash>` | `review_schedule` | **schema v5 主布局**：单题一项 `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}`，评分只写改动键（O(改动数)） |
-| `qb:user:reviewMeta:<bankId>` | `review_schedule`（清单） | `{v:3, count, keys:[...]}`；per-hash 键集合，供枚举/统计/清理；**跨标签按 `keys` 并集合并、`count`=并集长度（C008，合并缺清单即孤儿 hash）** |
+| `qb:user:reviewMeta:<bankId>` | `review_schedule`（布局标记） | `{v:4}` 紧凑标记（P2-06）；键集合由物理 `user:review:<bankId>:<hash>` 前缀枚举，**不再存 keys/count**；旧 `{v:3,count,keys}` 由启动期 `ReviewStore.convertMetaLayouts()` 幂等压缩（旧清单与物理键集合不一致时保留原清单并记录 anomalia，不丢状态） |
 | `qb:user:review:<bankId>` | `review_schedule`（旧整表） | 兼容读：迁移前/迁移中断/旧备份导入；`QB.ReviewStore` 合并旧整表与 per-hash（per 优先），写路径不再产生此键 |
 | `qb:user:reviewRev:<bankId>` | 本地同步元数据 | 单调递增的本地复习版本号（服务端 `review_rev` 的本地对应物）；用于 storage 事件按版本合并与写前重读，不进备份 |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |
@@ -62,7 +62,7 @@ users 1 ──<（wrong_questions / favorites / attempts / sessions）   # 多�
 | `qb:meta:migrationProgress` | —（迁移运行期，**始终 LocalStorage**） | `{v,done,total,bytes,at}` LS→IDB 迁移**断点续传进度**：每批写完后更新，中断后从 `done` 继续；迁移完成即清除，不进备份 |
 | `qb:meta:hashMap:<bankId>` | —（迁移运行期） | `{oldHash: newHash}` 断点续跑的哈希映射；迁移成功后保留到最后一步再移除，供中断重入复用，不进备份 |
 | `qb:meta:theme` | —（前端偏好） | `light`/`dark` |
-| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 **6**（v2 contentHash → v3 题目分片 → v4 分片一致修复 → v5 hash 64 位 + per-hash 复习 + 分段日志 → **v6 存储底座迁 IndexedDB**），启动时由 `Migration.run({force?})` 幂等升级（v1→…→v6 链式；已是 6 且后端已切换时为空操作） |
+| `qb:meta:schemaVersion` | —（前端元数据） | 本地 schema 版本号；当前 **6**（v2 contentHash → v3 题目分片 → v4 分片一致修复 → v5 hash 64 位 + per-hash 复习 + 分段日志 → **v6 存储底座迁 IndexedDB**），启动时由 `Migration.run({force?})` 幂等升级（v1→…→v6 链式；已是 6 且后端已切换时为空操作）。**reviewMeta 子布局版本 v3→v4 独立于 schema 6**：不触发全量迁移，`Migration.run` 每次启动对旧清单做一次幂等压缩（失败保留原清单，应用按物理键枚举照常可用） |
 | `qb:meta:storageBackend` | —（运行期引导标记，**始终 LocalStorage**） | 后端选择：`'idb'` / `'ls'`（用户显式回退，不再自动升级）/ `'ls-fallback'`（IDB 不可用或读失败）/ 缺失（首次，仍用 LS 待 v6 迁移）。不进备份、恢复 replace 不删除 |
 | `qb:meta:lsMigratedAt` | —（运行期引导标记，**始终 LocalStorage**） | LS→IDB 迁移完成时间（ISO）；用于展示与诊断，不进备份 |
 | `qb:meta:lsBackupState` | —（运行期引导标记，**始终 LocalStorage**） | LS 旧数据处置状态：`retained`（迁移完成、等待下次启动校验后自动清理）/ `cleaned`（已清理，自动或手动）/ `rollback-current` / `rollback-snapshot` / `idb-unavailable`；不进备份 |

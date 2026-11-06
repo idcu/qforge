@@ -27,10 +27,9 @@
   }
 
   /**
-   * 复习清单 `{v, count, keys}` 合并（跨标签并集，C008）。
-   * 另一标签可能只看到部分 hash：整值覆盖会让本地已有 hash 成为孤儿（state 存在、清单缺失，
-   * 迁移/备份按清单枚举时漏题）。只合并 `keys` 并集，`count` 恒等于并集长度，`v` 取较大者；
-   * 非法/缺字段一侧视为空，不改写另一侧的有效键。不修改入参。
+   * 复习清单/标记合并（跨标签，C008 / P2-06）。
+   * v4 标记不含 keys，直接取较大版本；若任一侧仍是旧 v3 清单则按 keys 并集保留
+   * （读取路径已不依赖清单，混合版本也不会让状态成为孤儿）。不修改入参。
    */
   function mergeMeta(local, remote) {
     const a = local && typeof local === 'object' ? local : {};
@@ -45,7 +44,8 @@
         keys.push(k);
       });
     });
-    return { v: Math.max(Number(a.v) || 0, Number(b.v) || 0), count: keys.length, keys: keys };
+    const v = Math.max(Number(a.v) || 0, Number(b.v) || 0);
+    return keys.length ? { v: v, count: keys.length, keys: keys } : { v: v };
   }
 
   QB.ReviewMerge = { mergeMaps, lastOf, mergeMeta };

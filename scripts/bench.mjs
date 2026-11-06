@@ -266,6 +266,12 @@ let c018ColdMs = 0;
 let c018WarmMs = 0;
 let c018PrepOldMs = 0;
 let c018PrepNewMs = 0;
+let reviewMetaWrites1k = 0;
+let reviewMetaBytes1k = 0;
+let reviewMetaLast1k = 0;
+let reviewMetaWrites10k = 0;
+let reviewMetaBytes10k = 0;
+let reviewMetaLast10k = 0;
 {
   const bank = await QB.DB.banks.create({ name: 'C018 去重库', category: 'bench-c018' });
   const seed = [];
@@ -314,25 +320,65 @@ let c018PrepNewMs = 0;
     'ms；比值 ' + (c018PrepNewMs / c018PrepOldMs).toFixed(3));
 }
 
-/* ---------- 2d. C018 P2-06 首次 hash 清单写入字节（接受档，不设门禁） ---------- */
-{
-  const rb = await QB.DB.banks.create({ name: 'C018 清单库', category: 'bench-c018' });
-  let cumBytes = 0;
-  let lastBytes = 0;
+/* ---------- 2d. P2-06 reviewMeta 实际写入字节（1000 / 10000 新 hash） ----------
+ * 旧布局 v3：每次新 hash 重写全量 keys 清单（1000 → 累计 3346.1KB / 末次 6919B）。
+ * v4：只写一次 {v:4} 标记；这里统计**真实落盘调用**（Storage.setSync），不是对象内存估值。 */
+function measureReviewMeta(bankId, count) {
+  const mk = QB.KEYS.reviewMeta(bankId);
+  const orig = QB.Storage.setSync;
+  const s = { writes: 0, bytes: 0, last: 0 };
+  QB.Storage.setSync = function (k, v) {
+    if (k === mk) {
+      s.writes++;
+      const b = Buffer.byteLength(JSON.stringify(v));
+      s.last = b;
+      s.bytes += b;
+    }
+    return orig.apply(QB.Storage, arguments);
+  };
   const t0 = process.hrtime.bigint();
-  for (let i = 0; i < 1000; i++) {
-    QB.ReviewStore.put(rb.id, 'h' + i, { reps: 1, due: Date.now() + 86400000, last: Date.now() });
-    const meta = QB.ReviewStore.meta(rb.id);
-    lastBytes = Buffer.byteLength(JSON.stringify(meta));
-    cumBytes += lastBytes;
+  try {
+    for (let i = 0; i < count; i++) {
+      QB.ReviewStore.put(bankId, 'h' + i, { reps: 1, due: Date.now() + 86400000, last: Date.now() });
+    }
+  } finally {
+    QB.Storage.setSync = orig;
   }
-  const totalMs = Number(process.hrtime.bigint() - t0) / 1e6;
+  s.ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  return s;
+}
+{
+  const b1 = await QB.DB.banks.create({ name: 'P2-06 清单库 1k', category: 'bench-c018' });
+  const s1 = measureReviewMeta(b1.id, 1000);
+  reviewMetaWrites1k = s1.writes;
+  reviewMetaBytes1k = s1.bytes;
+  reviewMetaLast1k = s1.last;
   report.push({
-    name: '首次 hash 清单写入字节（1000 新 hash，C018）',
-    median: totalMs, best: totalMs, p50: totalMs, p95: totalMs,
-    runs: 1, samples: 1, min: totalMs, max: totalMs,
-    extra: '累计 meta ' + (cumBytes / 1024).toFixed(1) + 'KB；末次清单 ' + lastBytes + 'B（随库线性放大，P2-06 接受）'
+    name: 'reviewMeta 写入字节（1000 新 hash，P2-06）',
+    median: s1.ms, best: s1.ms, p50: s1.ms, p95: s1.ms,
+    runs: 1, samples: 1, min: s1.ms, max: s1.ms,
+    extra: 'meta 写入 ' + s1.writes + ' 次 / 累计 ' + s1.bytes + 'B / 末次 ' + s1.last +
+      'B；旧 v3 对照 累计 3346.1KB / 末次 6919B（C018 实测）'
   });
+
+  const b2 = await QB.DB.banks.create({ name: 'P2-06 清单库 10k', category: 'bench-c018' });
+  const s10 = measureReviewMeta(b2.id, 10000);
+  reviewMetaWrites10k = s10.writes;
+  reviewMetaBytes10k = s10.bytes;
+  reviewMetaLast10k = s10.last;
+  report.push({
+    name: 'reviewMeta 写入字节（10000 新 hash，P2-06）',
+    median: s10.ms, best: s10.ms, p50: s10.ms, p95: s10.ms,
+    runs: 1, samples: 1, min: s10.ms, max: s10.ms,
+    extra: 'meta 写入 ' + s10.writes + ' 次 / 累计 ' + s10.bytes + 'B / 末次 ' + s10.last +
+      'B；旧 v3 推算 累计 ≈334.6MB（∝N²）/ 末次 ≈67.6KB（∝N）'
+  });
+
+  // 清理临时夹具，避免 11k 条复习状态污染后续 heap/规模库读数
+  QB.ReviewStore.clear(b1.id);
+  QB.ReviewStore.clear(b2.id);
+  await QB.DB.banks.remove(b1.id);
+  await QB.DB.banks.remove(b2.id);
 }
 
 /* ---------- 11. 大规模单库（3000 题）数据层打点（阶段 A 规模验收） ---------- */
@@ -549,7 +595,7 @@ row('SRS 写载荷（3000 状态：整表 vs 单键增量）', await timed(() =>
 
 QB.ReviewStore.clear(srsBank); // schema v5：per-hash 布局，预置 3000 个独立状态键（写入 O(1)）
 srsKeys.forEach((k) => QB.Storage.setSync(QB.KEYS.reviewState(srsBank, k), srsFull[k]));
-QB.ReviewStore.writeMeta(srsBank, srsKeys);
+QB.ReviewStore.writeMarker(srsBank);
 row('SRS 本地评分落盘（3000 状态，per-hash；含落盘）', await timed(async (i) => {
   const d = {}; d[srsKey] = srsFull[srsKey];
   await QB.DB.reviews.patch(srsBank, d, [{ t: qNow + i, h: srsKey, r: 3, b: srsBank }]);
@@ -1429,6 +1475,15 @@ if (process.argv.indexOf('--assert') >= 0) {
       + ' ≤ 0.50（旧 readAll+Set ' + ms(c018PrepOldMs) + '，索引 ' + ms(c018PrepNewMs) + '）');
     if (!ok) fails.push('merge 去重准备 10k ' + ratio.toFixed(3) + ' > 0.50');
   }
+  // P2-06：reviewMeta v4 标记——1000/10000 新 hash 的 meta 实际写入次数 ≤1、累计 ≤64B
+  //（旧 v3 每次重写全量 keys：1000 → 1000 次 / 3346.1KB；门禁直接锁住线性膨胀回归）
+  [['1000', reviewMetaWrites1k, reviewMetaBytes1k, reviewMetaLast1k],
+    ['10000', reviewMetaWrites10k, reviewMetaBytes10k, reviewMetaLast10k]].forEach(([n, w, b, last]) => {
+    const ok = w <= 1 && b <= 64;
+    console.log((ok ? '  ✓ ' : '  ✗ ') + 'reviewMeta ' + n + ' 新 hash 写入：' + w + ' 次 / 累计 ' + b +
+      'B / 末次 ' + last + 'B（要求 ≤1 次且 ≤64B；旧 v3 随 N 线性重写）');
+    if (!ok) fails.push('reviewMeta ' + n + ' 新 hash 写入 ' + w + ' 次 / ' + b + 'B > 1 次 / 64B');
+  });
   // P1-B 门禁修订：原「历史绝对毫秒基线 ×1.05」（grade 0.0771 / gradeMany 0.2480）对机器频率/负载漂移敏感：
   //   HEAD 实测 0.0902 / 0.2787，同机复跑旧代码 e772e60 也是 0.0882 / 0.2784（同超限）→ 是机器漂移，不是代码回退。
   // 改为「同轮标定比值」：ratio = 本轮被测中位数 / 标定单位耗时（标定工作与被测 patch 同构，见 5b）；

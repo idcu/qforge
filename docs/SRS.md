@@ -248,7 +248,7 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 | 键 | 内容 | 对应表（见 DATABASE.md） |
 | --- | --- | --- |
 | `qb:user:review:<bankId>:<hash>` | 单题状态对象（per-hash，评分只写改动键） | `review_schedule` |
-| `qb:user:reviewMeta:<bankId>` | `{v:3,count,keys}` per-hash 键清单（枚举/统计/清理） | `review_schedule` |
+| `qb:user:reviewMeta:<bankId>` | `{v:4}` 紧凑标记（键集合由物理 `user:review:<bank>:<hash>` 前缀枚举） | `review_schedule` |
 | `qb:user:review:<bankId>` | 旧整表 `contentHash → 状态对象`；**仅兼容读**（迁移前/中断/旧备份导入），`QB.ReviewStore` 双读合并、per 优先 | `review_schedule` |
 | `qb:user:revlogMeta` | `{v:2,segSize:200,first,last,count}` 分段清单 | `review_log` |
 | `qb:user:revlog:<i>` | 第 i 段评分日志 `{id,h,r,t,b?}[]`（≤200 条） | `review_log` |

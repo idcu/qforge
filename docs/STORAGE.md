@@ -32,7 +32,7 @@
 
 | 存放位置 | 键 | 理由 |
 | --- | --- | --- |
-| **IndexedDB**（业务数据） | `banks` / `questions:*`（分片 + 清单）/ `user:review:<bank>:<hash>` + `user:reviewMeta` / `user:revlogMeta` + `user:revlog:<i>` / 错题 / 收藏 / 历史 / 会话 / 权重 / 当前库 / 主题 / 开始偏好 / 题目图片资产索引 | 数据量随题量增长（50k 题约 45MB 估算），必须解除 LS 约 5MB 硬顶；IDB 配额按 origin 计算且通常远大于 LS |
+| **IndexedDB**（业务数据） | `banks` / `questions:*`（分片 + 清单）/ `user:review:<bank>:<hash>` + `user:reviewMeta`（v4 标记）/ `user:revlogMeta` + `user:revlog:<i>` / 错题 / 收藏 / 历史 / 会话 / 权重 / 当前库 / 主题 / 开始偏好 / 题目图片资产索引 | 数据量随题量增长（50k 题约 45MB 估算），必须解除 LS 约 5MB 硬顶；IDB 配额按 origin 计算且通常远大于 LS |
 | **LocalStorage**（引导标记，`QB.Store.BOOTSTRAP_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:schemaVersion` / `meta:migrationLock` / `meta:migrationBackup` / `meta:lsQuotaProbe` / `meta:lsQuotaCap` | **打开 IDB 之前就要同步可读**（决定用哪个后端）；迁移锁需跨标签同步原子；自动备份在 IDB 不可用时要有落点；`meta:lsQuotaProbe` 是探测临时键（每次探测结束/启动时清理，不得残留），`meta:lsQuotaCap` 是容量探测缓存。这些都是极小状态，不占容量 |
 | 备份排除（`BACKUP_EXCLUDED_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:lsQuotaProbe` / `meta:lsQuotaCap` | 只描述「本设备当前用哪个后端/容量」，换设备应重新探测；恢复 replace 时也不删除（否则会把新设备的后端选择一起删掉） |
 
@@ -112,8 +112,8 @@
 | `user:reviewRev:<bankId>` | 取 `max` |
 | `user:revlog:<i>` | 按条目 `id` 并集（保留另一标签的追加） |
 | `user:revlogMeta` | `v/last` 取大、`first` 取小、`count` 取大 |
-| **`user:reviewMeta:<bankId>`（C008）** | **`ReviewMerge.mergeMeta`：`keys` 并集，`count` 恒等于并集长度，`v` 取大**——两标签各只看到部分 hash 时，整值覆盖会让另一标签的 hash 变孤儿（state 在、清单缺，迁移/备份按清单枚举漏题） |
+| **`user:reviewMeta:<bankId>`（C008 / P2-06）** | **`ReviewMerge.mergeMeta`：v4 标记直接取较大版本（`{v:4}`，不再并集 keys）；键集合由物理 per-hash 键枚举，标签各写各自的状态键即可并集，结构上不再产生孤儿 hash** |
 
-`mergeMeta` 对缺字段/非数组载荷视为空，不破坏另一侧有效键；重复事件幂等。回归：`scripts/storage.test.mjs`
-用两个独立 harness 共享同一底层存储（真实走 `ReviewStore.writeMeta`），断言 `keys 1+1→2`、`count=2`、
-`stateKeys` 覆盖双方 hash。
+`mergeMeta` 对缺字段/非数组载荷视为空，v4 标记无 keys 时结果为 `{v:4}`；重复事件幂等。回归：`scripts/storage.test.mjs`
+用两个独立 harness 共享同一底层存储（真实走 `ReviewStore.put` + 逐键 storage 事件），断言双方 `stateKeys`/`readMap`
+覆盖 h1+h2、meta 载荷 ≤16B 且不含 keys。

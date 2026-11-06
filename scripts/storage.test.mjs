@@ -163,7 +163,7 @@ section('跨标签合订（A4）：review 键按 ReviewMerge 合并而非覆盖'
   S.clearAll();
 }
 
-section('C008 跨标签 reviewMeta：keys 并集、count=并集长度（消除孤儿 hash）');
+section('C008/P2-06 跨标签复习状态：物理键并集、meta 不再并集大清单');
 {
   // 双标签复现：两个独立 harness 共享同一底层 localStorage（A/B 各自一套模块状态）
   const raw = new Map();
@@ -172,31 +172,57 @@ section('C008 跨标签 reviewMeta：keys 并集、count=并集长度（消除�
   A.QB.DB.init(); B.QB.DB.init();
   const bank = 'bank-meta';
   const mk = A.QB.KEYS.reviewMeta(bank);
-  const v = A.QB.REVIEW_LAYOUT_VERSION;
-  // A 标签走真实写入路径：清单 keys=[h1] 并落盘
-  A.QB.ReviewStore.writeMeta(bank, ['h1']);
-  A.QB.Storage.forceSync();
-  const aValue = raw.get('qb:' + mk); // 事件载荷 = A 写入时的值（浏览器在写入瞬间捕获）
-  // B 标签本地已写入 keys=[h2]
-  B.QB.ReviewStore.writeMeta(bank, ['h2']);
-  // 浏览器 storage 事件：把 A 写入时的真实值送到 B
-  B.QB.Storage._handleExternalChange({ key: 'qb:' + mk, newValue: aValue });
+  const sk1 = A.QB.KEYS.reviewState(bank, 'h1');
+  const sk2 = A.QB.KEYS.reviewState(bank, 'h2');
+  // 两标签各自真实评分写入：只写自己的状态键，meta 仅在首次写一次紧凑标记
+  A.QB.ReviewStore.put(bank, 'h1', { last: 300, stability: 3 });
+  B.QB.ReviewStore.put(bank, 'h2', { last: 250, stability: 9 });
+  A.QB.Storage.forceSync(); B.QB.Storage.forceSync();
+  // 浏览器逐键 storage 事件：把对方的状态键投递给本标签（不再依赖 meta 清单）
+  B.QB.Storage._handleExternalChange({ key: 'qb:' + sk1, newValue: raw.get('qb:' + sk1) });
+  A.QB.Storage._handleExternalChange({ key: 'qb:' + sk2, newValue: raw.get('qb:' + sk2) });
+  B.QB.Storage._handleExternalChange({ key: 'qb:' + mk, newValue: raw.get('qb:' + mk) });
+  eq(A.QB.ReviewStore.stateKeys(bank).length, 2, 'A 侧 stateKeys 覆盖双方 hash（另一标签进度不成孤儿）');
+  eq(B.QB.ReviewStore.stateKeys(bank).length, 2, 'B 侧 stateKeys 覆盖双方 hash（另一标签进度不成孤儿）');
+  eq(Object.keys(A.QB.ReviewStore.readMap(bank)).length, 2, 'A 侧整表读回 2 条状态');
+  eq(Object.keys(B.QB.ReviewStore.readMap(bank)).length, 2, 'B 侧整表读回 2 条状态');
   const merged = B.QB.Storage.get(mk, null);
-  eq((merged.keys || []).length, 2, '双标签清单按键并集（h1+h2，不整值覆盖）');
-  ok((merged.keys || []).indexOf('h1') >= 0 && (merged.keys || []).indexOf('h2') >= 0, '并集包含双方 hash');
-  eq(merged.count, 2, 'count 与 keys 并集长度一致（不产生孤儿 hash）');
-  // 反向/重复事件幂等
-  B.QB.Storage._handleExternalChange({ key: 'qb:' + mk, newValue: aValue });
-  eq((B.QB.Storage.get(mk, null).keys || []).length, 2, '重复事件不重复计数');
-  eq(B.QB.ReviewStore.meta(bank).keys.length, 2, 'ReviewStore.meta 读回并集清单');
-  eq(B.QB.ReviewStore.stateKeys(bank).length, 2, 'stateKeys 覆盖双方 hash（另一标签进度不再成孤儿）');
-  // A 侧自己的清单未被事件反向污染
-  eq(A.QB.Storage.get(mk, null).keys.length, 1, 'A 标签本地清单保持自身视图（不被 B 覆盖）');
-  // 非法载荷不炸、不丢已有键
-  B.QB.Storage._handleExternalChange({ key: 'qb:' + mk, newValue: JSON.stringify({ v: v, count: 9, keys: 'bad' }) });
-  eq((B.QB.Storage.get(mk, null).keys || []).length, 2, '非法 keys 字段不破坏已有并集');
-  eq(B.QB.Storage.get(mk, null).count, 2, '非法 count 不覆盖并集长度');
+  eq(merged.v, 4, 'reviewMeta 标记版本=4');
+  ok(!Array.isArray(merged.keys), 'v4 标记不含 keys 数组（跨标签无需并集大清单）');
+  ok(Buffer.byteLength(JSON.stringify(merged)) <= 16, 'meta 载荷 ≤16B（不随 hash 数增长）');
+  // 非法载荷不炸、不丢物理状态
+  B.QB.Storage._handleExternalChange({ key: 'qb:' + mk, newValue: JSON.stringify({ v: 4, count: 9, keys: 'bad' }) });
+  eq(Object.keys(B.QB.ReviewStore.readMap(bank)).length, 2, '非法 meta 载荷不丢物理状态');
   A.QB.Storage.clearAll(); B.QB.Storage.clearAll();
+}
+
+section('P2-06 reviewMeta 写入字节：1000 个新 hash 不再线性膨胀');
+{
+  // 拦截底层持久化写入，只统计 reviewMeta 键（真实落盘字节，不是对象内存估值）
+  const bank = 'rm-layout';
+  const mk = QB.KEYS.reviewMeta(bank);
+  QB.Storage.clearAll();
+  const rawSet = ls.setItem.bind(ls);
+  let writes = 0, bytes = 0, last = 0;
+  ls.setItem = (k, v) => {
+    if (k === 'qb:' + mk) { writes++; last = Buffer.byteLength(String(v)); bytes += last; }
+    return rawSet(k, v);
+  };
+  try {
+    for (let i = 0; i < 1000; i++) QB.ReviewStore.put(bank, 'h' + i, { reps: 1, last: 1000 + i });
+  } finally {
+    ls.setItem = rawSet;
+  }
+  ok(writes <= 1, '1000 新 hash：meta 写入次数 ≤1（实测 ' + writes + ' 次）');
+  ok(bytes <= 64, '1000 新 hash：meta 累计写入 ≤64B（实测 ' + bytes + 'B）');
+  ok(last <= 16, '末次 meta 载荷 ≤16B（实测 ' + last + 'B）');
+  eq(QB.ReviewStore.stateKeys(bank).length, 1000, '物理状态键 1000 个');
+  eq(QB.ReviewStore.count(bank), 1000, '统计数=1000');
+  eq(Object.keys(QB.ReviewStore.readMap(bank)).length, 1000, '整表读回 1000 条状态');
+  const meta = QB.Storage.get(mk, null);
+  eq(meta && meta.v, 4, 'meta 标记 v=4');
+  ok(meta && !Array.isArray(meta.keys), 'meta 不含 keys 数组');
+  QB.Storage.clearAll();
 }
 
 

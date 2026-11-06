@@ -855,22 +855,26 @@
   let revlogRev = 0; // 本地 revlog 写修订号（供统计页派生数据缓存失效；B3）
 
   /* ---------------- 复习状态 per-hash 布局（公共抽象 QB.ReviewStore） ----------------
-   * schema v5：调度状态从单键整表 map 改为「每个 contentHash 一个独立键」+ 清单键。
-   *   - 写：单次评分只 setSync 一个状态键（O(1)），不再序列化整库；
-   *   - 读：readMap 仍返回整表 map（对外语义不变），get(bankId, hash) 供单题 O(1) 读取；
-   *   - 兼容：旧整表键 user:review:<bankId> 继续参与合并读取（迁移前/迁移中断/旧备份导入）。
+   * schema v5：调度状态从单键整表 map 改为「每个 contentHash 一个独立键」。
+   * P2-06（布局 v4）：user:reviewMeta:<bankId> 只保留 {v:4} 紧凑标记，不再存 keys 清单。
+   *   - 写：单次评分只 setSync 一个状态键；稳态下不再产生任何 meta 写入；
+   *   - 读：hash 集合由物理状态键前缀枚举（唯一事实源），readMap 仍返回整表 map；
+   *   - 兼容：旧 v3 清单只用于迁移诊断；旧整表键 user:review:<bankId> 继续参与合并读取。
    * 唯一实现，migrate 与适配器内部均复用之，禁止各自复制 per-hash 解析。
    */
-  const REVIEW_LAYOUT_VERSION = 3;
+  const REVIEW_LAYOUT_VERSION = 4;
 
   function reviewStateKey(bankId, hash) { return K.reviewState(bankId, hash); }
 
-  /** per-bank hash 集合缓存（写路径 O(1)）：随清单对象替换自动失效（跨标签 meta 变更后重载） */
+  /** per-bank hash 集合缓存（写路径 O(1)）：随 meta 对象替换自动失效。
+   *  v4 起 meta 不再携带 keys，集合由物理状态键枚举（stateKeys）构建。 */
   const reviewKeySets = new Map();
   function reviewKeySetOf(bankId, meta) {
     let entry = reviewKeySets.get(bankId);
-    if (!entry || entry.meta !== meta || (!meta && !entry.set.size)) {
-      entry = { meta: meta, set: new Set(meta ? meta.keys : ReviewStore.stateKeys(bankId)) };
+    if (!entry || entry.meta !== meta) {
+      const set = new Set(ReviewStore.stateKeys(bankId));
+      if (meta && Array.isArray(meta.keys)) meta.keys.forEach((h) => set.add(h));
+      entry = { meta: meta, set: set };
       reviewKeySets.set(bankId, entry);
     }
     return entry.set;
@@ -886,26 +890,25 @@
     stateKey: reviewStateKey,
     legacyMap: legacyReviewMap,
 
-    /** 清单 {v, count, keys}；旧布局/缺失返回 null（同标签写经 setSync 更新缓存，跨标签由 storage 事件同步） */
+    /** 布局标记/旧清单（诊断用）；v4 标记不含 keys，读取路径不依赖它 */
     meta(bankId) {
       const m = Storage.get(K.reviewMeta(bankId), null);
-      return (m && m.v === REVIEW_LAYOUT_VERSION && Array.isArray(m.keys)) ? m : null;
+      if (!m || typeof m !== 'object') return null;
+      if (m.v === REVIEW_LAYOUT_VERSION) return m;
+      return (m.v === 3 && Array.isArray(m.keys)) ? m : null;
     },
 
-    writeMeta(bankId, keys) {
-      const meta = {
-        v: REVIEW_LAYOUT_VERSION,
-        count: keys.length,
-        keys: keys.slice()
-      };
+    /** 写紧凑标记 {v:4}（P2-06）：不再落 keys 数组；旧 v3 清单在首次写入/迁移时被压缩 */
+    writeMarker(bankId) {
+      const meta = { v: REVIEW_LAYOUT_VERSION };
       Storage.setSync(K.reviewMeta(bankId), meta);
+      const set = new Set(ReviewStore.stateKeys(bankId));
+      reviewKeySets.set(bankId, { meta: meta, set: set });
       return meta;
     },
 
-    /** 物理状态键的 hash 列表（无清单时兼容枚举；迁移完成后只读清单） */
+    /** 物理状态键的 hash 列表（唯一事实源；不读 meta.keys，旧清单/跨标签都不影响可见性） */
     stateKeys(bankId) {
-      const meta = ReviewStore.meta(bankId);
-      if (meta) return meta.keys.slice();
       const prefix = K.review(bankId) + ':';
       return Storage.keys()
         .filter((k) => k.indexOf(prefix) === 0)
@@ -931,30 +934,26 @@
       return legacyReviewMap(bankId)[hash] || null;
     },
 
-    /** 状态键数量（O(1) 清单直读；旧整表额外条目计入） */
+    /** 状态键数量（物理键枚举 ∪ 旧整表额外条目，与 readMap 同口径） */
     count(bankId) {
-      const meta = ReviewStore.meta(bankId);
-      if (!meta) return Object.keys(ReviewStore.readMap(bankId)).length;
-      const legacy = legacyReviewMap(bankId);
-      const extra = Object.keys(legacy).filter((h) => meta.keys.indexOf(h) < 0).length;
-      return meta.count + extra;
+      const set = new Set(ReviewStore.stateKeys(bankId));
+      Object.keys(legacyReviewMap(bankId)).forEach((h) => set.add(h));
+      return set.size;
     },
 
-    /** 写入单键并维护清单（返回 key 是否新增）；已存在的键为 O(1)，不复制整份清单 */
+    /** 写入单键（返回 key 是否新增）；稳态只写一个状态键，不再重写 meta */
     put(bankId, hash, state) {
       const meta = ReviewStore.meta(bankId);
       const keySet = reviewKeySetOf(bankId, meta);
       const isNew = !keySet.has(hash);
       Storage.setSync(reviewStateKey(bankId, hash), state);
-      if (isNew || !meta) {
-        keySet.add(hash);
-        const nextMeta = ReviewStore.writeMeta(bankId, Array.from(keySet));
-        reviewKeySets.set(bankId, { meta: nextMeta, set: keySet });
-      }
+      keySet.add(hash);
+      // 无标记 / 仍是旧 v3 清单时写一次紧凑标记（顺带压缩旧清单）；之后新 hash 零 meta 写入
+      if (!meta || Array.isArray(meta.keys)) ReviewStore.writeMarker(bankId);
       return isNew;
     },
 
-    /** 删除单键（同时清旧整表条目与清单），返回是否有改动 */
+    /** 删除单键（同时清旧整表条目），返回是否有改动；不重写 meta */
     removeHash(bankId, hash) {
       let changed = false;
       const cached = reviewKeySets.get(bankId);
@@ -967,11 +966,6 @@
         if (Object.keys(legacy).length) Storage.setSync(K.review(bankId), legacy);
         else Storage.remove(K.review(bankId));
         changed = true;
-      }
-      const meta = ReviewStore.meta(bankId);
-      if (meta) {
-        const idx = meta.keys.indexOf(hash);
-        if (idx >= 0) { meta.keys.splice(idx, 1); ReviewStore.writeMeta(bankId, meta.keys); changed = true; }
       }
       return changed;
     },
@@ -986,15 +980,14 @@
 
     /**
      * 旧整表布局 → per-hash 布局（幂等；迁移/旧备份导入共用）。
-     * 顺序：先补写缺失的状态键 → 写清单 → 最后删旧整表键。
+     * 顺序：先补写缺失的状态键 → 写布局标记 → 最后删旧整表键。
      * 任一步中断后重跑都会收敛到同一结果，不会重复或丢状态。
      * @returns {{converted:number, kept:number}} converted=本次从旧整表补写的键数
      */
     convertLegacy(bankId) {
       const legacy = legacyReviewMap(bankId);
-      const meta = ReviewStore.meta(bankId);
-      const keys = meta ? meta.keys.slice() : ReviewStore.stateKeys(bankId);
-      const known = new Set(keys);
+      const raw = ReviewStore.meta(bankId);
+      const known = new Set(ReviewStore.stateKeys(bankId));
       let converted = 0;
       Object.keys(legacy).forEach((h) => {
         const own = Storage.getFresh(reviewStateKey(bankId, h), null);
@@ -1005,11 +998,12 @@
           Storage.setSync(reviewStateKey(bankId, h), val);
           converted++;
         }
-        if (!known.has(h)) { keys.push(h); known.add(h); }
+        known.add(h);
       });
-      if (keys.length || meta) ReviewStore.writeMeta(bankId, keys);
+      // v4 稳态（标记已存在且无 keys）零写入；仅首次/旧清单时压缩为标记
+      if ((known.size || raw) && (!raw || Array.isArray(raw.keys))) ReviewStore.writeMarker(bankId);
       if (Object.keys(legacy).length) Storage.remove(K.review(bankId));
-      return { converted: converted, kept: keys.length };
+      return { converted: converted, kept: known.size };
     },
 
     /** 数据中出现的全部复习状态键所属题库（迁移/备份折叠用；旧整表键优先） */
@@ -1034,10 +1028,7 @@
     remap(bankId, mapping) {
       if (!mapping || !mapping.size) return 0;
       let n = 0;
-      let perChanged = false;
-      const meta = ReviewStore.meta(bankId);
-      const keys = meta ? meta.keys.slice() : ReviewStore.stateKeys(bankId);
-      const keySet = new Set(keys);
+      const keys = ReviewStore.stateKeys(bankId);
       keys.forEach((h) => {
         if (!mapping.has(h)) return;
         const state = Storage.getFresh(reviewStateKey(bankId, h), null);
@@ -1049,8 +1040,6 @@
           : state;
         Storage.setSync(reviewStateKey(bankId, nh), merged);
         Storage.remove(reviewStateKey(bankId, h));
-        keySet.delete(h); keySet.add(nh);
-        perChanged = true;
         n++;
       });
       const legacy = legacyReviewMap(bankId);
@@ -1068,8 +1057,68 @@
         if (Object.keys(legacy).length) Storage.setSync(K.review(bankId), legacy);
         else Storage.remove(K.review(bankId));
       }
-      if (meta || perChanged) ReviewStore.writeMeta(bankId, Array.from(keySet));
+      // 不再重写 meta：v4 标记不含清单，物理键重映射已即时生效；旧 v3 清单由启动期迁移压缩
       return n;
+    },
+
+    /**
+     * v3 全量清单 → v4 紧凑标记（P2-06，幂等）。
+     * 仅当旧清单集合与物理状态键集合完全一致时才覆盖；不一致（孤儿索引/缺状态）
+     * 保留原清单并返回 verified:false，绝不丢可读状态。写失败恢复旧 meta 缓存值。
+     * @returns {{migrated:boolean, listed:number, physical:number, missing:number, unlisted:number, verified:boolean, failed?:string}}
+     */
+    convertMetaLayout(bankId) {
+      const raw = Storage.getFresh(K.reviewMeta(bankId), null);
+      const physical = ReviewStore.stateKeys(bankId);
+      const base = { migrated: false, listed: 0, physical: physical.length, missing: 0, unlisted: 0, verified: true };
+      if (!raw || !(raw.v === 3 && Array.isArray(raw.keys))) return base;
+      const listed = raw.keys.filter((h) => typeof h === 'string');
+      const physSet = new Set(physical);
+      const listedSet = new Set(listed);
+      const missing = listed.filter((h) => !physSet.has(h));
+      const unlisted = physical.filter((h) => !listedSet.has(h));
+      const stats = {
+        migrated: false,
+        listed: listed.length,
+        physical: physical.length,
+        missing: missing.length,
+        unlisted: unlisted.length,
+        verified: missing.length === 0 && unlisted.length === 0
+      };
+      if (!stats.verified) return stats;
+      try {
+        ReviewStore.writeMarker(bankId);
+      } catch (e) {
+        try { Storage.set(K.reviewMeta(bankId), raw); } catch (_) { /* 保留旧视图 */ }
+        stats.failed = String((e && e.message) || e);
+        return stats;
+      }
+      const after = Storage.getFresh(K.reviewMeta(bankId), null);
+      if (!after || after.v !== REVIEW_LAYOUT_VERSION || Array.isArray(after.keys)) {
+        throw new Error('reviewMeta 布局迁移校验失败（' + bankId + '）');
+      }
+      stats.migrated = true;
+      return stats;
+    },
+
+    /** 全部题库的清单压缩（启动/迁移/备份恢复统一入口；幂等，失败只记录不抛） */
+    convertMetaLayouts() {
+      const out = { banks: 0, migrated: 0, failed: 0, anomalies: [] };
+      ReviewStore.bankIds().forEach((bankId) => {
+        out.banks++;
+        let r;
+        try {
+          r = ReviewStore.convertMetaLayout(bankId);
+        } catch (e) {
+          out.failed++;
+          out.anomalies.push(bankId + ':' + ((e && e.message) || e));
+          return;
+        }
+        if (r.migrated) out.migrated++;
+        if (r.failed) { out.failed++; out.anomalies.push(bankId + ':' + r.failed); }
+        else if (!r.verified) out.anomalies.push(bankId + ':index-physical-mismatch');
+      });
+      return out;
     }
   };
 
@@ -1399,19 +1448,17 @@
       const prevRev = reviewRevOf(bankId);
       try {
         ReviewStore.clear(bankId);
-        const keys = [];
         Object.keys(map || {}).forEach((hash) => {
           if (map[hash] == null) return;
           Storage.setSync(reviewStateKey(bankId, hash), map[hash]);
-          keys.push(hash);
         });
-        ReviewStore.writeMeta(bankId, keys);
+        ReviewStore.writeMarker(bankId);
         bumpReviewRev(bankId);
       } catch (e) {
         try {
           ReviewStore.clear(bankId);
           Object.keys(prev).forEach((hash) => Storage.set(reviewStateKey(bankId, hash), prev[hash]));
-          if (Object.keys(prev).length) ReviewStore.writeMeta(bankId, Object.keys(prev));
+          if (Object.keys(prev).length) ReviewStore.writeMarker(bankId);
           if (prevMeta != null) Storage.set(K.reviewMeta(bankId), prevMeta);
           if (prevLegacy != null) Storage.set(K.review(bankId), prevLegacy);
           Storage.set(K.reviewRev(bankId), prevRev);

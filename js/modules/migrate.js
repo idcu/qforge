@@ -8,7 +8,7 @@
  *   v4 → v5（一次性迁移，两条旧遗留合并）：
  *     1) hash 位宽 32→64：contentHash 由 '2:'+8hex 升级为 '3:'+16hex（FNV-1a 64 位）；
  *     2) 复习状态布局：user:review:<bankId> 整表 → user:review:<bankId>:<hash> per-hash
- *        + user:reviewMeta:<bankId> 清单；
+ *        + user:reviewMeta:<bankId> 紧凑标记 {v:4}（v3 为全量清单，启动期幂等压缩）；
  *     3) 评分日志布局：user:revlog 整表 → user:revlogMeta + user:revlog:<i> 分段追加。
  *     旧布局仍可双读（迁移中断 / 旧备份导入），对外读语义不变。
  *   v5 → v6（存储底座）：LocalStorage → IndexedDB（`QB.Store` 统一接口）。
@@ -431,7 +431,9 @@
     let converted = 0;
     ids.forEach((id) => { converted += QB.ReviewStore.convertLegacy(id).converted; });
     const revlogConverted = QB.RevlogStore.convertLegacy();
-    return { banks: ids.length, converted: converted, revlog: revlogConverted };
+    // P2-06：旧 v3 全量清单 → v4 紧凑标记（幂等；旧备份导入后同样收敛）
+    const reviewMeta = QB.ReviewStore.convertMetaLayouts();
+    return { banks: ids.length, converted: converted, revlog: revlogConverted, reviewMeta: reviewMeta };
   }
 
   /* ---------------- v5 → v6：LocalStorage → IndexedDB（存储底座） ---------------- */
@@ -492,7 +494,17 @@
   function run(opts) {
     const force = !!(opts && opts.force);
     if (currentVersion() >= SCHEMA_VERSION && !force) {
-      return Promise.resolve({ fromVersion: SCHEMA_VERSION, version: SCHEMA_VERSION });
+      // 版本已最新也可能残留旧 reviewMeta v3 清单（P2-06）：每次启动做一次幂等压缩，
+      // 失败只记录不抛（读取路径按物理键枚举，旧清单保留不影响可用性）。
+      let reviewMeta = null;
+      try {
+        reviewMeta = QB.ReviewStore && typeof QB.ReviewStore.convertMetaLayouts === 'function'
+          ? QB.ReviewStore.convertMetaLayouts()
+          : null;
+      } catch (e) {
+        reviewMeta = { banks: 0, migrated: 0, failed: 1, anomalies: [String((e && e.message) || e)] };
+      }
+      return Promise.resolve({ fromVersion: SCHEMA_VERSION, version: SCHEMA_VERSION, reviewMeta: reviewMeta });
     }
     if (inflight) return inflight;
     inflight = doRun(force).finally(() => { inflight = null; });
@@ -561,6 +573,11 @@
         if (fromVersion < 3) result.sharded = await migrateV2ToV3();
         if (fromVersion < 4) result.repaired = await migrateV3ToV4();
         result.layout = await migrateV4ToV5();
+        try {
+          result.reviewMeta = QB.ReviewStore.convertMetaLayouts();
+        } catch (e) {
+          result.reviewMeta = { banks: 0, migrated: 0, failed: 1, anomalies: [String((e && e.message) || e)] };
+        }
         result.backend = await migrateV5ToV6();
         QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
         await QB.Storage.flush();
