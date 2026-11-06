@@ -11,7 +11,7 @@
 
 ### test(e2e): 真实浏览器端到端验收（C020/C025/C007/C008/IDB50K）+ C007 真实缺陷修复
 
-**Commit Hash**：`PENDING`
+**Commit Hash**：`5eb40c0`
 
 **核心改动**
 - 新增 `scripts/e2e-browser.mjs`（**手动真机门禁，不进 CI**）：复用 `scripts/lib/cdp.mjs` /
