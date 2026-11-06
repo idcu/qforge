@@ -11,7 +11,7 @@
 
 ### feat(security): WebDAV 密码 AES-GCM 加密落盘 + 旧明文迁移（C027）
 
-**Commit Hash**：`PENDING`
+**Commit Hash**：`2d20821`
 
 **核心改动**
 - `js/modules/sync-dav.js`：
