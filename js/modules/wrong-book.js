@@ -35,6 +35,20 @@
       return QB.DB.progress.wrongAdd(bankId, question);
     },
 
+    /**
+     * 批量加入错题（R-02）：优先一次读改写（wrongAddMany）；第三方适配器缺失时串行回退。
+     * 收卷等批量场景唯一入口，禁止调用方自行循环 add。
+     */
+    async addMany(bankId, questions) {
+      const batch = questions || [];
+      if (QB.hasCapability(QB.DB, 'progress', 'wrongAddMany')) {
+        return QB.DB.progress.wrongAddMany(bankId, batch);
+      }
+      let list = [];
+      for (const q of batch) list = await QB.DB.progress.wrongAdd(bankId, q);
+      return list;
+    },
+
     async remove(bankId, questionKey) {
       return QB.DB.progress.wrongRemove(bankId, questionKey);
     },

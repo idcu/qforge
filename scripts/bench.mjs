@@ -108,6 +108,9 @@ function bestEffortGc() { if (typeof global.gc === 'function') { global.gc(); gl
 const HAS_GC = typeof global.gc === 'function';
 
 const report = [];
+// R-02 收卷错题写放大门禁读数（2c 段赋值，--assert 段判定）
+let r02CallsRatio = 0;
+let r02BytesCut = 0;
 function row(name, timeTriple, extra) {
   report.push({
     name, median: timeTriple.median, best: timeTriple.best,
@@ -182,9 +185,8 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
 }, 5), '重写全部分片（写放大 O(库规模)）');
 
 /* ---------- 2c. 阶段 0：收卷错题写放大（50 题 · 旧逐题 vs 单次读改写） ----------
- * 旧路径对应 js/app.js:396-402：每题一次 QB.DB.progress.wrongAdd → local-adapter
- * js/data/local-adapter.js:757-769 每次「整表读 + 整表写」。
- * 阶段 0 只测基线，不实现 wrongAddMany；「单次读改写」是对照模拟（非生产路径）。
+ * 旧路径对应 js/app.js recordWrongs 逐题 QB.DB.progress.wrongAdd → local-adapter 每次「整表读 + 整表写」。
+ * 新路径为生产 QB.DB.progress.wrongAddMany（R-02）：整表只读一次、只写一次。
  * 口径：
  *   - LS：计数 QB.Storage.set 调用与累计 JSON.stringify 字节（API 层写放大），
  *     同时计数真实 localStorage.setItem（200ms 防抖会把同键多次写合并成 1 次落盘）；
@@ -204,16 +206,8 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
   }
   const K = QB.KEYS.wrong(benchBank.id);
   const resetWrong = () => { QB.Storage.setSync(K, []); QB.Storage.forceSync(); };
-  const mergeBatch = () => {
-    const list = QB.Storage.get(K, []).slice();
-    for (const q of wrongQs) {
-      const key = QB.makeQuestionKey(q);
-      const found = list.find((w) => w.questionKey === key);
-      if (found) { found.wrongCount = (found.wrongCount || 1) + 1; found.lastAt = Date.now(); }
-      else list.push({ questionKey: key, wrongCount: 1, lastAt: Date.now() });
-    }
-    QB.Storage.set(K, list);
-  };
+  // 生产路径（R-02）：一次读改写；下方计数与计时均直接调用它，不做本地模拟
+  const batchAdd = async () => { await QB.DB.progress.wrongAddMany(benchBank.id, wrongQs); };
 
   // LS 计数（API 层 set 次数/字节 + 真实落盘次数）
   let setCalls = 0;
@@ -234,8 +228,10 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
   QB.Storage.forceSync();
   const oldCalls = setCalls, oldBytes = setBytes, oldDisk = diskWrites;
   resetWrong(); setCalls = 0; setBytes = 0; diskWrites = 0;
-  mergeBatch(); QB.Storage.forceSync();
+  await batchAdd(); QB.Storage.forceSync();
   const batchCalls = setCalls, batchBytes = setBytes, batchDisk = diskWrites;
+  r02CallsRatio = batchCalls ? oldCalls / batchCalls : 0;
+  r02BytesCut = oldBytes ? 1 - batchBytes / oldBytes : 0;
   QB.Storage.set = origSet;
   window.localStorage.setItem = origLsSet;
 
@@ -245,7 +241,7 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
     QB.Storage.forceSync();
   }, 10);
   const tBatch = await timed(async () => {
-    resetWrong(); mergeBatch(); QB.Storage.forceSync();
+    resetWrong(); await batchAdd(); QB.Storage.forceSync();
   }, 10);
 
   // IDB 模式：独立 harness，量「真实事务次数」
@@ -272,14 +268,7 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
   await IQ.Storage.flush();
   const iOldBatches = batches, iOldBytes = batchBytesIdb;
   await resetIdb(); batches = 0; batchBytesIdb = 0;
-  const ilist = IQ.Storage.get(IK, []).slice();
-  for (const q of wrongQs) {
-    const key = IQ.makeQuestionKey(q);
-    const found = ilist.find((w) => w.questionKey === key);
-    if (found) { found.wrongCount = (found.wrongCount || 1) + 1; found.lastAt = Date.now(); }
-    else ilist.push({ questionKey: key, wrongCount: 1, lastAt: Date.now() });
-  }
-  IQ.Storage.set(IK, ilist);
+  await IQ.DB.progress.wrongAddMany(ibank.id, wrongQs);
   await IQ.Storage.flush();
   const iBatchBatches = batches, iBatchBytes = batchBytesIdb;
   IQ.Store.batch = origBatch;
@@ -292,18 +281,11 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
   }, 5);
   const tBatchIdb = await timed(async () => {
     await resetIdb();
-    const l = IQ.Storage.get(IK, []).slice();
-    for (const q of wrongQs) {
-      const key = IQ.makeQuestionKey(q);
-      const found = l.find((w) => w.questionKey === key);
-      if (found) { found.wrongCount = (found.wrongCount || 1) + 1; found.lastAt = Date.now(); }
-      else l.push({ questionKey: key, wrongCount: 1, lastAt: Date.now() });
-    }
-    IQ.Storage.set(IK, l);
+    await IQ.DB.progress.wrongAddMany(ibank.id, wrongQs);
     await IQ.Storage.flush();
   }, 5);
 
-  row('收卷错题写放大（' + wrongQs.length + ' 题 · 旧逐题 vs 单次读改写）', tOld,
+  row('收卷错题写放大（' + wrongQs.length + ' 题 · 旧逐题 vs 生产 wrongAddMany）', tOld,
     'LS：旧 set ' + oldCalls + ' 次/累计 ' + (oldBytes / 1024).toFixed(1) + ' KB，真实落盘 ' + oldDisk
     + ' 次（防抖合并）；对照 set ' + batchCalls + ' 次/' + (batchBytes / 1024).toFixed(1) + ' KB，落盘 ' + batchDisk + ' 次。'
     + 'IDB：旧 batch ' + iOldBatches + ' 次/累计 ' + (iOldBytes / 1024).toFixed(1) + ' KB；对照 batch '
@@ -1838,6 +1820,11 @@ if (process.argv.indexOf('--assert') >= 0) {
     + ' / 3000 ' + ms(w3k ? w3k.median : NaN) + ' / 20000 ' + ms(w20k ? w20k.median : NaN)
     + '（20000 ≤ 1.00 ms 且 ≤ max(4×1000, 3×3000)+0.2）');
   if (!writeOk) fails.push('per-hash 写入复杂度不达标');
+  // R-02：收卷错题批量写——同轮旧逐题 vs 生产 wrongAddMany；set 调用 ≥25× 减少、累计字节 ≥90% 减少
+  const r02Ok = r02CallsRatio >= 25 && r02BytesCut >= 0.9;
+  console.log((r02Ok ? '  ✓ ' : '  ✗ ') + 'R-02 收卷错题批量写：set 减少 ' + r02CallsRatio.toFixed(1)
+    + '×（要求 ≥25×），累计字节减少 ' + (r02BytesCut * 100).toFixed(1) + '%（要求 ≥90%）');
+  if (!r02Ok) fails.push('R-02 收卷错题批量写不达标：' + r02CallsRatio.toFixed(1) + '× / ' + (r02BytesCut * 100).toFixed(1) + '%');
   console.log('-------------------------------------------');
   if (fails.length) {
     fails.forEach((f) => console.log('  - ' + f));

@@ -65,9 +65,10 @@ section('可选契约（R-06）：声明 + 校验 + 缺失时的降级路径');
 {
   const OPT = QB.OPTIONAL_CONTRACTS;
   ok(!!OPT, 'QB.OPTIONAL_CONTRACTS 已声明');
-  eq(OPT ? Object.keys(OPT).join(',') : '', 'reviews,revlog', '可选契约仅 reviews/revlog 两组');
+  eq(OPT ? Object.keys(OPT).join(',') : '', 'reviews,revlog,progress', '可选契约含 reviews/revlog/progress 三组');
   eq(OPT && OPT.reviews ? OPT.reviews.join(',') : '', 'get,patch', 'reviews 可选项 = get/patch');
   eq(OPT && OPT.revlog ? OPT.revlog.join(',') : '', 'revision', 'revlog 可选项 = revision');
+  eq(OPT && OPT.progress ? OPT.progress.join(',') : '', 'wrongAddMany', 'progress 可选项 = wrongAddMany');
   ok(typeof QB.hasCapability === 'function', '提供 QB.hasCapability 作为唯一能力检测入口');
   ok(typeof QB.assertOptional === 'function', '提供 QB.assertOptional 校验可选方法类型');
 
@@ -121,6 +122,76 @@ section('可选契约（R-06）：声明 + 校验 + 缺失时的降级路径');
     eq(recorded, 1, '有 patch 时不调用 record（recorded 保持 1）');
     QB.DB.reviews = realReviews;
   }
+}
+
+section('错题批量写（R-02）：一次读改写 + 降级');
+{
+  ok(QB.hasCapability(QB.LocalAdapter, 'progress', 'wrongAddMany'), 'local-adapter 提供 wrongAddMany');
+  ok(QB.hasCapability(QB.ApiAdapter, 'progress', 'wrongAddMany'), 'api-adapter 提供 wrongAddMany（当前串行调用，待批量端点）');
+  ok(typeof QB.WrongBook.addMany === 'function', 'QB.WrongBook.addMany 已导出');
+  ok(QB.assertOptional(QB.LocalAdapter, 'local') === QB.LocalAdapter, 'local 通过可选契约校验（含 wrongAddMany）');
+
+  const bank = await QB.DB.banks.create({ name: 'R-02 批量错题' });
+  const qs = [];
+  for (let i = 0; i < 50; i++) {
+    qs.push({ type: 'judge', question: 'R-02 批量错题 ' + i + '？', options: [], answer: '正确' });
+  }
+  const K = QB.KEYS.wrong(bank.id);
+  QB.Storage.setSync(K, []);
+  QB.Storage.forceSync();
+
+  let calls = 0;
+  let bytes = 0;
+  const origSet = QB.Storage.set;
+  QB.Storage.set = function (k, v) {
+    if (k === K) { calls += 1; bytes += Buffer.byteLength(JSON.stringify(v), 'utf8'); }
+    return origSet.call(QB.Storage, k, v);
+  };
+  const list = await QB.WrongBook.addMany(bank.id, qs);
+  QB.Storage.set = origSet;
+  QB.Storage.forceSync();
+  eq(calls, 1, '50 题一次 addMany 只触发 1 次 Storage.set（旧逐题为 50 次）');
+  eq(list.length, 50, '返回最终错题列表 50 条');
+  eq(list.filter((w) => w.wrongCount === 1).length, 50, '每题为新错题（wrongCount=1）');
+
+  // 旧路径累计字节：逐题整表写 50 次，O(N²)
+  let naiveBytes = 0;
+  const naive = [];
+  for (let i = 0; i < qs.length; i++) {
+    naive.push({ questionKey: QB.makeQuestionKey(qs[i]), wrongCount: 1, lastAt: 0 });
+    naiveBytes += Buffer.byteLength(JSON.stringify(naive), 'utf8');
+  }
+  ok(bytes * 20 < naiveBytes, '累计序列化字节至少减少 95%（实测 ' + bytes + ' B vs 旧 ' + naiveBytes + ' B）');
+
+  // 第三方适配器只有 wrongAdd：addMany 串行降级，语义一致
+  const realProgress = QB.DB.progress;
+  let serial = 0;
+  let serialList = [];
+  QB.DB.progress = {
+    wrongList: async () => serialList,
+    wrongAdd: async (bankId, q) => {
+      serial += 1;
+      serialList = serialList.concat([{ questionKey: QB.makeQuestionKey(q), wrongCount: 1 }]);
+      return serialList;
+    },
+    wrongRemove: async () => {},
+    wrongClear: async () => {},
+    favoriteList: async () => [],
+    favoriteToggle: async () => {},
+    favoriteClear: async () => {},
+    historyList: async () => [],
+    historyAdd: async () => {},
+    historyUpdate: async () => {},
+    historyRemove: async () => {},
+    historyClear: async () => {},
+    sessionSave: async () => {},
+    sessionLoad: async () => null,
+    sessionClear: async () => {}
+  };
+  const fallback = await QB.WrongBook.addMany(bank.id, qs.slice(0, 3));
+  eq(serial, 3, '无 wrongAddMany 时按单题串行降级（3 次 wrongAdd）');
+  eq(fallback.length, 3, '降级路径返回合并后的列表');
+  QB.DB.progress = realProgress;
 }
 
 section('reviews 仓库（本地）');

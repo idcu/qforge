@@ -403,11 +403,9 @@
   }
 
   async function recordWrongs(engine) {
-    for (let i = 0; i < engine.questions.length; i++) {
-      const r = engine.results[i];
-      // 不定项少选（partial）得半分，不计入错题本
-      if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, engine.questions[i]);
-    }
+    // R-02：一次筛出本场错题并整表写一次；禁止逐题 add（旧实现 50 题 → 50 次整表读改写）
+    const wrongs = QB.WrongBook.sessionWrongs(engine.questions, engine.results);
+    if (wrongs.length) await QB.WrongBook.addMany(State.bankId, wrongs);
   }
 
   /**

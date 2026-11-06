@@ -9,6 +9,41 @@
 
 ## 最新记录
 
+### perf(progress): 收卷错题改为一次读改写（R-02）
+
+**Commit Hash**：`c3a3121`
+
+**核心改动**
+- `js/data/contracts.js`：`OPTIONAL_CONTRACTS` 增 `progress: ['wrongAddMany']`（缺失时领域层降级）。
+- `js/data/local-adapter.js`：抽出纯函数 `applyWrongEntry(list, question)`；`wrongAdd` 改为
+  `wrongAddMany([question])`；`wrongAddMany` 整表只 `Storage.get` 1 次、只 `Storage.set` 1 次（空数组不写）。
+- `js/data/api-adapter.js`：新增 `wrongAddMany`；服务端暂无批量端点，按既有 `wrongAdd` 串行（语义一致，TODO 后端批量）。
+- `js/modules/wrong-book.js`：新增 `addMany(bankId, questions)` 作为批量唯一入口；无 `wrongAddMany` 的第三方适配器串行回退。
+- `js/app.js`：`recordWrongs` 改为 `sessionWrongs` 一次筛选 + `addMany` 一次写（不再逐题 `add`）。
+- `scripts/bench.mjs`：收卷错题行改为直接调用**生产** `wrongAddMany`，仍同轮对照旧逐题；新增第 63 项门禁（set 次数 ≥25×、字节 ≥90%）。
+- `sw.js`：`CACHE` v22 → v23，刷新 `scripts/sw-baseline.json`。
+- 文档：`docs/ARCHITECTURE.md` §4.14 + §5 抽象表、`docs/API-CONTRACT.md`（可选契约与 `progress.wrongAddMany`）、
+  `docs/TESTING.md`（contract 87→98、合计 5436→5447、SW v23）、`docs/BENCH.md`（R-02 复测）、`docs/DEVELOPMENT.md`（SW 版本）。
+- **影响面**：错题条目形状、`WrongBook.isWrongResult` 判定（材料题 partial 不计错）与返回列表语义不变；
+  行为变化仅本地批量场景的写次数从 N 次整表读改写降为 1 次。`progress.wrongAddMany` 成为公开可选契约。
+
+**验证数据（实测）**
+- 红：`node scripts/contract.test.mjs` → **6 项断言失败**（`OPTIONAL_CONTRACTS` 仍为 reviews/revlog、
+  `progress` 可选项为空、local/api 无 `wrongAddMany`、`WrongBook.addMany` 未导出），随后在
+  `await QB.WrongBook.addMany(...)` 处以 TypeError 中止（exit 1）。原始输出：`.analysis/architecture-audit/stage2-red-r02.txt`。
+- 绿：同套件 **98 通过 / 0 失败**；原始输出：`.analysis/architecture-audit/stage2-green-r02.txt`。
+- Bench（`node --expose-gc scripts/bench.mjs --assert`，同轮 A/B）：
+  - LS：旧 `Storage.set` **50 次 / 93.4 KB** → 新 **1 次 / 3.7 KB**（**50.0×**，字节 **−96.1%**）；真实 `setItem` 均 1 次（防抖）。
+  - IDB：旧 `Store.batch` **18 次 / 35.9 KB** → 新 **1 次 / 3.7 KB**（**18.0×**）。
+  - 耗时：LS 0.52 / 0.44 ms（各 10 轮）；IDB 1.08 / 0.53 ms（各 5 轮）。
+  - 门禁 63/63 通过；原始输出：`.analysis/architecture-audit/stage2-bench-r02.txt`。
+
+**遗留 TODO / 风险**
+- api 适配器仍串行调用 `wrongAdd`（N 次网络往返）；待后端提供批量端点后收敛为 1 请求。
+- **未实机验证**：真实浏览器 200ms 防抖落盘、真实 IDB 事务合并；IDB 批次数为 Node 计数口径（await 间隔影响合并粒度）。
+- 公共抽象清单：新增 `applyWrongEntry`（local-adapter 内唯一错题归并）、`QB.WrongBook.addMany`、可选契约 `progress.wrongAddMany`；
+  复用 `QB.hasCapability`，未新增第二套能力检测。
+
 ### refactor(config): 容量阈值收敛到 LIMITS 单一事实源（R-15）
 
 **Commit Hash**：`f81fbf1`

@@ -317,6 +317,15 @@
       const r = await req('POST', ROUTES.banks + '/' + enc(bankId) + '/wrong', { question_key: key });
       return (r.items || []).map(fromWireWrong);
     },
+    /**
+     * 批量加入（R-02）：服务端暂无批量端点，按既有 wrongAdd 串行调用（语义一致）。
+     * TODO(api-batch)：后端提供批量端点后改为单次请求，网络往返由 N 降到 1。
+     */
+    async wrongAddMany(bankId, questions) {
+      let list = [];
+      for (const q of (questions || [])) list = await progress.wrongAdd(bankId, q);
+      return list;
+    },
     async wrongRemove(bankId, questionKey) {
       await req('DELETE', ROUTES.banks + '/' + enc(bankId) + '/wrong/' + enc(questionKey));
     },
