@@ -179,6 +179,21 @@ boot() = try { startApp() } catch (e) → State.bootError = e
 - 诊断报告**不含题目内容、备份数据或密码**，只含错误栈与存储状态；`boot-diagnostics` 是本层唯一新增 action。
 - 未实机验证：真实浏览器中「下载触发」依赖 `<a download>` + Blob URL，Node 垫片只验证到创建 Blob / 触发 click，不代表磁盘落盘行为。
 
+### 4.9 渲染代次守卫（R-01）
+
+```
+render() → seq = ++renderSeq（模块级计数器）
+  → await loadBankData()
+  → if (seq !== renderSeq) return          // 期间已有更新的 render，本次作废
+  → syncBankSwitch / syncTabs / 构造 html（部分 case 分支内还有 await）
+  → if (seq !== renderSeq) return          // await 期间视图已切换，禁止回写
+  → DomPatch.patch / innerHTML 写入
+```
+
+- 只保护「写 DOM」这一步：过期渲染可以继续做只读计算，但不会覆盖更新视图。
+- 判定依据是**发起顺序**而不是完成顺序；同步段（检查到写入之间无 await）保证同一时刻只有一个写入者。
+- 未实机验证：真实浏览器慢 IO（大库读盘）下的视觉闪烁是否完全消除；Node 用例只覆盖「慢分支后切换视图」这一确定性时序。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
