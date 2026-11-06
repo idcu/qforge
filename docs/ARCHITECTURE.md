@@ -251,6 +251,20 @@ activate → caches.keys()
 - 行为面：三处阈值数值不变；仅 `annotation.js` 在「配置缺失」这一不可达路径下由 4MiB 纠正为 2MiB。
 - 未实机验证：无（纯常量引用与静态扫描，无浏览器行为）。
 
+### 4.14 错题批量写（R-02）
+
+| 层 | 入口 | 行为 |
+| --- | --- | --- |
+| 领域 | `QB.WrongBook.addMany(bankId, questions)` | 收卷等批量场景唯一入口；`QB.hasCapability(QB.DB, 'progress', 'wrongAddMany')` 为真走一次读改写，否则串行 `wrongAdd` 降级 |
+| 数据 | `progress.wrongAddMany(bankId, questions)`（可选契约） | local：整表 `Storage.get` 1 次 + `Storage.set` 1 次（空数组不写）；api：暂无批量端点，按 `wrongAdd` 串行（语义一致） |
+
+- 错题归并唯一实现为 `local-adapter` 内的纯函数 `applyWrongEntry(list, question)`，`wrongAdd` 也复用它，
+  禁止再复制一份「同 key 计数 +1 / 新题追加」逻辑。
+- `js/app.js` 的 `recordWrongs` 改为「`sessionWrongs` 一次筛选 + `addMany` 一次写」，不再逐题 `add`。
+- 影响面：错题条目形状、判定谓词（`WrongBook.isWrongResult`，材料题 partial 不计错）与返回列表语义均不变；
+  唯一变化是本地 50 题从「50 次整表读改写」降为「1 次」。
+- 未实机验证：真实浏览器 200ms 防抖落盘与真实 IDB 事务合并（Node 计数口径见 `docs/BENCH.md`）。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -271,9 +285,10 @@ activate → caches.keys()
 | `QB.Base64` | **C011 Base64 唯一实现**：`encodeBytes/decodeToBytes/toUrlSafe/fromUrlSafe`；Node 走 Buffer、浏览器分块 btoa；输出与原 `bytesToBase64` 逐字节一致 | `SharePage.dataUrl`（内嵌图片）、`ShareLink` |
 | `QB.ShareLink` | **C011 分享码/回链（纯函数、零网络）**：`PREFIX='qfshare1:'`；`encode(ArrayBuffer)` 确定性、`decode` 校验前缀/字符集/字节上限、`buildLink(base,code)` → `#share=`、`readHash/extractCode` 双形态 | `Exporter.shareFlow`（生成）、`DataIO.parseShareCode`（粘贴/回链导入）、app 启动 `handleShareHash` |
 | `reviews.record(bankId, map, logs)` | 调度状态 + 评分日志一次提交（api 模式 1 个 PUT；local 模式写前重读合并 + 状态/日志/版本快照提交，失败回滚） | 旧调用方/第三方适配器回退路径 |
+| `QB.WrongBook.addMany(bankId, questions)` | **R-02 错题批量写唯一入口**：一次筛选 + 一次整表读改写；适配器无 `wrongAddMany` 时串行 `wrongAdd` 降级 | `app.js recordWrongs`、第三方适配器回退 |
 | `reviews.patch(bankId, delta, logs)`（可选） | 增量提交：api 模式只上行本批改动键（PATCH，O(改动数)）；local 与 record 共用同一合并/回滚实现；适配器未实现时 `SRSStore` 回退 `record` | srs-store.grade/gradeMany |
 | `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | app.js 统计页缓存诊断结果，避免每次 render 全量扫 revlog |
-| `QB.OPTIONAL_CONTRACTS` + `QB.hasCapability` + `QB.assertOptional`（R-06） | 可选契约的**唯一判定入口**：`reviews[get,patch]`、`revlog[revision]` 可缺失；`DB.init` 校验「提供则必须是函数」；领域模块用 `hasCapability` 检测并走文档化降级 | `SRSStore`（get/patch 降级）、`app.js` 统计页（revision 降级）、第三方适配器合规判定 |
+| `QB.OPTIONAL_CONTRACTS` + `QB.hasCapability` + `QB.assertOptional`（R-06 / R-02） | 可选契约的**唯一判定入口**：`reviews[get,patch]`、`revlog[revision]`、`progress[wrongAddMany]` 可缺失；`DB.init` 校验「提供则必须是函数」；领域模块用 `hasCapability` 检测并走文档化降级 | `SRSStore`（get/patch 降级）、`WrongBook.addMany`（wrongAddMany 降级）、`app.js` 统计页（revision 降级）、第三方适配器合规判定 |
 | `questions.revision()` + `bumpRev()` | **整库题目读缓存失效唯一机制**：任意题目写路径（create/update/remove/insertMany/级联/备份恢复）同步 +1；`QB.DB.loadQuestions` 以 `(bankId, rev)` 判定命中 | local-adapter / api-adapter 的 `backup.import`（C016：恢复也 bumpRev）、`DB.loadQuestions`、Node 断言 |
 | `QB.LocalAdapter.questions` 内存索引（C018） | **id → {bankId, idx \| legacy, pos} + bankId → Set(contentHash)**：`get/update/remove` 命中 O(1)，merge 去重直接复用哈希集、不再 `readAll`；**仅内存、不写新键、不升 schema**。一致性：`QuestionShards.writeAll/append/clear/compact`、`remove/removeMany`、`backup.import`、migrate 直写分片后的 `QuestionShards.invalidateIndex()` 与跨标签 `questions:*` 合并钩子同步失效/增量维护；冷启首次访问 O(n) 重建 | local-adapter 内部实现 + `QB.QuestionShards.invalidateIndex()`（低层写后失效钩子，供 migrate 使用）；所有 `QB.DB.questions.get/update/remove/insertMany` 调用方透明受益、`scripts/shard.test.mjs` 断言 |
 | `QB.SchedSettings.ofBankId/invalidate`（C019） | 按库缓存的**唯一失效契约**：`save` 写库后覆盖缓存；`banks.update`（含 `sched`）、`banks.remove`、`backup.import`（local/api 双后端）与跨标签 `banks` 合并钩子立即 `invalidate`；**不在每次 `ofBankId` 重读 bank**（避免 API 模式评分多一个 GET） | `SRSStore.grade/gradeMany`、local-adapter/api-adapter、Storage 合并钩子、`scripts/sched.test.mjs` |

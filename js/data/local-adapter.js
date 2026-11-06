@@ -749,22 +749,36 @@
   };
 
   /* ---------------- ProgressRepository ---------------- */
+
+  /**
+   * 错题归并唯一实现（R-02）：同 key 计数 +1、更新时间；新题追加。
+   * 纯函数（原地修改传入列表），供 wrongAdd / wrongAddMany 共用，禁止再复制一份。
+   */
+  function applyWrongEntry(list, question) {
+    const key = QB.makeQuestionKey(question);
+    const found = list.find((w) => w.questionKey === key);
+    if (found) {
+      found.wrongCount = (found.wrongCount || 1) + 1;
+      found.lastAt = now();
+    } else {
+      list.push({ questionKey: key, wrongCount: 1, lastAt: now() });
+    }
+  }
+
   const progress = {
     // 错题本（键用 contentHash，跨导入稳定）
     async wrongList(bankId) {
       return Storage.get(K.wrong(bankId), []).slice();
     },
     async wrongAdd(bankId, question) {
-      const key = QB.makeQuestionKey(question);
+      return progress.wrongAddMany(bankId, [question]);
+    },
+    /** 批量加入（R-02）：整表只读一次、只写一次；空数组不写 */
+    async wrongAddMany(bankId, questions) {
+      const batch = questions || [];
       const list = Storage.get(K.wrong(bankId), []).slice();
-      const found = list.find((w) => w.questionKey === key);
-      if (found) {
-        found.wrongCount = (found.wrongCount || 1) + 1;
-        found.lastAt = now();
-      } else {
-        list.push({ questionKey: key, wrongCount: 1, lastAt: now() });
-      }
-      Storage.set(K.wrong(bankId), list);
+      batch.forEach((q) => applyWrongEntry(list, q));
+      if (batch.length) Storage.set(K.wrong(bankId), list);
       return list;
     },
     async wrongRemove(bankId, questionKey) {

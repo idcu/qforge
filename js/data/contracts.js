@@ -77,11 +77,13 @@
    * - reviews.get：单题调度状态 O(1) 读取；缺失时 SRSStore.stateFor/statesFor 回退整表 list。
    * - reviews.patch：作答热路径增量提交；缺失时 SRSStore.commitGraded 回退 record 整表提交。
    * - revlog.revision：同步写修订号（供统计页派生缓存失效）；缺失时调用方按「无修订信息」处理。
+   * - progress.wrongAddMany：一次读改写批量加入错题；缺失时 WrongBook.addMany 串行回退 wrongAdd。
    * 第三方适配器只需满足 QB.CONTRACTS（必需）；实现可选方法可提升性能，但不得改变语义。
    */
   QB.OPTIONAL_CONTRACTS = {
     reviews: ['get', 'patch'],
-    revlog: ['revision']
+    revlog: ['revision'],
+    progress: ['wrongAddMany']
   };
 
   /** 能力检测唯一入口（可选契约）：领域模块不得各写 typeof 判断 */

@@ -180,6 +180,7 @@
 | `questions.insertMany` | `POST /api/banks/{id}/questions/batch`（`op=add`） |
 | `questions.removeMany` | `POST /api/banks/{id}/questions/batch`（`op=delete`） |
 | `progress.wrongList/wrongAdd/wrongRemove/wrongClear` | Progress 的 wrong 端点 |
+| `progress.wrongAddMany(bankId, questions)`（可选，R-02） | 一次批量加入错题；`local-adapter` 整表只读一次、只写一次并返回最终列表；`api-adapter` 当前无批量端点，按 `wrongAdd` 串行（待后端提供批量接口后收敛为 1 请求）；缺失时 `QB.WrongBook.addMany` 串行回退 |
 | `progress.favoriteList/favoriteToggle/favoriteClear` | Progress 的 favorites 端点 |
 | `progress.historyList/historyAdd/historyUpdate/historyRemove/historyClear` | history 端点（`historyUpdate` → `PATCH /api/history/{id}`） |
 | `progress.sessionSave/sessionLoad/sessionClear` | session 端点 |
@@ -194,7 +195,7 @@
 
 > **契约归属（2026-10-19 阶段 C 起）**：`reviews/revlog/weights/backup` 已进入 `QB.CONTRACTS`（只暴露「存储原语」，算法留在领域模块）；**资产不进 `QB.CONTRACTS`**，改走独立的 `QB.ASSET_DRIVER_CONTRACT`（避免 `DB.init → useDriver → getDriver` 自递归）。
 >
-> **可选契约（R-06）**：`QB.OPTIONAL_CONTRACTS = { reviews: ['get','patch'], revlog: ['revision'] }`。第三方适配器实现 `QB.CONTRACTS` 即合规；可选方法可缺失，一旦提供必须是函数。能力检测唯一入口 `QB.hasCapability(adapter, group, method)`（领域模块不再自写 `typeof`）；`QB.DB.init()` 在 `assertAdapter` 之后执行 `QB.assertOptional`。降级路径：`reviews.get` 缺失 → `SRSStore.stateFor/statesFor` 回退整表 `list`；`reviews.patch` 缺失 → `SRSStore.commitGraded` 回退整表 `record`；`revlog.revision` 缺失 → 统计页诊断缓存按「无修订信息」处理（每次重算）。`api-adapter` 因此只需实现 `patch`，`get` 缺失是**声明过的合法状态**而非缺陷。
+> **可选契约（R-06 / R-02）**：`QB.OPTIONAL_CONTRACTS = { reviews: ['get','patch'], revlog: ['revision'], progress: ['wrongAddMany'] }`。第三方适配器实现 `QB.CONTRACTS` 即合规；可选方法可缺失，一旦提供必须是函数。能力检测唯一入口 `QB.hasCapability(adapter, group, method)`（领域模块不再自写 `typeof`）；`QB.DB.init()` 在 `assertAdapter` 之后执行 `QB.assertOptional`。降级路径：`reviews.get` 缺失 → `SRSStore.stateFor/statesFor` 回退整表 `list`；`reviews.patch` 缺失 → `SRSStore.commitGraded` 回退整表 `record`；`revlog.revision` 缺失 → 统计页诊断缓存按「无修订信息」处理（每次重算）；`progress.wrongAddMany` 缺失 → `QB.WrongBook.addMany` 串行 `wrongAdd`。`api-adapter` 因此只需实现 `patch`，`get` 缺失是**声明过的合法状态**而非缺陷。
 >
 > **接线进度（诚实标注）**：契约与两个适配器已就位，且领域模块**已完成接线**——`srs-store.js`/`fsrs-opt.js`/`backup.js` 的存储读写全部改为「经 `QB.DB.*` 异步仓库」（`SRSStore`/`FSRSOpt`/`Backup` 只保留算法与作用域过滤），`sync-dav.js` 与 `app.js` 的调用点补齐 `await`。**断开自递归**的关键：`local-adapter` 的 `reviews/revlog/weights` 直接读写 LocalStorage，**不反向调用**领域模块（否则与「领域模块 → `QB.DB.*`」互为委托死循环）；`SRSStore.readMap`/`FSRSOpt.readLog` 等改为委托 `QB.DB.*`。
 >
