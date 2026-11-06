@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-06T07:20:55.529Z",
+  "generatedAt": "2026-11-06T07:36:12.878Z",
   "runItems": 36,
   "suiteFiles": 35,
-  "totalAssertions": 5364,
+  "totalAssertions": 5385,
   "gateCount": 62,
   "counts": {
     "smoke-test.mjs": 731,
@@ -11,7 +11,7 @@
     "api-backend.test.mjs": 310,
     "app-boot.test.mjs": 71,
     "assets.test.mjs": 182,
-    "backup.test.mjs": 146,
+    "backup.test.mjs": 147,
     "blueprint.test.mjs": 18,
     "contract.test.mjs": 66,
     "dom-patch.test.mjs": 40,
@@ -38,14 +38,14 @@
     "static-server.test.mjs": 29,
     "storage.test.mjs": 61,
     "sw-runtime.test.mjs": 32,
-    "sync-dav.test.mjs": 45,
+    "sync-dav.test.mjs": 65,
     "ui-renderer.test.mjs": 218,
     "xml-lite.test.mjs": 39
   },
   "firstScreen": {
     "scripts": 86,
     "files": 94,
-    "rawKB": "999.0",
-    "gzipKB": "356.9"
+    "rawKB": "1009.1",
+    "gzipKB": "359.8"
   }
 }

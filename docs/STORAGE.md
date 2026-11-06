@@ -37,6 +37,7 @@
 | 备份排除（`BACKUP_EXCLUDED_KEYS`） | `meta:storageBackend` / `meta:lsMigratedAt` / `meta:lsCleanupAt` / `meta:lsBackupState` / `meta:lsQuotaProbe` / `meta:lsQuotaCap` | 只描述「本设备当前用哪个后端/容量」，换设备应重新探测；恢复 replace 时也不删除（否则会把新设备的后端选择一起删掉） |
 
 题目图片二进制沿用既有独立 IDB 库 `qforge/assets`（不属于本节的 KV 底座）。
+WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforge-secrets/keys`（键 `dav`，C027）；不属于业务数据、不进备份，随浏览器配置清理而失效（见 [SECURITY.md](SECURITY.md) §9）。
 
 ### 9.3 后端选择与安全回落
 

@@ -20,7 +20,8 @@
       const v = data[k];
       if (k === QB.KEYS.metaDav && v && typeof v === 'object' && !Array.isArray(v)) {
         const copy = Object.assign({}, v);
-        delete copy.pass;
+        delete copy.pass;      // 旧版明文字段
+        delete copy.passEnc;   // C027 密文字段（诊断/导出时同样不带走）
         out[k] = copy;
       } else {
         out[k] = v;

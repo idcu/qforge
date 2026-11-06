@@ -35,14 +35,64 @@ async function throwsAsync(fn, re, l) {
 QB.Assets.useDriver(QB.Assets.memoryDriver());
 QB.Storage.remove(QB.KEYS.metaDav);
 const D = QB.SyncDAV;
-const CONF = { baseUrl: 'https://dav.example.com/dav/backups/', user: 'u', pass: 'p' };
+const CONF = { baseUrl: 'https://dav.example.com/dav/backups/', user: 'u', pass: 's3cret-pw' };
 
-section('配置存取');
-D.saveConfig(CONF);
-eq(D.getConfig().baseUrl, CONF.baseUrl, 'saveConfig/getConfig');
-eq(D.getConfig().pass, 'p', '密码本机保存');
+section('配置存取（C027：密码加密落盘）');
+await D.saveConfig(CONF);
+eq(D.getConfig().baseUrl, CONF.baseUrl, 'saveConfig/getConfig 元数据');
+{
+  const raw = QB.Storage.get(QB.KEYS.metaDav, null);
+  eq(raw.v, 2, '配置版本 v2');
+  eq(raw.pass, undefined, '落盘不再有明文 pass 字段');
+  ok(!JSON.stringify(raw).includes(CONF.pass), '落盘内容不含明文密码');
+  ok(raw.passEnc && raw.passEnc.iv && raw.passEnc.data, '密文含随机 IV 与数据（' + (raw.passEnc && raw.passEnc.alg) + '）');
+  const loaded = await D.loadConfig();
+  eq(loaded.pass, CONF.pass, 'loadConfig 解密还原密码');
+  eq(D.getConfig().hasPass, true, 'getConfig 只报 hasPass，不返回明文');
+  await D.saveConfig(CONF);
+  const raw2 = QB.Storage.get(QB.KEYS.metaDav, null);
+  ok(raw2.passEnc.data !== raw.passEnc.data, '同一密码二次加密密文不同（随机 IV）');
+}
 D.clearConfig();
-eq(D.getConfig().baseUrl, '', 'clearConfig');
+eq(D.getConfig().baseUrl, '', 'clearConfig 清空元数据');
+eq(D.getConfig().hasPass, false, 'clearConfig 后 hasPass=false');
+
+section('旧明文配置迁移（C027）');
+{
+  const legacy = { baseUrl: 'https://legacy.example/dav/', user: 'lu', pass: 'legacy-pw', lastAt: 123 };
+  QB.Storage.set(QB.KEYS.metaDav, legacy);
+  const first = await D.loadConfig();
+  eq(first.pass, 'legacy-pw', '旧明文首次读取仍可用');
+  eq(first.migrated, true, '首次读取触发迁移');
+  const migratedRaw = QB.Storage.get(QB.KEYS.metaDav, null);
+  eq(migratedRaw.v, 2, '迁移后写为 v2');
+  eq(migratedRaw.pass, undefined, '迁移后删除旧明文字段');
+  ok(!JSON.stringify(migratedRaw).includes('legacy-pw'), '迁移后落盘不含旧明文');
+  ok(migratedRaw.passEnc && migratedRaw.passEnc.data, '迁移后写入密文');
+  const second = await D.loadConfig();
+  eq(second.pass, 'legacy-pw', '迁移后再次读取仍还原密码');
+  ok(!second.migrated, '二次读取不再重复迁移');
+  const tampered = JSON.parse(JSON.stringify(migratedRaw));
+  const head = tampered.passEnc.data.charAt(0);
+  tampered.passEnc.data = (head === 'A' ? 'B' : 'A') + tampered.passEnc.data.slice(1);
+  QB.Storage.set(QB.KEYS.metaDav, tampered);
+  const broken = await D.loadConfig();
+  eq(broken.pass, '', '密文被篡改时不返回明文');
+  ok(/解密失败|重新输入/.test(broken.passError || ''), '篡改给出可见错误（' + broken.passError + '）');
+  await D.saveConfig({ baseUrl: 'https://x.example/dav/', user: 'u', pass: '' });
+  const empty = QB.Storage.get(QB.KEYS.metaDav, null);
+  eq(empty.passEnc, undefined, '清空密码不保留密文');
+  eq((await D.loadConfig()).pass, '', '清空密码后读取为空');
+}
+
+section('上传使用解密后的密码（C027）');
+{
+  QB.Storage.set(QB.KEYS.metaDav, { baseUrl: 'https://dav.example.com/dav/backups/', user: 'u', pass: 's3cret-pw' });
+  const rec = {};
+  await D.upload({ fetch: fakeFetch(rec, { status: 201 }) });
+  eq(Buffer.from(rec.opts.headers.Authorization.replace(/^Basic /, ''), 'base64').toString('utf8'),
+    'u:s3cret-pw', '上传读取的是解密后的密码');
+}
 
 section('校验与 URL 拼接');
 eq(D.targetUrl('https://a.com/dav/'), 'https://a.com/dav/' + D.FILE_NAME, '带尾斜杠');

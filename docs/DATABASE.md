@@ -54,7 +54,7 @@ users 1 ──<（wrong_questions / favorites / attempts / sessions）   # 多�
 | `qb:user:revlog:<i>` | `review_log`（分段） | 第 i 段 ≤200 条，元素 `{id,h,r,t,b?}`（`b`=bankId） |
 | `qb:user:revlog` | `review_log`（旧整表） | 兼容读：清单缺失时回退整表；写路径不再产生此键 |
 | `qb:meta:fsrsWeights` | —（前端偏好） | 个性化 FSRS 权重与训练元数据 |
-| `qb:meta:dav` | —（前端偏好） | WebDAV 配置（目录 URL/账号/应用密码/上次同步时间），仅本机 |
+| `qb:meta:dav` | —（前端偏好） | WebDAV 配置 `{v:2, baseUrl, user, passEnc:{alg,iv,data}, lastAt…}`，仅本机；**密码不再明文**（C027：AES-GCM 256 密文，随机 12B IV）；解密密钥为不可导出 CryptoKey，存 IndexedDB `qforge-secrets/keys`（`dav`）；IDB 不可用时密钥仅内存、密码不落盘，刷新需重填。旧 v1 明文配置首次读取自动「加密→回读校验→覆盖」；备份与诊断输出均剔除 `pass`/`passEnc`（威胁模型见 [SECURITY.md](SECURITY.md) §9） |
 | `qb:meta:currentBank` | —（前端偏好） | 当前题库 id |
 | `qb:meta:startPrefs` | —（前端偏好） | 最近一次练习/考试开始参数（各题型数量/分值、分类、时长、计时/乱序开关），仅本机 |
 | `qb:meta:migrationLock` | —（迁移运行期） | `{owner, at}` 多标签迁移锁；TTL 30s，陈锁可接管；迁移完成即释放，不进备份 |

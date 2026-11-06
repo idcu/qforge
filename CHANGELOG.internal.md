@@ -9,6 +9,63 @@
 
 ## 最新记录
 
+### feat(security): WebDAV 密码 AES-GCM 加密落盘 + 旧明文迁移（C027）
+
+**Commit Hash**：`PENDING`
+
+**核心改动**
+- `js/modules/sync-dav.js`：
+  ① 配置升级 `v2`：`{v:2, baseUrl, user, passEnc:{alg:'AES-GCM', iv, data}, lastAt…}`，**不再写 `pass` 明文字段**；
+  每次保存随机 12 字节 IV。加密/解密用 Web Crypto（零依赖），密钥为
+  `crypto.subtle.generateKey({name:'AES-GCM',length:256}, false, …)` 生成的**不可导出 CryptoKey**，
+  持久化在 IndexedDB `qforge-secrets/keys`（键 `dav`）。
+  ② 新增 `loadConfig()`（异步解密，返回 `pass` / `passError`）；`saveConfig()` 改为**异步**（先加密再落盘）；
+  `getConfig()` 只返回元数据与 `hasPass`，**不返回明文**。
+  ③ 旧明文迁移：首次读取检测 `raw.pass` → 加密 → **立即解密回读校验** → 一致才覆盖并删除明文；
+  不一致/加密失败则保留旧值并返回可见错误；Web Crypto 或密钥不可用时**移除明文**、密码仅本次会话可用并提示。
+  ④ IndexedDB 不可用时密钥退化为**仅内存会话密钥**，`passEnc` 不落盘（刷新必然无法解密，UI 提示重输）。
+  ⑤ 上传/下载在无显式 config 时改用 `loadConfig()`（解密后密码）；解密失败先抛可读错误，不再退化成「请填写密码」。
+  ⑥ WebDAV 弹窗更新文案：加密边界（能防 localStorage 拷贝/截图/同步；**不能防**同源 XSS、恶意扩展、同机读盘、
+  整 profile 拷贝），并显示迁移/解密错误。
+- `js/modules/backup.js`：`redactSecrets` 同时剔除 `pass`（旧明文）与 `passEnc`（C027 密文）；备份仍保留地址/账号。
+- `scripts/sync-dav.test.mjs`：配置段落改为异步加密断言 + 旧明文迁移/篡改/清空 + 上传使用解密密码（**+20 项**）。
+- `scripts/backup.test.mjs`：改为 `await saveConfig` / `loadConfig`，并新增「备份不携带 `passEnc`」（146→147）。
+- 新增 `docs/SECURITY.md`（§9 威胁模型：存储布局、迁移路径、能挡/挡不住矩阵、残余风险、未验证项）；
+  同步 `docs/BACKUP.md`、`docs/DATABASE.md`、`docs/STORAGE.md`、`docs/TESTING.md`（sync-dav 45→65、
+  backup 146→147、合计 5364→5385）、`docs/DEVELOPMENT.md`（SW v15→v16）、`docs/BENCH.md`
+  （首屏 356.9/999.0 → **359.8/1009.1**，实测）。
+- `sw.js` `CACHE` v15→v16（修改 `js/**` 按既有约定换代）；`scripts/sw-baseline.json`、`scripts/docs-baseline.json`
+  同步刷新（**未调任何阈值**）。
+- **API 影响面（显式说明）**：`QB.SyncDAV.saveConfig` 由同步改为异步；新增 `loadConfig`；`getConfig` 不再含 `pass`。
+  调用方仅 `sync-dav.js` 自身弹窗与 `scripts/sync-dav.test.mjs` / `scripts/backup.test.mjs`，均已同步；
+  `backup.js` 的 `redactSecrets` 行为扩展为剔除 `passEnc`。未新增运行时模块或全局抽象。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **先红**：实现前 `node scripts/sync-dav.test.mjs` → exit 1（`loadConfig` 不存在 / 落盘仍含 `pass` 明文字段）。
+- **后绿**：`node scripts/sync-dav.test.mjs` → **65 / 65（exit 0）**：
+  落盘 `v2` 且无 `pass`、JSON 不含密码、`passEnc` 含 alg/iv/data、同密码二次密文不同（随机 IV）、
+  `loadConfig` 还原 `s3cret-pw`、`getConfig.hasPass=true` 且无明文、`clearConfig` 后清空；
+  旧明文 `legacy-pw` 首次读取 `migrated=true`、落盘无明文、二读仍还原且不重复迁移；
+  篡改首字节 → `pass=''` + 错误含「解密失败/重新输入」；清空密码移除 `passEnc`；
+  上传 Basic 头还原 `u:s3cret-pw`（走解密路径）。
+- **配套套件**：`node scripts/backup.test.mjs` → **147 / 147（exit 0）**（含「备份不携带 passEnc」）。
+- **门禁（实跑退出码）**：`npm run verify:fast` → **exit 0**（36 运行项 / **5385** 断言 / 基线一致）；
+  `node --expose-gc scripts/bench.mjs --assert` → **62/62 通过（exit 0）**，heapUsed 增量 **2.70 MB**（before 8.93 → after 11.64 MB）；
+  首屏 **359.8 KB gzip / 1009.1 KB raw**（较 C026 增加 2.9/10.1 KB，来自加密实现与弹窗文案）。
+
+**威胁模型（摘要；全文见 docs/SECURITY.md §9）**
+- **能挡**：只拿到 LocalStorage 拷贝/导出/截图/浏览器同步、备份或诊断包外泄（`pass`/`passEnc` 均剔除）。
+- **挡不住**：同源 XSS（可调用 decrypt）、恶意浏览器扩展/调试器、同机读盘、整浏览器 profile 拷贝、
+  运行期内存转储；无用户口令/KDF，忘记密码后的离线破解模型未设计。**不替代应用专用密码**。
+
+**遗留 TODO / 风险**
+- **真实浏览器 IndexedDB CryptoKey 跨会话持久性未做真机自动化验收**（Node 无 IDB，走内存会话密钥回退路径）；
+  隐私模式/站点数据清理下 `qforge-secrets` 的行为与提示未留真机截图证据，如实标「未测」。
+- Key 不可用时旧明文迁移会**移除明文但不保存密码**（安全优先），刷新后需重新输入；该提示已实现但未做真机验收。
+- 未实现密钥轮换、多设备密钥同步、用户口令派生（PBKDF2/Argon2）与密码强度校验。
+- `getConfig()` 语义变更（不再含 `pass`）属**破坏性 API 变化**；仓内调用方已同步，外部脚本若读取 `.pass` 会拿到
+  `undefined`，应改用 `await loadConfig()`。
+
 ### feat(annotation): 单库批注总量上限（C026）——超限拒绝写入 / 导出前显式确认
 
 **Commit Hash**：`c58fa49`

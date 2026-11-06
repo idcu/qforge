@@ -59,14 +59,15 @@ ok(!!bankKey, '备份含题库/SRS 数据键');
 
 section('WebDAV 密码脱敏（备份可安全分享，评估报告中优先级#6）');
 {
-  QB.SyncDAV.saveConfig({ baseUrl: 'https://dav.example.com/', user: 'u1', pass: 's3cret', lastAt: 1 });
+  await QB.SyncDAV.saveConfig({ baseUrl: 'https://dav.example.com/', user: 'u1', pass: 's3cret', lastAt: 1 });
   const bp = await QB.Backup.buildBackup();
   const dav = bp.data[QB.KEYS.metaDav];
   ok(!!dav && dav.pass === undefined, '备份不含 WebDAV 明文密码');
   eq(dav.baseUrl, 'https://dav.example.com/', '非密字段（地址）保留');
   eq(dav.user, 'u1', '非密字段（账号）保留');
+  eq(dav.passEnc, undefined, '备份不携带密码密文（C027）');
   // 本地配置不受备份脱敏影响
-  eq(QB.SyncDAV.getConfig().pass, 's3cret', '脱敏不改本地原配置（纯函数）');
+  eq((await QB.SyncDAV.loadConfig()).pass, 's3cret', '脱敏不改本地原配置（纯函数）');
   // redactSecrets 直接契约
   const redacted = QB.Backup.redactSecrets({ a: 1, 'meta:dav': { baseUrl: 'x', pass: 'y' } });
   eq(redacted.a, 1, 'redactSecrets：无关键原样保留');
