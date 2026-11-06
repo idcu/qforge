@@ -2,6 +2,8 @@
 
 > 导入支持 **题库包(.qbk) / JSON / CSV / TSV / Markdown(.md) / XLSX / DOCX / Anki(.apkg) / Quizlet(.txt/.quizlet)** 九种来源，全部在浏览器本地解析（零第三方库）。
 > 解析规则变化时须同步更新本文档与 `js/importers/adapters.js`、`js/importers/line-parser.js`。
+>
+> **导入体积上限（R-20）**：本地文件单文件 **16 MiB**（`QB.CONFIG.LIMITS.IMPORT_MAX_BYTES`）。超过时在 `FileReader`/解析之前直接拒绝，提示「超过导入上限 / 未读取文件、未写入任何题目」，不打开预览、不落库；网络地址导入仍受 **8 MiB**（`NETWORK.URL_IMPORT_MAX_BYTES`）约束，两者以更严格者为准。
 
 ## 1. 标准题目模型
 ---
