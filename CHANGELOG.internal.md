@@ -11,7 +11,7 @@
 
 ### fix(security): CSP 默认 self + 显式白名单，标注明文风险（C020）
 
-**Commit Hash**：待回填（提交后补）
+**Commit Hash**：`c439bc1`
 
 **核心改动**
 - **缺陷（先红）**：`index.html` 与 `scripts/lib/security-headers.mjs` 的 `connect-src` 为
