@@ -11,7 +11,7 @@
 
 ### fix(import): 导入体积在读取前预检（R-20）
 
-**Commit Hash**：`<提交后回填>`
+**Commit Hash**：`4d75763`
 
 **核心改动**
 - `js/config.js`：新增 `LIMITS.IMPORT_MAX_BYTES = 16 MiB`（REFACTOR-PLAN 初值，待产品确认）。
