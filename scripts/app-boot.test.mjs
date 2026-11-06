@@ -1,0 +1,407 @@
+/**
+ * app.js 运行时覆盖（C021）——Node + 最小 DOM 垫片，驱动 8 条真实入口路径：
+ *   boot / 文件导入 / 文本粘贴（分享回链） / URL 导入 / 拖拽导入 / api 分支 / 导出 / 备份恢复
+ *
+ * 不加载真实 data-io / exporter / backup：这三者的交互层依赖真实 DOM（文件选择、下载、弹窗），
+ * 本套件只验证 app.js 的「入口分派、参数传递、状态迁移、失败反馈」是否接线正确。
+ *
+ * 判据（负例带牙齿）：
+ *   1. 正常模式下所有断言必须通过（71 项）；
+ *   2. `node scripts/app-boot.test.mjs --mutate-commit-import` 会把 app.js 源码里的
+ *      `DataIO.commitImport` 调用改坏（改为 res=null），整套件必须出现失败并 exit 1，
+ *      否则说明本套件没有覆盖到该入口 → exit 2。
+ *
+ * 真机未验证：本垫片不实现布局/选择器/HTML 解析，任何视觉与真实浏览器行为仍需人工验证。
+ *
+ * 运行：node scripts/app-boot.test.mjs [--mutate-commit-import]
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHarness } from './_harness.mjs';
+import { createDom } from './lib/dom-shim.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const QB_DIR = path.resolve(__dirname, '..');
+const NEGATIVE = process.argv.slice(2).includes('--mutate-commit-import');
+const SHARE_CALL = 'const res = await QB.DataIO.commitImport(target, result, source);';
+
+const APP_SRC = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8');
+// 变异测试：把唯一落库入口改坏（模拟「导入成功但未写库」），整套件应当变红（exit 1）
+const APP_FOR_ENV = NEGATIVE
+  ? APP_SRC.replace(SHARE_CALL, 'const res = null; /* mutated for negative control */')
+  : APP_SRC;
+
+let pass = 0;
+const failures = [];
+const rejections = [];
+process.on('unhandledRejection', (e) => { rejections.push(e); });
+
+function ok(c, l) {
+  if (c) { pass++; console.log('  ✓ ' + l); } else { failures.push(l); console.log('  ✗ ' + l); }
+}
+function eq(a, b, l) {
+  ok(a === b, l + '（期望 ' + JSON.stringify(b) + '，实际 ' + JSON.stringify(a) + '）');
+}
+function section(t) { console.log('\n== ' + t + ' =='); }
+function tick(ms) { return new Promise((r) => setTimeout(r, ms || 0)); }
+async function waitUntil(fn, ms) {
+  const limit = ms || 2000;
+  const start = Date.now();
+  while (Date.now() - start < limit) {
+    if (fn()) return true;
+    await tick(3);
+  }
+  return false;
+}
+
+function loadFile(window, rel) {
+  const code = fs.readFileSync(path.join(QB_DIR, rel), 'utf8');
+  new Function('window', 'globalThis', code)(window, window);
+}
+
+/** api 分支替身：满足 QB.assertAdapter 契约，全部本地返回，零 fetch */
+function apiStub(stat) {
+  const group = (names) => {
+    const g = {};
+    names.forEach((n) => {
+      g[n] = async (...args) => {
+        stat.api.push([n].concat(args));
+        if (n === 'list') return [];
+        if (n === 'count') return 0;
+        if (n === 'revision') return 0;
+        return null;
+      };
+    });
+    return g;
+  };
+  return {
+    banks: group(['list', 'get', 'create', 'update', 'remove']),
+    questions: group(['list', 'count', 'revision', 'get', 'create', 'update', 'remove', 'insertMany', 'removeMany']),
+    progress: group(['wrongList', 'wrongAdd', 'wrongRemove', 'wrongClear', 'favoriteList', 'favoriteToggle',
+      'favoriteClear', 'historyList', 'historyAdd', 'historyUpdate', 'historyRemove', 'historyClear',
+      'sessionSave', 'sessionLoad', 'sessionClear']),
+    reviews: group(['list', 'save', 'remove', 'record']),
+    revlog: group(['list', 'append']),
+    weights: group(['read', 'write', 'remove']),
+    backup: group(['export', 'import'])
+  };
+}
+
+/**
+ * 建一个可运行 app.js 的环境；返回 QB/DOM/调用记录。
+ * opts: { api, share, shareCode, appSource }
+ */
+async function makeEnv(opts) {
+  const o = opts || {};
+  const stat = {
+    toasts: [], data: [], exports: [], backup: 0, migration: 0, dbInit: 0, fetch: 0, api: []
+  };
+  const { QB, window } = await createHarness(QB_DIR);
+  const dom = createDom({ nullIds: ['toast-wrap'] });
+
+  // 让 ui-renderer 里的自由变量 document/location 也能解析到垫片（app.js 用显式参数）
+  const prevDocument = globalThis.document;
+  globalThis.document = dom.document;
+  window.location = dom.location;
+  window.navigator = dom.navigator;
+  window.history = dom.history;
+  window.addEventListener = dom.window.addEventListener;
+  window.removeEventListener = dom.window.removeEventListener;
+  window.scrollTo = dom.window.scrollTo;
+  window.scrollY = 0;
+  window.innerHeight = 800;
+  window.innerWidth = 1200;
+
+  loadFile(window, 'js/modules/ui-renderer.js');
+  loadFile(window, 'js/modules/dom-patch.js');
+  // toast 走记录器：不创建节点、不起 2.6s 定时器，测试可断言提示文案
+  QB.UIRenderer.toast = (m, t) => { stat.toasts.push({ message: m, type: t }); };
+
+  if (o.api) {
+    QB.CONFIG.DATA_BACKEND = 'api';
+    QB.ApiAdapter = apiStub(stat);
+  }
+
+  // —— 交互层替身（真实实现需要浏览器文件选择/下载/弹窗）——
+  const D = QB.DataIO;
+  D.importFlow = async (bank, trigger) => { stat.data.push(['importFlow', bank, trigger]); return true; };
+  D.importTextFlow = async (bank, trigger) => { stat.data.push(['importTextFlow', bank, trigger]); return true; };
+  D.importUrlFlow = async (bank, url, trigger) => { stat.data.push(['importUrlFlow', bank, url, trigger]); return true; };
+  D.refreshUrlFlow = async (bank, trigger) => { stat.data.push(['refreshUrlFlow', bank, trigger]); return true; };
+  D.importFile = async (bank, file, kind, active) => {
+    stat.data.push(['importFile', bank, file, kind, active]);
+    return true;
+  };
+  D.parseShareCode = async (code) => {
+    stat.data.push(['parseShareCode', code]);
+    if (o.share && o.share.throw) throw new Error(o.share.error || 'bad');
+    return o.share && o.share.result ? o.share.result
+      : { questions: [{ type: 'single', question: '分享题' }], meta: { manifest: { title: '分享题包' } } };
+  };
+  D.commitImport = async (target, result, source) => {
+    stat.data.push(['commitImport', target, result, source]);
+    return o.share && o.share.cancel ? null : { ok: true };
+  };
+  QB.Exporters = {
+    openFlow: async (args) => { stat.exports.push(['openFlow', args]); },
+    distributeFlow: async (args) => { stat.exports.push(['distributeFlow', args]); },
+    shareFlow: async (args) => { stat.exports.push(['shareFlow', args]); }
+  };
+  QB.Backup = { openFlow: async () => { stat.backup++; } };
+  QB.ShareLink.readHash = (hash) => {
+    const m = /#share=([^&]+)/.exec(hash || '');
+    return m ? (o.shareCode || m[1]) : null;
+  };
+
+  // —— 观察迁移 / DB 初始化 / 网络 ——
+  // migration 的 schema 细节由 migrate.test 覆盖；这里只验证 app.js 是否按后端分支调用它
+  QB.Migration.run = async () => { stat.migration++; return { locked: false, migrated: 0 }; };
+  const origInit = QB.DB.init;
+  QB.DB.init = function (...args) { stat.dbInit++; return origInit.apply(QB.DB, args); };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (...args) => { stat.fetch++; return realFetch.apply(globalThis, args); };
+
+  if (o.shareCode || o.share) dom.location.hash = (o.share && o.share.hash) || '#share=SHARE1';
+
+  const source = o.appSource || APP_FOR_ENV;
+  new Function('window', 'globalThis', 'document', 'location', 'navigator',
+    'requestIdleCallback', 'setTimeout', 'history', source)(
+    window, window, dom.document, dom.location, dom.navigator,
+    dom.requestIdleCallback, setTimeout, dom.history);
+
+  const booted = await waitUntil(() => window.QB.App && window.QB.App.State.banksLoaded === true);
+  stat.booted = booted;
+  stat.QB = window.QB;
+  stat.window = window;
+  stat.dom = dom;
+  stat.prevDocument = prevDocument;
+  stat.restore = () => { globalThis.fetch = realFetch; globalThis.document = prevDocument; };
+  return stat;
+}
+
+/** 触发 #view 的 data-action 点击（走真实的 click 事件委托） */
+async function clickAction(env, action, attrs) {
+  const el = env.dom.document.createElement('button');
+  el.setAttribute('data-action', action);
+  Object.keys(attrs || {}).forEach((k) => el.setAttribute(k, attrs[k]));
+  const view = env.dom.document.getElementById('view');
+  view.fire('click', { target: el });
+  await tick(5);
+  return el;
+}
+
+function toastsText(env) { return env.toasts.map((t) => t.message).join(' | '); }
+function viewHtml(env) { return env.dom.document.getElementById('view').innerHTML; }
+
+/* ============================================================
+ * 1. boot：空库启动、顶栏同步、主题、SW 注册、本地迁移
+ * ============================================================ */
+section('boot：空库启动 + 顶栏/主题/SW/迁移接线');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  ok(env.booted, 'boot 完成（State.banksLoaded=true）');
+  eq(QB.App.State.view, 'banks', '无题库时首屏进入题库管理');
+  ok(viewHtml(env).indexOf('还没有题库') >= 0, '首屏渲染空态文案');
+  ok(env.dom.document.getElementById('tabs').innerHTML.indexOf('data-tab="home"') >= 0, '标签栏已同步');
+  eq(env.dom.document.getElementById('bank-switch').disabled, true, '无题库时题库下拉禁用');
+  eq(env.dom.document.documentElement.getAttribute('data-theme'), 'light', '主题写入 documentElement');
+  eq(env.dom.navigator.serviceWorker.registrations.length, 1, 'http 环境注册 SW 一次');
+  eq(env.dom.navigator.serviceWorker.registrations[0].script, 'sw.js', 'SW 脚本路径为 sw.js');
+  eq(env.dom.navigator.serviceWorker.registrations[0].options.scope, './', 'SW scope 为 ./');
+  eq(env.dom.idleTasks.length, 1, '配额探测排入空闲回调');
+  eq(env.migration, 1, 'local 后端执行一次数据库迁移');
+  eq(env.dbInit, 1, 'QB.DB.init 调用一次');
+  eq(env.fetch, 0, '启动零网络请求');
+  eq(rejections.length, 0, '启动无未处理 rejection');
+
+  // 无题库时入口必须给出可操作提示，而不是静默
+  await clickAction(env, 'bank-import');
+  ok(toastsText(env).indexOf('请先创建一个题库') >= 0, '无题库点「导入题库文件」提示先建库');
+  ok(!env.data.some((d) => d[0] === 'importFlow'), '无题库时不调用 importFlow');
+  await clickAction(env, 'bank-export');
+  ok(toastsText(env).indexOf('请先选择题库') >= 0, '无题库点导出提示先选择题库');
+  await clickAction(env, 'backup-manage');
+  await waitUntil(() => env.backup > 0);
+  eq(env.backup, 1, '备份恢复入口无题库也能打开');
+  env.restore();
+}
+
+/* ============================================================
+ * 2. 有题库：文件 / 文本 / URL / 拖拽 / 导出
+ * ============================================================ */
+section('有题库：文件·文本·URL·拖拽导入与导出分派');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  const bank = await QB.DB.banks.create({ name: '演示库', description: '' });
+  QB.App.State.bankId = bank.id;
+  QB.App.State.banksLoaded = false; // 与真实「新建题库」路径一致：列表缓存失效后重读
+  QB.App.State.view = 'home';
+  await QB.DB.setCurrentBankId(bank.id);
+  await QB.App.render();
+  eq(QB.App.State.bank && QB.App.State.bank.id, bank.id, '当前题库已装载');
+  ok(viewHtml(env).indexOf('演示库') >= 0, '首页渲染当前题库名');
+
+  const elFile = await clickAction(env, 'bank-import');
+  await waitUntil(() => env.data.some((d) => d[0] === 'importFlow'));
+  const recFile = env.data.find((d) => d[0] === 'importFlow');
+  ok(!!recFile, '文件导入调用 DataIO.importFlow');
+  eq(recFile && recFile[1].id, bank.id, '文件导入传入当前题库');
+  eq(recFile && recFile[2], elFile, '文件导入传入真实触发元素（焦点归还）');
+
+  await clickAction(env, 'bank-import-text');
+  await waitUntil(() => env.data.some((d) => d[0] === 'importTextFlow'));
+  ok(!!env.data.find((d) => d[0] === 'importTextFlow'), '文本粘贴导入调用 importTextFlow');
+
+  const elUrl = await clickAction(env, 'bank-import-url');
+  await waitUntil(() => env.data.some((d) => d[0] === 'importUrlFlow'));
+  const recUrl = env.data.find((d) => d[0] === 'importUrlFlow');
+  eq(recUrl && recUrl[1].id, bank.id, 'URL 导入传入当前题库');
+  eq(recUrl && recUrl[2], undefined, 'URL 导入不预填地址（弹出输入框）');
+  eq(recUrl && recUrl[3], elUrl, 'URL 导入传入触发元素');
+
+  await clickAction(env, 'bank-refresh-url');
+  await waitUntil(() => env.data.some((d) => d[0] === 'refreshUrlFlow'));
+  ok(!!env.data.find((d) => d[0] === 'refreshUrlFlow'), '刷新 URL 源调用 refreshUrlFlow');
+
+  // 拖拽：dragenter 加高亮，dragleave 移除；drop 才真正导入
+  const dt = { types: ['Files'], files: [{ name: 'demo.csv' }] };
+  env.dom.document.fire('dragenter', { dataTransfer: dt });
+  ok(env.dom.document.body.classList.contains('drag-over'), '拖入文件时 body 加 drag-over');
+  env.dom.document.fire('dragleave', { dataTransfer: dt });
+  ok(!env.dom.document.body.classList.contains('drag-over'), '拖离后移除 drag-over');
+
+  env.dom.document.fire('drop', { dataTransfer: dt });
+  await waitUntil(() => env.data.some((d) => d[0] === 'importFile'));
+  const recDrop = env.data.find((d) => d[0] === 'importFile');
+  ok(!!recDrop, 'drop 文件调用 DataIO.importFile');
+  eq(recDrop && recDrop[2], dt.files[0], 'drop 传入第一个文件');
+  eq(recDrop && recDrop[3], QB.Source.KINDS.DROP, 'drop 来源标记为 DROP');
+  eq(recDrop && recDrop[4], null, '无焦点元素时 active=null');
+  ok(!env.dom.document.body.classList.contains('drag-over'), 'drop 后清除 drag-over');
+
+  // 非文件拖拽忽略
+  const before = env.data.filter((d) => d[0] === 'importFile').length;
+  env.dom.document.fire('drop', { dataTransfer: { types: ['text/plain'], files: [] } });
+  await tick(10);
+  eq(env.data.filter((d) => d[0] === 'importFile').length, before, '非 Files 拖拽不触发导入');
+
+  // 答题中拒绝拖拽
+  QB.App.State.engine = {};
+  env.dom.document.fire('drop', { dataTransfer: dt });
+  await tick(10);
+  ok(toastsText(env).indexOf('答题中不能导入') >= 0, '答题中拖拽导入被拒绝并提示');
+  eq(env.data.filter((d) => d[0] === 'importFile').length, before, '答题中不调用 importFile');
+  QB.App.State.engine = null;
+
+  // 无题库时拖拽：提示先建库，不进入导入
+  const beforeNoBank = env.data.filter((d) => d[0] === 'importFile').length;
+  QB.App.State.bank = null;
+  QB.App.State.bankId = null;
+  env.dom.document.fire('drop', { dataTransfer: dt });
+  await tick(10);
+  ok(toastsText(env).indexOf('请先创建或选择题库') >= 0, '无题库拖拽提示先建库');
+  eq(env.data.filter((d) => d[0] === 'importFile').length, beforeNoBank, '无题库拖拽不调用 importFile');
+  QB.App.State.bankId = bank.id;
+  QB.App.State.banksLoaded = false;
+  await QB.App.render();
+
+  // 导出：6 个入口 → 3 个方法，参数必须是当前题库与触发元素
+  await clickAction(env, 'bank-export');
+  await clickAction(env, 'bank-package');
+  await clickAction(env, 'bank-share');
+  await clickAction(env, 'export-wrong');
+  await clickAction(env, 'export-fav');
+  await clickAction(env, 'export-history');
+  const want = ['openFlow', 'distributeFlow', 'shareFlow', 'openFlow', 'openFlow', 'openFlow'];
+  const wantKind = ['bank', 'bank', 'bank', 'wrong', 'favorites', 'history'];
+  eq(env.exports.length, 6, '6 个导出入口各自分派');
+  ok(env.exports.every((e, i) => e[0] === want[i]), '导出方法分派正确（银行/题包/分享/错题/收藏/历史）');
+  ok(env.exports.every((e) => e[1].bank && e[1].bank.id === bank.id), '每次导出都传入当前题库');
+  ok(env.exports.every((e, i) => e[1].kind === wantKind[i]), '每次导出 kind 正确');
+  ok(env.exports.every((e) => e[1].trigger && e[1].trigger.getAttribute('data-action')), '每次导出传入触发元素');
+  env.restore();
+}
+
+/* ============================================================
+ * 3. 分享回链（粘贴路径）：成功 / 无效 / 取消
+ * ============================================================ */
+section('分享回链：成功落库 / 无效分享码 / 取消清理空库');
+{
+  ok(APP_SRC.includes(SHARE_CALL), '负例锚点存在：app.js 唯一落库入口可被变异测试改写');
+  const env = await makeEnv({ share: {} });
+  const QB = env.QB;
+  ok(env.booted, '带 #share 启动完成');
+  const recRead = env.data.find((d) => d[0] === 'parseShareCode');
+  eq(recRead && recRead[1], 'SHARE1', '从 location.hash 解析分享码');
+  const recCommit = env.data.find((d) => d[0] === 'commitImport');
+  ok(!!recCommit, '分享回链调用 commitImport（唯一落库入口）');
+  eq(recCommit && recCommit[2].questions.length, 1, 'commitImport 收到解析出的题目');
+  eq(recCommit && recCommit[3].kind, QB.Source.KINDS.PASTE, '分享导入来源标记为 PASTE');
+  eq(recCommit && recCommit[3].uri, '分享回链', '分享来源记录「分享回链」');
+  eq(env.dom.history.replaced.length, 1, '处理完分享码立即清 hash');
+  eq(env.dom.history.replaced[0][2], '/', 'replaceState 清空为当前 path+search');
+  const target = recCommit && recCommit[1];
+  eq(QB.App.State.bankId, target && target.id, '导入成功后切换到目标题库');
+  eq(await QB.DB.getCurrentBankId(), target && target.id, '当前题库持久化');
+  ok(viewHtml(env).indexOf('分享题包') >= 0, '导入后首页渲染题包标题');
+  eq(rejections.length, 0, '分享导入无未处理 rejection');
+  env.restore();
+}
+{
+  const env = await makeEnv({ share: { throw: true, error: 'bad' } });
+  const QB = env.QB;
+  eq(env.data.filter((d) => d[0] === 'commitImport').length, 0, '无效分享码不落库');
+  ok(toastsText(env).indexOf('分享码无效：bad') >= 0, '无效分享码给出错误提示');
+  eq(await QB.DB.banks.list().then((l) => l.length), 0, '无效分享码不创建空题库');
+  env.restore();
+}
+{
+  const env = await makeEnv({ share: { cancel: true } });
+  const QB = env.QB;
+  const recCommit = env.data.find((d) => d[0] === 'commitImport');
+  const target = recCommit && recCommit[1];
+  eq(await QB.DB.banks.list().then((l) => l.length), 0, '取消导入时删除新建的空题库');
+  eq(QB.App.State.bankId, null, '取消后不切换当前题库');
+  ok(target && target.id, '取消前已按 manifest 建库（用于承载预览）');
+  env.restore();
+}
+
+/* ============================================================
+ * 4. api 分支：不跑本地迁移、DB 走 ApiAdapter、零网络
+ * ============================================================ */
+section('api 分支：跳过本地迁移 + 适配器接线');
+{
+  const env = await makeEnv({ api: true });
+  const QB = env.QB;
+  ok(env.booted, 'api 模式 boot 完成');
+  eq(QB.DB.backend, 'api', 'DB 使用 api 后端');
+  eq(env.migration, 0, 'api 模式不执行本地 schema 迁移');
+  ok(env.api.some((r) => r[0] === 'list'), 'DB 调用 ApiAdapter.banks.list');
+  eq(QB.App.State.view, 'banks', '空后端首屏进入题库管理');
+  ok(viewHtml(env).indexOf('还没有题库') >= 0, '空后端渲染空态');
+  eq(env.fetch, 0, 'api 分支替身下零 fetch（真实网络另由 api-backend.test 覆盖）');
+  env.restore();
+}
+
+/* ============================================================
+ * 汇总
+ * ============================================================ */
+if (rejections.length) {
+  failures.push('存在 ' + rejections.length + ' 个未处理 rejection');
+}
+console.log('\n========================================');
+console.log('通过: ' + pass + '，失败: ' + failures.length);
+if (NEGATIVE) {
+  const caught = failures.length > 0;
+  console.log(caught
+    ? '[mutate] 预期红 ✅：commitImport 入口被改坏后本套件能抓住（失败 ' + failures.length + ' 项，exit 1）'
+    : '[mutate] 未翻红 ❌：变异未被抓住，说明套件没有覆盖该入口');
+  process.exit(caught ? 1 : 2);
+}
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exit(1);
+}

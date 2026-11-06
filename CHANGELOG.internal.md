@@ -9,6 +9,48 @@
 
 ## 最新记录
 
+### test(app): app.js 运行时覆盖 8 条真实入口，兼作入口接线变异门禁（C021）
+
+**Commit Hash**：`待回填`
+
+**核心改动**
+- **新增** `scripts/lib/dom-shim.mjs`：Node 侧最小 DOM 垫片（元素注册表 / 事件注册与派发 /
+  classList / 属性 / `style.setProperty` / `closest` / `querySelector` 最小匹配）。
+  **显式不实现**布局（`offsetHeight/scrollHeight` 固定 0）、选择器引擎（`querySelector` 仅 `#id`）、
+  HTML 解析（`innerHTML` 只是字符串）——依赖真实渲染的结论一律不在本套件断言。
+- **新增** `scripts/app-boot.test.mjs`：fresh harness + 补载 `ui-renderer`/`dom-patch`，
+  用 `new Function(...,'document','location','navigator',...)` 显式注入垫片，覆盖 **8 条路径**：
+  ① boot（空库首屏/顶栏/主题/SW 注册/空闲配额探测/本地迁移调用，零 fetch）；
+  ② 文件导入；③ 文本粘贴（分享回链成功/无效/取消）；④ URL 导入与刷新；
+  ⑤ 拖拽（dragenter/dragleave 高亮、drop 传 `Files[0]`+`KINDS.DROP`+active、非 Files 忽略、答题/无库拒绝）；
+  ⑥ api 后端分支（跳过本地迁移、走 `ApiAdapter` 替身）；⑦ 导出 6 入口→3 方法；
+  ⑧ 备份恢复入口。真实 data-io/exporter/backup 的文件选择/下载/弹窗依赖真实 DOM，故以记录型替身
+  只验证「入口分派、参数透传、状态迁移、失败反馈」。
+- **变异门禁**：`node scripts/app-boot.test.mjs --mutate-commit-import` 把 app.js 唯一落库入口
+  `const res = await QB.DataIO.commitImport(...)` 改为 `res = null`，整套件必须变红（exit 1）。
+- `scripts/test-order.mjs` 注册新套件；`docs/TESTING.md` 增加套件行与合计；
+  `scripts/docs-baseline.json` 由 `docs-check --write` 刷新。
+- 公共抽象：仅测试侧 `createDom`（`scripts/lib/dom-shim.mjs`），**不改应用业务代码**；
+  影响面限于 `scripts/**`，不触碰 `packages/**`/`js/**` 运行时。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **绿**：`node scripts/app-boot.test.mjs` → **71 / 71 通过（exit 0）**；
+  覆盖断言 71 项（boot 18、导入/拖拽/导出 27、分享 19、api 7、负例锚点 1 等）。
+- **红（变异）**：`node scripts/app-boot.test.mjs --mutate-commit-import` → **63 通过 / 8 失败（exit 1）**：
+  「分享回链调用 commitImport」「收到题目」「来源 PASTE/分享回链」「切换到目标题库/持久化/渲染标题」
+  「取消前已建库」共 8 项失败，证明唯一落库入口确被覆盖；未漂移则 exit 2。
+- **门禁（实跑退出码）**：`node scripts/test-all.mjs` → **35 套件 / 5286 断言 / 基线一致（exit 0，38.2s）**；
+  `npm run verify:fast` → **exit 0**；`docs-check --static` 一致；
+  `node --expose-gc scripts/bench.mjs --assert` → **62 项全过（exit 0）**（reviewMeta 1000/10000 新 hash
+  均 1 次/7B；heapUsed 增量 +2.69 MB）；首屏 **353.3 KB gzip / 989.0 KB raw**（与 C021 前一致，本项零运行时改动）。
+
+**遗留 TODO / 风险**
+- **真机 DOM 未验证**：垫片不实现布局/选择器/HTML 解析；拖拽高亮视觉、真实文件选择/下载、
+  弹窗焦点与移动端行为仍需人工在浏览器验收。
+- `SHARE_CALL` 变异锚点依赖 app.js 中该调用保持单行原样；若重构拆分需同步更新锚点，
+  否则 `--mutate-commit-import` 会以「未翻红」exit 2 报警（不会静默通过）。
+- api 分支只验证 app.js 接线；真实 HTTP 行为由 `api-backend.test.mjs` 覆盖，本套件零网络。
+
 ### fix(storage): reviewMeta 改为 v4 紧凑标记，消除随库线性膨胀（P2-06）
 
 **Commit Hash**：`8725a89`

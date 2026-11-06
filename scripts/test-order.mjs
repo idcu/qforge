@@ -43,6 +43,7 @@ export const ORDER = [
   'pwa.test.mjs',
   'ui-renderer.test.mjs',
   'dom-patch.test.mjs',
+  'app-boot.test.mjs',
   'a11y.test.mjs',
   'static-server.test.mjs'
 ];
