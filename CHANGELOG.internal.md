@@ -11,7 +11,7 @@
 
 ### test(a11y): 无障碍静态门禁独立进 CI，弹窗快照缺登记即红（C022）
 
-**Commit Hash**：`待回填`
+**Commit Hash**：`45bb8f0`
 
 **核心改动**
 - `.github/workflows/test.yml` 新增独立 `a11y` job（Node 24）运行 `node scripts/a11y.test.mjs`；
