@@ -9,6 +9,50 @@
 
 ## 最新记录
 
+### refactor(config): 容量阈值收敛到 LIMITS 单一事实源（R-15）
+
+**Commit Hash**：`（提交后回填）`
+
+**核心改动**
+- `js/config.js`：`LIMITS` 新增 `BACKUP_LS_WARN_BYTES = 4MiB`、`QUIZLET_MAX_TEXT_LENGTH = 4MiB`
+  （后者按 `text.length`/UTF-16 单元比较，命名如实反映口径）。
+- `js/modules/backup.js`：`used > 4 * 1024 * 1024` → `used > QB.CONFIG.LIMITS.BACKUP_LS_WARN_BYTES`。
+- `js/importers/quizlet-importer.js`：`text.length > 4 * 1024 * 1024` →
+  `text.length > QB.CONFIG.LIMITS.QUIZLET_MAX_TEXT_LENGTH`。
+- `js/utils/annotation.js`：`|| 4 * 1024 * 1024` 兜底 → `|| 2 * 1024 * 1024`，
+  与 `ANNOTATION_TOTAL_MAX_BYTES` 同值（修复配置缺失路径下的 4MiB/2MiB 漂移）。
+- `scripts/references.test.mjs`：新增静态门禁——`js/**` 下裸 `4 * 1024 * 1024` 必须为 0
+  （`js/config.js` 唯一允许定义处，用 `(?<![0-9])` 排除 `64 * 1024 * 1024`），并校验
+  backup/quizlet 确实引用新常量、annotation 兜底值等于配置值。
+- `sw.js`：`CACHE` v21 → v22，刷新 `scripts/sw-baseline.json`。
+- 文档：`docs/ARCHITECTURE.md` §4.13（常量表与门禁）、`docs/TESTING.md`
+  （references 13→20、合计 5429→5436）、`docs/BENCH.md`（首屏体积复测）、`docs/DEVELOPMENT.md`（SW 版本读数）。
+- **影响面**：三处阈值数值不变；唯一行为变化是 `annotation.js` 在「`QB.CONFIG` 缺失」的不可达兜底路径下
+  由 4MiB 纠正为 2MiB（正常启动始终读配置，不受影响）。`QUIZLET_MAX_TEXT_LENGTH` 与
+  `BACKUP_LS_WARN_BYTES` 成为公开配置面，后续调阈值只改 `LIMITS`。
+- **公共抽象清单（新增/调整）**
+  - 新增常量 `LIMITS.BACKUP_LS_WARN_BYTES`、`LIMITS.QUIZLET_MAX_TEXT_LENGTH`；
+  - 调整消费方：`backup.js`、`quizlet-importer.js`、`annotation.js` 兜底 → 统一读 `LIMITS`；
+  - 新增静态门禁（references 套件内），未新增运行项。
+
+**验证数据（Node v24.14.0，Windows，Asia/Shanghai）**
+- **先红**：`node scripts/references.test.mjs` → **exit 1**，`通过: 14，失败: 6`。失败项：
+  `无裸 4 * 1024 * 1024`（命中 `js/importers/quizlet-importer.js`, `js/modules/backup.js`,
+  `js/utils/annotation.js`）、`BACKUP_LS_WARN_BYTES` 缺失、`QUIZLET_MAX_TEXT_LENGTH` 缺失、
+  backup/quizlet 未引用常量、annotation 兜底 4MiB ≠ LIMITS 2MiB。
+- **后绿**：同命令 → **exit 0**，`通过: 20，失败: 0`（新增 7 项：裸值扫描、3 个常量断言、
+  2 个引用断言、兜底一致性）。
+- **配套门禁**：`npm run verify:fast` → **exit 0**（36 运行项 / 5436 断言 / 0 失败，`docs-check --static` 一致）；
+  `npm run bench` → **exit 0**（62/62 性能门禁）。
+- `node scripts/sw-runtime.test.mjs --write-baseline` → `qforge-v22 / 93 files / 96098f327aa7…`，套件 34 项通过。
+- 断言只增不减（references 13→20，合计 5429→5436），未调整阈值/基线。
+
+**遗留 TODO / 风险**
+- 静态门禁只覆盖 `4 * 1024 * 1024` 这一种写法；`4 << 20`、`4194304`、`4096 * 1024` 等变体
+  不会被抓到（当前仓库无此类写法）。
+- `QUIZLET_MAX_TEXT_LENGTH` 按 UTF-16 单元比较，若未来改为按 UTF-8 字节限制，需同步重命名与文档。
+- 未实机验证：无（纯常量引用与静态扫描，不涉及浏览器行为）。
+
 ### fix(sw): 缓存清理收窄到本站命名空间（R-11）
 
 **Commit Hash**：`7ac18bf`

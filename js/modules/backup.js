@@ -847,7 +847,7 @@
     const used = QB.Storage.usageBytes();
     const KB = Math.round(used / 1024);
     const isIdb = QB.Storage.mode === 'idb';
-    const warn = !isIdb && used > 4 * 1024 * 1024;
+    const warn = !isIdb && used > QB.CONFIG.LIMITS.BACKUP_LS_WARN_BYTES;
     const store = QB.Store;
     const marker = store ? store.marker : null;
     const legacyBytes = (isIdb && store) ? store.legacyLSUsedBytes() : 0;

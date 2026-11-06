@@ -47,7 +47,7 @@
   /** 仅当「所有非空行都能切成两列」时才接管 .txt，避免抢走既有 CSV/行式导入 */
   function sniff(input) {
     const text = input && input.text;
-    if (!text || text.length > 4 * 1024 * 1024) return false;
+    if (!text || text.length > QB.CONFIG.LIMITS.QUIZLET_MAX_TEXT_LENGTH) return false;
     const lines = nonEmptyLines(text);
     if (lines.length < 1) return false;
     const first = lines[0];

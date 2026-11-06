@@ -67,7 +67,11 @@
     ANNOTATION_MAX_LENGTH: 5000,
     // 单库批注总量上限（UTF-8 字节，C026）：写入/导入超限时拒绝并给出可见提示；
     // 导出超限时先确认「不含批注继续」，不静默截断（2MiB ≈ 540 题 × 5000 字符的 77%）
-    ANNOTATION_TOTAL_MAX_BYTES: 2 * 1024 * 1024
+    ANNOTATION_TOTAL_MAX_BYTES: 2 * 1024 * 1024,
+    // 备份弹窗：LocalStorage 模式已用空间告警阈值（超过提示受 ~5MB 限制；不阻断导出）
+    BACKUP_LS_WARN_BYTES: 4 * 1024 * 1024,
+    // Quizlet .txt 接管上限：按 text.length（UTF-16 单元）比较，超过视为非 Quizlet，交回其他导入器
+    QUIZLET_MAX_TEXT_LENGTH: 4 * 1024 * 1024
   };
 
   // 题目图片资产（IndexedDB；改库名等于换存储实例，不会迁移旧图）
