@@ -266,6 +266,40 @@ section('C009 用量快照：基线同口径 + 增量误差 ≤0.1% + 清空即�
 }
 
 
+section('R-07 字节口径唯一化：fullKeyOf / bytesOfValue 与 usageBytes 同口径');
+{
+  const S = QB.Storage;
+  const Q = QB.Quota;
+  S.clearAll();
+  Q.reset();
+  ok(typeof S.fullKeyOf === 'function', 'Storage.fullKeyOf 已导出（物理键唯一实现）');
+  ok(typeof Q.bytesOfValue === 'function', 'Quota.bytesOfValue 已导出（值字节唯一实现）');
+  eq(S.fullKeyOf('r07-o'),
+    ((QB.CONFIG.STORAGE_PREFIX || (QB.CONFIG.STORAGE && QB.CONFIG.STORAGE.PREFIX)) || 'qb') + ':r07-o',
+    'fullKeyOf 与 CONFIG 前缀一致');
+  // 5 种固定夹具（字符串/中文/数字/对象/数组）：逐键公式固定 + usageBytes 增量等于 Σ bytesOfValue
+  const fixtures = [
+    ['r07-s', 'ascii'],
+    ['r07-cn', '中文'],
+    ['r07-n', 42],
+    ['r07-o', { a: 1, b: 'x' }],
+    ['r07-a', [1, '二', true]]
+  ];
+  const before = S.usageBytes();
+  fixtures.forEach(([k, v]) => S.setSync(k, v));
+  const after = S.usageBytes();
+  const sum = fixtures.reduce((n, [k, v]) => n + Q.bytesOfValue(k, v), 0);
+  eq(after - before, sum, 'usageBytes 增量 = Σ bytesOfValue（逐键同口径，实测 ' + sum + ' B）');
+  eq(Q.bytesOfValue('r07-o', { a: 1, b: 'x' }),
+    (JSON.stringify({ a: 1, b: 'x' }).length + 'r07-o'.length + 2) * 2, 'bytesOfValue 公式固定（JSON 长度 + 键长 + 2）×2');
+  const raw = window.localStorage.getItem(S.fullKeyOf('r07-o'));
+  eq(Q.diskBytes('r07-o'), (raw.length + 'r07-o'.length + 2) * 2,
+    'diskBytes 复用 Storage.fullKeyOf 同一物理键（实测 ' + raw.length + ' 字符原文）');
+  S.clearAll();
+  Q.reset();
+}
+
+
 section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
 {
   S.clearAll();

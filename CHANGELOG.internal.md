@@ -9,6 +9,41 @@
 
 ## 最新记录
 
+### refactor(storage): 字节口径唯一化（R-07）
+
+**Commit Hash**：`（本条目提交后回填）`
+
+**核心改动**
+- `js/utils/storage.js`：公开 `fullKeyOf(key)`（LS 物理键唯一实现）；`usageBytes()` 的 IDB/LS 两分支
+  统一改调 `QB.Quota.bytesOfValue(k,v)`，不再各自手写 `JSON.stringify(...)+k+2` 公式。
+- `js/utils/quota.js`：`valueBytes` 更名并公开为 `bytesOfValue(key,value)`（值字节唯一实现）；
+  `diskBytes(key)` 改用 `QB.Storage.fullKeyOf(key)`，删除自行拼接 `CONFIG.STORAGE_PREFIX + ':' + key` 的重复实现。
+- 文档：`docs/ARCHITECTURE.md` §5（Storage/Quota 两行）、`docs/STORAGE.md` §9.1、`docs/modules/utils.md`、
+  `docs/user-guide.md`（三处容量数字同口径）、`docs/TESTING.md`（storage 61→67、合计 5476→5482）。
+- **影响面**：公开 API 只增（`fullKeyOf` / `bytesOfValue`）；`valueBytes` 为内部函数更名，无外部调用；
+  不改变写入、上限、预检与快照算法，无数据迁移。回滚即 revert。
+
+**验证数据（实测）**
+- 红：`node scripts/storage.test.mjs` → `Storage.fullKeyOf 已导出` / `Quota.bytesOfValue 已导出` 2 项失败，
+  随后 `TypeError: S.fullKeyOf is not a function`（storage.test.mjs:277，exit 1）。
+  原始输出：`.analysis/architecture-audit/stage3-red-r07.txt`。
+- 绿：同套件 **67 断言 / 67 通过 / 0 失败**；固定 5 组夹具（ascii/中文/数字/对象/数组，合计 152B）
+  `usageBytes` 增量 = Σ `bytesOfValue` 逐字节相等；`diskBytes` 与 `fullKeyOf` 物理键一致。
+  原始输出：`.analysis/architecture-audit/stage3-green-r07.txt`。
+- 口径固定值（夹具 `r07-o={a:1,b:'x'}`）：`bytesOfValue` = (JSON 15 + 键 5 + 2) × 2 = **44 B**；
+  LS 原文 15 字符 → `diskBytes` = **44 B**（公式一致）。
+- 无性能项：本项不新增扫描/遍历，`usageBytes` 调用次数与复杂度不变；门禁未新增阈值。
+- 门禁：`verify:fast` exit 0（36 运行项 / 5482 断言）；`bench --assert` 64/64 exit 0；
+  `docs-check --static` exit 0。**如实上报**：`SRSStore.gradeMany` 比值门禁（5.05×1.06=5.353）
+  在本轮 4 次 bench 中 2 次以 5.36/5.41 微幅失败、2 次通过；该路径未受 R-07 改动影响
+  （`trackWrite` 前后都调同一字节函数），判定为同机噪声/阈值贴边，未调阈值也未改基线。
+- SW：`qforge-v25` → `qforge-v26`（`js/utils/storage.js`、`js/utils/quota.js` 变更），
+  同步刷新 `scripts/sw-baseline.json`（93 files / 52cfe5102a82…）。
+
+**遗留 TODO / 风险**
+- LS 分支在 `localStorage.getItem` 抛错时回退到缓存值估算；该分支无法在 Node 稳定复现（**未实机验证**）。
+- 未实机验证：真实浏览器跨标签下 `fullKeyOf` 前缀与既有数据兼容（前缀来源仍为 `CONFIG`，未改值）。
+
 ### docs(arch): 启动分层水合 spike 判定 no-go（R-10，未实施）
 
 **Commit Hash**：`（本条目提交后回填）`

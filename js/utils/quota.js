@@ -94,7 +94,8 @@
     ready: false, used: 0, limit: 0, backend: 'ls', at: 0, dirty: false
   };
 
-  function valueBytes(key, value) {
+  /** 值字节唯一实现（R-07）：JSON 长度 + 键长 + 2，×2（UTF-16）；Storage.usageBytes 复用 */
+  function bytesOfValue(key, value) {
     try { return ((JSON.stringify(value) || '').length + String(key).length + 2) * 2; } catch (_) {
       return (String(key).length + 2) * 2;
     }
@@ -103,8 +104,7 @@
   function diskBytes(key) {
     if (isIdb()) return 0;
     try {
-      const prefix = (QB.CONFIG && (QB.CONFIG.STORAGE_PREFIX || (QB.CONFIG.STORAGE && QB.CONFIG.STORAGE.PREFIX))) || 'qb';
-      const raw = global.localStorage.getItem(prefix + ':' + key);
+      const raw = global.localStorage.getItem(QB.Storage.fullKeyOf(key));
       if (raw == null) return 0;
       return (raw.length + String(key).length + 2) * 2;
     } catch (_) {
@@ -115,8 +115,8 @@
   /** 写入后按增量调整快照（oldKnown=false 时旧值从磁盘探测） */
   function trackWrite(key, newValue, oldValue, oldKnown) {
     if (!meter.ready) return; // 基线未建立：等 refresh 时全量算
-    const nb = valueBytes(key, newValue);
-    const ob = oldKnown ? valueBytes(key, oldValue) : diskBytes(key);
+    const nb = bytesOfValue(key, newValue);
+    const ob = oldKnown ? bytesOfValue(key, oldValue) : diskBytes(key);
     if (ob == null) { meter.dirty = true; meter.used += nb; return; }
     meter.used += nb - ob;
     meter.at = Date.now();
@@ -126,7 +126,7 @@
   /** 删除后按增量调整快照（旧值未知 → dirty，等全量校正） */
   function trackDelete(key, oldValue, oldKnown) {
     if (!meter.ready) return;
-    const ob = oldKnown ? valueBytes(key, oldValue) : diskBytes(key);
+    const ob = oldKnown ? bytesOfValue(key, oldValue) : diskBytes(key);
     if (ob == null) { meter.dirty = true; return; }
     meter.used = Math.max(0, meter.used - ob);
     meter.at = Date.now();
@@ -194,6 +194,7 @@
     isIdb: isIdb, limitBytes: limitBytes, usageBytes: usageBytes, remainingBytes: remainingBytes,
     shardOverheadBytes: shardOverheadBytes, estimateQuestions: estimateQuestions,
     canFitQuestions: canFitQuestions, estimateAsync: estimateAsync, formatBytes: formatBytes,
+    bytesOfValue: bytesOfValue, diskBytes: diskBytes,
     trackWrite: trackWrite, trackDelete: trackDelete, reset: reset, view: view, refresh: refresh
   });
 })(typeof window !== 'undefined' ? window : globalThis);
