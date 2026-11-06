@@ -11,7 +11,7 @@
 
 ### feat(annotation): 本地批注随题包往返与分享页只读展示（C012）
 
-**Commit Hash**：`（待回填；FEAT 提交后由 docs(changelog) 补记，遵守历史只追加）`
+**Commit Hash**：`ba07af3`（feat(annotation): 本地批注随题包往返与分享页只读展示…）
 
 **核心改动**
 - 新增 `js/utils/annotation.js`（`QB.Annotation`）：`normalize`（`\r\n`/`\r`→`\n`、trim、`MAX_LENGTH` 截断）、`present`；
