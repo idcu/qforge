@@ -569,6 +569,29 @@ section('二期金样本：fuzz 确定性 / easyDays 边界 / 默认关闭等价
     'easy-maxdays 第 ' + i + ' 步 ≤5 天'));
 }
 
+section('C019 调度设置缓存：外部改库/跨标签立即失效（P2-08）');
+{
+  const bank = await QB.DB.banks.create({ name: 'C019 设置缓存库' });
+  await S.save(bank, { requestRetention: 0.9 });
+  eq((await S.ofBankId(bank.id)).requestRetention, 0.9, 'save 后 ofBankId 返回 0.90');
+
+  // 路径 1：绕过 save 直改库（备份恢复/其他模块写库的等价路径）
+  await QB.DB.banks.update(bank.id, { sched: { requestRetention: 0.8 } });
+  eq((await S.ofBankId(bank.id)).requestRetention, 0.8, '直改库 sched 后 ofBankId 立即失效返回 0.80');
+
+  // 路径 2：跨标签整表覆盖（Storage 外部变更事件；旧实现命中旧缓存 → 0.80）
+  const banksNow = QB.Storage.get(QB.KEYS.banks, []);
+  const next = banksNow.map((b) => (b.id === bank.id ? Object.assign({}, b, { sched: { requestRetention: 0.85 } }) : b));
+  const prefix = (QB.CONFIG && (QB.CONFIG.STORAGE_PREFIX || (QB.CONFIG.STORAGE && QB.CONFIG.STORAGE.PREFIX))) || 'qb';
+  QB.Storage._handleExternalChange({ key: prefix + ':' + QB.KEYS.banks, newValue: JSON.stringify(next) });
+  eq((await S.ofBankId(bank.id)).requestRetention, 0.85, '跨标签改库后 ofBankId 立即返回 0.85');
+
+  // 缓存按库隔离：其他库不受影响
+  const other = await QB.DB.banks.create({ name: 'C019 其他库' });
+  await S.save(other, { requestRetention: 0.95 });
+  eq((await S.ofBankId(other.id)).requestRetention, 0.95, '其他库设置不受影响（0.95）');
+}
+
 /* 汇总 */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

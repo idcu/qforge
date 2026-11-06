@@ -111,6 +111,13 @@ eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: '训练集' }, { answer: '�
 eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: 'def', accept: ['Def', 'DEF'] }] }, ['DEF']).isCorrect, true, '填空：备选答案命中');
 eq(QB.judgeAnswer({ type: 'fill', blanks: [{ answer: 'def' }] }, ['']).isCorrect, false, '填空：空答案判错');
 eq(QB.judgeAnswer({ type: 'essay', reference_answer: '开放答案' }, '任意作答').isCorrect, null, '简答：返回 null 待自评');
+// C019（P2-09）：非法布尔答案不得静默判错（旧实现一律返回 false → 计入错题/统计）
+eq(QB.judgeAnswer({ type: 'judge', answer: '不确定' }, true).isCorrect, null, '判断：题干答案非法 → pending（不计错）');
+eq(QB.judgeAnswer({ type: 'judge', answer: '正确' }, '模棱两可').isCorrect, null, '判断：用户作答非法 → pending（不计错）');
+eq(QB.judgeAnswer({ type: 'judge', answer: '正确' }).isCorrect, false, '判断：未作答仍判错（保留考试计分语义）');
+eq(QB.judgeAnswer({ type: 'judge', answer: '错误' }, '错误').isCorrect, true, '判断：文本「错误」合法判对');
+ok(QB.ResultPolicy && !QB.ResultPolicy.isDecided({ isCorrect: null }) && !QB.ResultPolicy.isWrong({ isCorrect: null }),
+  'pending 结果不计入已判定/错误（统计与错题本沿用 ResultPolicy）');
 // 填空空位/答案数量不一致：按较大值保留并警告（旧实现会静默截断答案）
 {
   const short = QB.Adapters.toStandard({ type: 'fill', question: '____ 与 ____', answer: '甲' });

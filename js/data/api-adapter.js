@@ -190,6 +190,10 @@
   let weightsCache = null;
 
   /* ---------------- BankRepository ---------------- */
+  /** C019：题库记录变更后让 QB.SchedSettings 的按库缓存失效（模块可能尚未加载，故做存在性守卫）。 */
+  function invalidateSchedCache(bankId) {
+    if (QB.SchedSettings && typeof QB.SchedSettings.invalidate === 'function') QB.SchedSettings.invalidate(bankId);
+  }
   const banks = {
     async list() { const r = await req('GET', ROUTES.banks); return (r.items || []).map(fromWireBank); },
     async get(id) { const w = await reqMaybe('GET', ROUTES.bank(enc(id))); return w ? fromWireBank(w) : null; },
@@ -199,7 +203,9 @@
       if (opts && opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== null) {
         body.base_updated_at = opts.baseUpdatedAt;
       }
-      return fromWireBank(await req('PATCH', ROUTES.bank(enc(id)), body));
+      const updated = fromWireBank(await req('PATCH', ROUTES.bank(enc(id)), body));
+      if (patch && patch.sched !== undefined) invalidateSchedCache(id); // C019：调度设置直改库
+      return updated;
     },
     async remove(id, options) {
       const cascade = !options || options.cascade !== false;
@@ -208,6 +214,7 @@
       reviewCache.delete(id); // 级联已删该库 reviews，缓存须一并丢弃
       reviewRevCache.delete(id);
       weightsCache = null; // 级联可能删除该库 preset，权重缓存一并丢弃
+      invalidateSchedCache(id); // C019：删库后丢弃该库调度缓存
       if (cascade) bumpLogRev(); // 级联会删除该库评分日志，统计缓存失效
     }
   };
@@ -509,6 +516,7 @@
         reviewCache.clear();
         reviewRevCache.clear();
         weightsCache = null;
+        invalidateSchedCache(); // C019：备份可能替换任意库的 sched，整表丢弃
         bumpRev(); // C016：题目写修订号 +1，使 QB.DB.loadQuestions 的整库缓存失效
         bumpLogRev(); // 备份载荷可能替换 revlog，统计页派生数据失效
       }

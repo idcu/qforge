@@ -11,6 +11,12 @@
 
   function now() { return Date.now(); }
 
+  /** C019：题库记录变更后让 QB.SchedSettings 的按库缓存失效（模块可能尚未加载，故做存在性守卫）。
+   *  bankId 为空表示整表失效（备份恢复可能替换任意库）。 */
+  function invalidateSchedCache(bankId) {
+    if (QB.SchedSettings && typeof QB.SchedSettings.invalidate === 'function') QB.SchedSettings.invalidate(bankId);
+  }
+
   /** 附带 contentHash 与时间戳的标准题目 */
   function stampQuestion(q, bankId) {
     const t = now();
@@ -393,12 +399,14 @@
       if (idx < 0) throw new Error('题库不存在: ' + id);
       list[idx] = Object.assign({}, list[idx], patch, { id: id, updatedAt: now() });
       Storage.set(K.banks, list);
+      if (patch && patch.sched !== undefined) invalidateSchedCache(id); // C019：调度设置直改库
       return list[idx];
     },
     async remove(id, options) {
       const cascade = !options || options.cascade !== false;
       const list = (await banks.list()).filter((b) => b.id !== id);
       Storage.setSync(K.banks, list);
+      invalidateSchedCache(id); // C019：删库后丢弃该库调度缓存
       if (cascade) cascadeDelete(id); // 级联清理由唯一入口负责（见下方 cascadeDelete）
     }
   };
@@ -1474,6 +1482,7 @@
         // C018：恢复可能整体替换题目键，用户数据合并不走 Storage.set，须显式让内存索引失效。
         invalidateQuestionIndex();
         bumpRev();
+        invalidateSchedCache(); // C019：备份可能替换任意库的 sched，整表丢弃
       }
       revlogRev += 1; // 备份可能替换 revlog，统计页派生数据失效（B3）
       return out;

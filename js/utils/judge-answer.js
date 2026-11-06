@@ -33,8 +33,20 @@
       const userBool = resolveJudge(userAnswer, question.options);
       const correctAnswer = correctBool === true ? '正确' : correctBool === false ? '错误' : String(question.answer || '');
       const userStr = userBool === true ? '正确' : userBool === false ? '错误' : String(userAnswer || '');
+      /* C019：非法布尔答案不再静默判错（P2-09）。
+       * - 题干答案非法（数据损坏/导入错误）：isCorrect=null（待人工），不写错题、不计入统计；
+       * - 用户未作答（空/缺省）：仍按错处理，保持考试计分语义（空答不应因 pending 免罚）；
+       * - 用户作答非法（非 对/错/选项字母文本，如损坏的旧数据）：isCorrect=null（待人工），
+       *   不写错题/统计；ResultPolicy 已按 null 排除在已判定与错误之外。 */
+      const blank = userAnswer === undefined || userAnswer === null
+        || (typeof userAnswer === 'string' && userAnswer.trim() === '');
+      let isCorrect;
+      if (correctBool === null) isCorrect = null;
+      else if (blank) isCorrect = false;
+      else if (userBool === null) isCorrect = null;
+      else isCorrect = correctBool === userBool;
       return {
-        isCorrect: correctBool !== null && userBool !== null ? correctBool === userBool : false,
+        isCorrect: isCorrect,
         correctAnswer,
         userAnswer: userStr,
         detail: null

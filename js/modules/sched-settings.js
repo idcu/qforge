@@ -146,8 +146,14 @@
     return normalize(bank && bank.sched);
   }
 
-  /* 按题库缓存归一结果（与 QB.FSRSOpt 权重缓存同口径：save 后更新、页面 reload 后重读；
-   * 多端并发改设置读到旧值属已知限制）。避免 grade/gradeMany 热路径每次读整条 bank 记录。 */
+  /* 按题库缓存归一结果（与 QB.FSRSOpt 权重缓存同口径：save 后更新）。
+   * 避免 grade/gradeMany 热路径每次读整条 bank 记录。
+   * C019（P2-08）：跨标签改库（storage 事件整表覆盖 banks）与备份恢复/直改库
+   * 必须让缓存立即失效，否则会继续用旧保留率/步骤/上限调度。失效入口：
+   *   1) `QB.Storage.registerMerge` 的 banks 钩子（下方模块尾部注册，跨标签）；
+   *   2) local/api 适配器 `banks.update`（含 sched 时）、`banks.remove`、`backup.import`；
+   *   3) `save()` 写库后直接覆盖缓存（本模块自身路径）。
+   * 不在每次 ofBankId 时重读 bank：避免 API 模式下每次评分多一个 GET（N+1）。 */
   const bankCache = new Map();
 
   /** 按题库 id 取生效设置（SRSStore.grade/gradeMany 的唯一解析入口；每库至多读一次库） */
@@ -183,4 +189,12 @@
     DEFAULTS, LEECH_ACTIONS, MAX_PER_GROUP, RETENTION_MIN, RETENTION_MAX, MAX_INTERVAL_MIN, MAX_INTERVAL_MAX,
     normalize, normalizeSteps, normalizeEasyDays, validate, toBool, toInt, ofBank, ofBankId, invalidate, save
   };
+
+  /* C019：跨标签 banks 整表变化 → 丢弃按库调度缓存（保持默认整值覆盖语义）。 */
+  if (QB.Storage && typeof QB.Storage.registerMerge === 'function' && QB.KEYS && QB.KEYS.banks) {
+    QB.Storage.registerMerge(
+      (key) => key === QB.KEYS.banks,
+      (local, incoming) => { bankCache.clear(); return incoming; }
+    );
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

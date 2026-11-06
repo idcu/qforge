@@ -46,7 +46,7 @@
 | `good` 2 | 3 | 良好 | 按目标保留率正常增长 |
 | `easy` 3 | 4 | 简单 | 间隔放大（easyBonus = w16）、D 下降、直接毕业 |
 
-**作答到评分的映射（`app.js`）**：客观题全对→good；**不定项少选（partial 半分）→hard**；**材料题“全半对”（无硬错、全部小问均为少选半分）→hard（经 `QB.ResultPolicy.kind='partial'`，不再因聚合 `isCorrect=true` 误记 good）**；错选/未答→again；简答题练习中为自评（用户点对/错后才记录），考试整卷评分同样按此映射批量写入。映射与收集的唯一入口是 `SRSStore.ratingForResult(result)` / `SRSStore.collectGraded([{question,result}])`：练习即时提交、交卷批量收集、材料题自评后收集、**结果页内联自评（交卷后）**四处共用；收集即标记 `result.srsRecorded`，**保证一次作答只写一条调度与一条 revlog**（待自评的 null 结果不收集也不标记；结果页自评在整题聚合由 null 变为已判定时才收集）。
+**作答到评分的映射（`app.js`）**：客观题全对→good；**不定项少选（partial 半分）→hard**；**材料题“全半对”（无硬错、全部小问均为少选半分）→hard（经 `QB.ResultPolicy.kind='partial'`，不再因聚合 `isCorrect=true` 误记 good）**；错选/未答→again；简答题练习中为自评（用户点对/错后才记录），考试整卷评分同样按此映射批量写入。**判断题的非法答案（题干答案或用户作答无法解析为 对/错）在 `judge-answer` 返回 `isCorrect=null`（pending）**：不写错题本、不计入交卷统计与 SRS 调度（`ResultPolicy.kind='pending'`、`collectGraded` 跳过）；**未作答仍按错误处理**，避免以 pending 规避空答扣分（C019）。映射与收集的唯一入口是 `SRSStore.ratingForResult(result)` / `SRSStore.collectGraded([{question,result}])`：练习即时提交、交卷批量收集、材料题自评后收集、**结果页内联自评（交卷后）**四处共用；收集即标记 `result.srsRecorded`，**保证一次作答只写一条调度与一条 revlog**（待自评的 null 结果不收集也不标记；结果页自评在整题聚合由 null 变为已判定时才收集）。
 
 ## 4. 学习步骤状态机（1m / 10m）
 
@@ -278,7 +278,7 @@ v1 的「今日复习」直接取全部到期题（新题也算到期），3000 
 | 模块 | 关键导出 |
 | --- | --- |
 | `fsrs.js` | `QB.FSRS.review(state, rating, now, weights, opts?)`（`opts.sched.fuzz` 或 `opts.fuzzSeed` 启用 fuzz）、`initialState(now)`、`isLearning(state)`、`DEFAULT_W`（21）、`DECAY`/`FACTOR`/`REQUEST_RETENTION`/`STABILITY_MIN`/`MAX_INTERVAL_DAYS`/`SAME_DAY_LIMIT_DAYS`/`FUZZ_RANGES`、`decayOf`/`factorOf`/`powerDecay`/`retrievability`、`initStability`/`initDifficulty`/`nextStability`/`nextDifficulty`、`recallStability`/`forgetStability`/`stabilityShortTerm`、`nextIntervalDays`/`applyFuzz(intervalDays, rand, maxDeltaDays?)`/`applyEasyDays(intervalDays, fromTs, weights)` |
-| `sched-settings.js` | `QB.SchedSettings.normalize`（唯一归一，保留未知键）、`normalizeEasyDays`、`validate`（表单非法值就地报错）、`LEECH_ACTIONS`、`ofBank`/`ofBankId`（按库缓存）、`invalidate`/`save`；`DEFAULTS` 含 `fuzz:false`/`fuzzMaxDays:0`/`easyDays:[100×7]`/`leechAction:'none'` |
+| `sched-settings.js` | `QB.SchedSettings.normalize`（唯一归一，保留未知键）、`normalizeEasyDays`、`validate`（表单非法值就地报错）、`LEECH_ACTIONS`、`ofBank`/`ofBankId`（按库缓存）、`invalidate`/`save`；`DEFAULTS` 含 `fuzz:false`/`fuzzMaxDays:0`/`easyDays:[100×7]`/`leechAction:'none'`。**C019 缓存失效**：`save` 自身覆盖缓存；`banks.update`（含 sched）、`banks.remove`、`backup.import`、跨标签 `banks` 整表合并均 `invalidate`，不再出现「改设置后用旧保留率调度」；`ofBankId` 热路径不重读 bank（避免 API 模式评分多一次 GET） |
 | `srs.js` | `QB.SRS.RATINGS`、`isDue`、`isDueToday`、`dueQuestions` |
 | `srs-store.js` | `QB.SRSStore.grade/gradeMany/dueToday/countDue/forecast/stats/getState/clear`（**均 async，经 `QB.DB.reviews`**；0–3→1–4 映射、SM-2 迁移；`sched.fuzz` 开启时按 `bankId|contentHash|reps` 派生确定性 seed）；同步纯函数 `keyFor`/`ratingForResult`/`collectGraded`；`fuzzSeedFor`（确定性 seed 派生，金样本与生产同源）；leech 动作唯一实现 `applyLeechAction`（仅 grade/gradeMany 调用） |
 | `fsrs-opt.js` | revlog/权重**存取层**（经 `QB.DB.revlog/weights`，**均 async**）：`appendLog`、`readLogForScope`、`diagnose`、`train`（async 存储包装）、`trainAsync`（Worker/回退）、`getActiveWeights`、`saveWeights`、`resetWeights`、**`shouldRetrain`/`warmWeightsFor`**（增量重训）；纯函数 `normalizeStore`（归一唯一实现，local-adapter 复用）；常量 `LOG_LIMIT`/`WARM_ITERATIONS`/`RETRAIN_MIN_NEW` |

@@ -9,6 +9,43 @@
 
 ## 最新记录
 
+### fix(judge): 非法判断答案返回 pending；调度缓存即时失效（C019）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- **缺陷 A（P2-09，先红）**：`js/utils/judge-answer.js` 判断题对「题干答案非法」或「用户作答非法」一律返回
+  `isCorrect:false` → 计入错题本、错误数与正确率，用户无法区分「答错」与「数据坏了」。
+  改为：题干答案非法 → `null`（pending）；用户作答非空但非法 → `null`；**未作答仍判 `false`**（保留考试计分，
+  pending 不能当免罚）。`ResultPolicy.kind(null)='pending'`、`WrongBook` 仅收 `wrong`、`collectGraded` 跳过 pending，
+  **无需改统计/错题代码**。
+- **缺陷 B（P2-08，先红）**：`QB.SchedSettings.ofBankId` 的按库缓存只在 `save()` 时更新；绕过 `save` 直改库、
+  备份恢复替换 `bank.sched`、跨标签整表覆盖时继续用旧保留率/步骤/上限调度。
+  失效入口补齐：`Storage.registerMerge` 的 `banks` 钩子（跨标签）、local/api 双后端 `banks.update`（含 `sched`）、
+  `banks.remove`、`backup.import`；`save` 自身覆盖缓存不变。**不改为每次 `ofBankId` 重读 bank**（避免 API 模式评分多一个 GET/N+1）。
+- `js/modules/sched-settings.js`、`js/data/local-adapter.js`、`js/data/api-adapter.js`。
+- 公共抽象：复用既有 `QB.SchedSettings.invalidate(bankId?)`；两适配器仅在 3 处写路径调用（带存在性守卫），
+  失效实现唯一收敛在 sched-settings，无重复实现。
+
+**验证数据（同机 Asia/Shanghai）**
+- **红（临时还原旧实现后实跑）**：`node scripts/smoke-test.mjs` → **2 项失败**（题干答案非法、作答非法仍返回 `false`）；
+  `node scripts/sched.test.mjs` → **2 项失败**（直改库、跨标签整表覆盖后 `ofBankId` 仍返回缓存 **0.90**）。
+- **绿（本提交）**：`smoke-test` **731/731**（新增 5 断言）；`sched.test` **221/221**（新增 4 断言）：
+  题干答案非法 → `null`、作答非法 → `null`、未作答 → `false`、文本「错误」→ `true`、
+  pending 不计入 `ResultPolicy` 已判定/错误；`save` 0.90 → 直改库 0.80 → 跨标签 0.85 均为即时值，其他库 0.95 隔离。
+- **门禁（实跑退出码）**：`node scripts/test-all.mjs` → **34 套件 / 5181 断言 / 基线一致（exit 0）**；
+  `node --expose-gc scripts/bench.mjs --assert` → **60 项全过（exit 0）**；
+  `npm run verify:fast` → **exit 0**；`docs-check --static` 全部一致；首屏 **351.5 KB gzip / 984.4 KB raw**（C018 350.4 / 981.5，+1.1 KB gzip）。
+
+**影响范围**
+- 判断题「作答为空」语义不变（仍判错）；只有**非法值**变为 pending，正常答题路径无变化。
+- 结果页/答题卡/统计对 pending 的既有渲染与跳过逻辑复用，无新增 UI 分支。
+- 调度设置保存后的即时生效语义不变；新增覆盖「跨标签/备份恢复/直改库」三条外部路径。
+
+**遗留 TODO / 风险**
+- 远端正向变更（API 模式另一客户端改 sched）仍需刷新页面才可见；本次只保证本客户端写路径与跨标签事件。
+- `banks.update` 的失效条件是 `patch.sched !== undefined`，若未来通过其他字段间接改 sched 需同步补充。
+
 ### perf(data): 导入去重索引与单题 O(1) 定位（C018）
 
 **Commit Hash**：`9fb8ad0`
