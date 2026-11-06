@@ -208,6 +208,38 @@ section('M3 材料题：Repository 新增/编辑往返');
   eq(list[0].children.length, 2, 'insertMany 后子问题保留');
   eq(list[0].children[0].score, 25, 'insertMany 后子问题分值保留');
 }
+section('C012 本地批注：编辑表单与材料题父题批注');
+{
+  const body = QB.QuestionEditor.editorBody({
+    type: 'single', question: '题干', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A',
+    annotation: '批注<b>内容</b>\n第二行'
+  });
+  ok(body.indexOf('data-qe="annotation"') >= 0, '普通题编辑表单含批注文本框（data-qe=annotation）');
+  ok(body.indexOf('maxlength="' + QB.Annotation.MAX_LENGTH + '"') >= 0, '批注文本框带最大长度（公共常量）');
+  ok(body.indexOf('批注（本地，随题包导出）') >= 0, '批注字段有明确文案（本地/随包导出）');
+  ok(body.indexOf('批注&lt;b&gt;内容&lt;/b&gt;') >= 0, '批注文本经 HTML 转义');
+  ok(body.indexOf('<b>内容</b>') < 0, '不注入原始批注标记');
+
+  const prevBackend = QB.DB.backend;
+  QB.DB.backend = 'api';
+  const apiBody = QB.QuestionEditor.editorBody({ type: 'single', question: '题干', annotation: '服务端批注' });
+  ok(/data-qe="annotation"[^>]*disabled/.test(apiBody), 'API 模式批注输入禁用（纯本地能力，不静默丢写）');
+  ok(apiBody.indexOf('后端模式暂不支持本地批注') >= 0, 'API 模式给出禁用原因');
+  QB.DB.backend = prevBackend;
+
+  const matBody = QB.QuestionEditor.materialEditorBody({
+    type: 'material', material: '材料', annotation: '父题批注',
+    children: [mkChild('single'), mkChild('judge')]
+  });
+  ok(matBody.indexOf('data-me="annotation"') >= 0, '材料题编辑表单含父题批注文本框（data-me=annotation）');
+
+  const mat = QB.QuestionEditor.buildMaterialQuestion({
+    material: '材料', annotation: ' 父题批注\n第二行 ', children: [mkChild('single'), mkChild('judge')]
+  }).question;
+  eq(mat.annotation, '父题批注\n第二行', '材料题父题批注按公共归一落库');
+  ok(!('annotation' in mat.children[0]), '子问题不单独携带批注（统一挂父题）');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

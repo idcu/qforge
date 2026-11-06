@@ -68,6 +68,11 @@
       body += '<div class="stem">' + embed(QB.RichText.render(q.question || '')) + '</div>' +
         renderOptions(q, embed) + renderAnswer(q, embed);
     }
+    // 批注（C012）：只读展示，随题包一起带走；材料题批注统一挂父题
+    if (QB.Annotation && QB.Annotation.present(q)) {
+      body += '<div class="annotation"><span class="label">批注：</span>' +
+        embed(QB.RichText.render(QB.Annotation.normalize(q.annotation))) + '</div>';
+    }
     const meta = [QB.typeLabel(q.type)];
     if (q.category) meta.push(q.category);
     return '<article class="q"><div class="q-head"><span class="q-no">' + (index + 1) + '.</span>' +
@@ -105,6 +110,7 @@
     '.label{color:var(--muted);font-weight:600;}',
     '.value{font-weight:700;}',
     '.analysis{font-size:14px;color:#374151;margin-top:8px;white-space:pre-wrap;}',
+    '.annotation{font-size:14px;color:#6b7280;margin-top:8px;border-left:3px solid var(--line);padding-left:10px;white-space:pre-wrap;}',
     '.muted{color:var(--muted);font-weight:400;}',
     '.rt-img{display:block;max-width:100%;margin:8px 0;border-radius:6px;}',
     '.rt-img-missing{color:var(--muted);font-size:13px;}',

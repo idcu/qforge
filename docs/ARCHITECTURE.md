@@ -137,6 +137,24 @@ Exporters.shareFlow({kind, bank, trigger})
 ```
 > 全程 0 网络、0 账号；分享页保持只读（无 `<script>`）。格式与上限见 [EXPORT-FORMAT.md](EXPORT-FORMAT.md) §2.5、[IMPORT-FORMAT-BINARY.md](IMPORT-FORMAT-BINARY.md) §9。
 
+### 4.7 本地批注（C012）
+
+```
+写批注（纯本地）：
+  题目编辑器（普通题 data-qe=annotation / 材料题父题 data-me=annotation）
+    → QB.Annotation.normalize（CRLF→LF、trim、≤5000 截断，唯一实现）
+    → QB.DB.questions.create/update（可选字段，不参与 contentHash）
+导出 → 导入 → 分享页：
+  Exporters.toPlain 仅在 QB.Annotation.present(q) 时写 annotation（JSON/.qbk；CSV/MD/XLSX/DOCX/TXT 不写）
+    → qbk bank.json 的 questions 含批注；checksum 覆盖含批注的 questions；manifest 结构不变
+    → Importers.toStandard / toStandardMaterial 保留 annotation（挂在父题；子问题不单独携带）
+    → 练习反馈 / 材料题总评 / 分享页只读展示（RichText 转义 + pre-wrap 保留换行）
+```
+
+- **不影响题目身份**：`makeContentHash` 不覆盖 `annotation`，写批注不会重映射错题/收藏/复习键，也不改变题目顺序。
+- **向后兼容**：旧包无 `annotation` 照常导入；新包被旧客户端丢弃该字段后，`QB.Package.verify` 只比较 manifest 与 envelope 的 checksum 字符串，仍 `checksumOk=true`。`manifestVersion` 保持 1，容器结构不变。
+- **API 后端**：wire 白名单与服务端 SQL schema 均无该字段，编辑器在 `QB.DB.backend === 'api'` 时禁用批注并提示「后端模式暂不支持本地批注」，避免静默丢失。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -151,6 +169,7 @@ Exporters.shareFlow({kind, bank, trigger})
 | `QB.AnswerText` | 填空多空拼接/旧 answer 回退、按题型答案行 | 导出、分享页、编辑器预览、导入、判分反馈 |
 | `QB.Weights.normalizeStore` | FSRS 权重仓归一（旧单组→global） | local-adapter、api-adapter、fsrs-opt |
 | `QB.ReviewMerge` | 多端/多标签复习合并（纯函数）：`mergeMaps` 同键保留 `last` 更大者；`mergeMeta` 清单 `keys` 并集、`count`=并集长度（C008，消除孤儿 hash） | api-adapter 409 合并重试、local-adapter 写前合并、Storage 跨标签合并、migrate/backup、storage 双标签回归 |
+| `QB.Annotation` | 题目批注归一唯一实现（C012）：`normalize`（CRLF→LF、trim、`MAX_LENGTH` 截断）、`present`（非空判定）；`MAX_LENGTH` 取自 `CONFIG.LIMITS.ANNOTATION_MAX_LENGTH` | 本地适配器写入、导入器（普通题/材料题父题）、导出器、题目编辑器、练习反馈、分享页 |
 | `QB.Statistics.reviewStats(revlog, bankId)` | **C010 逐题作答聚合（纯函数）**：只读现有 revlog，按 `e.b===bankId` 过滤；`r>=FSRS.RATINGS.good`（good/easy）计正确，hard 计作答不计正确；返回 `Map<hash,{answered,correct,accuracy}>` | PracticeBuilder、统计/测试；不新增进度键 |
 | `QB.PracticeBuilder` | **C010 错题/薄弱一键组卷（纯函数）**：`weakKeys`（<60% 且作答≥2）、`build({questions,wrongKeys,revlog,bankId,limit,seed})` → 候选并集/内容键去重/种子洗牌/裁剪；零写入 | app.js `startSmartPractice`（首页与错题页共用 action）；阈值读 `CONFIG.LIMITS` |
 | `QB.Base64` | **C011 Base64 唯一实现**：`encodeBytes/decodeToBytes/toUrlSafe/fromUrlSafe`；Node 走 Buffer、浏览器分块 btoa；输出与原 `bytesToBase64` 逐字节一致 | `SharePage.dataUrl`（内嵌图片）、`ShareLink` |

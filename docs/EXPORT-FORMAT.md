@@ -54,6 +54,7 @@
 }
 ```
 > **`bank.sched`（可选，P1-A）**：仅当该题库**设置过调度参数**时写入，值经 `QB.SchedSettings.normalize`（camelCase；`learningSteps` 以**秒**为单位），字段见 [DATABASE.md](DATABASE.md) §2.1。未设置时 `bank` 与旧包逐字段同构（无 `sched` 键）；旧包导入零差异（`normalize(null)` 回退默认）。`.qbk` 内 `bank.json` 与普通 JSON 导出同语义；**`manifest.json` 不含 `sched`，结构不变**（题包清单不承诺调度参数）。
+> **`annotation`（可选，C012，纯本地）**：仅当题目带批注时写入（字符串，≤`CONFIG.LIMITS.ANNOTATION_MAX_LENGTH`=5000；CRLF→LF、首尾 trim）。CSV/XLSX/DOCX/Markdown/TXT 不携带该列（行式/表格格式无此语义）。`checksum` 对**含批注的 `questions`** 计算，因此批注被纳入内容完整性校验；`.qbk` 的 `bank.json` 与普通 JSON 同语义，`manifest.json` 结构不变（仍只比对 manifest/envelope 的 checksum 字符串）。旧客户端丢弃 `annotation` 后重新导出/校验时，manifest checksum 仍一致，不会误报。前端 API 后端（`DATA_BACKEND=api`）无该字段，编辑器禁用批注写入。
 > **内容校验和（P4，v3）**：`checksum` 对 `questions` 的规范化 JSON 计算 **FNV-1a 64 位并加版本前缀 `3:`**（共 18 字符：`3:` + 16 位十六进制），实现对 `QB.Source.checksumContent`；导出一律写新值，**版本由前缀自标注**（无独立版本字段）。导入时经 `QB.Source.verifyChecksum` 复核：`3:` 前缀按 64 位重算；旧导出/手工数据的裸 8 位十六进制按 FNV-1a 32 位重算；两者都接受，**不因格式升级而阻断导入或误报**，仅在校验值真正不一致时给警告并在预览展示。仅用于检测传输损坏/手工误改，**不是密码学签名**，不防恶意重算。URL 来源快照的 `source_checksum` 仍是 32 位（8 位十六进制，`checksumText`），与内容校验和分开——改它会让已存「远端文件是否变化」的记录全部误判。
 > 错题导出时题目附带 `wrongCount`（再导入时被适配器忽略，不影响题面）。
 > 材料题（`type=material`）以 `material` + `children` **嵌套**导出（M1 起），JSON/.qbk 全字段无损；小问题目复用各题型字段，但不携带 `category/difficulty/tags`（继承父题，见 [SPEC-material.md](SPEC-material.md) §2.1）。

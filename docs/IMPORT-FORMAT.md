@@ -86,6 +86,7 @@
   > 谁也不知道该信哪一份。现在版本号的**唯一声明处**是 DEVELOPMENT.md §0 那张表，
   > 由 `scripts/docs-links.mjs` 与 `js/utils/question-id.js` 的 `HASH_VERSION` 对账。
 - **合并**：跳过与库内已存在的重复题；**覆盖**：清空目标库后写入。
+- **批注（可选，C012）**：题目对象上的 `annotation`（字符串，≤5000，CRLF→LF、trim）随题导入并保留；材料题只保留父题批注，子问题该字段忽略。缺该字段的旧 JSON 照常导入，不产生警告；`annotation` 不参与去重键与 contentHash。
 - 警告（如缺答案）**不阻断**导入，但该题在答题时会判为未得分。
 
 **0 题拒绝原因展示契约**（`QB.DataIO.importFailureText` 为唯一实现）：

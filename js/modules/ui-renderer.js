@@ -228,8 +228,14 @@
     return renderSingleAnswerArea(q, userAns, result, answered, null);
   }
 
-  /** 材料题提交后的整题总评横幅（逐小问反馈在各自卡片内） */
-  function renderMaterialOverall(result) {
+  /** 批注只读块（C012）：练习反馈与材料题总评共用；无批注返回空串 */
+  function annotationBlock(q) {
+    if (!q || !QB.Annotation || !QB.Annotation.present(q)) return '';
+    return '<div class="analysis annotation">批注：' + rich(QB.Annotation.normalize(q.annotation)) + '</div>';
+  }
+
+  /** 材料题提交后的整题总评横幅（逐小问反馈在各自卡片内；父题批注随总评展示） */
+  function renderMaterialOverall(result, q) {
     if (!result) return '';
     const kids = result.children || [];
     const total = kids.length;
@@ -250,7 +256,7 @@
       cls = 'no';
       title = '❌ 有小问答错（对 ' + okCount + ' / ' + total + '，' + (result.points ? result.points.earned : 0) + ' 分）';
     }
-    return '<div class="feedback ' + cls + '"><h4>' + title + '</h4></div>';
+    return '<div class="feedback ' + cls + '"><h4>' + title + '</h4>' + annotationBlock(q) + '</div>';
   }
 
   function renderSingleAnswerArea(q, userAns, result, answered, childIndex) {
@@ -355,11 +361,11 @@
       return '<div class="feedback neutral"><h4>◐ 少选，得一半分</h4>' +
         '<div class="fb-line">正确答案：<b>' + rich(result.correctAnswer || '') + '</b></div>' +
         '<div class="fb-line">你的答案：' + esc(String(result.userAnswer || '（未作答）')) + '</div>' +
-        (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + '</div>';
+        (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + annotationBlock(q) + '</div>';
     }
     if (result.isCorrect === true) {
       return '<div class="feedback ok"><h4>✅ 回答正确</h4>' +
-        (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + '</div>';
+        (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + annotationBlock(q) + '</div>';
     }
     if (result.isCorrect === null) {
       return '<div class="feedback neutral"><h4>📝 请自评</h4>' +
@@ -368,12 +374,12 @@
         '<div class="quiz-actions">' +
         '<button class="btn btn-sm" data-action="self-correct"' + selfAttr + '>我答对了</button>' +
         '<button class="btn btn-sm btn-danger" data-action="self-wrong"' + selfAttr + '>我答错了</button>' +
-        '</div></div>';
+        '</div>' + annotationBlock(q) + '</div>';
     }
     return '<div class="feedback no"><h4>❌ 回答错误</h4>' +
       '<div class="fb-line">正确答案：<b>' + rich(result.correctAnswer || '') + '</b></div>' +
       '<div class="fb-line">你的答案：' + esc(String(result.userAnswer || '（未作答）')) + '</div>' +
-      (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + '</div>';
+      (result.analysis ? '<div class="analysis">解析：' + rich(result.analysis) + '</div>' : '') + annotationBlock(q) + '</div>';
   }
 
   /**
@@ -440,7 +446,7 @@
     // 作答反馈（正确答案/你的答案/解析）紧随题面，位于操作按钮与答题卡之上：
     // 解析是作答后最需要阅读的内容，不应被压到页面最底部（答题卡之后）。
     if (!isExam && answered) {
-      regions.push({ key: 'quiz-feedback', html: q.type === 'material' ? renderMaterialOverall(result) : renderFeedback(q, result) });
+      regions.push({ key: 'quiz-feedback', html: q.type === 'material' ? renderMaterialOverall(result, q) : renderFeedback(q, result) });
       // 本题历史（评分序列/最近一次）是增强信息：仅在已答且有 revlog 时出现
       if (Array.isArray(opts.reviewHistory) && opts.reviewHistory.length) {
         regions.push({ key: 'quiz-history', html: renderReviewHistory(opts.reviewHistory) });

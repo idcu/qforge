@@ -86,6 +86,8 @@
     delete item.category;
     delete item.difficulty;
     delete item.tags;
+    // 批注统一挂在父题（C012）：子问题不单独携带，避免同一题出现多份批注语义
+    delete item.annotation;
     // 子问题分值（M4，可选）：JSON/.qbk 无损往返；文本格式不携带（按默认分）
     const score = QB.normalizeChildScore(c.score);
     if (score > 0) item.score = score;
@@ -107,6 +109,8 @@
       difficulty: Number(q.difficulty) || 0,
       tags: Array.isArray(q.tags) ? q.tags.slice() : []
     };
+    // 批注（C012）：可选本地字段，仅带内容的题写入；JSON/.qbk 无损往返，旧客户端丢弃后不影响 checksum
+    if (QB.Annotation && QB.Annotation.present(q)) item.annotation = QB.Annotation.normalize(q.annotation);
     // 材料题：嵌套 material + children（JSON/.qbk 无损往返的必需字段；行式与表格格式另走分流）
     if (q.type === 'material') {
       item.material = q.material || '';

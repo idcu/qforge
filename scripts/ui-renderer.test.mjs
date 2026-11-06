@@ -720,6 +720,45 @@ section('C011 分享入口与 manifest.packageId 展示');
   ok(html.indexOf('pkg-0123456789abcdef') >= 0, '导入预览显示 manifest.packageId');
 }
 
+section('C012 作答反馈：本地批注只读展示（含材料题父题批注）');
+{
+  const q = {
+    type: 'single', question: '批注反馈题', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A',
+    annotation: '批注：<script>alert(1)</script>\n第二行'
+  };
+  const engine = {
+    mode: 'practice', questions: [q], currentIndex: 0,
+    results: [{ isCorrect: true, correctAnswer: 'A', userAnswer: 'A', analysis: '' }],
+    answers: ['A'],
+    getCurrentQuestion: () => q,
+    getProgress: () => ({ current: 1, total: 1, percentage: 100 }),
+    getScore: () => ({ score: 10, correct: 1, wrong: 0 }),
+    hasAnswered: () => true, canSubmit: () => true, isLastQuestion: () => true,
+    statusAt: () => 'correct', answeredCount: () => 1
+  };
+  const html = UI.renderQuiz(engine, {});
+  ok(html.indexOf('class="analysis annotation"') >= 0, '反馈区含批注块（analysis annotation）');
+  ok(html.indexOf('批注：&lt;script&gt;alert(1)&lt;/script&gt;') >= 0, '批注文本展示且 <script> 被转义');
+  ok(html.indexOf('批注：<script>') < 0, '批注不注入原始脚本标签');
+  ok(html.indexOf('第二行') >= 0, '批注换行内容保留');
+
+  const mq = {
+    type: 'material', material: '共享材料', annotation: '父题批注XYZ',
+    children: [{ type: 'judge', question: '小问', options: [], answer: '正确' }]
+  };
+  const mEngine = {
+    mode: 'practice', questions: [mq], currentIndex: 0,
+    results: [{ isCorrect: true, correctAnswer: '正确', userAnswer: '正确', children: [{ isCorrect: true, correctAnswer: '正确', userAnswer: '正确', score: 10, earned: 10 }] }],
+    answers: [true],
+    getCurrentQuestion: () => mq,
+    getProgress: () => ({ current: 1, total: 1, percentage: 100 }),
+    getScore: () => ({ score: 10, correct: 1, wrong: 0 }),
+    hasAnswered: () => true, canSubmit: () => true, isLastQuestion: () => true,
+    statusAt: () => 'correct', answeredCount: () => 1
+  };
+  ok(UI.renderQuiz(mEngine, {}).indexOf('父题批注XYZ') >= 0, '材料题总评展示父题批注');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

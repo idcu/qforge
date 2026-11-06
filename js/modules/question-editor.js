@@ -89,6 +89,32 @@
       (d === 0 ? '未设置' : d + ' · ' + QB.difficultyLabel(d)) + '</option>').join('');
   }
 
+  /**
+   * 批注字段（C012，纯本地）：普通题与材料题编辑器共用同一实现。
+   * 后端模式禁用：服务端 schema 与 wire 白名单无该字段，禁用避免「看起来存了但重启后丢失」。
+   * @param {Object} q 现有题目（可为空）
+   * @param {string} prefix 'qe'（普通题）| 'me'（材料题父题）
+   */
+  function annotationField(q, prefix) {
+    const p = prefix || 'qe';
+    const api = !!(QB.DB && QB.DB.backend === 'api');
+    const max = (QB.Annotation && QB.Annotation.MAX_LENGTH) || 5000;
+    return '<label class="qe-label">批注（本地，随题包导出）</label>' +
+      '<textarea data-' + p + '="annotation" rows="2" maxlength="' + max + '"' +
+      (api
+        ? ' disabled placeholder="后端模式暂不支持本地批注"'
+        : ' placeholder="易错点、判分口径、记忆提示（仅存本机，随题包导出）"') +
+      '>' + esc(q && q.annotation ? q.annotation : '') + '</textarea>' +
+      (api ? '<div class="li-meta">后端模式暂不支持本地批注（服务端无该字段，避免静默丢失）。</div>' : '');
+  }
+
+  /** 收集批注文本（后端模式返回空：不把本地字段写入服务端） */
+  function collectAnnotation(scope, prefix) {
+    if (QB.DB && QB.DB.backend === 'api') return '';
+    const el = scope.querySelector('[data-' + (prefix || 'qe') + '="annotation"]');
+    return el ? el.value : '';
+  }
+
   /** 按题型渲染「作答与答案」编辑区（core；data-qe 前缀，供普通题表单使用） */
   function answerSectionCore(q) {
     q = q || {};
@@ -240,7 +266,10 @@
       difficulty: val('[data-qe="difficulty"]'),
       tags: val('[data-qe="tags"]')
     }, collectAnswer(modal, type, 'qe'));
-    return buildQuestion(type, fv).question;
+    const q = buildQuestion(type, fv).question;
+    const annotation = QB.Annotation ? QB.Annotation.normalize(collectAnnotation(modal, 'qe')) : '';
+    if (annotation) q.annotation = annotation;
+    return q;
   }
 
   /**
@@ -352,6 +381,9 @@
       answer: '',
       children: children
     };
+    // 批注（C012）：材料题批注挂父题（子问题不单独携带）
+    const annotation = QB.Annotation ? QB.Annotation.normalize(fv.annotation) : '';
+    if (annotation) question.annotation = annotation;
     if (!question.material && !question.question) errors.push('材料正文与总题干至少填写一项');
     if (children.length < 2) errors.push('材料题至少需要 2 个小问');
     const maxChildren = (QB.Adapters && QB.Adapters.MATERIAL_MAX_CHILDREN) || 10;
@@ -407,6 +439,7 @@
       '<button type="button" class="btn btn-sm btn-ghost" data-me="add-child">＋ 添加小问</button>' +
       '<button type="button" class="btn btn-sm btn-ghost" data-me="img">📷 插入图片（先点击材料/题干/小问文本框定位光标）</button>' +
       '<label class="qe-label">整题解析（可选）</label><textarea data-me="analysis" rows="2">' + esc(q.analysis || '') + '</textarea>' +
+      annotationField(q, 'me') +
       '<div class="qe-grid">' +
       '<div><label class="qe-label">分类</label><input type="text" data-me="category" value="' + esc(q.category || '') + '" placeholder="如 物业基础" /></div>' +
       '<div><label class="qe-label">难度</label><select data-me="difficulty">' + diffOptions(q.difficulty) + '</select></div>' +
@@ -533,6 +566,7 @@
           category: val('[data-me="category"]'),
           difficulty: val('[data-me="difficulty"]'),
           tags: val('[data-me="tags"]'),
+          annotation: collectAnnotation(modal, 'me'),
           children: collectAll()
         });
         if (built.errors.length) { errBox.textContent = built.errors.join('；'); return; }
@@ -549,6 +583,32 @@
   }
 
   /**
+   * 普通题编辑表单 HTML（纯构建，可测试）。
+   * @param {Object} q 题目（空对象=新增）
+   * @param {boolean} existing 是否为编辑已有题（仅影响标题）
+   */
+  function editorBody(q, existing) {
+    q = q || {};
+    return '<h3>' + (existing ? '编辑题目' : '新增题目') + '</h3>' +
+      '<div class="qe-form">' +
+      '<label class="qe-label">题型</label><select data-qe="type">' + typeOptions(q.type) + '</select>' +
+      '<label class="qe-label">题干</label><textarea data-qe="question" rows="2" placeholder="题干文本（填空用 ____ 表示空位）">' + esc(q.question || '') + '</textarea>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-qe="img">📷 插入图片（先点击题干/选项/解析定位光标）</button>' +
+      '<div data-qe="answerbox">' + answerSection(q) + '</div>' +
+      '<label class="qe-label">解析（可选）</label><textarea data-qe="analysis" rows="2">' + esc(q.analysis || '') + '</textarea>' +
+      annotationField(q, 'qe') +
+      '<div class="qe-grid">' +
+      '<div><label class="qe-label">分类</label><input type="text" data-qe="category" value="' + esc(q.category || '') + '" placeholder="如 物业基础" /></div>' +
+      '<div><label class="qe-label">难度</label><select data-qe="difficulty">' + diffOptions(q.difficulty) + '</select></div>' +
+      '</div>' +
+      '<label class="qe-label">标签（多个用 、,； 分隔）</label><input type="text" data-qe="tags" value="' + esc((q.tags || []).join('、')) + '" placeholder="如 法规、高频" />' +
+      '</div>' +
+      '<div class="qe-err" data-qe="err"></div>' +
+      '<div class="modal-actions"><button class="btn btn-ghost" data-qe="cancel">取消</button>' +
+      '<button class="btn" data-qe="save">保存</button></div>';
+  }
+
+  /**
    * 打开题目编辑器
    * @param {Object} bank 题库
    * @param {Object|null} existing 为空=新增，否则编辑
@@ -559,23 +619,7 @@
     const q = existing ? JSON.parse(JSON.stringify(existing)) : { type: 'single', options: [{ letter: 'A', text: '' }, { letter: 'B', text: '' }], difficulty: 0, tags: [] };
     let curType = q.type;
 
-    const body = () =>
-      '<h3>' + (existing ? '编辑题目' : '新增题目') + '</h3>' +
-      '<div class="qe-form">' +
-      '<label class="qe-label">题型</label><select data-qe="type">' + typeOptions(curType) + '</select>' +
-      '<label class="qe-label">题干</label><textarea data-qe="question" rows="2" placeholder="题干文本（填空用 ____ 表示空位）">' + esc(q.question || '') + '</textarea>' +
-      '<button type="button" class="btn btn-sm btn-ghost" data-qe="img">📷 插入图片（先点击题干/选项/解析定位光标）</button>' +
-      '<div data-qe="answerbox">' + answerSection(q) + '</div>' +
-      '<label class="qe-label">解析（可选）</label><textarea data-qe="analysis" rows="2">' + esc(q.analysis || '') + '</textarea>' +
-      '<div class="qe-grid">' +
-      '<div><label class="qe-label">分类</label><input type="text" data-qe="category" value="' + esc(q.category || '') + '" placeholder="如 物业基础" /></div>' +
-      '<div><label class="qe-label">难度</label><select data-qe="difficulty">' + diffOptions(q.difficulty) + '</select></div>' +
-      '</div>' +
-      '<label class="qe-label">标签（多个用 、,； 分隔）</label><input type="text" data-qe="tags" value="' + esc((q.tags || []).join('、')) + '" placeholder="如 法规、高频" />' +
-      '</div>' +
-      '<div class="qe-err" data-qe="err"></div>' +
-      '<div class="modal-actions"><button class="btn btn-ghost" data-qe="cancel">取消</button>' +
-      '<button class="btn" data-qe="save">保存</button></div>';
+    const body = () => editorBody(q, !!existing);
 
     UI.openModal(body(), (modal) => {
       const answerbox = modal.querySelector('[data-qe="answerbox"]');
@@ -813,7 +857,7 @@
   QB.QuestionEditor = {
     create, update, remove, insertMany, removeMany,
     buildQuestion, buildChildQuestion, buildMaterialQuestion,
-    materialEditorBody, insertAtCursor, canEditQuestion, isMaterialQuestion,
+    editorBody, materialEditorBody, insertAtCursor, canEditQuestion, isMaterialQuestion,
     openManager, openEditor, openMaterialEditor, openReservedDialog
   };
 })(window);

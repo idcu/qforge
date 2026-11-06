@@ -13,6 +13,7 @@ assets/asxxxxxxxx-123.jpg # 图片字节，文件名即资产 id（FNV-1a 哈希
 assets/asyyyyyyyy-456.png
 ```
 
+- **题目批注（C012，可选）**：`bank.json.questions[*].annotation` 若存在则随题导入并按 `QB.Annotation.normalize` 归一（CRLF→LF、trim、≤5000），材料题挂在父题（子问题忽略该字段）。旧包没有该字段 → 题目不带批注、无警告；新包的该字段对旧版本可安全忽略（manifest 校验只比较 checksum 字符串，不重算题目）。软件不与服务端同步该字段（纯本地）。
 - 由「导出 → 题库包 .qbk」或「导出分发题包」生成；导入时走与其他格式完全相同的预览/合并/覆盖流程，图片自动写入本浏览器 IndexedDB（同内容去重）。
 - 包内缺失题目引用的图片时给出警告，题面位置显示占位，不阻断导入。
 - URL 网络导入同样支持 .qbk（受 8MB 快照上限约束；超大题库包请文件/拖拽导入）；**.qbk 按二进制拉取**（`Source.fetchSnapshot` 直接复用导入注册表的 `BINARY_EXTS` 唯一权威，含 `xlsx/docx/qbk`），得到 `arrayBuffer` 快照后交给 qbk 解析器；不会按文本读取（否则 ZIP 字节会被解码成乱码并报「无法识别的二进制导入入参」）。

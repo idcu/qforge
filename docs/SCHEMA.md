@@ -65,6 +65,7 @@ CREATE UNIQUE INDEX uq_questions_bank_hash ON questions(bank_id, content_hash); 
 CREATE INDEX idx_questions_bank_type     ON questions(bank_id, type);
 CREATE INDEX idx_questions_bank_category ON questions(bank_id, category);
 ```
+> **本地可选字段 `annotation`（C012）**：仅存在于本地题目对象/JSON 备份/`.qbk` 的 `bank.json`，**不写入服务端**——上表 SQL 与实际 `serve-api.mjs` 均无该列，wire 白名单（`QB.Wire.question.to/from`、`api-adapter.toWireQuestion`）也不携带它。`DATA_BACKEND=api` 时题目编辑器禁用批注输入并提示原因；本地模式下它是可选字段，`contentHash` 不覆盖它（写批注不影响去重/错题/收藏/复习键）。旧 JSON 无该字段照常读取。
 
 ### 2.3 wrong_questions（错题本）
 ```sql

@@ -56,7 +56,9 @@
     WEAK_ACCURACY: 60,
     // 分享回链/粘贴码（C011）：硬上限 = qbk 字节；软阈值 = 回链字符数（超过提示优先发分享码）
     SHARE_MAX_BYTES: 8 * 1024 * 1024,
-    SHARE_URL_SOFT_LIMIT: 64 * 1024
+    SHARE_URL_SOFT_LIMIT: 64 * 1024,
+    // 题目批注（C012，纯本地）：单题批注字符上限（超出截断，防止题包/分享码异常膨胀）
+    ANNOTATION_MAX_LENGTH: 5000
   };
 
   // 题目图片资产（IndexedDB；改库名等于换存储实例，不会迁移旧图）

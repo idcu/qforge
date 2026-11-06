@@ -16,6 +16,7 @@ export const ORDER = [
   'exporter.test.mjs',
   'office-export.test.mjs',
   'editor.test.mjs',
+  'annotation.test.mjs',
   'rich-text.test.mjs',
   'assets.test.mjs',
   'blueprint.test.mjs',

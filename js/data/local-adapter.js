@@ -31,6 +31,11 @@
       createdAt: q.createdAt || t,
       updatedAt: t
     };
+    // C012：批注是可选本地字段；不参与 contentHash（写批注不改错题/收藏/复习键）
+    if (QB.Annotation) {
+      const annotation = QB.Annotation.normalize(q.annotation);
+      if (annotation) item.annotation = annotation;
+    }
     // 材料题：必须保留 material 与 children（判分/做题/导出/备份的事实来源）。
     // 旧实现遗漏这两个字段，导致材料题经 create/insertMany 后只剩父题干（子问题与材料丢失）；
     // 子问题只保留判分所需字段（分类/难度/标签由父题继承，不落库）。

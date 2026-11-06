@@ -9,6 +9,54 @@
 
 ## 最新记录
 
+### feat(annotation): 本地批注随题包往返与分享页只读展示（C012）
+
+**Commit Hash**：`（待回填；FEAT 提交后由 docs(changelog) 补记，遵守历史只追加）`
+
+**核心改动**
+- 新增 `js/utils/annotation.js`（`QB.Annotation`）：`normalize`（`\r\n`/`\r`→`\n`、trim、`MAX_LENGTH` 截断）、`present`；
+  `MAX_LENGTH` 取自新增 `CONFIG.LIMITS.ANNOTATION_MAX_LENGTH=5000`（单一事实源）。编辑器/导入器/导出器/反馈/分享页共用，禁止各自复制归一。
+- `js/data/local-adapter.js`：`stampQuestion` 保留可选 `annotation`（**不参与 `makeContentHash`** → 写批注不重映射错题/收藏/复习键，不改题目顺序）。
+- `js/importers/adapters.js`：`toStandard` 与 `toStandardMaterial` 的父题保留 `annotation`（材料题批注统一挂父题，子问题不携带）。
+- `js/modules/exporter.js`：`toPlain` 仅在 `QB.Annotation.present(q)` 时写 `annotation`（JSON/.qbk 无损往返；CSV/XLSX/DOCX/Markdown/TXT 不输出）；
+  `childPlain` 显式删除子问题批注，避免同一题多份批注语义。
+- `js/modules/question-editor.js`：新增内部共用 `annotationField/collectAnnotation`；普通题 `data-qe="annotation"`、材料题父题 `data-me="annotation"`；
+  `collectForm`/`buildMaterialQuestion` 归一落库；**抽取并导出 `editorBody(q, existing)`**（原内联模板改为纯构建，便于无 DOM 测试，行为不变）；
+  `QB.DB.backend === 'api'` 时禁用输入并提示「后端模式暂不支持本地批注」（服务端 schema/wire 无该列，避免静默丢失）。
+- `js/modules/ui-renderer.js`：`annotationBlock(q)` 共用；练习反馈（正确/错误/少选/待自评）与材料题总评横幅展示「批注：…」（RichText 转义）。
+- `js/modules/share-page.js`：题目卡片后追加只读 `.annotation` 块；CSS `white-space:pre-wrap` 保留换行；仍无 `<script>`/无内联事件。
+- 注册：`index.html`（`js/utils/annotation.js`，86 个 classic script）、`contracts/modules.json`（86 条）、`scripts/_harness.mjs`、`scripts/test-order.mjs`；
+  `sw.js` CACHE v11→v12。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（实现前）**：`node scripts/annotation.test.mjs` 因 `QB.Annotation` 未定义以 exit 1 止步（新公共抽象未就位）；
+  公共抽象就位后继续跑，因导出器不写 `annotation`、qbk 往返丢失、分享页无批注块而失败；`editor`/`ui-renderer` 新增断言同样先失败。
+- **绿（本提交）**：`test-all` → **34 运行项 / 5129 断言 / 失败 0**；`annotation` **58 / 58**；`editor` **82 / 82**（+10）；
+  `ui-renderer` **218 / 218**（+5）；`bench --assert` **58 项门禁全部通过**；`docs-check --static` 全部一致。
+- **首屏体积**：94 文件（86 个内联 js）/ **347.5 KB gzip / 972.0 KB raw**（C011 345.0 / 966.2，+2.5 KB gzip）。
+- **批注往返**：单题/判断题/填空题 + 材料题父题，`collect → buildAsync('qbk', distribute) → runImport` 批注逐字符一致
+  （含 `<script>`、引号、emoji、`\n` 换行）；`manifestChecksumOk=true`、`countOk=true`、无清单/校验警告；旧包无字段 → 无 `annotation`、无警告；
+  旧客户端丢弃 `annotation` 后 `QB.Package.verify(...)` → `checksumOk=true`、`ok=true`、无警告（**manifestVersion 仍为 1、容器结构未变**）。
+- **分享页**：批注文本出现、`<script>` 转义为 `&lt;script&gt;`、换行原样保留、`.annotation{…white-space:pre-wrap}`；
+  **无 `<script>` / 无内联事件**；全链路 `globalThis.fetch` + `window.fetch` 双桩计数 **0 次**。
+- **批注体积/耗时实测（540 题，批注 120 字/题，15 轮参考）**：qbk `352,674 → 468,768 B`（**+116,094 B / +32.92%**，全库批注的最坏侧）；
+  `collect+build` median `9.59→12.78 ms`、P95 `13.65→24.91 ms`；`runImport` median `21.95→27.85 ms`、P95 `29.02→32.77 ms`；
+  540 题含批注分享页构建 median `5.35 ms` / P95 `7.88 ms`。
+
+**影响范围与公共抽象**
+- 新增 `QB.Annotation`、`CONFIG.LIMITS.ANNOTATION_MAX_LENGTH`、`QB.QuestionEditor.editorBody`（导出，原内联模板抽取，输出等价）。
+- 内部共用（不新增外部契约）：`annotationField`/`collectAnnotation`（编辑器）、`annotationBlock`（渲染器）。
+- **行为变更**：题目对象/JSON/`.qbk` 新增可选 `annotation`；练习反馈、材料题总评、分享页多一行只读批注；API 后端编辑器批注控件禁用。
+- **未改动**：qbk 版本号（`manifestVersion=1`）、容器结构、checksum 计算范围（仍为 `questions` 原始 JSON，含批注）、manifest 校验语义、
+  `contentHash` 算法、CSV/XLSX/DOCX/Markdown/TXT 输出、分享页只读约束、所有存储键。
+
+**遗留 TODO / 风险**
+- 单题上限 5000 字，但**无全库批注总字节上限**；全库大量长批注会让 `.qbk` 线性膨胀（实测最坏侧 +32.92%），后续可考虑导出前提示体积。
+- API 后端不支持批注（无服务端列）；跨设备共享需走 JSON/`.qbk` 导入，待后端 schema 扩展后再评估。
+- 浏览器端「在编辑器输入批注 → 保存 → 练习反馈可见」未做 DOM 自动化；Node 侧覆盖纯构建、Repository 往返与渲染字符串。
+- 旧客户端忽略批注的行为由 `Package.verify` 单测模拟验证，未在真实旧版本构建上跑端到端。
+
+
 ### feat(share): 分享回链与粘贴码离线往返，三库 3/3、fetch 0 次（C011）
 
 **Commit Hash**：`a27191b`（feat(share): 分享回链与粘贴码离线回导…）

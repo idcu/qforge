@@ -26,6 +26,7 @@ const MODULES = [
   'js/utils/judge-answer.js',
   'js/utils/result-policy.js',
   'js/utils/question-id.js',
+  'js/utils/annotation.js',
   'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/zip/src/vendor/zip.js',
   'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xml-lite/src/vendor/xml-lite.js',
   'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js',

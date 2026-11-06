@@ -294,6 +294,11 @@
       difficulty: normalizeDifficulty(firstOf(raw.difficulty, raw.难度, raw.d, '')),
       tags: normalizeTags(firstOf(raw.tags, raw.标签, raw.知识点, raw.keywords, []))
     };
+    // C012：批注是可选的本地字段（旧包没有；旧版本读新包时忽略，checksum 仍按 bank.json 原样核对）
+    if (QB.Annotation) {
+      const annotation = QB.Annotation.normalize(raw.annotation);
+      if (annotation) item.annotation = annotation;
+    }
 
     if (type === 'judge') {
       item.answer = normalizeJudgeAnswer(answer, options);
@@ -349,6 +354,11 @@
       difficulty: normalizeDifficulty(firstOf(raw.difficulty, raw.难度, raw.d, '')),
       tags: normalizeTags(firstOf(raw.tags, raw.标签, raw.知识点, raw.keywords, []))
     };
+    // C012：材料题批注挂在父题（子问题不单独携带批注）
+    if (QB.Annotation) {
+      const annotation = QB.Annotation.normalize(raw.annotation);
+      if (annotation) item.annotation = annotation;
+    }
 
     rawChildren.forEach((c, i) => {
       const childRaw = c || {};
