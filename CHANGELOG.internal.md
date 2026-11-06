@@ -11,7 +11,7 @@
 
 ### perf(share): 分享前先精确估算回链体积（R-19）
 
-**Commit Hash**：`（本条目提交后回填）`
+**Commit Hash**：`9556401`
 
 **核心改动**
 - `js/modules/share-link.js`：新增 `QB.ShareLink.estimateChars(bytes)`，纯算术
