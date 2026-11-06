@@ -10,7 +10,10 @@
  *   - style-src 'unsafe-inline'：渲染层大量使用 style="..." 内联样式（进度条/图表/弹窗），
  *     且为字符串模板拼接，无法改为 class；不引入 style 注入风险以外的放宽；
  *   - img-src data: blob:：图片资产存 IndexedDB，运行时经 createObjectURL 生成 blob:；
- *   - connect-src http: https:：后端基址/WebDAV/URL 导入均可配置到任意域，不能写死 'self'；
+ *   - connect-src 'self'：默认只允许同源网络出口（C020 收紧）。前后端分离后端、WebDAV、
+ *     URL 导入指向其他 origin 时，浏览器会按 CSP 拦截；部署方必须把该 origin **显式**加入
+ *     NETWORK.CSP_CONNECT_ALLOWLIST 并同步改写本文件与 index.html 两处 connect-src
+ *     （逐字符一致由 pwa.test 守护）。不做运行时二次校验，避免 API 模式每请求多一次判断。
  *   - worker-src 'self'：FSRS 训练 Worker 为同源 js/workers/fsrs-worker.js。
  *
  * frame-ancestors / X-Frame-Options 仅 HTTP 头生效（meta 里的 frame-ancestors 被浏览器忽略）。
@@ -25,7 +28,9 @@ export const CSP = [
   "style-src 'self' 'unsafe-inline' file:",
   "img-src 'self' data: blob: file:",
   "font-src 'self' data: file:",
-  "connect-src 'self' http: https: file:",
+  // C020：默认仅同源。file:// 页面本身 origin 为 opaque，放行 file: 等于对本地任意文件开口子，
+  // 且双击直开的离线场景不需要网络请求；跨源部署按文件头白名单说明显式追加 origin。
+  "connect-src 'self'",
   "worker-src 'self' file:",
   "media-src 'self' blob: file:",
   "object-src 'none'",

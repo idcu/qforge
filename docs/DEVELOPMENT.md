@@ -37,7 +37,7 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 
 | 分组 | 键（默认） | 用途 |
 | --- | --- | --- |
-| `NETWORK` | `API_BASE_URL('')`、`API_TIMEOUT_MS(15000)`、`API_TOKEN('')`、`URL_IMPORT_MAX_BYTES(8MB)`、`URL_IMPORT_TIMEOUT_MS(15000)` | REST 后端基址（空串=同源相对路径）、可选 Bearer 共享令牌（空=不带头）、网络导入上限/超时 |
+| `NETWORK` | `API_BASE_URL('')`、`API_TIMEOUT_MS(15000)`、`API_TOKEN('')`、`CSP_CONNECT_ALLOWLIST([])`、`URL_IMPORT_MAX_BYTES(8MB)`、`URL_IMPORT_TIMEOUT_MS(15000)` | REST 后端基址（空串=同源相对路径）、可选 Bearer 共享令牌（空=不带头）、CSP 跨源出口清单（部署期声明，运行时以 CSP 头/meta 为准）、网络导入上限/超时 |
 | `STORAGE` | `PREFIX('qb')`、`QUOTA_BYTES(5MB)`、`WARN_RATIO(0.7)`、`DANGER_RATIO(0.85)`、`WRITE_DELAY_MS(200)` | LocalStorage 键前缀、配额告警、防抖落盘 |
 | `LIMITS` | `QUESTIONS_PER_QUIZ(50)`、`POINTS_PER_CORRECT(10)`、`DEFAULT_EXAM_MINUTES(30)`、`HISTORY_MAX(500)`、`REVLOG_MAX(20000)` | 题量/分值/历史与评分日志 FIFO |
 | `ASSETS` | `IDB_NAME('qforge')`、`IDB_VERSION(1)`、`IDB_STORE('assets')` | 图片资产 IndexedDB 实例（改名=换新库，不迁移旧图） |
@@ -56,11 +56,11 @@ PORT=8788 HOST=0.0.0.0 DATA_DIR=/tmp/qf-data node scripts/serve-api.mjs
 
 前端切到后端**无需改 UI**（配置层即可）：启动 `serve-api.mjs` 后用查询串覆盖后端选择，例如
 `http://127.0.0.1:8788/?backend=api&api=`（同源，`api` 留空即相对路径）；跨域时填完整地址
-`?backend=api&api=http://127.0.0.1:8788`。等价地可在页面前置 `window.__QF_BACKEND__='api'`。
+`?backend=api&api=http://127.0.0.1:8788`。**C020 起 CSP 默认 `connect-src 'self'`**：跨域后端必须同时把该 origin 加入 `NETWORK.CSP_CONNECT_ALLOWLIST`、`index.html` 的 CSP meta 与 `scripts/lib/security-headers.mjs` 的 `CSP`（否则浏览器直接拦截；见下「静态安全头」）。等价地可在页面前置 `window.__QF_BACKEND__='api'`。
 不支持 multipart 上传（资产走**原始字节** `POST /api/assets`）；`POST /api/banks/{id}/import`
 仅实现 `{ questions, mode }` JSON 分支。单用户参考实现；`/api/*` 默认无鉴权，设置 `API_TOKEN`（或 `createServer({ token })`）后要求 `Authorization: Bearer <token>`，前端填 `NETWORK.API_TOKEN` 即自动附带，静态文件与 `/health` 保持公开；`reviews` 为整表 last-write-wins。**静态服务不暴露数据/开发文件**：`resolveSafePath` 拒绝以 `.` 开头的路径段（`.git`/`.trae`/`.qforge-data` 等）、`scripts`、`qforge-evaluation`、`CHANGELOG.internal.md`，并按绝对路径拒绝 `dataDir`；即使用户把 `DATA_DIR` 放在静态 root 内，`GET /<dataDir>/banks.json` 也返回 403。生产部署仍建议把 `DATA_DIR` 移出静态 root（物理隔离）。
 
-**静态安全头（CSP）**：`scripts/lib/security-headers.mjs` 是**唯一策略源**（`CSP` 常量 + `securityHeaders(filePath)`），由 `serve.mjs`/`serve-api.mjs` 共用的 `sendFile` 统一附加：HTML 带 `Content-Security-Policy`（共享策略 + `frame-ancestors 'none'`）与 `X-Frame-Options: DENY`，所有静态响应带 `X-Content-Type-Options: nosniff` / `Referrer-Policy: same-origin`；非 HTML 不加 CSP。`index.html` 的 `<meta http-equiv="Content-Security-Policy">` 必须与 `CSP` **逐字符一致**（`pwa.test` 比对，防页面/头两套口径）。策略约束：`script-src 'self'`（全站无内联脚本/无 eval，新增脚本必须外部文件）、`style-src 'unsafe-inline'`（渲染层 `style="..."`）、`img-src data: blob:`（IndexedDB 资产）、`connect-src 'self' http: https:`（可配置后端/WebDAV/URL 导入）；各指令额外放行 `file:` 仅用于「双击 index.html」直开（http(s) 页面受浏览器限制不能读 file://，不扩大网络暴露面）。改策略须同步测试与本文。
+**静态安全头（CSP）**：`scripts/lib/security-headers.mjs` 是**唯一策略源**（`CSP` 常量 + `securityHeaders(filePath)`），由 `serve.mjs`/`serve-api.mjs` 共用的 `sendFile` 统一附加：HTML 带 `Content-Security-Policy`（共享策略 + `frame-ancestors 'none'`）与 `X-Frame-Options: DENY`，所有静态响应带 `X-Content-Type-Options: nosniff` / `Referrer-Policy: same-origin`；非 HTML 不加 CSP。`index.html` 的 `<meta http-equiv="Content-Security-Policy">` 必须与 `CSP` **逐字符一致**（`pwa.test` 比对，防页面/头两套口径）。策略约束：`script-src 'self'`（全站无内联脚本/无 eval，新增脚本必须外部文件）、`style-src 'unsafe-inline'`（渲染层 `style="..."`）、`img-src data: blob:`（IndexedDB 资产）、**`connect-src 'self'`（C020 默认仅同源网络出口）**；各指令额外放行 `file:` 仅用于「双击 index.html」直开（http(s) 页面受浏览器限制不能读 file://，不扩大网络暴露面；`connect-src` 不放行 `file:`）。**跨源部署（分离后端/WebDAV/URL 导入）**：把目标 origin 显式加入 `NETWORK.CSP_CONNECT_ALLOWLIST`，并同步改写 `index.html` meta 与 `CSP` 常量的 `connect-src`（如 `connect-src 'self' https://api.example.com`）；两处仍须逐字符一致（pwa.test 守护）。`CSP_CONNECT_ALLOWLIST` 只作部署清单，不做运行时二次校验。改策略须同步测试与本文。
 
 **按 IP 限流（默认开启）**：参考后端默认 **1200 次/分钟/IP**（`RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` 可调，`0` 关闭；`TRUST_PROXY=1` 时按 `X-Forwarded-For` 首段分桶）。仅 `/api/*` 受限，静态与 `/health` 不受影响；超限 `429 RATE_LIMITED` + `Retry-After` + `X-RateLimit-*`。`createServer({ rateLimit: false })` 可在测试/内网关闭；`now` 可注入用于窗口重置测试。
 

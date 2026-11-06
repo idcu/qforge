@@ -4,6 +4,8 @@
  * 固定对象名 PUT/GET，不用 PROPFIND：
  *   <目录>/qforge-backup-latest.bin   有图为 .qfbk（ZIP），无图为 JSON（接收端按 PK 头自识别）
  * 配置（含 Basic Auth 密码）存 localStorage（与题库数据同在本机，不上传第三方）。
+ * 安全提示（C020）：密码为**明文**保存在本机 localStorage，任何能读该浏览器配置的脚本/人均可获取；
+ * 建议使用应用专用密码，公共/共享设备用完点「清除配置」。跨域 WebDAV 还受 CSP connect-src 白名单约束。
  *
  * 重要限制（与 URL 导入相同的诚实声明）：
  *   浏览器跨域要求 WebDAV 服务对本站来源放行 CORS；坚果云等多数公共服务默认不发
@@ -149,8 +151,9 @@
       '<label class="qe-label">WebDAV 目录 URL（如 https://dav.jianguoyun.com/dav/我的备份/）</label>' +
       '<input type="text" data-dav="url" value="' + esc(cfg.baseUrl) + '" placeholder="目录地址，以 / 结尾" style="width:100%">' +
       '<label class="qe-label">账号</label><input type="text" data-dav="user" value="' + esc(cfg.user) + '" style="width:100%">' +
-      '<label class="qe-label">密码 / 应用密码（仅存本机 localStorage）</label>' +
+      '<label class="qe-label">密码 / 应用密码（明文存本机 localStorage）</label>' +
       '<input type="password" data-dav="pass" value="' + esc(cfg.pass) + '" style="width:100%">' +
+      '<p class="li-meta">安全提示：密码明文保存在本机浏览器，非加密存储；建议使用应用专用密码，公共/共享设备用完请点「清除配置」。跨域 WebDAV 还需在 CSP connect-src 白名单放行该域。</p>' +
       '<p class="li-meta">上次上传：' + esc(last) + '　固定对象 ' + esc(FILE_NAME) + '</p>' +
       '<p class="li-meta">需要 WebDAV 服务允许本站 CORS 跨域访问；坚果云等公共服务默认可能被浏览器拦截，自建/Nextcloud 通常可配置。</p>' +
       '</div>' +

@@ -144,7 +144,13 @@ section('内容安全策略（CSP，静态站基线）');
   ok(!/'unsafe-eval'/.test(policy), '不含 unsafe-eval');
   ok(/style-src 'self' 'unsafe-inline' file:/.test(policy), "style-src 允许内联样式（渲染层 style=\"...\"）");
   ok(/img-src 'self' data: blob: file:/.test(policy), 'img-src 放行 data:/blob:/file:（IndexedDB 资产与双击直开）');
-  ok(/connect-src 'self' http: https: file:/.test(policy), 'connect-src 放行 http(s)/file:（可配置后端/WebDAV/URL 导入）');
+  const connect = (/connect-src([^;]*)/.exec(policy) || [])[1] || '';
+  eq(connect.trim(), "'self'", "connect-src 仅 'self'（默认禁止跨源网络出口）");
+  ok(!/connect-src[^;]*(?:http:|https:|file:|\*|ws:|wss:)/.test(policy),
+    'connect-src 不含 http(s)/file:/*/ws（跨源需部署时显式白名单）');
+  const cfg = read('js/config.js');
+  ok(/CSP_CONNECT_ALLOWLIST\s*:\s*\[\s*\]/.test(cfg),
+    'config.js 声明空 CSP_CONNECT_ALLOWLIST（部署时在两个 CSP 字面量显式加入 origin）');
   ok(/default-src 'self' file:/.test(policy) && /worker-src 'self' file:/.test(policy), 'default-src/worker-src 含 file:（file:// 脚本/Worker 可加载）');
   ok(/object-src 'none'/.test(policy) && /base-uri 'self'/.test(policy) && /form-action 'self'/.test(policy),
     'object-src/base-uri/form-action 收紧');

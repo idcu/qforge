@@ -27,6 +27,12 @@
     // 可选共享令牌（服务端 API_TOKEN 一致时启用）：请求自动带 Authorization: Bearer <token>。
     // 注意：这是单用户/自托管的共享密钥，不是账号体系；同源公开部署时前端包内可见，仅作最低限度访问控制。
     API_TOKEN: '',
+    // CSP 网络出口白名单（部署期声明，运行时不做拦截）：
+    // 默认 connect-src 仅 'self'；分离部署后端/WebDAV/URL 导入到其他 origin 时，
+    // 把 origin（如 'https://api.example.com'）同时加入本数组、index.html 的 CSP meta
+    // 与 scripts/lib/security-headers.mjs 的 CSP（两处逐字符一致，pwa.test 守护）。
+    // 注意：本数组只作文档/部署清单，浏览器实际以 CSP 头/meta 为准。
+    CSP_CONNECT_ALLOWLIST: [],
     URL_IMPORT_MAX_BYTES: 8 * 1024 * 1024, // 网络地址导入单文件上限
     URL_IMPORT_TIMEOUT_MS: 15000           // 网络地址导入拉取超时
   };

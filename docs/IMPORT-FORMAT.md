@@ -102,7 +102,7 @@ http(s) 环境下可直接粘贴远端文件地址导入，与选择文件走**�
 
 - 仅允许 `http/https`，地址末段扩展名必须是受支持格式（json/csv/tsv/txt/quizlet/md/markdown/xlsx/docx/qbk/apkg，查询串允许）。
 - 15 秒超时；大小上限 **8MB**（先用 `Content-Length` 预检，读取后再按字节兜底；文本按 UTF-8 字节计）。
-- 远端必须返回允许跨域的响应头（**CORS**）。无 CORS 的地址浏览器必然拦截，应用不做代理，请另存为文件后拖拽导入。
+- 远端必须返回允许跨域的响应头（**CORS**），且页面 CSP `connect-src` 须放行该域（默认仅 `'self'`，C020）。无 CORS 或未加入 `NETWORK.CSP_CONNECT_ALLOWLIST` 的地址会被浏览器拦截，应用不做代理，请另存为文件后拖拽导入。
 - 落地为**本地快照**：题库记录来源 `{kind:'url', uri, fetchedAt, checksum}`；首页显示来源徽章，「刷新网络来源」按 checksum 判断是否有变化，有变化才重新预览、合并去重。刷新是单向快照追加，不覆盖本地修改，不做双向同步。
 - `file://` 双击打开时该入口禁用（浏览器安全限制）；需要时用 GitHub Pages 或 `node scripts/serve.mjs`。
 - 不带凭据的公开地址；带 Token 的私有源属于未来 REST 后端范畴。

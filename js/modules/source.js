@@ -98,7 +98,7 @@
       res = await loader(checked.url.href, controller ? { signal: controller.signal } : undefined);
     } catch (e) {
       throw new Error(e.name === 'AbortError' ? '请求超时（' + (opts.timeout || URL_TIMEOUT_MS) / 1000 + 's）' :
-        '网络请求失败（可能是跨域限制，可另存文件后拖拽导入）：' + e.message);
+        '网络请求失败（可能是 CORS 限制或 CSP connect-src 未放行该域；可另存文件后拖拽导入，或按 docs/DEVELOPMENT.md 把 origin 加入 CSP 白名单）：' + e.message);
     } finally {
       if (timer) clearTimeout(timer);
     }

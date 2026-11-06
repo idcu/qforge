@@ -9,6 +9,53 @@
 
 ## 最新记录
 
+### fix(security): CSP 默认 self + 显式白名单，标注明文风险（C020）
+
+**Commit Hash**：待回填（提交后补）
+
+**核心改动**
+- **缺陷（先红）**：`index.html` 与 `scripts/lib/security-headers.mjs` 的 `connect-src` 为
+  `'self' http: https: file:`，等于页面可向任意 http(s) 源发请求、`file://` 页面还可读本地文件；
+  后端/WebDAV/URL 导入并不需要这么宽的默认出口。
+  改为 **`connect-src 'self'`**（两处逐字符一致，`pwa.test` 守护）。
+- `js/config.js` 新增 `NETWORK.CSP_CONNECT_ALLOWLIST: []`：声明为**部署期白名单**——跨源后端/WebDAV/
+  URL 导入须把 origin 显式加入本数组 **并同步改写两处 CSP 字面量**；明确注释「运行时不做二次校验」，
+  避免 API 模式每请求多一次判断（N+1）。
+- `js/modules/source.js`：URL 导入失败文案补充「CSP connect-src 未放行该域」与白名单指引。
+- `js/modules/sync-dav.js`：弹窗与文件头显式标注 **Basic Auth 密码明文存本机 localStorage**，
+  建议应用专用密码、共享设备用完清除；同时说明跨域 WebDAV 受 CSP 白名单约束。
+- 文档同步：`DEVELOPMENT.md`（NETWORK 表 + 跨源/静态安全头）、`API-CONTRACT.md`（CSP 与 CORS 的先后）、
+  `user-guide.md`（CSP 行为变化 + `API_TOKEN` 前端包内可见）、`ARCHITECTURE.md`（CSP 行）、
+  `BACKUP.md`（WebDAV 的 CSP/明文密码）、`IMPORT-FORMAT.md`（URL 导入）、`TESTING.md`（pwa 92 / 总计 5183）、
+  `BENCH.md`（首屏 352.2/985.7）。
+- 公共抽象：`NETWORK.CSP_CONNECT_ALLOWLIST` 为唯一声明点（部署清单）；CSP 字符串仍由
+  `scripts/lib/security-headers.mjs` 的 `CSP` 单点定义，`index.html` meta 与其逐字符一致。无新增运行时代码路径。
+
+**验证数据（同机 Asia/Shanghai）**
+- **红（仅改测试、未改实现时实跑）**：`node scripts/pwa.test.mjs` → **通过 89 / 失败 3（exit 1）**：
+  `connect-src` 实际 `'self' http: https: file:`、命中 http(s)/file: 负向断言、`CSP_CONNECT_ALLOWLIST` 未声明。
+- **绿（本提交）**：`pwa.test` **92/92（exit 0）**：`connect-src` 恰为 `'self'`、不含 http(s)/file:/*/ws、
+  `CSP_CONNECT_ALLOWLIST` 默认空、meta 与共享 `CSP` 逐字符一致。
+- **门禁（实跑退出码）**：`node scripts/test-all.mjs` → **34 套件 / 5183 断言 / 基线一致（exit 0，35.5s）**；
+  `node --expose-gc scripts/bench.mjs --assert` → **60 项全过（exit 0）**（heapUsed +2.70 MB）；
+  `npm run verify:fast` → **exit 0（35.8s）**；`docs-check --static` 全部一致；
+  首屏 **352.2 KB gzip / 985.7 KB raw**（C019 351.5 / 984.4，+0.7 KB gzip）。
+
+**影响范围（行为变化，事先声明）**
+- **同源部署（`API_BASE_URL=''` 或 `'/api'`）不受影响**：前端、后端同源时 `connect-src 'self'` 放行。
+- **分离部署/WebDAV/URL 导入到其他 origin**：浏览器将按 CSP **直接拦截**，必须在
+  `NETWORK.CSP_CONNECT_ALLOWLIST` + `index.html` meta + `security-headers.mjs` 三处显式加入该 origin（两处 CSP 仍须逐字符一致）。
+- `file://` 双击直开仍可加载本地脚本/样式/图片（保留 `file:`），但 `connect-src` 不再放行 `file:`；
+  该场景本就不支持 URL 导入/WebDAV（`fetch` 受浏览器限制），无功能回退。
+- 参考后端/静态服务的 HTML 响应 CSP 同步收紧；非 HTML 响应仍不带 CSP。
+
+**遗留 TODO / 风险**
+- `CSP_CONNECT_ALLOWLIST` **不做运行时校验**：部署方漏改两处 CSP 时，表现为浏览器控制台 CSP 拦截，
+  应用侧只能看到 fetch 失败（URL 导入文案已提示，API/WebDAV 仍以网络错误呈现）。
+- **未在真实浏览器实测 CSP 拦截/放行**（本项只有静态断言与 Node 门禁；跨源拦截行为依赖浏览器实现）。
+- `style-src 'unsafe-inline'` 仍保留（渲染层字符串模板内联样式），属未收敛的剩余放宽面。
+- WebDAV 密码仍为明文 localStorage（本次仅标注风险，未改为加密存储/凭据管理器）。
+
 ### fix(judge): 非法判断答案返回 pending；调度缓存即时失效（C019）
 
 **Commit Hash**：`b49559a`
