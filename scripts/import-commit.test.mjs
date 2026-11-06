@@ -235,6 +235,100 @@ const c1 = await makeQB({});
   ok(!ui.modals.some((h) => h.indexOf('导入预览') >= 0), '拒绝发生在预览之前');
 }
 
+/* ================= 8. R-20 导入体积预检（读取前拒绝） ================= */
+{
+  section('体积预检：超限在读取前拒绝、0 次写入');
+  const c8 = await makeQB({});
+  const { QB, ui, bank, controls } = c8;
+  const LIMIT = QB.CONFIG.LIMITS.IMPORT_MAX_BYTES;
+  const EXPECTED = 16 * 1024 * 1024;
+  eq(LIMIT, EXPECTED, '本地文件导入上限常量 = 16 MiB');
+  const over = (LIMIT || EXPECTED) + 1;
+
+  // File-like（instanceof Blob），用自身 size 覆盖避免真的申请 16MB
+  const big = Object.create(Blob.prototype);
+  Object.defineProperty(big, 'size', { value: over });
+  Object.defineProperty(big, 'name', { value: '超大.json' });
+
+  let frCount = 0;
+  const origFR = globalThis.FileReader;
+  globalThis.FileReader = class {
+    constructor() { frCount++; }
+    readAsText() { if (this.onload) this.onload(); }
+    readAsArrayBuffer() { if (this.onload) this.onload(); }
+  };
+  const before = (await QB.DB.questions.list(bank.id, {})).items.length;
+  controls.resetSets();
+  const setsBefore = controls.sets;
+  let res;
+  try {
+    res = await QB.DataIO.importFile(bank, big, QB.Source.KINDS.FILE);
+  } finally {
+    globalThis.FileReader = origFR;
+  }
+
+  eq(frCount, 0, '超限文件未构造/未调用 FileReader（读取前拒绝）');
+  eq(controls.sets - setsBefore, 0, '超限拒绝发生在落盘之前（写入 0 次）');
+  ok(res === null, 'importFile 返回 null（不谎报成功）');
+  ok(!ui.toasts.some((t) => t.msg.indexOf('导入完成') >= 0), '超限时没有「导入完成」toast');
+  ok(ui.modals.some((h) => h.indexOf('import-error') >= 0 && h.indexOf('超过导入上限') >= 0),
+    '错误弹窗含 .import-error 与「超过导入上限」');
+  ok(ui.modals.some((h) => h.indexOf('未读取文件') >= 0), '文案写明未读取文件/未写入题目');
+  ok(!ui.modals.some((h) => h.indexOf('导入预览') >= 0), '拒绝发生在预览之前');
+  eq((await QB.DB.questions.list(bank.id, {})).items.length, before, '题库题数不变');
+
+  // 二进制快照（{name, arrayBuffer}）同样按 byteLength 预检
+  controls.resetSets();
+  const sets2 = controls.sets;
+  const res2 = await QB.DataIO.importFile(bank,
+    { name: '超大.qbk', arrayBuffer: { byteLength: over } }, QB.Source.KINDS.FILE);
+  eq(controls.sets - sets2, 0, '二进制快照超限同样 0 次写入');
+  ok(res2 === null && ui.modals.some((h) => h.indexOf('超过导入上限') >= 0),
+    '二进制快照超限被拒且原因可见');
+
+  // 边界开区间：恰好等于上限不拒收，超过 1 字节才拒收
+  const edge = await QB.Importers.runImport({ name: '边界.json', size: LIMIT, text: '[]' });
+  eq((edge.errors || []).length, 0, 'size 恰好 = 上限时不做体积拒收');
+  const overEdge = await QB.Importers.runImport({ name: '边界.json', size: over, text: '[]' });
+  eq((overEdge.errors || []).length, 1, 'size = 上限 + 1 时预检拒收（errors 1 条）');
+  ok(overEdge.meta && overEdge.meta.migration && overEdge.meta.migration.supported === false,
+    '预检拒收标记 migration.supported=false');
+}
+
+/* ================= 9. R-20 落盘顺序：成功 toast 不早于落盘 ================= */
+{
+  section('落盘顺序：成功 toast 不早于落盘确认');
+  const c9 = await makeQB({});
+  const { QB, ui, bank, controls } = c9;
+  controls.quota.chars = null;
+  const events = [];
+  const origForce = QB.Storage.forceSync;
+  const origFlush = QB.Storage.flush;
+  QB.Storage.forceSync = function () { events.push('persist'); return origForce.apply(QB.Storage, arguments); };
+  QB.Storage.flush = async function () { events.push('flush'); return origFlush.apply(QB.Storage, arguments); };
+  const origToast = ui.toast;
+  ui.toast = function (msg, kind) {
+    events.push(msg.indexOf('导入完成') >= 0 ? 'success' : 'toast');
+    return origToast.call(ui, msg, kind);
+  };
+  let res;
+  try {
+    res = await QB.DataIO.commitImport(bank, makeResult(5, '顺序'), 'paste');
+  } finally {
+    ui.toast = origToast;
+    QB.Storage.forceSync = origForce;
+    QB.Storage.flush = origFlush;
+  }
+  const successIdx = events.indexOf('success');
+  const persistIdx = events.indexOf('persist');
+  const flushIdx = events.indexOf('flush');
+  const writeIdx = Math.max(persistIdx, flushIdx);
+  ok(!!res && res.inserted === 5, '顺序用例导入成功（inserted=5）');
+  ok(successIdx >= 0, '成功 toast 存在');
+  ok(writeIdx >= 0 && successIdx > writeIdx,
+    '成功 toast 在落盘确认之后（persist@' + persistIdx + ', flush@' + flushIdx + ', success@' + successIdx + '）');
+}
+
 /* ================= 汇总 ================= */
 console.log('\n========================================');
 console.log('import-commit 断言: ' + (pass + failures.length) + '，通过: ' + pass + '，失败: ' + failures.length);

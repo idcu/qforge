@@ -63,6 +63,9 @@
     // 分享回链/粘贴码（C011）：硬上限 = qbk 字节；软阈值 = 回链字符数（超过提示优先发分享码）
     SHARE_MAX_BYTES: 8 * 1024 * 1024,
     SHARE_URL_SOFT_LIMIT: 64 * 1024,
+    // 本地文件导入单文件上限（R-20）：在 FileReader/解析前按 file.size 拒绝，避免整文件读入内存。
+    // 初值 16MiB（REFACTOR-PLAN 建议值，待产品确认）；网络地址导入仍受 NETWORK.URL_IMPORT_MAX_BYTES（8MiB）约束。
+    IMPORT_MAX_BYTES: 16 * 1024 * 1024,
     // 题目批注（C012，纯本地）：单题批注字符上限（超出截断，防止题包/分享码异常膨胀）
     ANNOTATION_MAX_LENGTH: 5000,
     // 单库批注总量上限（UTF-8 字节，C026）：写入/导入超限时拒绝并给出可见提示；

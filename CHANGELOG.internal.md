@@ -9,6 +9,37 @@
 
 ## 最新记录
 
+### fix(import): 导入体积在读取前预检（R-20）
+
+**Commit Hash**：`<提交后回填>`
+
+**核心改动**
+- `js/config.js`：新增 `LIMITS.IMPORT_MAX_BYTES = 16 MiB`（REFACTOR-PLAN 初值，待产品确认）。
+- `js/importers/registry.js`：`runImport` 在扩展名分派后、任何 `FileReader`/解析之前做体积预检；
+  新增 `declaredBytes`（File/Blob `size`、二进制快照 `arrayBuffer.byteLength`）与 `sizeLimitResult`
+  （统一失败结构 `errors[1]` + `meta.migration.supported=false`，复用 `.import-error` 弹窗）。
+- 边界为开区间：`size > limit` 拒收，等于上限放行；网络地址导入仍受 8 MiB 上限（更严格者优先）。
+- `sw.js`：`CACHE` v23 → v24，刷新 `scripts/sw-baseline.json`。
+- 文档：`docs/IMPORT-FORMAT.md`、`docs/user-guide.md`、`docs/ARCHITECTURE.md` §4.15 + §5、
+  `docs/TESTING.md`（import-commit 40→57、合计 5447→5464、SW v24）、`docs/DEVELOPMENT.md`。
+- **影响面**：新增一种「读取前拒绝」路径；原「解析后容量预检/中途失败回滚/成功 toast 晚于落盘」行为不变。
+  本地文件 >16 MiB 现在直接拒收（此前会整文件读入后再解析）。
+
+**验证数据（实测）**
+- 红：`node scripts/import-commit.test.mjs` → **57 断言 / 50 通过 / 7 失败**：
+  上限常量 undefined、超限文件构造 `FileReader` **1 次**、无 `.import-error` 弹窗、二进制快照未拒收、
+  `size = 上限+1` 未拒收、`migration.supported=false` 缺失。原始输出：`.analysis/architecture-audit/stage2-red-r20.txt`。
+- 绿：同套件 **57 / 57 通过**；超限 `FileReader` 0 次、`Storage.set` 0 次、`importFile` 返回 null、题数不变；
+  落盘顺序断言成功 toast 严格晚于 `forceSync`/`flush`。原始输出：`.analysis/architecture-audit/stage2-green-r20.txt`。
+- 门禁：`verify:fast` exit 0（36 运行项 / 5464 断言）；`bench --assert` 63/63；`docs-check --static` exit 0。
+
+**遗留 TODO / 风险**
+- 16 MiB 为初值，需产品确认后调整（只改 `LIMITS.IMPORT_MAX_BYTES` 一处）。
+- **未实机验证**：真实浏览器大文件内存峰值、真实 IDB 配额拒写/事务回滚、真实 `FileReader` 行为；
+  Node 测试用 File-like（`instanceof Blob` + 覆盖 `size`）与二进制快照替身，不实际分配 16 MB。
+- 公共抽象：新增 `declaredBytes`/`sizeLimitResult`（registry 内唯一体积判定与失败结构）；
+  复用 `DataIO.importFailureText`/`showImportFailure`、`QB.Quota.formatBytes`，未新增第二条解析链。
+
 ### perf(progress): 收卷错题改为一次读改写（R-02）
 
 **Commit Hash**：`c3a3121`

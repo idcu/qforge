@@ -45,6 +45,40 @@
     return m ? m[1] : '';
   }
 
+  /**
+   * 声明体积（R-20）：真实 File/Blob 取 size；二进制快照取 arrayBuffer.byteLength。
+   * 文本快照（粘贴/URL 已各自限制）不在此口径，返回 -1 表示未知、不做预检。
+   */
+  function declaredBytes(file, realFile) {
+    if (realFile && typeof realFile.size === 'number' && Number.isFinite(realFile.size) && realFile.size >= 0) {
+      return realFile.size;
+    }
+    if (file && file.arrayBuffer && typeof file.arrayBuffer.byteLength === 'number' &&
+        Number.isFinite(file.arrayBuffer.byteLength)) {
+      return file.arrayBuffer.byteLength;
+    }
+    return -1;
+  }
+
+  /** 体积超限的统一失败结构（errors 优先，复用 data-io 的 .import-error 弹窗约定） */
+  function sizeLimitResult(ext, name, size, limit) {
+    const fmt = (QB.Quota && typeof QB.Quota.formatBytes === 'function')
+      ? QB.Quota.formatBytes
+      : function (n) { return Math.round((Number(n) || 0) / 1024) + ' KB'; };
+    const reason = '文件「' + (name || '(未命名)') + '」体积 ' + fmt(size) + '，超过导入上限 ' + fmt(limit) +
+      '（单文件 ' + Math.round(limit / (1024 * 1024)) + ' MiB）。未读取文件、未写入任何题目；' +
+      '请拆分、压缩后重试，或改用网络地址导入。';
+    return {
+      questions: [],
+      warnings: [],
+      errors: [reason],
+      format: ext,
+      stats: { total: 0, byType: {} },
+      ext: ext,
+      meta: { migration: { source: 'size-limit', supported: false, reason: reason } }
+    };
+  }
+
   function readFile(file, asBinary) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -71,6 +105,12 @@
     const ext = extOf(name);
     if (!candidates(ext).length) {
       throw new Error('不支持的文件类型 .' + ext + '（支持：json / csv / txt(Quizlet) / md / xlsx / docx / qbk / apkg）');
+    }
+    // R-20：体积预检必须在任何读取/解析之前——超限文件不构造 FileReader、不落盘
+    const sizeLimit = QB.CONFIG.LIMITS.IMPORT_MAX_BYTES;
+    const size = declaredBytes(file, realFile);
+    if (sizeLimit > 0 && size > sizeLimit) {
+      return sizeLimitResult(ext, name, size, sizeLimit);
     }
     const asBinary = BINARY_EXTS.indexOf(ext) >= 0;
     let input;

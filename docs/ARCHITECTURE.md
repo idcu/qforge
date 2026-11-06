@@ -265,6 +265,18 @@ activate → caches.keys()
   唯一变化是本地 50 题从「50 次整表读改写」降为「1 次」。
 - 未实机验证：真实浏览器 200ms 防抖落盘与真实 IDB 事务合并（Node 计数口径见 `docs/BENCH.md`）。
 
+### 4.15 导入体积预检（R-20）
+
+- 位置：`js/importers/registry.js` 的 `runImport`，在扩展名分派之后、任何 `FileReader`/解析之前。
+- 口径：真实 `File`/`Blob` 用 `file.size`；二进制快照用 `arrayBuffer.byteLength`；文本快照（粘贴/URL）不在此口径。
+- 阈值：`QB.CONFIG.LIMITS.IMPORT_MAX_BYTES`（16 MiB 初值，待产品确认）；网络地址导入仍受 `NETWORK.URL_IMPORT_MAX_BYTES`（8 MiB）约束。
+- 拒绝形态：返回统一失败结构（`questions: []`、`errors: [原因]`、`meta.migration.supported=false`），由
+  `DataIO.showImportFailure` 渲染 `.import-error` 弹窗；**不抛异常、不构造 FileReader、不进入预览、不落盘**。
+- 边界：`size > limit` 才拒收（等于上限放行）。
+- 落盘顺序（既有约束，R-20 复核）：`insertMany` 内部 `forceSync`/`flush` 完成且回读题数一致后，
+  `commitImport` 才提示「导入完成」；中途失败回滚到导入前状态。
+- 未实机验证：真实浏览器大文件内存峰值、真实 IDB 配额拒写与事务回滚。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -286,6 +298,7 @@ activate → caches.keys()
 | `QB.ShareLink` | **C011 分享码/回链（纯函数、零网络）**：`PREFIX='qfshare1:'`；`encode(ArrayBuffer)` 确定性、`decode` 校验前缀/字符集/字节上限、`buildLink(base,code)` → `#share=`、`readHash/extractCode` 双形态 | `Exporter.shareFlow`（生成）、`DataIO.parseShareCode`（粘贴/回链导入）、app 启动 `handleShareHash` |
 | `reviews.record(bankId, map, logs)` | 调度状态 + 评分日志一次提交（api 模式 1 个 PUT；local 模式写前重读合并 + 状态/日志/版本快照提交，失败回滚） | 旧调用方/第三方适配器回退路径 |
 | `QB.WrongBook.addMany(bankId, questions)` | **R-02 错题批量写唯一入口**：一次筛选 + 一次整表读改写；适配器无 `wrongAddMany` 时串行 `wrongAdd` 降级 | `app.js recordWrongs`、第三方适配器回退 |
+| `QB.CONFIG.LIMITS.IMPORT_MAX_BYTES` + `runImport` 前置预检（R-20） | **导入体积唯一口径**：File/Blob `size`、二进制快照 `arrayBuffer.byteLength`；超限返回统一失败结构，读取前拒绝 | 文件/拖拽/URL 导入入口（全部经 `runImport`） |
 | `reviews.patch(bankId, delta, logs)`（可选） | 增量提交：api 模式只上行本批改动键（PATCH，O(改动数)）；local 与 record 共用同一合并/回滚实现；适配器未实现时 `SRSStore` 回退 `record` | srs-store.grade/gradeMany |
 | `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | app.js 统计页缓存诊断结果，避免每次 render 全量扫 revlog |
 | `QB.OPTIONAL_CONTRACTS` + `QB.hasCapability` + `QB.assertOptional`（R-06 / R-02） | 可选契约的**唯一判定入口**：`reviews[get,patch]`、`revlog[revision]`、`progress[wrongAddMany]` 可缺失；`DB.init` 校验「提供则必须是函数」；领域模块用 `hasCapability` 检测并走文档化降级 | `SRSStore`（get/patch 降级）、`WrongBook.addMany`（wrongAddMany 降级）、`app.js` 统计页（revision 降级）、第三方适配器合规判定 |
