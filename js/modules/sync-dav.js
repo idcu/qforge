@@ -375,7 +375,7 @@
       '<input type="text" data-dav="url" value="' + esc(cfg.baseUrl) + '" placeholder="目录地址，以 / 结尾" style="width:100%">' +
       '<label class="qe-label">账号</label><input type="text" data-dav="user" value="' + esc(cfg.user) + '" style="width:100%">' +
       '<label class="qe-label">密码 / 应用密码（AES-GCM 加密保存在本机，密钥不可导出）</label>' +
-      '<input type="password" data-dav="pass" value="' + esc(cfg.pass) + '" style="width:100%">' +
+      '<input type="password" data-dav="pass" style="width:100%">' +
       passError +
       '<p class="li-meta">加密边界（不夸大）：密码不再以明文写入 localStorage，能防「只拿到 localStorage 备份/截图」的泄露；但不能防同源 XSS、恶意浏览器扩展、同机读盘或整浏览器配置拷贝，也不能替代应用专用密码。建议使用应用专用密码，共享设备用完点「清除配置」。跨域 WebDAV 还需在 CSP connect-src 白名单放行该域。</p>' +
       '<p class="li-meta">上次上传：' + esc(last) + '　固定对象 ' + esc(FILE_NAME) + '</p>' +
@@ -393,6 +393,9 @@
           pass: modal.querySelector('[data-dav="pass"]').value,
           lastAt: cfg.lastAt, lastName: cfg.lastName, lastSize: cfg.lastSize
         });
+        // R-14：密码只经 DOM value 回填，绝不写入 HTML 属性（避免随 innerHTML/截图/序列化泄露）
+        const passInput = modal.querySelector('[data-dav="pass"]');
+        if (passInput) passInput.value = cfg.pass || '';
         const persist = async (conf) => {
           const saved = await saveConfig(conf);
           if (saved.passWarning) QB.UIRenderer.toast(saved.passWarning, 'err');
