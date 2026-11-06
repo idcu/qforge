@@ -11,7 +11,7 @@
 
 ### fix(import): 材料题单小问不再导入即死路（C015）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`0a09372`
 
 **核心改动**
 - **缺陷复现（先红）**：1 小问材料题可正常导入并落库，但 `QuizEngine.canSubmit` 对 material 要求 `children.length >= 2`，
