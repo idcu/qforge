@@ -11,7 +11,7 @@
 
 ### test(contract): 装配清单 requires DAG 填满 + keeps 导出存在性校验（C023）
 
-**Commit Hash**：`待回填`
+**Commit Hash**：`31b5a67`
 
 **核心改动**
 - `contracts/modules.json`：**86 条**（计划写 81，实际清单已随 C021/C022 长到 86）逐条补齐
