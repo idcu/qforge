@@ -290,6 +290,15 @@ activate → caches.keys()
 - 影响面：分享成功路径的弹窗与返回结构只增不改；新增「超限取消」分支（用户可拒绝生成超长回链）。
 - 未实机验证：真实浏览器弹窗交互，以及真实聊天软件对超长 URL 的截断表现。
 
+### 4.17 启动水合评估（R-10，no-go）
+
+- 现状：IDB 启动 `Store.init()` → `readAll(true,true)` → `Storage.adoptStore`，一次性把全部记录（题目分片、
+  per-hash 复习状态、评分日志段等）放进同步缓存；`Storage.get` 是**同步**的，而 `Store.get` 在 IDB 下是异步的。
+- spike 实测（50k 题，判据跑前声明）：只水合 banks/metadata 时记录数降至基线 **0.0%**、驻留 heap 降至 **0.1%**，
+  但 `loadQuestions/reviews.list/revlog.list` 全部返回空（G1 功能不成立）→ **NO-GO**，未改生产代码。
+- 结论：分层懒加载必须以「读路径整体异步化」为前提；在同步 `Storage` 契约下不做。数据见
+  `CHANGELOG.internal.md` 的 R-10 条目。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |

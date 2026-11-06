@@ -9,6 +9,36 @@
 
 ## 最新记录
 
+### docs(arch): 启动分层水合 spike 判定 no-go（R-10，未实施）
+
+**Commit Hash**：`（本条目提交后回填）`
+
+**核心改动**
+- **未修改任何生产代码**。新增临时 spike `.analysis/architecture-audit/r10-spike.mjs`（不入库），
+  按运行前声明的判据实测「只水合 banks/questionsMeta/reviewMeta/reviewRev/revlogMeta/meta:*」方案。
+- `docs/ARCHITECTURE.md`：补充 §4.17 评估结论与限制（同步 `Storage.get` 决定懒加载不可行）。
+- `docs/user-guide.md`：补充「启动水合」已知限制（大库启动内存近似线性）。
+
+**预声明判据（跑前固定，未调整）**
+- 基线 = 生产现状 `Store.init()` 全量 `readAll` + `Storage.adoptStore`（50,000 题 IDB）。
+- G1 功能（硬前提）：`banks.list` / `questions.count` / `loadQuestions` / `reviews.list` / `revlog.list`
+  必须返回真实数据（50000 / 50000 / 50000）。
+- G2 收益：水合记录数 ≤ 基线 50% **或** 驻留 heap ≤ 基线 −30%。
+- Go = G1 且 G2；G1 不成立即 no-go（不得为指标牺牲用户可见数据）。
+
+**验证数据（实测，`node --expose-gc`）**
+- 基线：记录 **50,354**（域 50,353，21.32 MB）；耗时 **57.0 ms**；heap 峰值 +**49.56 MB**；驻留 +**26.12 MB**。
+- 分层方案：记录 **3**（0.00 MB）；耗时 **38.8 ms**；驻留 +**0.02 MB**（记录 0.0% / 驻留 0.1% → G2 PASS）。
+- 功能探针：`banks=1 / count=50000`，但 `loadQuestions=0`、`reviews=0`、`revlog=0`（**G1 FAIL**）。
+- 判定：**NO-GO**。根因：`Storage.get` 为同步读，未水合的键在同步 `Storage.keys()/get()` 下静默返回空；
+  要让分层方案成立必须把题目/复习/日志读路径整体改异步，影响面覆盖半个数据层。
+- 原始输出：`.analysis/architecture-audit/stage3-r10-spike.txt`。
+
+**遗留 TODO / 风险**
+- 上层若未来把读路径异步化，可重新评估（判据与基线须重跑，不得复用本次数字）。
+- 大库启动内存与题目数量近似线性，属已知限制，已在 `docs/user-guide.md` 标注。
+- 未实机验证：真实浏览器 50k IDB 启动的 GC 行为与内存峰值（Node 为同机参考值）。
+
 ### perf(share): 分享前先精确估算回链体积（R-19）
 
 **Commit Hash**：`9556401`
