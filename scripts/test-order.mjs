@@ -41,6 +41,7 @@ export const ORDER = [
   'review-queue.test.mjs',
   'sync-dav.test.mjs',
   'pwa.test.mjs',
+  'sw-runtime.test.mjs',
   'ui-renderer.test.mjs',
   'dom-patch.test.mjs',
   'app-boot.test.mjs',

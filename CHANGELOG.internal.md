@@ -9,6 +9,51 @@
 
 ## 最新记录
 
+### fix(pwa): SW 预缓存失败不再被吞、非 2xx 导航不覆盖离线壳 + 运行时门禁（C025）
+
+**Commit Hash**：`待回填`
+
+**核心改动**
+- `sw.js`：
+  ① `install` 去掉 `.catch(() => self.skipWaiting())`。旧实现在预缓存失败时仍 resolve 并
+  `skipWaiting`，会让**残缺缓存的 SW 直接激活**（离线缺资源，且浏览器不再重试安装）。现在失败
+  会 reject，旧 SW 继续服务，下次检查重试。
+  ② 导航分支仅在 `res && res.ok` 时写回 `./index.html`。旧实现无条件 `put`，一次服务端 500
+  会把离线壳替换成错误页，之后所有离线导航都命中它。
+  ③ `CACHE` 由 `qforge-v12` 升到 `qforge-v13`（行为变更 + 首屏体积变化，按既有约定换代）。
+- 新增 `scripts/sw-runtime.test.mjs`（**32 项**）：Node VM 加载 `sw.js`，以内存 CacheStorage /
+  fetch 替身执行真实分支——install 清单与 CORE 逐项一致、预缓存失败必须 reject 且不
+  `skipWaiting`、导航 2xx 才回写且 500 不覆盖、离线回退、静态资源缓存优先 + 仅 2xx 后台更新、
+  非 GET/跨源/`/api` 不接管、activate 删旧缓存并 `claim`。
+- 新增版本基线 `scripts/sw-baseline.json`（`CACHE` + 预缓存清单与 index.html 引用的
+  **93 个 js/css** 内容 SHA-256）。改了资源却没 bump 版本（或 bump 了没刷基线）→ 套件红；
+  刷新命令 `node scripts/sw-runtime.test.mjs --write-baseline`，必须与版本号同 commit。
+- `scripts/test-order.mjs` 注册新套件；`docs/TESTING.md`（35→36 运行项、5288→5320 断言、新增
+  套件行）、`docs/DEVELOPMENT.md`（运行项 36、SW 版本读数 v13）、`docs/BENCH.md`（首屏
+  353.3→353.6 KB gzip / 989.0→989.5 KB raw）、`scripts/docs-baseline.json` 同步。
+- 公共抽象：无新增运行时抽象。`sw-baseline.json` 是新的**门禁数据文件**，影响面：任何
+  `js/**`/`css/**` 改动都必须递增 `CACHE` 并刷新基线，否则 `test-all` 红（这是有意收紧）。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **先红**：修复前 `node scripts/sw-runtime.test.mjs` → **26 通过 / 6 失败（exit 1）**。其中真实
+  缺陷 3 项：`预缓存失败时 install 等待链必须 reject`、`失败时不 skipWaiting`、`非 2xx 不写回
+  index.html`；另 3 项为基线文件尚不存在（属新增门禁的初始红）。
+- **后绿**：修复 + 写入基线后 → **32 通过 / 0 失败（exit 0）**。
+- **版本守卫负例**：`node scripts/sw-runtime.test.mjs --mutate`（内存改摘要、不动版本）→
+  **31 通过 / 1 失败（exit 1）**，失败项为「93 个 js/css 摘要未变」。
+- **全量门禁（实跑退出码）**：`npm run verify:fast` → exit 0（`test-all` **36 个运行项 / 5320
+  断言 / 基线一致**，38.4s）；`node --expose-gc scripts/bench.mjs --assert` → **62/62 通过
+  （exit 0）**；`docs-check --write` → `36 项 / 5320 断言 / 62 门禁` 一致；首屏 **353.6 KB gzip /
+  989.5 KB raw**（较 v12 的 353.3/989.0 增加 0.3/0.5 KB，来自 sw.js 新增注释与分支）。
+
+**遗留 TODO / 风险**
+- 运行时门禁是 **Node 替身**，未在真实浏览器验证「预缓存失败时 install 失败」「500 不覆盖
+  缓存」的端到端表现（需 DevTools 离线模式 + 伪造 500）。本项结论只覆盖源码分支与可观察
+  Promise 结果。
+- `--write-baseline` 与 `--mutate` 均不得进 CI（前者会写文件、后者预期失败）；当前由
+  `check-ci-coverage` 只拦 `--mutate`，`--write-baseline` 尚未单独断言。
+- 基线摘要覆盖 index.html 引用的 js/css + CORE；未引用但可能被动态加载的资源不在守卫范围内。
+
 ### test(lib): 统一 34 套件断言原语，断言总数与基线不变（C024）
 
 **Commit Hash**：`6100643`

@@ -12,7 +12,7 @@
  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
  */
-const CACHE = 'qforge-v12';
+const CACHE = 'qforge-v13';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
   './icons/icon-192.png', './icons/icon-512.png',
@@ -23,11 +23,13 @@ const CORE = [
 ];
 
 self.addEventListener('install', (event) => {
+  // 预缓存失败必须让 install 可观察地失败：旧实现在 catch 里无条件 skipWaiting，
+  // 会让带残缺缓存的 SW 直接激活（离线时缺资源且浏览器不再重试安装）。
+  // 失败时旧 SW 继续服务，浏览器下次检查会重试。
   event.waitUntil(
     caches.open(CACHE)
       .then((cache) => cache.addAll(CORE))
       .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting())
   );
 });
 
@@ -47,13 +49,17 @@ self.addEventListener('fetch', (event) => {
   // 后端 REST 不拦截（同源 API 约定挂在 /api 前缀，见 API-CONTRACT）
   if (url.pathname === '/api' || url.pathname.indexOf('/api/') === 0) return;
 
-  // 导航：网络优先，失败回退缓存的 index.html
+  // 导航：网络优先，成功（2xx）才回写离线壳；失败回退缓存的 index.html
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('./index.html', copy)).catch(() => {});
+          // 非 2xx（如后端 500 错误页）不能覆盖 index.html：否则一次服务端故障
+          // 会把离线壳替换成错误页，之后所有离线导航都命中它。
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('./index.html', copy)).catch(() => {});
+          }
           return res;
         })
         .catch(() => caches.match('./index.html').then((r) => r || caches.match('./')))
