@@ -623,17 +623,21 @@
     },
 
     /**
-     * 立即把待写数据落盘；LS 失败抛错（备份/退出/关键事务前调用）。
-     * IDB 模式异步落盘，失败经 onError；需要等待时用 `flush()`。
+     * 立即把待写数据落盘；LS 失败同步抛错（备份/退出/关键事务前调用）。
+     * IDB 模式返回落盘 Promise：**调用方应 await**（如备份恢复事务），失败会从该 Promise 上抛；
+     * 内部另挂一个 no-op catch 仅避免未 await 的旧调用点产生 unhandledRejection，
+     * 不影响 await 方拿到错误（onError 已通知；待写保留可重试）。
      */
     forceSync() {
       this._cancelSchedule();
-      if (this._awaiting) return; // F2：等待期强制落盘也保持内存缓冲（避免写入将被清理的 LS）
+      if (this._awaiting) return Promise.resolve(); // F2：等待期强制落盘也保持内存缓冲（避免写入将被清理的 LS）
       if (this._isIdb()) {
-        this.flush().catch(() => { /* onError 已通知；待写保留 */ });
-        return;
+        const p = this.flush();
+        p.catch(() => { /* onError 已通知；await 方仍会收到同一 rejection */ });
+        return p;
       }
       this._writeNow();
+      return Promise.resolve();
     },
 
     /** 删除；LS 模式同步生效，IDB 模式入队删除（缓存立即失效） */

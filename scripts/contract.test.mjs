@@ -134,14 +134,17 @@ section('backup 仓库（本地）');
   const payload = QB.DB.backup.export();
   ok(payload && payload.data && payload.data[QB.KEYS.banks], 'export 返回 { data } 且含逻辑键');
   eq(JSON.parse(JSON.stringify(payload.data[QB.KEYS.banks]))[0].name, '库1', '载荷含题库数据');
-  throws(() => QB.DB.backup.import({}, 'merge'), /需要 \{ data \}/, '缺 data 的载荷被拒绝');
+  // backup.import 自 C017 起为 async（IDB 落盘失败需上抛），拒绝走 rejected Promise
+  let payloadErr = null;
+  try { await QB.DB.backup.import({}, 'merge'); } catch (e) { payloadErr = e; }
+  ok(!!payloadErr && /需要 \{ data \}/.test(payloadErr.message), '缺 data 的载荷被拒绝');
   // merge：同名键覆盖、其余保留
   QB.Storage.set(QB.KEYS.metaTheme, 'dark');
-  QB.DB.backup.import({ data: { [QB.KEYS.banks]: [{ id: 'bk2', name: '库2' }] } }, 'merge');
+  await QB.DB.backup.import({ data: { [QB.KEYS.banks]: [{ id: 'bk2', name: '库2' }] } }, 'merge');
   eq(QB.Storage.get(QB.KEYS.banks)[0].name, '库2', 'merge 覆盖同名键');
   eq(QB.Storage.get(QB.KEYS.metaTheme), 'dark', 'merge 保留其余现有键');
   // replace：删除载荷中不存在的旧键
-  QB.DB.backup.import({ data: { [QB.KEYS.banks]: [{ id: 'bk3', name: '库3' }] } }, 'replace');
+  await QB.DB.backup.import({ data: { [QB.KEYS.banks]: [{ id: 'bk3', name: '库3' }] } }, 'replace');
   eq(QB.Storage.get(QB.KEYS.banks)[0].name, '库3', 'replace 写入载荷');
   eq(QB.Storage.get(QB.KEYS.metaTheme, null), null, 'replace 清除载荷外的旧键');
 }

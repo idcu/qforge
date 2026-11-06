@@ -498,15 +498,15 @@
    *   replace（默认）= 先内存快照旧数据，全量写入成功后再删除载荷中不存在的旧键，
    *     任一步失败尽力回滚到快照后抛出（不再先删后写、失败即全丢）；
    *   merge = 同名逻辑键覆盖（备份中未包含的键保留；banks/history/revlog 若在备份中则整体替换，非实体级合并）。
-   * @returns {{keys:number, mode:string}}
+   * @returns {Promise<{keys:number, mode:string}>} IDB 模式会等待落盘完成，失败上抛
    */
-  function applyData(data, mode) {
+  async function applyData(data, mode) {
     data = data || {};
     const m = mode === 'merge' ? 'merge' : 'replace';
 
     if (m === 'merge') {
       Object.keys(data).forEach((k) => QB.Storage.set(k, data[k]));
-      QB.Storage.forceSync();
+      await QB.Storage.forceSync();
       return { keys: Object.keys(data).length, mode: m };
     }
 
@@ -518,11 +518,11 @@
         QB.Storage.set(k, data[k]);
         written.push(k);
       });
-      QB.Storage.forceSync();
+      await QB.Storage.forceSync();
       oldKeys.filter((k) => !Object.prototype.hasOwnProperty.call(data, k))
         .filter((k) => !(QB.Store && typeof QB.Store.isBootstrap === 'function' && QB.Store.isBootstrap(k)))
         .forEach((k) => QB.Storage.remove(k));
-      QB.Storage.forceSync();
+      await QB.Storage.forceSync();
     } catch (e) {
       console.error('[Backup] 恢复失败，尝试回滚到恢复前快照：', e);
       try {
@@ -531,7 +531,7 @@
           if (old) QB.Storage.set(k, old[1]);
           else QB.Storage.remove(k);
         });
-        QB.Storage.forceSync();
+        await QB.Storage.forceSync();
       } catch (rollbackErr) {
         console.error('[Backup] 回滚也失败：', rollbackErr);
       }
@@ -716,11 +716,22 @@
     };
   }
 
-  /** 恢复备份包中的资产：replace 先清空 IDB，merge 仅覆盖写入 */
+  /**
+   * 恢复备份包中的资产：**先写后切**（C017/P2-11）。
+   * 先写入新资产，成功后才在 replace 模式清理不在新集合中的旧资产；
+   * 写入失败时旧资产原样保留（旧实现先 clear 再写，失败即丢光全部图片）。
+   */
   async function restoreAssets(assets, mode) {
-    if (mode === 'replace') await QB.Assets.clear();
-    await QB.Assets.putEntries(assets);
-    return assets.length;
+    const list = assets || [];
+    const oldIds = mode === 'replace' ? await QB.Assets.ids() : [];
+    const newIds = await QB.Assets.putEntries(list);
+    if (mode === 'replace') {
+      const keep = new Set(newIds);
+      for (const id of oldIds) {
+        if (!keep.has(id)) await QB.Assets.remove(id);
+      }
+    }
+    return list.length;
   }
 
   /** 解析备份文件：自动识别 ZIP 包（PK 头）或 JSON */

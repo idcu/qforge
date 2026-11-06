@@ -407,6 +407,75 @@ section('跨版本降级（F3）：32 位 hash 冲突拒绝导出');
   ok(again[QB.KEYS.questions(bankId)].every((q) => /^2:/.test(q.contentHash)), '恢复算法后正常导出');
 }
 
+section('资产恢复先写后切（P2-11）');
+{
+  QB.Assets.useDriver(QB.Assets.memoryDriver());
+  const putOk = await QB.Assets.putEntries([{ id: 'asOld1', bytes: new Uint8Array([9, 8, 7]), mime: 'image/png' }]);
+  eq(putOk.length, 1, '旧资产写入 1 条');
+  ok((await QB.Assets.ids()).length === 1, '恢复前资产数量 1');
+  const oldRec = await QB.Assets.get('asOld1');
+  ok(!!oldRec && oldRec.bytes[0] === 9, '旧资产内容可读（byte0=9）');
+
+  // 注入资产写失败：恢复必须整段失败，且旧资产不被先清空
+  const origPut = QB.Assets.putEntries;
+  QB.Assets.putEntries = async () => { throw new Error('注入资产写失败'); };
+  let assetErr = null;
+  try {
+    await QB.Backup.restoreAssets([{ id: 'asNew1', bytes: new Uint8Array([1]), mime: 'image/png' }], 'replace');
+  } catch (e) { assetErr = e; }
+  QB.Assets.putEntries = origPut;
+  ok(!!assetErr && assetErr.message.indexOf('注入资产写失败') >= 0, '资产写失败时恢复抛错');
+  eq((await QB.Assets.ids()).length, 1, '失败后旧资产数量不变（未先清空）');
+  const kept = await QB.Assets.get('asOld1');
+  ok(!!kept && kept.bytes[0] === 9, '失败后旧资产仍可读');
+
+  const n = await QB.Backup.restoreAssets([{ id: 'asNew1', bytes: new Uint8Array([1]), mime: 'image/png' }], 'replace');
+  eq(n, 1, '正常恢复返回资产数');
+  const afterIds = await QB.Assets.ids();
+  ok(afterIds.indexOf('asNew1') >= 0, '新资产已写入');
+  ok(afterIds.indexOf('asOld1') < 0, 'replace 成功后才清理旧资产');
+}
+
+section('forceSync 等待 IDB 落盘并上抛错误（P2-11）');
+{
+  const { createMemoryIDB } = await import('./lib/idb-memory.mjs');
+  const h2 = await createHarness(path.resolve(__dirname, '..'), { indexedDB: createMemoryIDB() });
+  const S2 = h2.QB.Storage;
+  const Store = h2.QB.Store;
+  await S2.initStore();
+  await Store.migrateToIdb(Store.lsSource());
+  S2.adoptStore({ mode: 'idb', records: await Store.readAll(true) });
+  eq(S2.mode, 'idb', '测试切到 IDB 口径');
+
+  let resolveBatch = null;
+  const origBatch = Store.batch;
+  // 延迟真实事务：证明 forceSync 在事务真正完成前不会 resolve
+  Store.batch = (payload) => new Promise((resolve, reject) => {
+    resolveBatch = () => origBatch.call(Store, payload).then(resolve, reject);
+  });
+  S2.setSync('c017:wait', { v: 1 });
+  const ret = S2.forceSync();
+  ok(ret && typeof ret.then === 'function', 'forceSync 返回可等待 Promise');
+  let settled = false;
+  (ret && typeof ret.then === 'function' ? ret : Promise.resolve())
+    .then(() => { settled = true; }, () => { settled = true; });
+  await Promise.resolve();
+  await Promise.resolve();
+  eq(settled, false, '事务未完成前 forceSync 不 resolve（真正等待 flush）');
+  resolveBatch();
+  await (ret && typeof ret.then === 'function' ? ret : Promise.resolve());
+  eq(settled, true, '落盘完成后 forceSync resolve');
+  const got = await Store.get('c017:wait');
+  eq(got && got.v, 1, '等待结束后值已落盘');
+
+  Store.batch = () => Promise.reject(new Error('注入 IDB 写失败'));
+  S2.setSync('c017:bad', { v: 2 });
+  let boom = null;
+  try { await S2.forceSync(); } catch (e) { boom = e; }
+  ok(!!boom && boom.message.indexOf('注入 IDB 写失败') >= 0, 'flush 失败经 forceSync 上抛（不静默吞掉）');
+  Store.batch = origBatch;
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

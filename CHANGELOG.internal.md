@@ -9,6 +9,44 @@
 
 ## 最新记录
 
+### fix(backup): 资产恢复先写后切，失败保持旧资产（C017）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- **缺陷 A（先红）**：`restoreAssets` 在 replace 模式**先 `QB.Assets.clear()` 再 `putEntries`**；图片写入失败（配额/IDB 异常）
+  时旧图片已被清空 —— 数据恢复成功、图片全丢。
+- `js/modules/backup.js`：`restoreAssets` 改为**先写后切**：先 `putEntries` 新资产，成功后才删除不在新集合中的旧资产；
+  写入失败时直接抛错，旧资产原样保留。
+- **缺陷 B（先红）**：`Storage.forceSync()` 在 IDB 模式 `this.flush().catch(()=>{})` 后立即返回 `undefined`，
+  调用方无法等待、错误被吞；`applyData` 因此可能在事务落盘前就返回「恢复成功」。
+- `js/utils/storage.js`：`forceSync()` IDB 模式**返回 flush Promise**（失败从该 Promise 上抛）；LS 模式仍同步抛错。
+  内部另挂 no-op catch，仅防止不 await 的旧调用点产生 unhandledRejection，await 方仍能收到错误。
+- `js/modules/backup.js`：`applyData` 改 async，三次落盘点全部 `await QB.Storage.forceSync()`（含回滚落盘）。
+- `js/data/local-adapter.js`：`backup.import` 改 async 并 `await applyData`，IDB 写入失败向上抛，不再「先报成功」。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0）**
+- **红（实现前）**：`node scripts/backup.test.mjs` → 146 断言中 **6 失败**：
+  资产注入写失败后旧资产被清空（数量 1→0、内容不可读）；`forceSync` 不返回 Promise、事务未完成即判完成、
+  断言时值尚未落盘、flush 错误未上抛（被 no-op catch 吞掉）。
+- **绿（本提交）**：146/146；资产失败时**旧资产数量 1、内容 byte0=9 不变**，成功后才清理旧资产；
+  `forceSync` 返回 Promise、`resolveBatch` 前 `settled=false`、完成后值落盘、注入失败经 `forceSync` 抛出。
+- **全量门禁（实跑退出码 0）**：`test-all` **34 运行项 / 5156 断言 / 0 失败（37.3s）**；
+  `bench --assert` **58 门禁全部通过**；`docs-check --static` 全部一致；`verify:fast` exit 0（36.2s）。
+  首屏 **348.5 KB gzip / 974.6 KB raw**（C016 348.2 / 973.8，+0.3 KB gzip）。
+
+**影响范围与公共抽象**
+- 公共抽象：`Storage.forceSync()` 新增 IDB 返回值契约（Promise，可 await、失败上抛）；`QB.Backup.applyData` 变为 async；
+  `restoreAssets` 语义不变（返回资产数），仅执行顺序改为先写后切。`restoreAssets` 现使用既有 `QB.Assets.ids/remove`。
+- **行为变更**：IDB 恢复改为等待事务落盘；失败直接报「恢复失败」。既有 17 处 `forceSync()` 调用点未改调用方式，
+  行为等价（仍即时触发落盘，不 await 时不产生 unhandledRejection）。
+- 未改备份格式、资产 id 规则、清理策略（replace 仍删除不在备份中的旧资产）。
+- 契约测试同步适配 async（`scripts/contract.test.mjs` 2 处改为 await/rejected 断言，断言数仍 66，未改门禁阈值）。
+
+**遗留 TODO / 风险**
+- 数据先于资产恢复：资产失败时数据已写入（提示失败、可重试），未回滚数据；本次只保证**旧资产不丢**（验收口径）。
+- 未起真实 IndexedDB 浏览器验证，Node 侧用内存 IDB driver 注入 batch 失败/延迟事务。
+
 ### fix(backup): 恢复后失效题目缓存并递增 rev（C016）
 
 **Commit Hash**：`b6d8ee7`
