@@ -304,10 +304,14 @@ section('activate：删除旧版本缓存并接管客户端');
   const env = createEnv();
   env.seed('qforge-v1', './index.html', makeResponse(200, 'old'));
   env.seed(CACHE, './index.html', makeResponse(200, 'current'));
+  // 同源但非本应用的缓存（例如同域下其他 PWA / 工具）：绝不能被本站 SW 删除
+  env.seed('other-app-v1', './index.html', makeResponse(200, 'other'));
   const ev = dispatch(env, 'activate');
   await ev.pending;
   ok(env.calls.deleted.indexOf('qforge-v1') >= 0, '旧版本缓存被删除（qforge-v1）');
   ok(env.calls.deleted.indexOf(CACHE) < 0, '当前版本缓存保留（' + CACHE + '）');
+  ok(env.calls.deleted.indexOf('other-app-v1') < 0, '同源其他应用缓存不被删除（R-11：只清理本站前缀）');
+  ok(env.stores.has('other-app-v1'), '其他应用缓存内容仍在（未被误删）');
   eq(env.calls.claim, 1, '调用 clients.claim（首次加载即受控）');
 }
 

@@ -224,6 +224,19 @@ QB.assertOptional(adapter, name)           ← DB.init 在 assertAdapter 之后�
   本项只收紧「渲染面」。
 - 未实机验证：真实浏览器扩展/序列化路径；Node 用例只断言 `openModal` HTML 字符串与回调 `value`。
 
+### 4.12 SW 缓存删除范围（R-11）
+
+```
+activate → caches.keys()
+  → filter(k => k.indexOf(CACHE_PREFIX) === 0 && k !== CACHE)   // CACHE_PREFIX = 'qforge-'
+  → caches.delete(k) → clients.claim()
+```
+
+- 原实现 `k !== CACHE` 会把**同源其他应用/工具的 CacheStorage**一并删除；现收窄到本站命名空间。
+- `CACHE` 必须以 `CACHE_PREFIX` 开头，由 `pwa.test.mjs` 静态校验（改前缀/版本时不会静默脱钩）。
+- 升级清理语义不变：旧 `qforge-v*` 仍会被删除，`other-app-*` 等保持原样。
+- 未实机验证：真实浏览器多 PWA 共享 origin 时的 CacheStorage 隔离与删除时序。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |

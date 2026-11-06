@@ -12,7 +12,9 @@
  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
  */
-const CACHE = 'qforge-v20';
+const CACHE = 'qforge-v21';
+// 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
+const CACHE_PREFIX = 'qforge-';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
   './icons/icon-192.png', './icons/icon-512.png',
@@ -36,7 +38,9 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys
+        .filter((k) => k.indexOf(CACHE_PREFIX) === 0 && k !== CACHE)
+        .map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
