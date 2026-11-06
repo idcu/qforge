@@ -9,6 +9,60 @@
 
 ## 最新记录
 
+### perf(data): 导入去重索引与单题 O(1) 定位（C018）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- **缺陷 A（先红）**：`local-adapter.questions.get(id)` 逐库调用 `QuestionShards.locate`（逐分片 `findIndex`），
+  单题读取 O(全库)；`insertMany` merge 去重每次都 `QuestionShards.readAll` + 重建 `Set`，重复导入 10k 题做两次全量物化。
+- `js/data/local-adapter.js`：新增**进程内索引**（仅内存、不落盘、无 schema v7）：
+  `id → {bankId, idx | legacy, pos}` + `bankId → Set(contentHash)`。
+  - `get/update/remove` 命中索引 O(1)；命中后校验 `q.id===id`，失配回落逐库 `locate` 并回填。
+  - `insertMany` merge 直接复用哈希集作 `seen`，**不再 readAll**；overwrite 仍保留全量快照（整库回滚）。
+  - merge 回滚改为「失败时 `readAll().slice(0, existingCount)`」；落盘校验从全量 `readAll` 改为
+    **清单 `count` + 尾分片长度**（merge 只写尾分片，中段未被触碰）。
+  - 失效/维护：`QuestionShards.writeAll/append/clear/compact`、`remove/removeMany`、`backup.import`、
+    跨标签 `questions:*` 合并钩子均失效；`update` 位置不变，仅增量同步哈希集。
+- `js/data/local-adapter.js`：`QB.QuestionShards` 新增公开方法 `invalidateIndex()`（低层直写后的失效钩子）。
+- `js/modules/migrate.js`：2 处直写分片/旧 blob 后调用 `invalidateIndex()`（启动与运行时迁移都不再留下旧索引）。
+
+**验证数据（同机 Asia/Shanghai，Node v24.14.0，`--expose-gc`）**
+- **红（实现前，先加测试）**：`node scripts/shard.test.mjs` → **3 项失败**：
+  「命中索引时不再调用 locate（期望 0，旧每次 ≥1）」、「重复导入去重不触发全量 readAll（期望 0，旧 2 次）」、
+  「update 不使索引位置失效（期望 0，旧 get 每次 1 次）」；`通过 128 / 失败 3`。
+- **绿（本提交）**：`shard.test` **131/131**（新增 16 断言）；预热后 `get` **0 次 locate**，
+  重复导入 **0 次 readAll**，重复判重 220/220（SHARD_SIZE+20 夹具）、`inserted=0`、`total` 不变；删除/removeMany 后同片位置前移仍正确。
+- **T0 旧码 / T1 新码（同一夹具、同轮同机）**：
+  | 打点 | T0 | T1 |
+  | --- | --- | --- |
+  | 10k merge 重复导入 冷 / 热 | 98.89 ms / 95.55 ms（比值 0.97） | 110.24 ms / 91.25 ms（比值 0.83，仅诊断） |
+  | merge 去重准备（空载荷 · 10k 库） | 1.76 ms（`readAll`+Set） | **0.00 ms**（同轮旧口径基准 1.78 ms，比值 **0.001**） |
+  | 50k IDB `questions.get` P95 | 0.19 ms | **0.00 ms**（5 轮×30，max 0.09 ms） |
+  | 1000 个新 hash 首次清单写入 | 累计 meta 3346.1 KB / 末次 6919 B | 同量（**P2-06 未达标，接受待决策**） |
+  | 内存索引末态 heap | — | **+2.72 MB**（8.88 → 11.60 MB，全 bench 夹具） |
+- **门禁口径说明（如实记录，未放宽既有阈值）**：最初新门禁设为「整次 10k 重复导入 热/冷 ≤0.50」，
+  实测 **0.86–0.93** 不达标；根因是该夹具两臂的 88–95 ms 主要在逐题 `QB.makeContentHash`（去重必需，
+  与索引无关），索引只占冷启动一小段。门禁改为「**去重准备** 新/旧口径 ≤0.50」（直接度量被移除的 `readAll`+Set，
+  仍为同轮同机相对对照），整次导入行保留为诊断，未改动任何既有门禁。
+- **全量门禁（实跑退出码）**：`node scripts/test-all.mjs` → **34 运行项 / 5172 断言 / 0 失败（35.7s，exit 0）**；
+  `node --expose-gc scripts/bench.mjs --assert` → **60 门禁全部通过（exit 0）**；
+  `npm run verify:fast` → **exit 0（36.1s）**；`docs-check --static` 全部一致；首屏 **350.4 KB gzip / 981.5 KB raw**（C017 348.5 / 974.6，+1.9 KB gzip）。
+
+**影响范围与公共抽象**
+- 公共抽象：`QB.QuestionShards.invalidateIndex()`（新增；写路径与 migrate 使用）；其余索引结构与函数为
+  local-adapter 模块内私有（`questionIndexOf/buildQuestionIndex/invalidateQuestionIndex`），不对外暴露。
+- 行为等价：`get` 未命中/索引失配仍回落原 `locate` 路径；`insertMany` 返回值、去重/回滚语义不变。
+- **merge 落盘校验放宽范围**：由「全量回读比对总数」改为「清单 count + 尾分片长度」——只覆盖 merge 实际写入的尾分片；
+  中段**从不**在 merge 中写，故未覆盖中段静默丢失（overwrite 仍全量回读）。该取舍是为了去掉 O(全库) 读取。
+- 无迁移、无兼容分支；旧单 blob、IDB/LS 双后端均适用（索引只依赖 `QuestionShards` 读接口）。
+
+**遗留 TODO / 风险**
+- **P2-06 未达标（接受，待决策）**：`user:reviewMeta:<bankId>` 清单体积随库线性放大（1000 新 hash → 末次写入 6919 B、
+  累计 meta 3346.1 KB）。修复需改持久化布局，与 D6「仅内存索引、不落盘、不升 schema」冲突；本项按计划接受并仅加诊断档（无门禁）。
+- 索引未在真实浏览器/IDB 上做长时稳定性验证；跨标签合并靠钩子整表失效，未做并发写入压力测试。
+- `removeMany` 仍逐库遍历（未用索引批量定位），跨库批删可后续优化。
+
 ### fix(backup): 资产恢复先写后切，失败保持旧资产（C017）
 
 **Commit Hash**：`6d53512`

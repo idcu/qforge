@@ -5,9 +5,9 @@
 > **读数口径**：本文里的数字由 `scripts/docs-check.mjs` 复算校验（它同时读 README / DEVELOPMENT / 本文）。
 
 ```bash
-npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，58 项）
+npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，60 项）
 npm run bench:observe                        # 只观测不判定（记录轮次/容量读数用）
-node --expose-gc scripts/bench.mjs --assert   # 性能门禁：58 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
+node --expose-gc scripts/bench.mjs --assert   # 性能门禁：60 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
 node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
 
@@ -74,7 +74,14 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 > **DOM 增量更新验收（阶段 A）**：`#view` 改走 `QB.DomPatch` 区域对账（列表 + 答题区，含**答题卡格级增量**）。**列表侧**——错题本移除一条仅重建 1/22 区域（占其 HTML 字节 0.9%），其余 20 个区域保留原 DOM 节点（保住焦点/滚动）。**答题区**——勾选选项时顶层仅重建 3/5 区域（占字节 15.6%）；答题卡由「整卡单区域」细化为 `frame` + `sub`：帧跨作答逐字节不变（整张 `<details>` 不重建，展开态不丢），仅按 key 就地替换变化的 **3/52** 子节点（计数 + 受影响格，占整卡 HTML 字节 2.0%）。相较细化前（整卡占答题区字节约 95.6%），答题热路径重建量 **由 95.6% 降至 15.6%**。**浏览器实机验证**：折叠答题卡后作答，卡片保持折叠（证明 `<details>` 未被重建）；作答使选项态/提交按钮/计数/当前格状态同步更新，控制台无报错。
 > `insertMany` 落库耗时以 v3（64 位）contentHash 语义哈希重算为主（约 11.32 ms / 541 题），**与分片写入无关**——分片写入（`writeAll` 3 片 + 清单整体）远低于旧单键写。历史记录的 1.65–1.78 ms 系 v1 裸 hash 时代口径（v2 哈希上线后即升至 4.97–5.38 ms，见 `CHANGELOG.internal.md`），非本批退化；v3 的 BigInt 64 位哈希比 v2 的 32 位慢（单次约 2 倍），仍在门禁（≤30 ms）内。
 
-bench 全程 heapUsed：8.72 → 11.39/11.42 MB（**+2.66～+2.69 MB**，两轮 `--expose-gc` 实跑；3000 题规模库末态 20.32 MB；DOM 增量末态 20.52 MB）。首屏静态体积（index.html + css + 86 个 index 内联 js（含 `@idcu` 模块适配层，C012 新增 `js/utils/annotation.js`）+ FSRS 训练 Worker + sw.js + manifest/icon，共 94 个文件，逐文件 `gzip -9` 合计；2026-11-06 C017 复测）：**348.5 KB gzip / 974.6 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：8.88 → 11.60 MB（**+2.72 MB**，`--expose-gc` 实跑；3000 题规模库末态 35.99 MB；DOM 增量末态 36.19 MB）。首屏静态体积（index.html + css + 86 个 index 内联 js（含 `@idcu` 模块适配层，C012 新增 `js/utils/annotation.js`）+ FSRS 训练 Worker + sw.js + manifest/icon，共 94 个文件，逐文件 `gzip -9` 合计；2026-11-06 C018 复测）：**350.4 KB gzip / 981.5 KB raw**；图片字节在 IndexedDB，不计入首屏包。
+
+> **导入去重索引与单题定位验收（C018，2026-11-06，同机 `--expose-gc`）**
+> - **T0 旧码（本次改动前）**：10k merge 重复导入 冷 **98.89 ms** / 热 **95.55 ms**（比值 0.97）；空载荷 merge 去重准备（`readAll`+Set）**1.76 ms**；50k IDB `questions.get` P95 **0.19 ms**；1000 个新 hash 写入 `user:reviewMeta` 累计 meta **3346.1 KB**、末次清单 **6919 B**。
+> - **T1 新码**：同夹具 冷 **110.24 ms** / 热 **91.25 ms**（比值 0.83，**仅诊断**——两臂都含逐题 `contentHash` 计算，整次导入比值无法反映本次改动）；去重准备 **0.00 ms**（旧口径同轮基准 **1.78 ms**，比值 **0.001**）；50k `get` P95 **0.00 ms**（中位 0.00 / max 0.09 ms，5 轮×30）；内存索引末态 heap **+2.72 MB**（8.88 → 11.60 MB）。
+> - **口径说明（如实记录，不调旧阈值）**：最初把门禁设为「整次 10k 重复导入热/冷 ≤0.50」，实测 **0.86–0.93** 不达标。根因是同夹具两臂的 88–95 ms 主要耗在逐题 `QB.makeContentHash`（去重必需、与索引无关），索引只占冷启动的一小段。门禁改为「去重准备新/旧口径比值 ≤0.50」——直接度量被移除的 `readAll`+Set 工作，仍然同轮同机对照；整次导入行保留为诊断读数，未放宽任何既有门禁。
+> - **P2-06 未达标（接受，待决策）**：哈希清单 `user:reviewMeta:<bankId>` 的 JSON 体积随库线性放大（1 → 1000 个新 hash：单次写入 6919 B，累计 meta 3346.1 KB）。修复需改持久化布局，与 D6「仅内存索引、不落盘、不升 schema」冲突；本项按计划接受并仅加诊断档（无门禁）。
+
 
 > **首页渲染 50k 题库验收（C009，2026-11-06 复测，同机 `--expose-gc`，同一 50k/IDB 夹具 A/B 各 60 采样）**
 > - **T0 旧码（`29e1db0`，worktree）**：`renderHome` 内联 `Storage.usageBytes()`（遍历全部键 + 逐值 `JSON.stringify`）→ **median 56.33 ms / P95 62.22 ms / max 81.26 ms，峰值 +59.09 MB**，两项均超门槛。

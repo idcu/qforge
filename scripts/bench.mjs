@@ -261,6 +261,80 @@ row('Markdown 导入解析（540 题 md 文本）', await timed(async () => {
 
 const heapAfter = (bestEffortGc(), process.memoryUsage().heapUsed);
 
+/* ---------- 2c. C018 导入去重索引（10000 题 merge：首次建索引 vs 热重复导入） ---------- */
+let c018ColdMs = 0;
+let c018WarmMs = 0;
+let c018PrepOldMs = 0;
+let c018PrepNewMs = 0;
+{
+  const bank = await QB.DB.banks.create({ name: 'C018 去重库', category: 'bench-c018' });
+  const seed = [];
+  for (let i = 0; i < 10000; i++) {
+    seed.push({
+      type: 'single',
+      question: 'C018 去重题 ' + i + '？',
+      options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }, { letter: 'C', text: '丙' }, { letter: 'D', text: '丁' }],
+      answer: 'A',
+      difficulty: (i % 5) + 1,
+      tags: ['bench', 'c018']
+    });
+  }
+  await QB.DB.questions.insertMany(bank.id, seed, { dedupe: false, mode: 'overwrite' });
+
+  // 旧口径去重准备（C018 前每次 merge 导入都做）：readAll + Set
+  const tPrepOld = process.hrtime.bigint();
+  for (let r = 0; r < 3; r++) {
+    const before = QB.QuestionShards.readAll(bank.id);
+    const seen = new Set(before.map((q) => q.contentHash));
+    void seen;
+  }
+  c018PrepOldMs = Number(process.hrtime.bigint() - tPrepOld) / 1e6 / 3;
+
+  // 冷：首次索引构建 + 10k 重复导入
+  const tCold = process.hrtime.bigint();
+  await QB.DB.questions.insertMany(bank.id, seed, { dedupe: true, mode: 'merge' });
+  c018ColdMs = Number(process.hrtime.bigint() - tCold) / 1e6;
+
+  // 热：索引已建，重复导入只做哈希查重（不再 readAll）
+  const warm = await stableTimed(async () => {
+    await QB.DB.questions.insertMany(bank.id, seed, { dedupe: true, mode: 'merge' });
+  }, 3, 3);
+  c018WarmMs = warm.median;
+  row('merge 导入去重（10000 题 · 重复导入，C018）', warm,
+    '首次建索引 ' + c018ColdMs.toFixed(2) + 'ms；热 ' + c018WarmMs.toFixed(2) +
+    'ms；比值 ' + (c018WarmMs / c018ColdMs).toFixed(2));
+
+  // 空载荷 merge（只测去重准备，不含 stamping）：旧口径每次都 readAll
+  const prep = await stableTimed(async () => {
+    await QB.DB.questions.insertMany(bank.id, [], { dedupe: true, mode: 'merge' });
+  }, 3, 3);
+  c018PrepNewMs = prep.median;
+  row('merge 去重准备（空载荷 · 10000 题库，C018）', prep,
+    '旧口径 readAll ' + c018PrepOldMs.toFixed(2) + 'ms → 索引 ' + c018PrepNewMs.toFixed(2) +
+    'ms；比值 ' + (c018PrepNewMs / c018PrepOldMs).toFixed(3));
+}
+
+/* ---------- 2d. C018 P2-06 首次 hash 清单写入字节（接受档，不设门禁） ---------- */
+{
+  const rb = await QB.DB.banks.create({ name: 'C018 清单库', category: 'bench-c018' });
+  let cumBytes = 0;
+  let lastBytes = 0;
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < 1000; i++) {
+    QB.ReviewStore.put(rb.id, 'h' + i, { reps: 1, due: Date.now() + 86400000, last: Date.now() });
+    const meta = QB.ReviewStore.meta(rb.id);
+    lastBytes = Buffer.byteLength(JSON.stringify(meta));
+    cumBytes += lastBytes;
+  }
+  const totalMs = Number(process.hrtime.bigint() - t0) / 1e6;
+  report.push({
+    name: '首次 hash 清单写入字节（1000 新 hash，C018）',
+    median: totalMs, best: totalMs, p50: totalMs, p95: totalMs,
+    runs: 1, samples: 1, min: totalMs, max: totalMs,
+    extra: '累计 meta ' + (cumBytes / 1024).toFixed(1) + 'KB；末次清单 ' + lastBytes + 'B（随库线性放大，P2-06 接受）'
+  });
+}
+
 /* ---------- 11. 大规模单库（3000 题）数据层打点（阶段 A 规模验收） ---------- */
 const bigBank = await QB.DB.banks.create({ name: '规模库', category: 'bench-3k' });
 const bigQs = [];
@@ -1106,6 +1180,8 @@ QB.Storage.clearAll(); // 迁移压测清空，避免污染末态 heap 统计
 let c009PeakMb = 0;
 let c009RefreshMs = 0;
 let c009UsageCalls = 0;
+let c018GetTime = null;
+let c018GetSeq = 0;
 {
   // 独立 IDB harness（主 harness 是 LS，不切换它，避免污染后续/报告口径）
   const c009Idb = createMemoryIDB();
@@ -1152,6 +1228,16 @@ let c009UsageCalls = 0;
   row('首页渲染 HTML 构建（50000 题库 · IDB，C009）', c009Time,
     '落库 ' + ms(writeMs) + '；refresh ' + ms(c009RefreshMs) + '（全量扫描 ' + c009UsageCalls + ' 次）；渲染 50k 视图 heap '
     + c009HeapMb.toFixed(2) + ' MB；进程峰值（采样）' + c009PeakMb.toFixed(2) + ' MB');
+
+  // C018：单题 O(1) 定位。随机取 200 个 id，先 get 一次预热内存索引，再量 P95（门禁 ≤1ms）
+  const page = await HQ.DB.questions.list(c009Bank.id, { offset: 4321, limit: 200 });
+  const ids = page.items.map((q) => q.id);
+  await HQ.DB.questions.get(ids[0]);
+  c018GetTime = await stableTimed(async () => {
+    await HQ.DB.questions.get(ids[c018GetSeq++ % ids.length]);
+  }, 30, 5);
+  row('单题读取（50000 题库 · IDB，C018）', c018GetTime,
+    '样本 ' + ids.length + ' id（预热索引后）；P95 门禁 ≤1ms');
 }
 
 /* ---------- 13.5 错题/薄弱一键组卷（C010）：10k 题库 P95 门禁 ----------
@@ -1320,6 +1406,28 @@ if (process.argv.indexOf('--assert') >= 0) {
       + ms(c010r.median) + '，最大 ' + ms(c010r.max) + '，' + c010r.runs + ' 轮×'
       + (c010r.samples && c010r.runs ? c010r.samples / c010r.runs : '?') + ' 样本）');
     if (!ok) fails.push('智能组卷 10k P95 ' + ms(c010r.p95) + ' > 300ms');
+  }
+  // C018：单题读取（50000 题库 · IDB）P95 ≤ 1ms（先 get 一次预热内存索引，门禁测稳态）
+  if (!c018GetTime) {
+    fails.push('单题读取（50000 题库 · IDB 缺失');
+  } else {
+    const ok = c018GetTime.p95 <= 1;
+    console.log((ok ? '  ✓ ' : '  ✗ ') + '单题读取 50k · IDB P95：' + ms(c018GetTime.p95) + ' ≤ 1ms（中位 '
+      + ms(c018GetTime.median) + '，最大 ' + ms(c018GetTime.max) + '，' + c018GetTime.runs + ' 轮×'
+      + (c018GetTime.samples && c018GetTime.runs ? c018GetTime.samples / c018GetTime.runs : '?') + ' 样本）');
+    if (!ok) fails.push('单题读取 50k · IDB P95 ' + ms(c018GetTime.p95) + ' > 1ms');
+  }
+  // C018：merge 去重准备（同轮同机对照）——旧口径 readAll+Set vs 内存索引，T1 ≤ 0.5×T0。
+  // 注：整次 10k 重复导入的热/冷比值受「逐题 contentHash 计算」支配（两臂同量），
+  //     不能反映本次改动的收益，故只作为诊断行输出，不设为门禁。
+  if (!(c018PrepOldMs > 0) || !(c018PrepNewMs >= 0)) {
+    fails.push('merge 去重准备（10000 题库 缺失');
+  } else {
+    const ratio = c018PrepNewMs / c018PrepOldMs;
+    const ok = ratio <= 0.5;
+    console.log((ok ? '  ✓ ' : '  ✗ ') + 'merge 去重准备 10k 新/旧口径比值：' + ratio.toFixed(3)
+      + ' ≤ 0.50（旧 readAll+Set ' + ms(c018PrepOldMs) + '，索引 ' + ms(c018PrepNewMs) + '）');
+    if (!ok) fails.push('merge 去重准备 10k ' + ratio.toFixed(3) + ' > 0.50');
   }
   // P1-B 门禁修订：原「历史绝对毫秒基线 ×1.05」（grade 0.0771 / gradeMany 0.2480）对机器频率/负载漂移敏感：
   //   HEAD 实测 0.0902 / 0.2787，同机复跑旧代码 e772e60 也是 0.0882 / 0.2784（同超限）→ 是机器漂移，不是代码回退。

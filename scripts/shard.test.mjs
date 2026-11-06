@@ -376,6 +376,67 @@ section('迁移 v3 → v4：启动自检修复坏清单');
   eq(again.version, 6, '再次运行为空操作（幂等）');
 }
 
+section('C018 题目内存索引：单题 O(1) 定位、merge 去重免全量读取');
+{
+  QB.Storage.clearAll();
+  const idxBank = await QB.DB.banks.create({ name: '索引库' });
+  const qs = [];
+  for (let i = 0; i < SHARD + 20; i++) qs.push(mkQ(i));
+  await QB.DB.questions.insertMany(idxBank.id, qs, { dedupe: false });
+
+  // 预热索引（首次 get 触发 O(n) 建索引，与旧实现成本同阶）
+  eq((await QB.DB.questions.get('q-' + (SHARD + 5))).id, 'q-' + (SHARD + 5), '预热索引：跨分片 get 正确');
+
+  // 负例 1：旧实现每次 get 逐库 locate（≥1 次）；索引命中后应为 0 次
+  const origLocate = QB.QuestionShards.locate;
+  let locateCalls = 0;
+  QB.QuestionShards.locate = function () { locateCalls++; return origLocate.apply(QB.QuestionShards, arguments); };
+  try {
+    eq((await QB.DB.questions.get('q-3')).id, 'q-3', '命中索引：get 返回正确题目');
+    eq((await QB.DB.questions.get('q-' + (SHARD + 10))).id, 'q-' + (SHARD + 10), '命中索引：跨分片 get 正确');
+  } finally { QB.QuestionShards.locate = origLocate; }
+  eq(locateCalls, 0, '命中索引时不再调用 locate（旧实现每次 ≥1 次）');
+
+  // 负例 2：旧实现 merge 导入前后各 1 次 readAll（去重基线 + 落盘回读）；应降为 0 次
+  const origReadAll = QB.QuestionShards.readAll;
+  let readAllCalls = 0;
+  QB.QuestionShards.readAll = function () { readAllCalls++; return origReadAll.apply(QB.QuestionShards, arguments); };
+  let dupRes;
+  try {
+    dupRes = await QB.DB.questions.insertMany(idxBank.id, qs, { dedupe: true, mode: 'merge' });
+  } finally { QB.QuestionShards.readAll = origReadAll; }
+  eq(readAllCalls, 0, '重复导入去重不触发全量 readAll（旧实现 2 次）');
+  eq(dupRes.duplicates, qs.length, '重复题全部判重（' + qs.length + '）');
+  eq(dupRes.inserted, 0, '重复导入不新增题目');
+  eq(dupRes.total, qs.length, '重复导入总数不变');
+
+  // merge 新增后再次导入同题 → 判重（哈希集合覆盖新写入题）
+  await QB.DB.questions.insertMany(idxBank.id, [mkQ(7777)], { dedupe: true, mode: 'merge' });
+  const again = await QB.DB.questions.insertMany(idxBank.id, [mkQ(7777)], { dedupe: true, mode: 'merge' });
+  eq(again.duplicates, 1, 'merge 新增题再次导入被判重');
+  eq(again.total, qs.length + 1, 'merge 新增后 total = 原有 + 1');
+
+  // 负例 3：update 只改分片内内容、位置不变；旧 get 仍走 locate（≥1 次）
+  const updId = 'q-' + (SHARD + 8);
+  await QB.DB.questions.update(updId, { question: '索引更新后题干？' });
+  let locateCalls2 = 0;
+  QB.QuestionShards.locate = function () { locateCalls2++; return origLocate.apply(QB.QuestionShards, arguments); };
+  try {
+    eq((await QB.DB.questions.get(updId)).question, '索引更新后题干？', 'update 后 get 内容正确');
+  } finally { QB.QuestionShards.locate = origLocate; }
+  eq(locateCalls2, 0, 'update 不使索引位置失效（0 次 locate）');
+
+  // 删除使同片后续题目位置前移：索引必须失效（旧实现无索引，天然正确；新实现防回归）
+  await QB.DB.questions.remove('q-2');
+  eq(await QB.DB.questions.get('q-2'), null, '删除后 get 返回 null');
+  eq((await QB.DB.questions.get('q-4')).id, 'q-4', '删除导致同片位置前移，余题仍正确可读');
+  eq((await QB.DB.questions.get('q-' + (SHARD + 1))).id, 'q-' + (SHARD + 1), '删除后跨分片读取正确');
+
+  // removeMany 同样使索引失效
+  await QB.DB.questions.removeMany(['q-6', 'q-' + (SHARD + 2)]);
+  eq((await QB.DB.questions.get('q-7')).id, 'q-7', 'removeMany 后索引失效，余题读取正确');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

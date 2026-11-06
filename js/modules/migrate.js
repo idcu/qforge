@@ -206,6 +206,7 @@
         const updated = mapShard(items);
         if (updated) QB.Storage.set(QB.KEYS.questions(bankId), updated);
       }
+      QB.QuestionShards.invalidateIndex(); // C018：直写题目键 → 内存索引失效
       if (!renamed.size) continue;
 
       states += QB.ReviewStore.remap(bankId, renamed);
@@ -332,6 +333,7 @@
           const updated = mapShard(QB.QuestionShards.shardOf(bankId, i));
           if (!updated) continue;
           QB.QuestionShards.setShard(bankId, i, updated); // 只重写该片（sizes 不变）
+          QB.QuestionShards.invalidateIndex(); // C018：直写分片 → 内存索引失效
           dirtyShards++;
           // 断点保护：分片改写后旧 hash 即消失，需把已见映射分批落盘；
           // 每 10 片序列化一次（O(n) 映射不宜每片重写），中断重入时据此补全用户数据重映射
