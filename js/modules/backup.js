@@ -32,6 +32,7 @@
 
   const REVIEW_PREFIX = QB.KEYS.review('');      // 'user:review:'
   const REVIEW_META_PREFIX = QB.KEYS.reviewMeta(''); // 'user:reviewMeta:'
+  const REVIEW_CHUNK_PREFIX = 'user:reviewChunk:';
   const SEG_PREFIX = 'user:revlog:';
 
   /** 运行期元数据：不进入备份（迁移锁/断点映射/本地同步版本号/迁移前自动备份/后端选择标记） */
@@ -68,6 +69,18 @@
 
     Object.keys(src).forEach((k) => {
       if (isRuntimeKey(k)) return;
+      // 防御：若导入的原始数据带有 v7 物理块记录，同样折叠进 per-hash 逻辑形状
+      if (k.indexOf(REVIEW_CHUNK_PREFIX) === 0) {
+        const rest = k.slice(REVIEW_CHUNK_PREFIX.length);
+        const cut = rest.indexOf(':');
+        const bank = cut < 0 ? rest : rest.slice(0, cut);
+        const states = (src[k] && typeof src[k] === 'object' && src[k].s && typeof src[k].s === 'object') ? src[k].s : null;
+        if (!bank || !states) return;
+        reviewBanks.add(bank);
+        perStates[bank] = perStates[bank] || {};
+        Object.keys(states).forEach((hash) => { perStates[bank][hash] = states[hash]; });
+        return;
+      }
       const bank = reviewBankOf(k);
       if (bank) {
         reviewBanks.add(bank);
