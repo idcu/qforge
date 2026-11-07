@@ -58,7 +58,14 @@
     return Number(n) > 0 ? Number(n) : 15000;
   }
 
-  /** 统一请求：非 2xx 抛带 .status/.code 的 Error；204 返回 null */
+  /**
+   * ETag 协商缓存（R-09）：GET 列表带 If-None-Match，304 时复用上次解析结果（0 解析/0 传输）。
+   * 键 = 完整 path（含查询串），不同筛选各自独立；写操作后由服务端内容变化自然失效，
+   * 不主动清缓存（服务端只在内容一致时回 304）。调用方约定：列表结果为只读。
+   */
+  const etagCache = new Map();
+
+  /** 统一请求：非 2xx 抛带 .status/.code 的 Error；204 返回 null；opts.etag 启用协商缓存 */
   async function req(method, path, body, opts) {
     const f = doFetch();
     if (!f) throw new Error('api-adapter：当前环境没有 fetch（无法访问后端）');
@@ -67,6 +74,8 @@
     // 可选共享令牌：与服务端 API_TOKEN 一致才放行；空 = 不带头（旧部署零影响）
     const token = (QB.CONFIG && QB.CONFIG.NETWORK && QB.CONFIG.NETWORK.API_TOKEN) || '';
     if (token) headers.Authorization = 'Bearer ' + token;
+    const etagKey = opts.etag ? path : null;
+    if (etagKey && etagCache.has(etagKey)) headers['If-None-Match'] = etagCache.get(etagKey).etag;
     const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs()) : null;
     let res;
@@ -87,11 +96,20 @@
       if (!res.ok) { await res.arrayBuffer(); throw httpError(res.status, null); }
       return { bytes: new Uint8Array(await res.arrayBuffer()), mime: (res.headers.get('content-type') || '').split(';')[0] };
     }
+    if (res.status === 304 && etagKey) {
+      const hit = etagCache.get(etagKey);
+      if (hit) return hit.payload;
+    }
     const text = await res.text();
     if (res.status === 204) return null;
     let payload = null;
     try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = null; }
     if (!res.ok) throw httpError(res.status, payload);
+    if (etagKey) {
+      const tag = res.headers.get('etag');
+      if (tag) etagCache.set(etagKey, { etag: tag, payload: payload });
+      else etagCache.delete(etagKey); // 服务端未提供 ETag → 下次走普通 200，不猜测
+    }
     return payload;
   }
   function httpError(status, payload) {
@@ -197,7 +215,7 @@
     }
   }
   const banks = {
-    async list() { const r = await req('GET', ROUTES.banks); return (r.items || []).map(fromWireBank); },
+    async list() { const r = await req('GET', ROUTES.banks, null, { etag: true }); return (r.items || []).map(fromWireBank); },
     async get(id) { const w = await reqMaybe('GET', ROUTES.bank(enc(id))); return w ? fromWireBank(w) : null; },
     async create(data) { return fromWireBank(await req('POST', ROUTES.banks, toWireBank(data))); },
     async update(id, patch, opts) {
@@ -239,7 +257,7 @@
         p.set('size', String(query.size || 20));
       }
       const suffix = p.toString() ? ('?' + p.toString()) : '';
-      const r = await req('GET', ROUTES.bankQuestions(enc(bankId)) + suffix);
+      const r = await req('GET', ROUTES.bankQuestions(enc(bankId)) + suffix, null, { etag: true });
       const items = (r.items || []).map(fromWireQuestion);
       // 仅无筛选时更新总数缓存：带 type/category/keyword 的查询返回的是筛选后 total，
       // 写入缓存会让后续 count() 误报「题库总数」（见 api-backend.test）。

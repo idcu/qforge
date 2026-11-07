@@ -897,6 +897,48 @@ section('跨布局整链 E2E：本地备份 → 真实后端（POST /api/backup�
   eq((await L2.DB.weights.read()).global.trainedAt, 8, '整链闭环：权重 meta（trainedAt）保留');
 }
 
+section('R-09 列表 ETag：304 协商缓存与写后刷新');
+{
+  // 1) 服务端层：ETag 存在、命中回 304（空体）、内容变化后旧 ETag 失效
+  const created = (await req('POST', '/api/banks', { name: 'ETag 库' })).body;
+  const first = await req('GET', '/api/banks');
+  ok(!!first.headers.get('etag'), 'GET /api/banks 返回 ETag');
+  eq(first.headers.get('cache-control'), 'no-store', 'ETag 响应仍 no-store（条件请求由客户端显式发起）');
+  const second = await req('GET', '/api/banks', undefined, { 'If-None-Match': first.headers.get('etag') });
+  eq(second.status, 304, 'If-None-Match 命中 → 304');
+  eq(second.type, '', '304 无 JSON 响应体');
+  await req('PATCH', '/api/banks/' + created.id, { name: 'ETag 库改名' });
+  const third = await req('GET', '/api/banks', undefined, { 'If-None-Match': first.headers.get('etag') });
+  eq(third.status, 200, '内容变化后同一 If-None-Match → 200（不接受旧 ETag）');
+
+  // 2) 适配器层：304 复用上次解析结果；写后 200 刷新
+  const ctx = await createHarness(ROOT);
+  const { QB } = ctx;
+  QB.CONFIG.DATA_BACKEND = 'api';
+  QB.CONFIG.API_BASE_URL = base;
+  const seen = [];
+  QB.ApiAdapter.useFetch((url, opts) => fetch(url, opts).then((r) => {
+    if ((opts && opts.method) === 'GET') seen.push(String(url).replace(base, '') + ' -> ' + r.status);
+    return r;
+  }));
+  QB.DB.init();
+  const bank = await QB.DB.banks.create({ name: '适配器 ETag 库' });
+  await QB.DB.questions.create(bank.id, {
+    type: 'single', question: 'ETag 题', options: [{ letter: 'A', text: '对' }], answer: 'A'
+  });
+  const l1 = await QB.DB.banks.list();
+  const l2 = await QB.DB.banks.list();
+  eq(l2.length, l1.length, '第二次 /api/banks 内容一致（304 复用缓存）');
+  ok(seen.some((s) => s === '/api/banks -> 304'), '适配器第二次 /api/banks 命中 304');
+  await QB.DB.banks.update(bank.id, { name: '适配器改名' });
+  const l3 = await QB.DB.banks.list();
+  eq(l3.find((x) => x.id === bank.id).name, '适配器改名', '写后列表 200 刷新（不返回旧缓存）');
+  const q1 = await QB.DB.questions.list(bank.id);
+  const q2 = await QB.DB.questions.list(bank.id);
+  eq(q2.total, q1.total, '题目列表 304 复用内容一致');
+  ok(seen.some((s) => s.indexOf('/questions -> 304') >= 0), '题目列表第二次命中 304');
+}
+
 await srv.close();
 
 section('后端不可达时的诚实拒绝（无假数据）');

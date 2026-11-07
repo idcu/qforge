@@ -9,6 +9,35 @@
 
 ## 最新记录
 
+### perf(api): 列表接口 ETag 协商缓存，304 复用解析结果（R-09）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `scripts/serve-api.mjs`：新增 `jsonEtag(req,res,body)`（响应体 sha1 前 20 位做强 ETag，`If-None-Match`
+  命中 → `304` 空体）；`GET /api/banks` 与 `GET /api/banks/{id}/questions` 改用；仍 `Cache-Control: no-store`。
+- `js/data/api-adapter.js`：新增 `etagCache`；`req(..., {etag:true})` 带 `If-None-Match`，**304 直接返回上次
+  解析结果（0 解析/0 传输）**，200 时记录新 ETag；服务端无 ETag 则清缓存回退普通 200。列表两条 GET 启用。
+- `scripts/api-backend.test.mjs`：新增 10 项（服务端 ETag/no-store/304 空体/写后旧 ETag 回 200；适配器
+  第二次 GET 304 复用、写后刷新、题目列表 304），**310 → 320**。
+- 文档：`docs/API-CONTRACT.md` §1 缓存协商 + §2/§3 两条 GET 标注 ETag；`docs/ARCHITECTURE.md` §5
+  新增抽象条目；`docs/TESTING.md`（api-backend 320、合计 **5505**、SW v30）；`docs/DEVELOPMENT.md`（SW v30）；
+  `docs/BENCH.md`（**366.4 KB gzip / 1026.1 KB raw**）；`docs-baseline.json` 重算。
+- `sw.js`：`qforge-v29` → `qforge-v30`；`scripts/sw-baseline.json`（93 files / `6c6d92681a49…`）。
+- **影响面**：仅 api 后端列表读路径；local 后端、写路径、单题读路径不变。回滚即 revert。
+
+**验证数据（实测）**
+- 红：移除服务端 ETag 后 `node scripts/api-backend.test.mjs` → **315 通过 / 5 失败，exit 1**（304 断言全失败）。
+  原始输出：`.analysis/architecture-audit/stage5-red-r09.txt`。
+- 绿：恢复后 **320 通过 / 0 失败，exit 0**。原始输出：`.analysis/architecture-audit/stage5-green-r09.txt`。
+- 全量：`verify:fast` exit **0**（36 运行项 / **5505** 断言）；`bench --assert` **64/64 exit 0**；
+  `docs-check --static` exit **0**。
+
+**遗留 TODO / 风险**
+- 服务端若自行增删 `ETag` 头，客户端会回退为普通 200（不猜测），无功能影响。
+- 304 复用返回的是上次解析对象；调用方约定只读（现有 `banks.list`/`questions.list` 均映射为新对象）。
+- **未实机验证**：真实浏览器 HTTP 缓存层对 `304 + no-store` 的处理（Node fetch 已覆盖往返）。
+
 ### fix(sync): 跨标签错题本按键合并，避免整值覆盖丢题（R-08 方案 A）
 
 **Commit Hash**：`（待回填）`

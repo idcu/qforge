@@ -28,7 +28,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual, createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveSafePath, sendFile } from './lib/static-server.mjs';
 import { makeContentHash } from './lib/question-hash.mjs';
@@ -547,6 +547,24 @@ function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(text);
 }
+/**
+ * R-09：带 ETag 的 JSON 响应。内容哈希做 ETag，`If-None-Match` 命中回 304（空体）。
+ * 只用于可缓存的 GET 列表（banks / 题目列表）；仍带 `Cache-Control: no-store`，
+ * 让浏览器不要自己缓存，条件请求由 api-adapter 显式发起，行为可预期。
+ */
+function jsonEtag(req, res, body) {
+  const text = JSON.stringify(body === undefined ? null : body);
+  const tag = '"' + createHash('sha1').update(text).digest('base64url').slice(0, 20) + '"';
+  const inm = String(req.headers['if-none-match'] || '');
+  const hit = inm.split(',').some((s) => s.trim().replace(/^W\//, '') === tag);
+  if (hit) {
+    res.writeHead(304, { ETag: tag, 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ETag: tag });
+  res.end(text);
+}
 function fail(res, status, code, message) {
   json(res, status, { error: { code: code, message: message } });
 }
@@ -678,7 +696,7 @@ export function createHandler(opts) {
 
     // ---- banks ----
     if (has(2) && segs[1] === 'banks') {
-      if (m === 'GET') return json(res, 200, { items: store.banks.list(), total: store.banks.list().length });
+      if (m === 'GET') return jsonEtag(req, res, { items: store.banks.list(), total: store.banks.list().length });
       if (m === 'POST') return json(res, 201, store.banks.create(await readJsonBody(req)));
       return fail(res, 405, 'METHOD_NOT_ALLOWED', m);
     }
@@ -710,7 +728,7 @@ export function createHandler(opts) {
     // ---- questions（按库） ----
     if (segs.length === 4 && segs[1] === 'banks' && segs[3] === 'questions') {
       const bankId = segs[2];
-      if (m === 'GET') return json(res, 200, store.questions.list(bankId, {
+      if (m === 'GET') return jsonEtag(req, res, store.questions.list(bankId, {
         type: q.get('type'), category: q.get('category'), q: q.get('q'),
         page: q.get('page'), size: q.get('size'), offset: q.get('offset')
       }));
