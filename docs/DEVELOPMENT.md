@@ -106,6 +106,8 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 
 **独立轻量 `docs-check` job**（`scripts/docs-check.mjs --static`）：只读 `scripts/docs-baseline.json` 的套件断言数/门禁数，实时读取运行项与首屏文件/gzip 体积后与 README、本文比对，**不 spawn 套件、不跑 bench**，不拖慢重腿（重腿仍 36 个运行项）。数字有意变化时本地 `node scripts/docs-check.mjs --write` 刷新基线并随代码同 commit 提交；默认 live 模式则实测跑一遍套件与 bench 复算（手动核对用）。
 
+**CSP 三处同步（`scripts/check-csp.mjs`，进 `verify:fast` 与 CI）：** 断言 `index.html` 的 CSP meta 与 `scripts/lib/security-headers.mjs` 的 `CSP` 逐字符一致，且 `NETWORK.CSP_CONNECT_ALLOWLIST`（`js/config.js`）的 origin 集合与两处 `connect-src` 的 origin 集合**双向相等**（多一个少一个都 exit 1）。`--selftest` 注入「白名单有、meta 无」「meta 有、白名单无」「两处策略不一致」「条目非 origin」四类负例，证明判据有牙齿。**SW 缓存版本**由 `scripts/sw-runtime.test.mjs` 的 baseline 门禁守护（`scripts/sw-baseline.json` 记录 `CACHE` 名与摘要；改 `js/**`/`index.html` 不 bump 版本即红，`--mutate` 可复现该红）。
+
 **vendor 自检 `job`**（`node scripts/check-ngm.mjs`）：断言 `ngm.json` ↔ `ngm.lock` ↔ `ngm.vendor` 双向一致、源码中的 vendor 字面路径都能归到已登记模块、适配层清单（`contracts/adapters.json`）与保留名齐全。**清单文件缺失或非法一律 exit 1**——历史缺陷是整段校验包在 `if (project && lock)` 内，`ngm.json`/`ngm.lock` 缺失时连错误汇总都被跳过，进程静默 exit 0；`--selftest` 用三个临时根（逐次缺 `ngm.json` / `ngm.lock` / `ngm.mappings.json`）证明这道闸会失败。
 
 **独立 `a11y` job**（`node scripts/a11y.test.mjs`，**103** 项断言）：与 `test-all` 内的同一命令并行存在，只提供无障碍的独立红绿信号，避免回归被其它套件噪声淹没。静态门禁自身带变异模式 `node scripts/a11y.test.mjs --mutate`（删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked`，预期 95 通过 / 8 失败、exit 1）；**该模式不得进 CI**（预期失败）。新增弹窗渲染器时，套件的「弹窗快照注册自检」会在未登记快照时转红。

@@ -29,6 +29,8 @@ jobs:
         run: node scripts/check-modules.mjs
       - name: 依赖方向（数据层不得反向点名领域模块）
         run: node scripts/check-layers.mjs
+      - name: CSP 三处同步（index.html / security-headers / 部署白名单）
+        run: node scripts/check-csp.mjs
       - name: 结构性删除的账本
         run: node scripts/check-deletions.mjs
       - name: 变更档案分卷（索引 ↔ 卷 双向）

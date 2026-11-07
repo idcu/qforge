@@ -9,6 +9,41 @@
 
 ## 最新记录
 
+### test(sw): 固化 SW 缓存版本基线红证据，新增 CSP 三处同步门禁（R-12 / R-13）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- **R-12（不新增脚本，复用既有基线门禁）**：`scripts/sw-runtime.test.mjs` 已用
+  `scripts/sw-baseline.json`（`CACHE` 名 + 93 文件摘要）强制「改 `js/**`/`index.html` 必须 bump `sw.js` 的
+  `CACHE`」；本阶段补录可复现红证据（`--mutate` 只改摘要不动版本 → 必红），不再新增重复脚本。
+- **R-13**：新增 `scripts/check-csp.mjs`（零依赖、只读）。判据：`index.html` 的 CSP meta 与
+  `scripts/lib/security-headers.mjs` 的 `CSP` 逐字符一致；`NETWORK.CSP_CONNECT_ALLOWLIST`（`js/config.js`）
+  每项为合法 origin；**白名单 origin 集合 == 两处 `connect-src` 的 origin 集合（双向）**；两处非 origin
+  指令（如 `'self'`）一致。数组体注释剥离器保留引号内的 `//`（URL 不被当注释截断）。
+- `package.json`：`verify:fast` 串入 `node scripts/check-csp.mjs`；`.github/workflows/test.yml` 的
+  docs-check job 增加同名步骤。
+- 文档：`docs/ARCHITECTURE.md` §8 CSP 行补独立门禁；`docs/DEVELOPMENT.md` 补 CSP/SW 门禁说明。
+- **影响面**：仅新增只读门禁与 CI 步骤；运行时策略、`index.html`、`security-headers.mjs` 均未改动。
+  回滚即 revert（不会留下失效的部署口径）。
+
+**验证数据（实测）**
+- R-12 红：`node scripts/sw-runtime.test.mjs --mutate` → **33 通过 / 1 失败，exit 1**
+  （摘要 `a572…` ≠ 基线 `6c6d…`）。原始输出：`.analysis/architecture-audit/stage5-red-r12.txt`。
+- R-12 绿：同命令无 `--mutate` → **34 通过 / 0 失败，exit 0**。
+  原始输出：`.analysis/architecture-audit/stage5-green-r12.txt`。
+- R-13 红：临时把 `CSP_CONNECT_ALLOWLIST` 置为 `['https://api.example.test']`（meta/头未同步）→
+  **2 处不一致，exit 1**（「白名单声明了 …，但 index.html 的 connect-src 未包含」+ HTTP 头同款）。
+  原始输出：`.analysis/architecture-audit/stage5-red-r13.txt`。
+- R-13 绿：还原后 **0 处不一致，exit 0**；`--selftest` 6/6 符合预期（含「白名单有、meta 无」）。
+  原始输出：`.analysis/architecture-audit/stage5-green-r13.txt`。
+- 全量：`verify:fast` exit **0**（36 运行项 / **5505** 断言）；`bench --assert` **64/64 exit 0**；
+  `docs-check --static` exit **0**（见门禁输出文件）。
+
+**遗留 TODO / 风险**
+- 门禁只比对 `connect-src` origin；其它指令（`img-src`/`script-src` 等）仍靠 pwa.test 的逐字符比对。
+- **未实机验证**：真实浏览器在跨源部署时对白名单 origin 的放行（e2e-browser C020 需本机 Edge，未在本阶段跑）。
+
 ### perf(api): 列表接口 ETag 协商缓存，304 复用解析结果（R-09）
 
 **Commit Hash**：`（待回填）`
