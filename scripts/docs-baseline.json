@@ -1,15 +1,15 @@
 {
-  "generatedAt": "2026-11-06T23:48:57.720Z",
+  "generatedAt": "2026-11-06T23:59:26.646Z",
   "runItems": 36,
   "suiteFiles": 35,
-  "totalAssertions": 5482,
+  "totalAssertions": 5486,
   "gateCount": 64,
   "counts": {
     "smoke-test.mjs": 731,
     "a11y.test.mjs": 103,
     "annotation.test.mjs": 90,
     "api-backend.test.mjs": 310,
-    "app-boot.test.mjs": 87,
+    "app-boot.test.mjs": 91,
     "assets.test.mjs": 182,
     "backup.test.mjs": 147,
     "blueprint.test.mjs": 18,
@@ -45,7 +45,7 @@
   "firstScreen": {
     "scripts": 86,
     "files": 94,
-    "rawKB": "1021.6",
-    "gzipKB": "364.7"
+    "rawKB": "1022.5",
+    "gzipKB": "365.0"
   }
 }

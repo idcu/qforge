@@ -9,6 +9,45 @@
 
 ## 最新记录
 
+### perf(stats): 统计页 forecast 缓存（P-6）
+
+**Commit Hash**：`（提交后回填）`
+
+**核心改动**
+- `js/app.js`：新增 `State.forecastCache`（`{bankId, qRev, logRev, value}`）；`case 'stats'` 先按
+  「题库 + `QB.DB.questions.revision()` + `QB.DB.revlog.revision()`」判定命中，未命中才调用
+  `QB.SRSStore.forecast(...)`；`invalidateReviewLog()` 在评分/交卷后同步清空。
+- 适配器不提供同步 `revision()`（`QB.hasCapability` 为假）时**不写缓存**，每次都重算，行为与改造前一致。
+- `scripts/bench.mjs`：新增观测行「统计页 forecast 单次（3000 题全量复习状态）」，含 5 样本计时与
+  1 次 GC 前后 heap 边界采样（不进 `--assert` 门禁）。
+- `scripts/app-boot.test.mjs`：第 7 节 4 项断言（文件项数 71 → 91）。
+- 文档：`docs/ARCHITECTURE.md` §4.18、`docs/user-guide.md`（统计段缓存说明）、`docs/BENCH.md`
+  （P-6 复测块）、`docs/TESTING.md`（app-boot 87→91、合计 5482→5486、变异 83/8、SW 缓存名 v27）、
+  `docs/DEVELOPMENT.md`（SW 缓存版本 v27）。
+- **契约/API**：`contracts/` **无变化**（`SRSStore.forecast` 签名与返回结构不变）；不写新键、无数据迁移。
+- **影响面**：仅 app.js 内部状态；第三方适配器自动退回无缓存路径。回滚即 revert。
+
+**验证数据（实测）**
+- 红：`node scripts/app-boot.test.mjs` → `通过: 88，失败: 3`（再次渲染期望 1 实得 2 / 日志 revision
+  变化后期望 2 实得 3 / 离开再进入期望 2 实得 4），exit 1。原始输出：`.analysis/architecture-audit/stage3-red-p6.txt`。
+- 绿：同套件 **91 通过 / 0 失败**，exit 0。原始输出：`.analysis/architecture-audit/stage3-green-p6.txt`。
+- 变异：`--mutate-commit-import` → **83 通过 / 8 失败**（exit 1），证明入口仍被覆盖。
+  原始输出：`.analysis/architecture-audit/stage3-p6-mutate.txt`。
+- 性能 A/B（同轮同机，Node v24.14.0 / Windows / `--expose-gc`）：
+  - 调用次数：改造前每次进入统计页 **1 次全量扫描** → P-6 同修订下 **0 次**（4 项 app-boot 断言）。
+  - 单次成本（3000 题全量复习状态，5 样本）：median **0.26 ms** / min 0.25 / max 0.71。
+  - 记录数：每次扫描 **3000 条**复习状态；缓存命中后 **0 条**。
+  - heap 边界（1 次采样，GC 前后）：未 GC **+0.11 MB**、GC 后驻留 **−0.04 MB**（只读扫描，不产生持久对象）。
+- 门禁（提交前实跑）：`verify:fast` exit **0**（36 运行项 / 5486 断言）；`bench --assert` **64/64 exit 0**；
+  `docs-check --static` exit **0**。报告原始输出在各 `stage3-*` 文件。
+- SW：`qforge-v26` → `qforge-v27`（`js/app.js`、`scripts/bench.mjs` 不属预缓存，但改 `js/**` 须递增），
+  同步刷新 `scripts/sw-baseline.json`（93 files / 6f5633b1974e…）。
+
+**遗留 TODO / 风险**
+- 缓存有效性依赖适配器如实自增 `revision()`；若第三方适配器实现了 `revision()` 却返回常量，
+  统计页会显示过期预测（本地/API 适配器均由 `bumpRev`/写路径保证）。
+- **未实机验证**：真实浏览器切页 long-task/帧时间；bench 为 Node 内存适配器。
+
 ### refactor(storage): 字节口径唯一化（R-07）
 
 **Commit Hash**：`d526b56`

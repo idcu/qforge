@@ -299,6 +299,20 @@ activate → caches.keys()
 - 结论：分层懒加载必须以「读路径整体异步化」为前提；在同步 `Storage` 契约下不做。数据见
   `CHANGELOG.internal.md` 的 R-10 条目。
 
+### 4.18 统计页 forecast 缓存（P-6）
+
+- 现状：`case 'stats'` 每次渲染都调 `QB.SRSStore.forecast(bankId, allQuestions, 7)`，内部遍历整库复习状态；
+  同一修订下重复进入统计页（首页 ↔ 统计页来回切换）每次都重付一次全量扫描（3000 题单次 median 0.24 ms，
+  随库规模线性增长）。
+- 缓存键 `{bankId, qRev, logRev}`：`qRev = QB.DB.questions.revision()`（题目增删改/导入/备份恢复自增）、
+  `logRev = QB.DB.revlog.revision()`（评分/备份/级联自增）；任一变化即失效，`invalidateReviewLog()`
+  在写日志后同步清空。诊断缓存 `fsrsDiag` 沿用同一 `logRev` 判定。
+- 适配器不提供同步 `revision()` 时（`QB.hasCapability` 为假，例如第三方后端），**不写缓存**，
+  每次仍重算——行为与改造前完全一致，不会把旧结果当新结果返回。
+- 影响面：仅 `js/app.js` 内部状态 `State.forecastCache` 与 `stats` 分支；不改公开 API/契约、不写新键、
+  无数据迁移。回滚即 revert。
+- 未实机验证：真实浏览器切页时的 long-task/帧时间未实测（本项只度量 Node 侧单次扫描成本）。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -322,7 +336,7 @@ activate → caches.keys()
 | `QB.WrongBook.addMany(bankId, questions)` | **R-02 错题批量写唯一入口**：一次筛选 + 一次整表读改写；适配器无 `wrongAddMany` 时串行 `wrongAdd` 降级 | `app.js recordWrongs`、第三方适配器回退 |
 | `QB.CONFIG.LIMITS.IMPORT_MAX_BYTES` + `runImport` 前置预检（R-20） | **导入体积唯一口径**：File/Blob `size`、二进制快照 `arrayBuffer.byteLength`；超限返回统一失败结构，读取前拒绝 | 文件/拖拽/URL 导入入口（全部经 `runImport`） |
 | `reviews.patch(bankId, delta, logs)`（可选） | 增量提交：api 模式只上行本批改动键（PATCH，O(改动数)）；local 与 record 共用同一合并/回滚实现；适配器未实现时 `SRSStore` 回退 `record` | srs-store.grade/gradeMany |
-| `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | app.js 统计页缓存诊断结果，避免每次 render 全量扫 revlog |
+| `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | app.js 统计页缓存诊断结果与 **P-6 forecast 缓存**，避免每次 render 全量扫 revlog/复习状态 |
 | `QB.OPTIONAL_CONTRACTS` + `QB.hasCapability` + `QB.assertOptional`（R-06 / R-02） | 可选契约的**唯一判定入口**：`reviews[get,patch]`、`revlog[revision]`、`progress[wrongAddMany]` 可缺失；`DB.init` 校验「提供则必须是函数」；领域模块用 `hasCapability` 检测并走文档化降级 | `SRSStore`（get/patch 降级）、`WrongBook.addMany`（wrongAddMany 降级）、`app.js` 统计页（revision 降级）、第三方适配器合规判定 |
 | `questions.revision()` + `bumpRev()` | **整库题目读缓存失效唯一机制**：任意题目写路径（create/update/remove/insertMany/级联/备份恢复）同步 +1；`QB.DB.loadQuestions` 以 `(bankId, rev)` 判定命中 | local-adapter / api-adapter 的 `backup.import`（C016：恢复也 bumpRev）、`DB.loadQuestions`、Node 断言 |
 | `QB.LocalAdapter.questions` 内存索引（C018） | **id → {bankId, idx \| legacy, pos} + bankId → Set(contentHash)**：`get/update/remove` 命中 O(1)，merge 去重直接复用哈希集、不再 `readAll`；**仅内存、不写新键、不升 schema**。一致性：`QuestionShards.writeAll/append/clear/compact`、`remove/removeMany`、`backup.import`、migrate 直写分片后的 `QuestionShards.invalidateIndex()` 与跨标签 `questions:*` 合并钩子同步失效/增量维护；冷启首次访问 O(n) 重建 | local-adapter 内部实现 + `QB.QuestionShards.invalidateIndex()`（低层写后失效钩子，供 migrate 使用）；所有 `QB.DB.questions.get/update/remove/insertMany` 调用方透明受益、`scripts/shard.test.mjs` 断言 |

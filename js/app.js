@@ -35,6 +35,8 @@
     reviewLogBankId: null,
     // 统计页 FSRS 诊断缓存：{rev, value}，按 QB.DB.revlog.revision() 失效（避免每次 render 全量扫日志）
     fsrsDiag: null,
+    // 统计页 forecast 缓存（P-6）：{bankId, qRev, logRev, value}，按题库/题目/日志修订号失效
+    forecastCache: null,
     fsrsScope: null,      // FSRS 权重作用域：null=全局，或 bankId
     // 持久存储告警（如迁移未完成、本页写入仍未落盘）：由 updateStatus 每次渲染追加，避免被普通文案覆盖
     storageNotice: '',
@@ -211,6 +213,7 @@
     State.reviewLog = null;
     State.reviewLogBankId = null;
     State.fsrsDiag = null; // 评分日志变化后统计页诊断缓存一并失效
+    State.forecastCache = null; // P-6：统计页预测缓存同步失效
   }
 
   /** 题库列表/当前库元数据变更后使缓存失效（本地可精确失效，api 模式避免多余 GET） */
@@ -273,9 +276,21 @@
         break;
       }
       case 'stats': {
-        const fc = State.bankId ? await QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
-        // B3：诊断需扫全量 revlog；按适配器写修订号缓存，重复打开统计页不再重复读/扫描
+        // P-6：forecast 需读全库复习状态；按「题库 + 题目修订号 + 日志修订号」缓存，
+        // 数据未变时重复进入统计页不再全量扫描（无同步 revision 的适配器不缓存）
+        const qRev = QB.hasCapability(QB.DB, 'questions', 'revision') ? QB.DB.questions.revision() : null;
         const logRev = QB.hasCapability(QB.DB, 'revlog', 'revision') ? QB.DB.revlog.revision() : null;
+        const fcCache = State.forecastCache;
+        let fc;
+        if (State.bankId && qRev != null && logRev != null && fcCache &&
+            fcCache.bankId === State.bankId && fcCache.qRev === qRev && fcCache.logRev === logRev) {
+          fc = fcCache.value;
+        } else {
+          fc = State.bankId ? await QB.SRSStore.forecast(State.bankId, State.allQuestions, 7) : null;
+          State.forecastCache = (State.bankId && qRev != null && logRev != null)
+            ? { bankId: State.bankId, qRev: qRev, logRev: logRev, value: fc } : null;
+        }
+        // B3：诊断需扫全量 revlog；按适配器写修订号缓存，重复打开统计页不再重复读/扫描
         if (!State.fsrsDiag || State.fsrsDiag.rev !== logRev) {
           State.fsrsDiag = { rev: logRev, value: await QB.FSRSOpt.diagnose() };
         }
