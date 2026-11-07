@@ -114,8 +114,11 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 | `user:reviewRev:<bankId>` | 取 `max` |
 | `user:revlog:<i>` | 按条目 `id` 并集（保留另一标签的追加） |
 | `user:revlogMeta` | `v/last` 取大、`first` 取小、`count` 取大 |
+| **`user:wrong:<bankId>`（R-08 方案 A）** | **按 `questionKey` 并集；同题 `wrongCount`/`lastAt` 取较大值。两标签同时记错同一题时按 max 而非相加（并发事件重合时总数偏小，避免重复计数）** |
+| **`user:favorite:<bankId>`** | **不注册合并，保持整值覆盖（last-write-wins）**：收藏是 toggle 语义，两边同时 toggle 同一题无法安全合并；彻底解决需 per-hash 布局（方案 B，未实施） |
 | **`user:reviewMeta:<bankId>`（C008 / P2-06）** | **`ReviewMerge.mergeMeta`：v4 标记直接取较大版本（`{v:4}`，不再并集 keys）；键集合由物理 per-hash 键枚举，标签各写各自的状态键即可并集，结构上不再产生孤儿 hash** |
 
 `mergeMeta` 对缺字段/非数组载荷视为空，v4 标记无 keys 时结果为 `{v:4}`；重复事件幂等。回归：`scripts/storage.test.mjs`
 用两个独立 harness 共享同一底层存储（真实走 `ReviewStore.put` + 逐键 storage 事件），断言双方 `stateKeys`/`readMap`
-覆盖 h1+h2、meta 载荷 ≤16B 且不含 keys。
+覆盖 h1+h2、meta 载荷 ≤16B 且不含 keys。错题合并另有用例：本地 `q1` + 远端 `q2` 并集为 2 条、同题
+`wrongCount`/`lastAt` 取较大值；收藏用例锁定「整值覆盖」现状，防未来误改。
