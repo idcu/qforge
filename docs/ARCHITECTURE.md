@@ -8,37 +8,43 @@
 | 目标 | 落地方式 |
 | --- | --- |
 | 纯前端静态可运行 | classic `<script src>` 顺序加载，挂到 `window.QB`，无 ES module / 无 fetch 本地文件 |
-| 前后端平滑迁移 | UI 只依赖 **Repository 接口**，`qb/js/config.js` 的 `DATA_BACKEND` 切换 `local` / `api` |
+| 前后端平滑迁移 | UI 只依赖 **Repository 接口**，`js/config.js` 的 `DATA_BACKEND` 切换 `local` / `api` |
 | 多题库 | `Bank` 是一等实体；题目带 `bankId`；用户数据按 `bankId` 分区存储 |
 | 题型可扩展 | 7 种题型集中在 `CONFIG.TYPES`（判断/单选/多选/不定项/填空/简答/材料 material），判分走策略表 `judge-answer`（材料题为一层嵌套，递归判分 + `aggregateMaterial` 聚合） |
 | 不重复实现 | 判分/去重键/洗牌/存储/导入适配 提取为公共抽象（见 §5） |
 
 ## 2. 分层结构
 
+**4 个概念层**（依赖只允许向下；每条模块清单的 `tier` 由 `scripts/check-modules.mjs` 强制，详见 §2.1）：
+
 ```
 ┌──────────────────────────────────────────────┐
-│  表现层  index.html + ui-renderer + app.js     │
+│ L3 表现与编排  index.html / ui-renderer /      │
+│                dom-patch / app.js              │
 └──────────────────────┬───────────────────────┘
-                       │ 只调用 Repository 接口
+                       │ QB.UIPort（R-04，阶段 7，未实施；当前领域直调 UIRenderer，见 §2.1 已登记例外）
 ┌──────────────────────▼───────────────────────┐
-│  应用层  quiz-engine / statistics / data-io    │
-│          bank-manager / question-editor        │
+│ L2 领域  quiz-engine / statistics / data-io /  │
+│         bank-manager / srs-store / fsrs / ...  │
 └──────────────────────┬───────────────────────┘
-                       │
+                       │ QB.DB 的 7 组 Repository + QB.Storage 门面
 ┌──────────────────────▼───────────────────────┐
-│  数据访问层 db.js（门面，按 config 选择实现）    │
-│   banks / questions / progress                 │
-│   + reviews / revlog / weights / backup（共 7 组）│
-├──────────────────────┬───────────────────────┤
-│ local-adapter.js     │ api-adapter.js         │
-│ （本期启用）           │ （走 REST，参考后端     │
-│                      │   scripts/serve-api.mjs）│
-└──────────────────────┴───────────────────────┘
+│ L1 数据访问  db.js（门面）/ local-adapter /     │
+│             api-adapter / storage / quota      │
+└──────────────────────┬───────────────────────┘
+                       │ QB.Store 物理后端 + QB.CONFIG
+┌──────────────────────▼───────────────────────┐
+│ L0 基础能力  config / utils / vendor（ngm）    │
+└──────────────────────────────────────────────┘
        │                          │
- LocalStorage              REST API → JSON/SQLite
+ LocalStorage / IndexedDB     REST API（参考后端 scripts/serve-api.mjs → JSON/SQLite）
 ```
 
-**关键约束**：表现层与应用层**不直接接触** `localStorage` / `fetch`。所有持久化经 `QB.DB` 的 7 组 Repository；仅由适配器实现。所有仓库方法**返回 Promise 语义**（local 返回普通值、api 返回真 Promise），调用点统一 `await`，迁移时 UI 代码零改动。**领域模块（srs-store / fsrs-opt / backup）同样只经 `QB.DB.*` 存取**，不直接读写 LocalStorage（详见 §3.3/§3.5 与 [SRS.md](SRS.md) §9）。
+> 「8 个装配段」（`sample/config/data/utils/vendor/modules/importers/entry`）只描述 `index.html` 的加载顺序，**不是分层**；与 4 个概念层的映射见 §2.1 的 `tier` 表。
+
+**关键约束**：L3/L2 **不直接接触** `localStorage` / `fetch`。所有持久化经 `QB.DB` 的 7 组 Repository，仅由 L1 适配器实现。所有仓库方法**返回 Promise 语义**（local 返回普通值、api 返回真 Promise），调用点统一 `await`，迁移时 UI 代码零改动。**领域模块（srs-store / fsrs-opt / backup）同样只经 `QB.DB.*` 存取**，不直接读写 LocalStorage（详见 §3.3/§3.5 与 [SRS.md](SRS.md) §9）。
+
+**端口与例外（R-03 / R-04）**：数据层反向能力已改为**端口注册**——领域模块在自身 IIFE 末尾向 `QB.LocalAdapter.hooks` 注册（`schedInvalidate`、`backup`），L1 不再点名 `QB.SchedSettings` / `QB.Backup`。**L2 直调 `QB.UIRenderer` 仍是已知例外**（`bank-manager` / `data-io` / `exporter` / `backup` / `sync-dav` 共 5 条，已在 `contracts/modules.json` 以 `allowUpward` 登记、`until` 到期判红）；目标形态 `QB.UIPort` 属阶段 7，**本阶段未实施**。
 
 ### 2.1 概念分层、装配分段与数据层端口（R-05 / R-03）
 
