@@ -40,6 +40,10 @@
 
 **关键约束**：表现层与应用层**不直接接触** `localStorage` / `fetch`。所有持久化经 `QB.DB` 的 7 组 Repository；仅由适配器实现。所有仓库方法**返回 Promise 语义**（local 返回普通值、api 返回真 Promise），调用点统一 `await`，迁移时 UI 代码零改动。**领域模块（srs-store / fsrs-opt / backup）同样只经 `QB.DB.*` 存取**，不直接读写 LocalStorage（详见 §3.3/§3.5 与 [SRS.md](SRS.md) §9）。
 
+### 2.1 数据层端口注册（R-03）
+
+数据层（`js/data/*`）**不得反向点名领域模块**（`QB.SchedSettings` / `QB.Backup` / `QB.UIRenderer`），由 `scripts/check-layers.mjs` 扫描 `js/data/*.js`（去注释后）强制。跨层能力改为**端口注册**：领域模块在自身 IIFE 末尾向 `QB.LocalAdapter.hooks` 注册（`schedInvalidate(bankId)`、`backup.{readAllData,applyData}`），数据层只按端口名调用。端口缺失时调度失效退化为 no-op（与「模块未加载」旧行为一致），备份端口缺失抛可读错误（不静默返回空数据）。
+
 ## 3. 模块清单与职责
 
 ## 3. 模块清单与职责
@@ -340,7 +344,8 @@ activate → caches.keys()
 | `QB.OPTIONAL_CONTRACTS` + `QB.hasCapability` + `QB.assertOptional`（R-06 / R-02） | 可选契约的**唯一判定入口**：`reviews[get,patch]`、`revlog[revision]`、`progress[wrongAddMany]` 可缺失；`DB.init` 校验「提供则必须是函数」；领域模块用 `hasCapability` 检测并走文档化降级 | `SRSStore`（get/patch 降级）、`WrongBook.addMany`（wrongAddMany 降级）、`app.js` 统计页（revision 降级）、第三方适配器合规判定 |
 | `questions.revision()` + `bumpRev()` | **整库题目读缓存失效唯一机制**：任意题目写路径（create/update/remove/insertMany/级联/备份恢复）同步 +1；`QB.DB.loadQuestions` 以 `(bankId, rev)` 判定命中 | local-adapter / api-adapter 的 `backup.import`（C016：恢复也 bumpRev）、`DB.loadQuestions`、Node 断言 |
 | `QB.LocalAdapter.questions` 内存索引（C018） | **id → {bankId, idx \| legacy, pos} + bankId → Set(contentHash)**：`get/update/remove` 命中 O(1)，merge 去重直接复用哈希集、不再 `readAll`；**仅内存、不写新键、不升 schema**。一致性：`QuestionShards.writeAll/append/clear/compact`、`remove/removeMany`、`backup.import`、migrate 直写分片后的 `QuestionShards.invalidateIndex()` 与跨标签 `questions:*` 合并钩子同步失效/增量维护；冷启首次访问 O(n) 重建 | local-adapter 内部实现 + `QB.QuestionShards.invalidateIndex()`（低层写后失效钩子，供 migrate 使用）；所有 `QB.DB.questions.get/update/remove/insertMany` 调用方透明受益、`scripts/shard.test.mjs` 断言 |
-| `QB.SchedSettings.ofBankId/invalidate`（C019） | 按库缓存的**唯一失效契约**：`save` 写库后覆盖缓存；`banks.update`（含 `sched`）、`banks.remove`、`backup.import`（local/api 双后端）与跨标签 `banks` 合并钩子立即 `invalidate`；**不在每次 `ofBankId` 重读 bank**（避免 API 模式评分多一个 GET） | `SRSStore.grade/gradeMany`、local-adapter/api-adapter、Storage 合并钩子、`scripts/sched.test.mjs` |
+| `QB.LocalAdapter.hooks`（R-03） | **数据层端口注册表**（唯一实例）：L2 领域模块在自身 IIFE 末尾注册能力（`schedInvalidate(bankId)`、`backup.{readAllData,applyData}`），数据层只按端口名调用，不再反向点名 `QB.SchedSettings` / `QB.Backup`；端口缺失 sched 侧 no-op、备份侧抛可读错误。`check-layers.mjs` 禁止数据层出现领域字面量 | `local-adapter`、`api-adapter`、`modules/sched-settings`、`modules/backup`、`scripts/check-layers.mjs` |
+| `QB.SchedSettings.ofBankId/invalidate`（C019） | 按库缓存的**唯一失效契约**：`save` 写库后覆盖缓存；`banks.update`（含 `sched`）、`banks.remove`、`backup.import`（local/api 双后端）与跨标签 `banks` 合并钩子经 `LocalAdapter.hooks.schedInvalidate` 立即失效（R-03）；**不在每次 `ofBankId` 重读 bank**（避免 API 模式评分多一个 GET） | `SRSStore.grade/gradeMany`、local-adapter/api-adapter（经端口）、Storage 合并钩子、`scripts/sched.test.mjs` |
 | `shuffle(arr, seed?)` / `shuffleOptions(q, seed?)` | 随机/种子化洗牌；选项乱序+答案重映射的派生克隆 | 抽题、答题选项乱序 |
 | `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步/按键合并；`getFresh` 写前重读；**R-07 `fullKeyOf(key)` 为 LS 物理键唯一实现，`usageBytes` 值字节统一走 `Quota.bytesOfValue`** | local-adapter 及所有持久化；`Quota.diskBytes` |
 | `QB.DB` + Repo 接口 | 数据访问统一入口，屏蔽后端差异 | 全部业务模块 |

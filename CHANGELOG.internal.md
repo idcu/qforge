@@ -9,6 +9,50 @@
 
 ## 最新记录
 
+### refactor(data): 数据层端口注入，消解 L1 → L2 反向依赖（R-03）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `js/data/local-adapter.js`：新增 `QB.LocalAdapter.hooks`（`schedInvalidate` / `backup`）与
+  `notifySchedInvalidate(bankId)`；`backup.export/import` 改经 `hooks.backup`，端口缺失抛
+  `备份模块未加载：缺少 LocalAdapter.hooks.backup`；`backupPort()` 为唯一取口函数。
+- `js/data/api-adapter.js`：`invalidateSchedCache` 改经同层 `QB.LocalAdapter.notifySchedInvalidate`
+  （不再出现 `QB.SchedSettings` 字面量）；`requires` 补登记 `data.local-adapter`（38 > 37，顺序合法）。
+- `js/modules/sched-settings.js` / `js/modules/backup.js`：IIFE 末尾向 `QB.LocalAdapter.hooks` 注册，
+  数据层不再反向点名领域模块。
+- 新增 `scripts/check-layers.mjs`（只读门禁 + `--selftest`）：最小词法扫描去注释后，禁止
+  `js/data/*.js` 出现 `QB.SchedSettings` / `QB.Backup` / `QB.UIRenderer`；接入 `verify:fast` 与 CI
+  docs-check job。
+- `scripts/backup.test.mjs`：新增 4 项端口断言（含「端口缺失抛可读错误」），147 → **151**。
+- `sw.js`：`qforge-v27` → `qforge-v28`（改 `js/**` 须递增），刷新 `scripts/sw-baseline.json`
+  （93 files / `77e1d6f8fc0e…`）。
+- 文档：`docs/ARCHITECTURE.md` §2.1（端口注册）、§5（`QB.LocalAdapter.hooks` 抽象条目、
+  SchedSettings 失效链路改经端口）；`docs/DEVELOPMENT.md`（verify:fast 链路含 check-layers、SW v28）；
+  `docs/TESTING.md`（backup 151、合计 **5490**、pwa 缓存名 v28）；`docs/BENCH.md`（首屏
+  **365.5 KB gzip / 1023.8 KB raw**）；`scripts/docs-baseline.json` 重算。
+- **契约/API**：`QB.LocalAdapter` 只增 `hooks` / `notifySchedInvalidate`，既有方法不减；适配器构造方式
+  不变（对象字面量单例）。`contracts/` 本 commit 无变化（tier 见下一提交）。
+- **影响面**：成功路径行为不变；备份失败路径由 TypeError 改为可读错误。回滚即 revert。
+
+**验证数据（实测，Node v24 / Windows）**
+- 红：`node scripts/check-layers.mjs` → **扫描 7 个数据层文件，8 处违约**（`local-adapter.js:17`
+  `QB.SchedSettings` ×3、`:1531/:1545` `QB.Backup`；`api-adapter.js:195` ×2），exit 1。
+  原始输出：`.analysis/architecture-audit/stage4-red-hooks.txt`。
+- 绿：同命令 **0 处违约**，exit 0；`--selftest` **5/5 已拦截**（含「注释提及不误报」）。原始输出：
+  `.analysis/architecture-audit/stage4-green-hooks.txt`。
+- 相关套件：`backup` **151/0**、`migrate` **322/0**、`storage` **67/0**、`sched` **221/0**、
+  `contract` **98/0**，全部 exit 0。
+- 门禁（提交前实跑）：`verify:fast` exit **0**（36 运行项 / **5490** 断言）；
+  `bench --assert` **64/64 exit 0**；`docs-check --static` exit **0**。
+  原始输出：`stage4-verify-fast.txt` / `stage4-bench.txt`。
+
+**遗留 TODO / 风险**
+- 端口注册依赖模块加载顺序（`sched-settings` @66、`backup` @81，均早于 `app.js` @86 的 `boot()`）。
+  若第三方页面只加载数据层，调度失效静默 no-op、备份调用抛错——已由错误文案与 §2.1 说明覆盖。
+- **未实机验证**：真实浏览器 SW 换代后的 upgrade 流程（v27 → v28）未在浏览器实跑；SW 生命周期仍由
+  `sw-runtime.test`（Node VM）覆盖。
+
 ### perf(stats): 统计页 forecast 缓存（P-6）
 
 **Commit Hash**：`960cadb`
