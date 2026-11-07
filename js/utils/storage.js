@@ -40,8 +40,9 @@
     /**
      * 逻辑键视图缓存（`keys()` 的物化结果）。
      * `keys()` 每次重建 50k 逻辑键字符串在启动期要付 6 次（迁移快速路径 + 首屏数据加载），
-     * 因此只物化一次，任何写入/删除/跨标签/迁移/后端切换都通过 `_invalidateKeys()` 递增版本；
-     * 版本不一致时**整体重建**（保守策略：宁可重算也不返回可能过期的键）。
+     * 因此只物化一次：只有键集合**实际变化**（新增 / 真正删除，判定收口在
+     * `_logicalKeyVisible`）或结构性变化（迁移/后端切换/清空）才推进 `_keysRev`；
+     * 版本不一致时整体重建（保守策略：宁可重算也不返回可能过期的键）。
      */
     _keysCache: null,
     _keysRev: 0,
@@ -76,9 +77,40 @@
     },
     _isIdb() { return this.mode === 'idb'; },
 
-    /** 逻辑键视图失效：任何可能改变「存在哪些键」的路径都必须调用（见各写入/删除/同步点） */
+    /**
+     * 逻辑键集合失效（结构性变化：后端切换 / 整体清空 / 迁移缓冲进出）。
+     * 单键写入/删除**不得**直接调用本函数，必须走 `_invalidateKeysIfChanged()`——
+     * 只有键集合实际变化（新增 / 真正删除）才推进版本。
+     */
     _invalidateKeys() {
       this._keysRev += 1;
+    },
+
+    /**
+     * 逻辑键可见性判定（**唯一**收口；`_buildKeys` 必须与此完全同构）。
+     * 覆盖来源：`_cache`（值为 undefined 视为 tombstone）、`_pending`、`_chunkLookup`（物理块）、
+     * LocalStorage 实键；`_awaitDeletes` 中的键一律不可见（等待迁移期删除只作用于内存，
+     * LS 实键尚未改写。IDB 模式下该集合由 adoptStore/endMigrationBuffer 清空）。
+     * @param {string} key
+     * @param {boolean} [peerApplied] 跨标签 storage 事件专用：事件到达时底层实键已被对端改写，
+     *   `current` 无法回看「变更前」——此时改用当前物化视图的成员关系回答；
+     *   视图已过期返回 null（下一次 keys() 必然重建，调用方无需再推版本）。
+     * @returns {boolean|null}
+     */
+    _logicalKeyVisible(key, peerApplied) {
+      if (peerApplied) {
+        if (!this._keysCache || this._keysRevCached !== this._keysRev) return null;
+        return this._keysCache.indexOf(key) >= 0;
+      }
+      if (this._awaitDeletes.has(key)) return false;
+      if (this._cache.get(key) !== undefined || this._pending.get(key) !== undefined) return true;
+      if (this._isIdb()) return this._chunkLookup(key) !== undefined;
+      try { return global.localStorage.getItem(fullKeyOf(key)) !== null; } catch (_) { return false; }
+    },
+
+    /** 键集合实际变化才推进版本（单键写入/删除的唯一失效入口） */
+    _invalidateKeysIfChanged(key, beforeVisible) {
+      if (beforeVisible !== this._logicalKeyVisible(key)) this._invalidateKeys();
     },
 
     /** 逻辑复习状态键 → 块内状态（未命中返回 undefined；不可与「值为 undefined」混淆用 hasOwnProperty） */
@@ -464,7 +496,10 @@
       // 逻辑视图批量读：复习状态键会自动解析回所在物理块（不复刻分块规则）
       let values = {};
       try { values = await QB.Store.readLogicalMany(keys); } catch (_) { values = {}; }
+      // 复用已重读的 values[k]：按键比较「处理前后可见性」，只有键集合真的变化才失效
+      let changed = false;
       keys.forEach((k) => {
+        const beforeVisible = this._logicalKeyVisible(k);
         const v = values[k];
         const hook = this._mergeHookFor(k);
         if (v === undefined) {
@@ -480,8 +515,9 @@
           this._cache.set(k, v);
           this._pending.delete(k);
         }
+        if (beforeVisible !== this._logicalKeyVisible(k)) changed = true;
       });
-      this._invalidateKeys();
+      if (changed) this._invalidateKeys();
     },
 
     /* ---------------- 错误通知与待写落盘 ---------------- */
@@ -541,6 +577,7 @@
       // 保持既有 setSync 语义：先落掉普通待写（防抖队列），再写引导键。
       // 否则紧随其后的 adoptStore/initStore 会重置 _pending，未落盘的业务写入被静默丢弃。
       // 等待切换期间照旧不落 LS（业务键门控不变）；IDB 模式的待写由事务队列负责。
+      const beforeVisible = this._logicalKeyVisible(key);
       if (!this._isIdb() && !this._awaiting && this._pending.size) {
         this._cancelSchedule();
         this._writeNow();
@@ -548,14 +585,15 @@
       global.localStorage.setItem(fullKeyOf(key), JSON.stringify(value));
       this._cache.set(key, value);
       this._pending.delete(key);
-      this._invalidateKeys();
+      this._invalidateKeysIfChanged(key, beforeVisible);
       return true;
     },
     _deleteBootstrap(key) {
+      const beforeVisible = this._logicalKeyVisible(key);
       global.localStorage.removeItem(fullKeyOf(key));
       this._cache.delete(key);
       this._pending.delete(key);
-      this._invalidateKeys();
+      this._invalidateKeysIfChanged(key, beforeVisible);
     },
 
     /** 入队一次写/删（IDB 模式；同一微任务内的多次调用合并为一个事务） */
@@ -641,9 +679,10 @@
       }
       this._demoteFallbackOnBusinessWrite(key);
       this._trackQuotaSet(key, value);
+      const beforeVisible = this._logicalKeyVisible(key);
       this._cache.set(key, value);
       this._pending.set(key, value);
-      this._invalidateKeys();
+      this._invalidateKeysIfChanged(key, beforeVisible);
       if (this._awaiting) return true; // F2：只排队，不落 LS
       if (this._isIdb()) {
         this._enqueue({ op: 'set', key: key, value: value });
@@ -664,9 +703,10 @@
       }
       this._demoteFallbackOnBusinessWrite(key);
       this._trackQuotaSet(key, value);
+      const beforeVisible = this._logicalKeyVisible(key);
       this._cache.set(key, value);
       this._pending.set(key, value);
-      this._invalidateKeys();
+      this._invalidateKeysIfChanged(key, beforeVisible);
       if (this._awaiting) return true; // F2：只排队，不落 LS
       if (this._isIdb()) {
         this._enqueue({ op: 'set', key: key, value: value });
@@ -726,6 +766,7 @@
 
     /** 删除；LS 模式同步生效，IDB 模式入队删除（缓存立即失效） */
     remove(key) {
+      const beforeVisible = this._logicalKeyVisible(key);
       let oldKnown = this._cache.has(key);
       let oldValue = oldKnown ? this._cache.get(key) : undefined;
       if (!oldKnown && this._isIdb()) {
@@ -736,7 +777,6 @@
       this._cache.delete(key);
       this._pending.delete(key);
       this._chunkForget(key);
-      this._invalidateKeys();
       // 引导键（迁移锁/后端标记）删除也必须立即可见：等待期释放锁不能被 _awaitDeletes 拖延
       if (isBootstrapKey(key)) {
         this._awaitDeletes.delete(key);
@@ -744,10 +784,12 @@
       }
       if (this._awaiting) {
         this._awaitDeletes.add(key); // F2：记入待删，切换后补删 IDB
+        this._invalidateKeysIfChanged(key, beforeVisible);
         return;
       }
       if (this._isIdb()) {
         this._enqueue({ op: 'del', key: key });
+        this._invalidateKeysIfChanged(key, beforeVisible);
         return;
       }
       try {
@@ -756,6 +798,7 @@
         this._notifyError(e);
         throw e;
       }
+      this._invalidateKeysIfChanged(key, beforeVisible);
     },
 
     /**
@@ -787,6 +830,8 @@
       if (!ev || !ev.key || ev.key.indexOf(PREFIX + ':') !== 0) return;
       const key = ev.key.slice(PREFIX.length + 1);
       if (this._isIdb() && !isBootstrapKey(key)) return;
+      // 事件到达时底层实键已被对端改写：用物化视图回答「变更前是否可见」
+      const beforeVisible = this._logicalKeyVisible(key, true);
       if (ev.newValue === null) {
         this._cache.delete(key);
         this._pending.delete(key);
@@ -806,7 +851,8 @@
           this._cache.delete(key);
         }
       }
-      this._invalidateKeys();
+      // beforeVisible=null 表示视图已过期：下一次 keys() 必然重建，无需再推版本
+      if (beforeVisible !== null) this._invalidateKeysIfChanged(key, beforeVisible);
     },
 
     /**
@@ -822,24 +868,27 @@
         const chunked = this._chunkLookup(key);
         return chunked === undefined ? defaultValue : chunked;
       }
+      let raw = null;
       let value;
       try {
-        const raw = global.localStorage.getItem(fullKeyOf(key));
+        raw = global.localStorage.getItem(fullKeyOf(key));
         value = raw === null ? undefined : JSON.parse(raw);
       } catch (e) {
         console.warn('[Storage] 读取失败 key=' + key, e);
         value = undefined;
       }
+      // 缓存/待写已在上面排除：LS 模式下「变更前可见性」等价于磁盘实键存在
+      const beforeVisible = raw !== null;
       // 缺失时不要用默认值填充缓存：否则 keys() 会把「不存在的键」当成存在，
       // 且以 null 为默认值的读取会污染后续 get(key, [])（返回 null 而非空数组）
       if (value === undefined) {
         this._cache.delete(key);
         this._pending.delete(key);
-        this._invalidateKeys();
+        this._invalidateKeysIfChanged(key, beforeVisible);
         return defaultValue;
       }
       this._cache.set(key, value);
-      this._invalidateKeys();
+      this._invalidateKeysIfChanged(key, beforeVisible);
       return value;
     },
 
@@ -866,31 +915,36 @@
         const chunked = this._chunkLookup(key);
         return chunked === undefined ? defaultValue : chunked;
       }
+      const cachedBefore = this._cache.get(key) !== undefined;
+      let raw = null;
       let value;
       try {
-        const raw = global.localStorage.getItem(fullKeyOf(key));
+        raw = global.localStorage.getItem(fullKeyOf(key));
         value = raw === null ? undefined : JSON.parse(raw);
       } catch (e) {
         this._cache.delete(key);
         value = undefined;
       }
+      // 本函数不回退缓存：磁盘缺失而缓存仍有旧值时也属于键集合变化
+      const beforeVisible = cachedBefore || raw !== null;
       // 缺失时不要用默认值填充缓存：否则 keys() 会把「不存在的键」当成存在（默认值可能是 null）
       if (value === undefined) {
         this._cache.delete(key);
         this._pending.delete(key);
-        this._invalidateKeys();
+        this._invalidateKeysIfChanged(key, beforeVisible);
         return defaultValue;
       }
       this._cache.set(key, value);
       this._pending.delete(key);
-      this._invalidateKeys();
+      this._invalidateKeysIfChanged(key, beforeVisible);
       return value;
     },
 
     /**
      * 列出所有逻辑键（合并存储与内存，避免防抖未落盘时漏键）。
      * 结果按 `_keysRev` 版本缓存：无变更时返回同一份物化结果的浅拷贝（O(n) 数组拷贝，不再重建 50k 字符串）。
-     * 任何写入/删除/跨标签同步/迁移/后端切换都会使版本失效，下一次调用整体重建。
+     * 只有**键集合实际变化**（新增 / 真正删除）才推进版本（见 `_invalidateKeysIfChanged`）；
+     * 更新已存在键的版本号不会使视图失效。后端切换/迁移/清空等结构性变化仍直接推进版本。
      */
     keys() {
       if (!this._keysCache || this._keysRevCached !== this._keysRev) {
@@ -900,7 +954,7 @@
       return this._keysCache.slice();
     },
 
-    /** 按当前缓存/磁盘视图构建逻辑键集合（唯一重建实现） */
+    /** 按当前缓存/磁盘视图构建逻辑键集合（唯一重建实现；可见性语义必须与 `_logicalKeyVisible` 同构） */
     _buildKeys() {
       if (this._isIdb()) {
         const out = new Set();

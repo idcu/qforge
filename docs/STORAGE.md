@@ -132,12 +132,16 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 - **逻辑键视图缓存**：`Storage.keys()` 由 `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制，
   同一修订只物化一次（首次 `_buildKeys()`），版本不一致时整体重建；每次返回 `slice()`，
   调用方修改返回值不会污染缓存。
-- **失效点（显式，宁可重建不返回脏键）**：`adoptStore`、`refreshMode`、迁移缓冲进出/失败、
-  `flush` 前、跨标签 `BroadcastChannel` 与 LS `storage` 事件、引导键写删、`set`/`setSync`/`remove`/`getFresh`
-  的缓存变更、`clearAll` 均调用 `_invalidateKeys()`；`_flushOps` 只清 `_pending`（`_cache` 保留）不失效。
-  迁移中途或块部分写入无法确认一致时一律整体重建。
+- **失效点（C1 精准失效，单键判定唯一收口）**：`Storage._logicalKeyVisible(key)` 是唯一可见性判定
+  （`_cache` 值 `undefined` 视为 tombstone / `_pending` / `_chunkLookup` 物理块 / `_awaitDeletes` / LS 实键），
+  与 `_buildKeys()` 同构；`set`/`setSync`/`remove`/`get`/`getFresh`/引导键写删只在**前后可见性翻转**
+  （新增 / 真正删除）时推进 `_keysRev`，更新已存在键不失效。结构性变化（`adoptStore`、`refreshMode`、
+  迁移缓冲进出/失败、`_applyPendingWrites`、`clearAll`）仍直接失效；`_flushOps` 只清 `_pending`
+  （`_cache` 保留）不失效。
 - **跨标签**：写入仍按**逻辑键**广播（块直写仅迁移专用、不广播）；对端收到后经 `Store.readLogicalMany`
-  展开为逻辑键落入 `_cache`，立即失效并重建视图。回归断言覆盖「写入后立即 `keys()` 可见」
-  「删除后立即消失」「跨标签写入后 `get`/`keys()` 可见」。
-- **实测（真机 Chromium 50k）**：`keys()` 单次 10.7ms → **0–0.1ms**（稳态）、启动 6 次 87.2ms →
-  **12.4–16.1ms**；水合窗口后长任务中位 153ms → **79ms**。契约等价性 17/17（diff=0）。
+  展开为逻辑键落入 `_cache`，**复用该批 `values[k]` 比较处理前后可见性**——已存在键更新不失效，
+  新增/真正删除各失效一次（不改广播协议）。LS `storage` 事件因底层已被对端改写，用当前物化视图
+  成员关系回答「变更前是否可见」，视图已过期则跳过（下一次 `keys()` 必然重建）。
+- **C1 验收（真机 Chromium 50k，5 场景 × 5 轮）**：重建次数 S1 3→**1**（中位 9.4ms，冷轮 3 次）、
+  S3 6→**0**、S4 1→**0**、S5 1→**0**；全场景中位合计 **122.3ms → 9.4ms**。Node 50k 门禁：
+  首次构建 15.08–16.55ms（≤40ms）、写已存在键后 0.11ms（≤2ms）。契约等价性 17/17（diff=0）。

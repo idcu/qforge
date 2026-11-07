@@ -9,6 +9,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createMemoryIDB } from './lib/idb-memory.mjs';
 import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -100,6 +101,174 @@ section('keys 合并磁盘与待写键');
   ok(ks.indexOf('k1') >= 0, 'keys 含已落盘键');
   ok(ks.indexOf('pending-key') >= 0, 'keys 含待写键（备份不丢未落盘数据）');
   S.clearAll();
+}
+
+section('C1 keys 精准失效：更新已存在键不触发整体重建（LS）');
+{
+  const S = QB.Storage;
+  S.clearAll();
+  let builds = 0;
+  const buildMs = [];
+  const origBuild = S._buildKeys;
+  S._buildKeys = function () {
+    const t = performance.now();
+    const out = origBuild.apply(this, arguments);
+    buildMs.push(performance.now() - t);
+    builds++;
+    return out;
+  };
+  try {
+    const N = 3000;
+    for (let i = 0; i < N; i++) S.setSync('c1-k' + i, { i: i });
+    const first = S.keys();
+    eq(first.length, N, '首次 keys() 物化 ' + N + ' 个逻辑键');
+    eq(builds, 1, '首次构建 1 次（实测 ' + buildMs[0].toFixed(3) + 'ms）');
+
+    // 红例：更新已存在键（值变、键集合不变）
+    const rev0 = S._keysRev;
+    for (let i = 0; i < 5; i++) S.setSync('c1-k' + i, { i: i, rev: 2 });
+    eq(S._keysRev, rev0, '更新已存在键不推进 _keysRev（红：当前实现每写一次 +1）');
+    const beforeHit = builds;
+    const t0 = performance.now();
+    const ks = S.keys();
+    const hitMs = performance.now() - t0;
+    eq(builds, beforeHit, '更新已存在键后 keys() 不再整体重建（无谓重建）');
+    eq(ks.length, N, '键集合不变');
+    ok(hitMs < 1, '键集合未变时 keys() 为命中路径（实测 ' + hitMs.toFixed(3) + 'ms）');
+
+    // (a) 真正删除 → 不可见，且只重建一次，之后回到命中路径
+    const bDel = builds;
+    S.remove('c1-k0');
+    ok(S.keys().indexOf('c1-k0') < 0, '删除后 keys() 不含该键');
+    eq(builds, bDel + 1, '真正删除推进版本并重建一次');
+    const bDel2 = builds;
+    S.keys();
+    eq(builds, bDel2, '删除后再次调用回到命中路径');
+
+    // (b) 新增键 → 立即可见
+    const bNew = builds;
+    S.setSync('c1-brand-new', { n: 1 });
+    ok(S.keys().indexOf('c1-brand-new') >= 0, '新增键立即出现在 keys()');
+    eq(builds, bNew + 1, '新增键推进版本并重建一次');
+
+    // (c) 跨标签 storage 事件：更新已存在键不失效；新增/删除键才失效
+    const bPeer = builds;
+    const revPeer = S._keysRev;
+    const peerVal = JSON.stringify({ i: 1, peer: true });
+    ls.setItem('qb:c1-k1', peerVal);
+    S._handleExternalChange({ key: 'qb:c1-k1', newValue: peerVal });
+    eq(S._keysRev, revPeer, '跨标签更新已存在键不推进版本');
+    eq(S.get('c1-k1').peer, true, '对端值已合入缓存');
+    ls.setItem('qb:c1-ext-new', '1');
+    S._handleExternalChange({ key: 'qb:c1-ext-new', newValue: '1' });
+    ok(S.keys().indexOf('c1-ext-new') >= 0, '跨标签新增键立即出现在 keys()');
+    ls.removeItem('qb:c1-ext-new');
+    S._handleExternalChange({ key: 'qb:c1-ext-new', newValue: null });
+    ok(S.keys().indexOf('c1-ext-new') < 0, '跨标签删除后不可见');
+    eq(builds, bPeer + 2, '跨标签仅「新增 / 删除」各重建一次');
+
+    // _awaitDeletes：等待迁移期删除的键不得从 LS 实键读回
+    S.beginAwaitingMigration();
+    S.setSync('c1-await', 1);
+    ok(S.keys().indexOf('c1-await') >= 0, '等待期新增键可见（_pending）');
+    S.remove('c1-await');
+    ok(S.keys().indexOf('c1-await') < 0, '_awaitDeletes 待删键不可见');
+
+    // 契约：keys() 返回副本
+    const view = S.keys();
+    view.length = 0;
+    ok(S.keys().length > 0, 'keys() 返回副本（调用方修改不影响内部视图）');
+  } finally {
+    S._buildKeys = origBuild;
+    S._awaiting = false;
+    S._awaitDeletes.clear();
+    S.clearAll();
+  }
+}
+
+section('C1 keys 精准失效（IDB）：tombstone / 物理块 / 跨标签 values 比较');
+{
+  const idb = createMemoryIDB();
+  const h = await createHarness(path.resolve(__dirname, '..'), { indexedDB: idb });
+  const Q2 = h.QB;
+  const S2 = Q2.Storage;
+  await S2.initStore();
+  await Q2.Store.migrateToIdb(Q2.Store.lsSource());
+  const bank = 'c1-bank';
+  const chunkKey = Q2.KEYS.reviewChunkOfHash(bank, 'h1');
+  const stateKey = Q2.KEYS.reviewState(bank, 'h1');
+  S2.adoptStore({
+    mode: 'idb',
+    records: new Map([
+      ['c1-misc', { v: 1 }],
+      [chunkKey, { h1: { last: 1 } }]
+    ])
+  });
+  eq(S2.mode, 'idb', 'IDB 模式就绪');
+
+  let builds = 0;
+  const origBuild = S2._buildKeys;
+  S2._buildKeys = function () {
+    builds++;
+    return origBuild.apply(this, arguments);
+  };
+  try {
+    const first = S2.keys();
+    eq(builds, 1, 'IDB 首次构建 1 次');
+    ok(first.indexOf(stateKey) >= 0, 'keys() 展开物理块内逻辑键');
+    eq(S2._logicalKeyVisible(stateKey), true, '_chunkLookup 命中的逻辑键判定可见');
+
+    const rev0 = S2._keysRev;
+    S2.setSync('c1-misc', { v: 2 });
+    await S2.flush();
+    eq(S2._keysRev, rev0, 'IDB 更新已存在键不推进版本');
+    S2.keys();
+    eq(builds, 1, 'IDB 更新已存在键不重建');
+
+    // tombstone：值为 undefined 不算可见（与 _buildKeys 同构）
+    S2._cache.set('c1-tomb', undefined);
+    eq(S2._logicalKeyVisible('c1-tomb'), false, 'tombstone（值 undefined）不算可见');
+    S2._cache.delete('c1-tomb');
+
+    // 物理块内键被删除 → 不可见，且只失效一次
+    const bDelChunk = builds;
+    S2.remove(stateKey);
+    ok(S2.keys().indexOf(stateKey) < 0, '物理块内键删除后不可见');
+    eq(builds, bDelChunk + 1, '物理块内键删除推进版本并重建一次');
+
+    // 跨标签：已存在键更新不失效，新增/删除才失效
+    await Q2.Store.batch([{ op: 'set', key: 'c1-misc', value: { v: 9 } }]);
+    const revPeer = S2._keysRev;
+    await S2._handleIdbExternal({ keys: ['c1-misc'] });
+    eq(S2.get('c1-misc').v, 9, '对端更新已合入缓存');
+    eq(S2._keysRev, revPeer, '对端更新已存在键不推进版本');
+
+    await Q2.Store.batch([{ op: 'set', key: 'c1-peer-new', value: { v: 1 } }]);
+    const bPeerNew = builds;
+    await S2._handleIdbExternal({ keys: ['c1-peer-new'] });
+    ok(S2.keys().indexOf('c1-peer-new') >= 0, '对端新增键立即可见');
+    eq(builds, bPeerNew + 1, '对端新增键推进版本并重建一次');
+
+    await Q2.Store.batch([{ op: 'del', key: 'c1-peer-new' }]);
+    const bPeerDel = builds;
+    await S2._handleIdbExternal({ keys: ['c1-peer-new'] });
+    ok(S2.keys().indexOf('c1-peer-new') < 0, '对端删除后不可见');
+    eq(builds, bPeerDel + 1, '对端删除推进版本并重建一次');
+
+    // 对端广播不存在的键（values[k]=undefined 且本就不可见）→ 不失效
+    const revGhost = S2._keysRev;
+    await S2._handleIdbExternal({ keys: ['c1-ghost'] });
+    eq(S2._keysRev, revGhost, '对端删除本就不可见的键不推进版本');
+
+    // 契约：keys() 返回副本
+    const view = S2.keys();
+    view.length = 0;
+    ok(S2.keys().length > 0, 'IDB keys() 返回副本');
+  } finally {
+    S2._buildKeys = origBuild;
+    S2.clearAll();
+    await S2.flush();
+  }
 }
 
 section('Helpers.debounce().cancel（丢弃挂起调用）');

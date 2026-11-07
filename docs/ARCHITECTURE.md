@@ -345,16 +345,29 @@ activate → caches.keys()
   启动固定付 6 次（迁移快速路径 `convertMetaLayouts` + `bankIds` + `stateKeys`）。现在由
   `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制：**同一修订只物化一次**，版本不一致时整体重建；
   返回 `slice()`，调用方增删不影响缓存。
-- **失效策略（显式失效点，宁可重建不返回脏键）**：`_invalidateKeys()` 递增 `_keysRev`，在每个可能改变
-  「存在哪些键」的路径调用：`adoptStore` / `refreshMode` / 迁移缓冲进出与失败分支 / `flush` 前
-  （`_applyPendingWrites`）/ 跨标签 `_handleIdbExternal` 与 LS `storage` 事件 / 引导键写删 / `set`、`setSync`、
-  `remove`、`getFresh` 的缓存变更 / `clearAll`。**`_flushOps` 不失效**：它只清 `_pending`，`_cache` 保留，
-  逻辑键集合不变。迁移中途、块部分写入或任何无法确认一致的状态一律走版本失效 → 整体重建，
-  不以局部增量维护换取「可能过期」的键。
+- **失效策略（C1 精准失效，单键判定唯一收口）**：`_logicalKeyVisible(key)` 是唯一可见性判定，
+  覆盖 `_cache`（值为 `undefined` 视为 tombstone）、`_pending`、`_chunkLookup`（物理块）、
+  `_awaitDeletes`、LocalStorage 实键，与 `_buildKeys()` 完全同构。`set` / `setSync` / `remove` /
+  `get` / `getFresh` / 引导键写删只在**前后可见性翻转**（新增 / 真正删除）时经
+  `_invalidateKeysIfChanged()` 推进 `_keysRev`；**更新已存在键的版本号不失效**。
+  跨标签 `_handleIdbExternal` 复用已重读的 `values[k]` 比较处理前后可见性，不改广播协议；
+  LS `storage` 事件因底层实键已被对端改写，用当前物化视图成员关系回答「变更前是否可见」
+  （视图已过期则跳过——下一次 `keys()` 必然重建）。结构性变化仍直接 `_invalidateKeys()`：
+  `adoptStore` / `refreshMode` / 迁移缓冲进出与失败 / `_applyPendingWrites` / `clearAll`。
+  **`_flushOps` 不失效**：它只清 `_pending`，`_cache` 保留，逻辑键集合不变。
+- **C1 红/绿实测（真机 Chromium 158.0.8127.18，50k/4 库，5 场景 × 5 轮，同脚本同口径）**：
+  - 红（`c96b692`，任何写入都失效）：S1 连答 30 题 **3 次重建/轮、34.0ms/轮（占 39.5%）**；
+    S3 跨标签 B 读 **6 次/轮、70.0ms**；S4 导入 5k **1 次、8.3ms**；S5 导出 **1 次、10.0ms**；
+    每轮中位合计 **122.3ms**。
+  - 绿（本项）：S1 **1 次/轮（中位 9.4ms，仅冷轮 3 次）**；S2/S3/S4/S5 均 **0 次**；
+    全场景中位合计 **9.4ms（−92.3%）**。剩余 1 次来自真实新增键（日志尾段 / 首条状态），非无谓重建。
+  - Node `--expose-gc` 50k 门禁：`keys()` 首次构建中位 **15.08–16.55ms**（两次门禁 11.89 / 32.83、13.28 / 33.46，门禁 ≤40ms）；
+    写已存在键后 **0.11ms**（0.08 / 0.19–0.20，门禁 ≤2ms；误失效会回落到首次构建量级）。
 - **实测（真机 Chromium 50k，同脚本同数据集）**：修复前 `keys()` 单次 10.7ms（启动期 15–19ms）、
   启动 6 次合计 87.2ms、水合窗口结束后首个长任务中位 153ms（141–179）；修复后单次稳态 **0–0.1ms**、
   6 次合计 **12.4–16.1ms**（仅首次 build）、窗口后长任务中位 **79ms**（76–92）。
   10 轮 `initStore` P50=193.1ms / P95=238.3ms / 最大值 238.3ms，窗口内长任务 0ms；
+  C1 复审同口径 10 轮：P50=185.0ms / P95=236.9ms / 最大值 236.9ms、窗口内长任务 0ms（无回退）；
   契约等价性 17/17（50k 逐键 `get`、`keys()` 全集、`readAll` 展开、四类边界，diff=0）。
 - **常驻内存成本（实测）**：`_keysCache` 保存 50k 逻辑键字符串属于净增常驻开销，两种口径分别实测：
   **真机 Chromium 158.0.8127.18**（CDP `HeapProfiler.collectGarbage` + `Runtime.getHeapUsage`，`keys()` 返回数组先释放）

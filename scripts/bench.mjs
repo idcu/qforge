@@ -1330,6 +1330,34 @@ for (const tier of [5000, 20000, 50000]) {
     extra: '1 状态键 + 尾段日志聚合 1 事务，上行 ' + idbWriteBytes + ' B'
   });
 
+  /* C1：逻辑键视图的两笔成本（首次物化 / 更新已存在键后是否误重建）。
+   * 只取 50k 档：与真机 keys 视图成本同量级；写入已存在键必须命中，
+   * 若精准失效回退成「任何写入都失效」，该行会回落到首次构建量级。 */
+  if (tier === 50000) {
+    const keyProbe = 'bench:keys-view-probe';
+    Q.Storage.setSync(keyProbe, 1);
+    let keysLen = 0;
+    const kb = await timed(() => {
+      Q.Storage._keysCache = null;
+      Q.Storage._keysRevCached = -1;
+      keysLen = Q.Storage.keys().length;
+    }, 5);
+    report.push({
+      name: 'keys() 首次构建（50000 题 · IDB）',
+      median: kb.median, min: kb.min, max: kb.max,
+      extra: '逻辑键 ' + keysLen + ' 个（含 50k 字符串物化）'
+    });
+    const wb = await timed((i) => {
+      Q.Storage.setSync(keyProbe, { v: i + 2 });
+      Q.Storage.keys();
+    }, 20);
+    report.push({
+      name: 'keys() 写入已存在键后（50000 题 · IDB）',
+      median: wb.median, min: wb.min, max: wb.max,
+      extra: '更新已存在键不应使视图失效；误失效会回落到「首次构建」量级'
+    });
+  }
+
   // 阶段 0：启动全量水合（同机第二轮启动，复用本档迁移后的 IDB；只取 5k/50k 两档）
   if (tier === 5000 || tier === 50000) {
     const hyd = await hydrationPass(pass.idb, tier);
@@ -1647,6 +1675,8 @@ if (process.argv.indexOf('--assert') >= 0) {
     ['IDB 单次评分写入（5000', 1],
     ['IDB 单次评分写入（20000', 1],
     ['IDB 单次评分写入（50000', 1],
+    ['keys() 首次构建（50000', 40],
+    ['keys() 写入已存在键后（50000', 2],
     ['导出构建（JSON+CSV+MD+TXT', 60]
   ];
   const fails = [];
