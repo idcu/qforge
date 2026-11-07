@@ -72,7 +72,7 @@
   /* 键分类（索引 by_kind 的取值域；报告/容量统计共用） */
   const KINDS = [
     'banks', 'questionShard', 'questionsMeta', 'questionsLegacy', 'wrong', 'favorite',
-    'reviewState', 'reviewMeta', 'reviewLegacy', 'reviewRev', 'history', 'session',
+    'reviewState', 'reviewChunk', 'reviewMeta', 'reviewLegacy', 'reviewRev', 'history', 'session',
     'revlogSeg', 'revlogMeta', 'revlogLegacy', 'weights', 'dav', 'currentBank',
     'startPrefs', 'theme', 'schema', 'hashMap', 'other'
   ];
@@ -234,8 +234,8 @@
     let kind = 'other';
     let seq = -1;
     if (key === 'banks') kind = 'banks';
-    else if (key.indexOf('questions:') === 0) {
-      const rest = key.slice('questions:'.length).split(':');
+    else if (key.indexOf(QUESTION_PREFIX) === 0) {
+      const rest = key.slice(QUESTION_PREFIX.length).split(':');
       bank = rest[0] || '';
       if (rest.length === 1) kind = 'questionsLegacy';
       else if (rest[1] === 'meta') kind = 'questionsMeta';
@@ -244,7 +244,14 @@
     else if (key.indexOf('user:fav:') === 0) { kind = 'favorite'; bank = key.slice('user:fav:'.length); }
     else if (key.indexOf('user:reviewMeta:') === 0) { kind = 'reviewMeta'; bank = key.slice('user:reviewMeta:'.length); }
     else if (key.indexOf('user:reviewRev:') === 0) { kind = 'reviewRev'; bank = key.slice('user:reviewRev:'.length); }
-    else if (key.indexOf('user:review:') === 0) {
+    else if (key.indexOf('user:reviewChunk:') === 0) {
+      // 物理分块（schema v7）：user:reviewChunk:<bankId>:<bucket>
+      const rest = key.slice('user:reviewChunk:'.length);
+      const cut = rest.indexOf(':');
+      bank = cut < 0 ? rest : rest.slice(0, cut);
+      kind = 'reviewChunk';
+      seq = parseInt(cut < 0 ? '' : rest.slice(cut + 1), 16) || 0;
+    } else if (key.indexOf('user:review:') === 0) {
       const rest = key.slice('user:review:'.length);
       const cut = rest.indexOf(':');
       if (cut < 0) { kind = 'reviewLegacy'; bank = rest; }
@@ -270,6 +277,82 @@
     return { key: key, bank: t.bank, kind: t.kind, seq: t.seq, value: value };
   }
 
+  /* ---------------- 复习状态物理分块（schema v7：逻辑键 ⇄ 块记录） ----------------
+   * 物理布局：user:reviewChunk:<bankId>:<bucket> → {v:1, s:{hash: state}}，
+   * bucket 由 `QB.KEYS.reviewBucket(hash)` 决定（唯一分桶实现，256 桶确定性映射）。
+   * 上层只认 `user:review:<bankId>:<hash>` 逻辑键：
+   *   - 水合时**不**把块记录展开成 50k 逻辑键：块键 → 状态对象进 `Storage` 二级缓存，
+   *     `Storage.get/keys` 仍同步、语义不变（避免 50k Map+字符串触发主 GC）；
+   *   - 写入时把逻辑键的 set/del 转换成「块内读改写」（`batch`），同一事务内合并，
+   *     跨标签并发写同一块的不同题目不会互相覆盖。
+   */
+  const REVIEW_STATE_PREFIX = 'user:review:';
+  const REVIEW_CHUNK_PREFIX = 'user:reviewChunk:';
+  /** 题库分片键前缀（主键区间拆分读共用，见 tagOf） */
+  const QUESTION_PREFIX = 'questions:';
+
+  /** 逻辑 per-hash 状态键（排除旧整表 user:review:<bankId> 与 reviewMeta） */
+  function isReviewStateKey(key) {
+    if (key.indexOf(REVIEW_STATE_PREFIX) !== 0) return false;
+    return key.slice(REVIEW_STATE_PREFIX.length).indexOf(':') >= 0;
+  }
+  function isReviewChunkKey(key) { return key.indexOf(REVIEW_CHUNK_PREFIX) === 0; }
+
+  /** 逻辑状态键 → 所在物理块键（分桶由 contracts 唯一实现） */
+  function chunkKeyOfStateKey(key) {
+    const rest = key.slice(REVIEW_STATE_PREFIX.length);
+    const cut = rest.indexOf(':');
+    return QB.KEYS.reviewChunkOfHash(rest.slice(0, cut), rest.slice(cut + 1));
+  }
+
+  /** 块值（`{v:1,s:{…}}`）的成员状态对象（非块/损坏返回 null） */
+  function chunkStatesOf(value) {
+    return (value && typeof value === 'object' && !Array.isArray(value)
+      && value.s && typeof value.s === 'object' && !Array.isArray(value.s))
+      ? value.s : null;
+  }
+
+  function chunkValueOf(states) { return { v: 1, s: states }; }
+
+  /** 同一逻辑键同时出现在块与旧 per-hash 键时按 last 合并（不整值覆盖；无 ReviewMerge 时块优先） */
+  function mergeStatePair(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    if (QB.ReviewMerge && typeof QB.ReviewMerge.mergeMaps === 'function') {
+      return QB.ReviewMerge.mergeMaps({ s: a }, { s: b }).s;
+    }
+    return b;
+  }
+
+  /**
+   * 物理记录 → 逻辑视图（Map）。块记录展开为 per-hash 逻辑键并**剔除块键本身**；
+   * 若同一 hash 还有旧 per-hash 记录（迁移半途/旧标签写入），按 `mergeStatePair` 合并，
+   * 保证「迁移完成前也能读到完整逻辑视图，且不偏好某一侧丢更新」。
+   * @param {Array<{key:string, value:*}>} recs
+   * @returns {Map<string,*>}
+   */
+  function expandRecords(recs) {
+    const map = new Map();
+    const chunks = [];
+    (recs || []).forEach((r) => {
+      if (!r || typeof r.key !== 'string') return;
+      if (isReviewChunkKey(r.key)) { chunks.push(r); return; }
+      map.set(r.key, r.value);
+    });
+    chunks.forEach((r) => {
+      const states = chunkStatesOf(r.value);
+      if (!states) return;
+      const rest = r.key.slice(REVIEW_CHUNK_PREFIX.length);
+      const cut = rest.indexOf(':');
+      const bank = cut < 0 ? rest : rest.slice(0, cut);
+      Object.keys(states).forEach((hash) => {
+        const logical = REVIEW_STATE_PREFIX + bank + ':' + hash;
+        map.set(logical, mergeStatePair(map.get(logical), states[hash]));
+      });
+    });
+    return map;
+  }
+
   /**
    * 逐键一致性判定（**校验逻辑唯一实现**）：迁移逐批回读与 `verifyAgainstLS` 共用。
    * 比较走 `QB.deepEqual`（结构比较，不产生序列化副本；定义见 js/utils/helpers.js）。
@@ -287,15 +370,14 @@
   }
 
   /* ---------------- LS → IDB 流式迁移：确定性顺序、分片批次、进度订阅 ---------------- */
-
   /** 键的确定性迁移顺序（题库 → 分片 → 复习 → 日志 → 其他；分片按库 + 序号） */
   function migrationRank(kind) {
     const order = {
       banks: 0, questionsMeta: 1, questionShard: 2, questionsLegacy: 3,
-      reviewMeta: 4, reviewState: 5, reviewLegacy: 6,
-      revlogMeta: 7, revlogSeg: 8, revlogLegacy: 9
+      reviewMeta: 4, reviewState: 5, reviewChunk: 6, reviewLegacy: 7,
+      revlogMeta: 8, revlogSeg: 9, revlogLegacy: 10
     };
-    return order[kind] != null ? order[kind] : 10;
+    return order[kind] != null ? order[kind] : 11;
   }
 
   /**
@@ -326,7 +408,7 @@
     let group = [];
     const flush = () => { if (group.length) { out.push(group); group = []; } };
     keys.forEach((k) => {
-      if (tagOf(k).kind === 'questionShard') { flush(); out.push([k]); }
+      if (tagOf(k).kind === 'questionShard' || tagOf(k).kind === 'reviewChunk') { flush(); out.push([k]); }
       else {
         group.push(k);
         if (group.length >= 64) flush();
@@ -422,6 +504,84 @@
     return runTx('readonly', (store, tx, box) => { bind(store, 'getAll', undefined, box); });
   }
 
+  /**
+   * 分批读全部物理记录（启动水合唯一入口）。
+   * 单次整库 `getAll` 把 10MB 状态一次性反序列化，真机实测 272–327ms；因此按
+   * 「库 × kind」拆成 8 个**主键前缀区间**请求，每请求只承载一个库的一类数据。
+   * 真机同轮对比（同一 50k 库）：
+   *   - 8 个区间请求 / 8 个并发只读事务：178.2ms（**本实现**）
+   *   - 8 个区间请求 / 同一事务串起来：153.5ms（profile 页），但整页验收 P50 由
+   *     208.7 退化到 222.7ms（单事务把 10MB 反序列化挤在提交点，GC 更集中）→ 已回退
+   *   - 4 个 by_bank 索引请求 / 4 并发事务：197ms；整库 getAll：272.6ms
+   * 关键路径只依赖 1 个小记录 `banks`：拿到库清单立刻并发发 8 个区间读；
+   * `getAllKeys`（1281 键，实测 6.7ms）与 rest 小键补读**并行**进行，不挡大块读。
+   * 依赖键完整性而非索引：索引未覆盖的记录按物理键逐条补读。
+   * @returns {Promise<Array<Object>>} 物理记录（顺序不保证）
+   */
+  async function txGetAllSplit() {
+    if (typeof IDBKeyRange === 'undefined') return txGetAll(); // Node 内存 IDB 无 key range
+    const banks = [];
+    let keysTask;
+    let banksValue;
+    try {
+      banksValue = await runTx('readonly', (store, tx, box) => {
+        bind(store, 'get', QB.KEYS.banks, box, (r) => (r ? r.value : null));
+      });
+    } catch (_) { return txGetAll(); }
+    if (Array.isArray(banksValue)) {
+      banksValue.forEach((b) => { if (b && typeof b.id === 'string' && banks.indexOf(b.id) < 0) banks.push(b.id); });
+    }
+    // 键清单与 rest 补读都在独立事务里，与 8 个大块请求并发（不占关键路径）
+    keysTask = runTx('readonly', (store, tx, box) => { bind(store, 'getAllKeys', undefined, box); })
+      .catch(() => null);
+    if (!banks.length) { // 无 banks 记录时从物理键回推库清单（降级路径，才需要等键清单）
+      const keys = await keysTask;
+      if (!Array.isArray(keys)) return txGetAll();
+      keys.forEach((k) => { const p = tagOf(k); if (p.bank && banks.indexOf(p.bank) < 0) banks.push(p.bank); });
+      if (!banks.length) return txGetAll();
+    }
+    const jobs = [];
+    banks.forEach((bank) => {
+      jobs.push([REVIEW_CHUNK_PREFIX + bank + ':', REVIEW_CHUNK_PREFIX + bank + ':\uffff']);
+      jobs.push([QUESTION_PREFIX + bank + ':', QUESTION_PREFIX + bank + ':\uffff']);
+    });
+    const restVals = {};
+    const restTask = keysTask.then((keys) => {
+      if (!Array.isArray(keys)) return;
+      const rest = keys.filter((k) => {
+        if (isBootstrap(k)) return false;
+        for (let i = 0; i < banks.length; i++) {
+          if (k.indexOf(REVIEW_CHUNK_PREFIX + banks[i] + ':') === 0) return false;
+          if (k.indexOf(QUESTION_PREFIX + banks[i] + ':') === 0) return false;
+        }
+        return true;
+      });
+      if (!rest.length) return;
+      return runTx('readonly', (store, tx) => {
+        rest.forEach((k) => {
+          const req = store.get(k);
+          req.onsuccess = () => { if (req.result !== undefined) restVals[k] = req.result.value; };
+        });
+      });
+    });
+    let parts;
+    try {
+      parts = await Promise.all([
+        Promise.all(jobs.map((b) => runTx('readonly', (store, tx, box) => {
+          bind(store, 'getAll', IDBKeyRange.bound(b[0], b[1]), box);
+        }))),
+        restTask
+      ]).then((r) => r[0]);
+    } catch (_) { return txGetAll(); }
+    const out = [];
+    parts.forEach((recs) => {
+      if (!recs) return;
+      for (let n = 0; n < recs.length; n++) out.push(recs[n]);
+    });
+    Object.keys(restVals).forEach((k) => { out.push(recordOf(k, restVals[k])); });
+    return out;
+  }
+
   /** 批量读取（单事务多请求，避免 N 次事务；逐键校验用，分块调用控制内存） */
   function idbGetMany(keys) {
     const body = keys.filter((k) => !isBootstrap(k));
@@ -502,6 +662,9 @@
      * 批量写（**单事务**）：`op:'clear'` 先清空业务键，再按顺序写。
      * 引导标记同步写 LocalStorage（打开 IDB 前的跨标签协调依赖同步可见）。
      * 任一请求失败事务整体回滚（失败不半写）。
+     * 复习状态逻辑键（`user:review:<bank>:<hash>`）不直接落盘，而是在同一事务内
+     * **块内读改写**（get → 合并本批 hash → put，见 `groupReviewOps`）：跨标签并发修改
+     * 同一块的不同题目时由 IDB 事务串行化保证不丢更新。
      */
     batch(ops) {
       const bootOps = ops.filter((op) => isBootstrap(op.key));
@@ -509,11 +672,27 @@
       const wantClear = ops.some((op) => op.op === 'clear');
       bootOps.forEach((op) => { if (op.op === 'del') lsDel(op.key); else lsSet(op.key, op.value); });
       if (!bodyOps.length && !wantClear) return Promise.resolve(true);
+      const grouped = groupReviewOps(bodyOps);
       return runTx('readwrite', (store, tx) => {
         if (wantClear) store.clear();
         bodyOps.forEach((op) => {
+          if (op.reviewChunk) return; // 已并入块组
           if (op.op === 'del') store.delete(op.key);
           else store.put(recordOf(op.key, op.value));
+        });
+        grouped.groups.forEach((g, chunkKey) => {
+          const req = store.get(chunkKey);
+          req.onsuccess = () => {
+            const states = chunkStatesOf(req.result && req.result.value) || {};
+            const next = {};
+            Object.keys(states).forEach((h) => {
+              if (!g.dels.has(h) && !g.sets.has(h)) next[h] = states[h];
+            });
+            g.sets.forEach((v, h) => { next[h] = v; });
+            if (Object.keys(next).length) store.put(recordOf(chunkKey, chunkValueOf(next)));
+            else store.delete(chunkKey); // 空块不驻留，避免孤儿记录
+          };
+          req.onerror = () => { /* 事务 onerror/onabort 统一 reject */ };
         });
         if (wantClear) lsKeys().forEach((k) => { if (!isBootstrap(k)) lsDel(k); });
       }).then(() => {
@@ -524,6 +703,28 @@
       });
     }
   };
+
+  /**
+   * 把逻辑复习状态 set/del 操作按物理块分组（唯一实现，`batch` 调用）。
+   * 分组结果同时标记回 `op.reviewChunk`，避免同一批里重复直写逻辑键。
+   * @param {Array<Object>} bodyOps
+   * @returns {{groups:Map<string,{sets:Map<string,*>, dels:Set<string>}>}}
+   */
+  function groupReviewOps(bodyOps) {
+    const groups = new Map();
+    bodyOps.forEach((op) => {
+      if (!isReviewStateKey(op.key)) return;
+      const chunkKey = chunkKeyOfStateKey(op.key);
+      const rest = op.key.slice(REVIEW_STATE_PREFIX.length);
+      const hash = rest.slice(rest.indexOf(':') + 1);
+      let g = groups.get(chunkKey);
+      if (!g) { g = { sets: new Map(), dels: new Set() }; groups.set(chunkKey, g); }
+      if (op.op === 'del') { g.dels.add(hash); g.sets.delete(hash); }
+      else { g.sets.set(hash, op.value); g.dels.delete(hash); }
+      op.reviewChunk = true;
+    });
+    return { groups: groups };
+  }
 
   /* ---------------- Store 公共接口 ---------------- */
   const Store = {
@@ -544,6 +745,8 @@
     lastInit: null,
 
     isBootstrap: isBootstrap,
+    /** 同一逻辑键两份副本的合并（块展开/迁移清理共用；last 胜出） */
+    mergeReviewStates: mergeStatePair,
     /** 是否为本设备运行期标记（备份/恢复排除；与 isBootstrap 不同：schemaVersion 仍需备份） */
     isBackupExcluded: (key) => BACKUP_EXCLUDED_KEYS.indexOf(key) >= 0,
     tagOf: tagOf,
@@ -707,9 +910,20 @@
         return map;
       }
       try {
-        const recs = await txGetAll();
+        const recs = await txGetAllSplit();
+        // 复习状态块**不在启动时展开**成 50k 逻辑键：块键 → 状态对象直接进 Map，
+        // 由 `Storage.adoptStore` 建二级缓存（get/keys 仍同步，语义不变）。
+        // 真机打点：展开本身计算仅 ~20ms，但 50k Map + 50k 字符串在刚反序列化 10MB 的堆上
+        // 触发一次主 GC（与水合合计 ~180ms 长任务）；二级缓存把这块分配整体省掉。
         const map = new Map();
-        (recs || []).forEach((r) => { if (r && typeof r.key === 'string') map.set(r.key, r.value); });
+        recs.forEach((r) => {
+          if (isReviewChunkKey(r.key)) {
+            const states = chunkStatesOf(r.value);
+            if (states) map.set(r.key, states);
+            return;
+          }
+          map.set(r.key, r.value);
+        });
         BOOTSTRAP_KEYS.forEach((k) => { const v = lsGet(k, undefined); if (v !== undefined) map.set(k, v); });
         return map;
       } catch (e) {
@@ -720,6 +934,117 @@
         return map;
       }
     },
+
+    /**
+     * 逻辑视图批量读（**校验/诊断唯一入口**）：输入逻辑键（含 `user:review:<bank>:<hash>`），
+     * 自动把复习状态键解析回所在物理块读取并展开；返回 `{逻辑键: 值}`，缺失为 undefined。
+     * 迁移逐批校验、`verifyAgainstLS`、回退前诊断共用，避免各自实现块展开逻辑。
+     * @param {string[]} keys
+     * @returns {Promise<Object>}
+     */
+    async readLogicalMany(keys) {
+      const out = {};
+      const plainKeys = [];
+      const pending = []; // [{logical, chunkKey, hash}]
+      (keys || []).forEach((k) => {
+        if (isReviewStateKey(k)) {
+          const rest = k.slice(REVIEW_STATE_PREFIX.length);
+          pending.push({ logical: k, chunkKey: chunkKeyOfStateKey(k), hash: rest.slice(rest.indexOf(':') + 1) });
+        } else plainKeys.push(k);
+      });
+      if (pending.length) {
+        const chunkKeys = Array.from(new Set(pending.map((p) => p.chunkKey)));
+        const chunks = await idbGetMany(chunkKeys);
+        pending.forEach((p) => {
+          const states = chunkStatesOf(chunks[p.chunkKey]);
+          out[p.logical] = states ? states[p.hash] : undefined;
+        });
+      }
+      if (plainKeys.length) {
+        const vals = await idbGetMany(plainKeys);
+        plainKeys.forEach((k) => { out[k] = vals[k]; });
+      }
+      return out;
+    },
+
+    /** 物理块键判定（供 Storage 跨标签刷新共用，避免另写前缀规则） */
+    isReviewChunkKey(key) { return isReviewChunkKey(key); },
+
+    /** 逻辑复习状态键判定（迁移/诊断共用；排除旧整表与 reviewMeta） */
+    isReviewStateKey(key) { return isReviewStateKey(key); },
+
+    /** 逻辑复习状态键拆解：{bank, hash} | null（键解析唯一实现，供迁移分组） */
+    reviewStateParts(key) {
+      if (!isReviewStateKey(key)) return null;
+      const rest = key.slice(REVIEW_STATE_PREFIX.length);
+      const cut = rest.indexOf(':');
+      return { bank: rest.slice(0, cut), hash: rest.slice(cut + 1) };
+    },
+
+    /** 物理块键拆解：{bank, bucket} | null（Storage 二级缓存按块键回推库/桶，避免另写前缀规则） */
+    reviewChunkParts(key) {
+      if (!isReviewChunkKey(key)) return null;
+      const rest = key.slice(REVIEW_CHUNK_PREFIX.length);
+      const cut = rest.indexOf(':');
+      return { bank: rest.slice(0, cut), bucket: rest.slice(cut + 1) };
+    },
+
+    /**
+     * 物理键批量读（**迁移清理/诊断专用**）：按物理键直读，不做逻辑键 → 块转换。
+     * 返回 `{物理键: 值}`；用于删除旧 per-hash 键前比对，防止旧标签的写入被误删。
+     */
+    async readPhysicalMany(keys) {
+      const out = {};
+      const list = (keys || []).filter((k) => typeof k === 'string');
+      if (!list.length) return out;
+      const vals = await idbGetMany(list);
+      list.forEach((k) => { out[k] = vals[k]; });
+      return out;
+    },
+
+    /** 块记录的成员展开：`{key, value}` 逻辑条目数组（跨标签刷新/诊断共用） */
+    chunkLogicalStates(record) {
+      const states = chunkStatesOf(record && record.value);
+      if (!states) return [];
+      const rest = String(record.key).slice(REVIEW_CHUNK_PREFIX.length);
+      const cut = rest.indexOf(':');
+      const bank = cut < 0 ? rest : rest.slice(0, cut);
+      return Object.keys(states).map((hash) => ({ key: REVIEW_STATE_PREFIX + bank + ':' + hash, value: states[hash] }));
+    },
+
+    /**
+     * 物理块直写（**迁移专用**，不广播）：items = [{bank, bucket, states}]。
+     * schema 升级未完成前其他标签不应按新布局读取，因此刻意绕过 `onWrite` 通知。
+     */
+    writeReviewChunks(items) {
+      const list = (items || []).filter((it) => it && it.bank && it.bucket);
+      if (!list.length) return Promise.resolve(0);
+      return runTx('readwrite', (store) => {
+        list.forEach((it) => {
+          const key = QB.KEYS.reviewChunk(it.bank, it.bucket);
+          const states = it.states || {};
+          if (Object.keys(states).length) store.put(recordOf(key, chunkValueOf(states)));
+          else store.delete(key);
+        });
+      }).then(() => list.length);
+    },
+
+    /**
+     * 物理键删除（**迁移清理专用**，不广播、不做逻辑键 → 块的转换）。
+     * 与 `batch({op:'del'})` 的区别：后者删逻辑复习状态键表示「从块里移除该 hash」，
+     * 迁移清理删的则是旧 per-hash 物理键本身。
+     */
+    deletePhysical(keys) {
+      const list = (keys || []).filter((k) => typeof k === 'string');
+      if (!list.length) return Promise.resolve(0);
+      return runTx('readwrite', (store) => { list.forEach((k) => store.delete(k)); }).then(() => list.length);
+    },
+
+    /** 写迁移进度并广播（v6→v7 分块迁移复用 v5→v6 的断点键与订阅入口） */
+    reportMigrationProgress(p) {
+      if (p && typeof p === 'object') { lsSet(PROGRESS_KEY, p); emitProgress(p); }
+    },
+    clearMigrationProgress() { clearProgress(); },
 
     get(key) { return Store.backend().get(key); },
     set(key, value) { return Store.backend().set(key, value); },
@@ -741,7 +1066,18 @@
         bind(store.index(name), 'getAll', key, box);
       });
       let recs;
-      if (opts.bank && opts.kind) recs = await readIndex('by_bank_kind', [opts.bank, opts.kind]);
+      if (opts.kind === 'reviewState') {
+        // 逻辑视图查询：物理记录是 `reviewChunk`，这里展开回 per-hash 条目（对外语义不变）
+        const raw = opts.bank
+          ? await readIndex('by_bank_kind', [opts.bank, 'reviewChunk'])
+          : await readIndex('by_kind', 'reviewChunk');
+        recs = [];
+        (raw || []).forEach((r) => {
+          Store.chunkLogicalStates(r).forEach((e) => {
+            recs.push({ key: e.key, value: e.value, bank: r.bank, kind: 'reviewState', seq: -1 });
+          });
+        });
+      } else if (opts.bank && opts.kind) recs = await readIndex('by_bank_kind', [opts.bank, opts.kind]);
       else if (opts.bank) recs = await readIndex('by_bank', opts.bank);
       else if (opts.kind) recs = await readIndex('by_kind', opts.kind);
       else recs = await txGetAll();
@@ -773,18 +1109,28 @@
       } else {
         recs = lsKeys().map((k) => recordOf(k, lsGet(k)));
       }
-      out.keys = recs.length;
+      out.keys = 0;
+      const chunkRecs = [];
       recs.forEach((r) => {
         const kind = r.kind || tagOf(r.key).kind;
+        out.keys += 1;
         out.byKind[kind] = (out.byKind[kind] || 0) + 1;
         const raw = JSON.stringify(r.value) || '';
         out.bytes += (raw.length + r.key.length + 2) * 2 + 32; // 32B/条 记录头估算
+        if (kind === 'reviewChunk') { chunkRecs.push(r); return; }
         if (kind === 'banks' && Array.isArray(r.value)) out.banks += r.value.length;
         if (kind === 'questionShard' && Array.isArray(r.value)) { out.shards++; out.questions += r.value.length; }
         if (kind === 'questionsLegacy' && Array.isArray(r.value)) out.questions += r.value.length;
         if (kind === 'reviewState') out.reviewStates++;
         if (kind === 'revlogSeg' && Array.isArray(r.value)) out.logs += r.value.length;
         if (kind === 'revlogLegacy' && Array.isArray(r.value)) out.logs += r.value.length;
+      });
+      // 块记录按展开后的逻辑状态数计入 keys/reviewStates（对外口径与 v6 一致）
+      chunkRecs.forEach((r) => {
+        const n = Store.chunkLogicalStates(r).length;
+        out.keys += Math.max(0, n - 1);
+        out.reviewStates += n;
+        out.byKind.reviewState = (out.byKind.reviewState || 0) + n;
       });
       return out;
     },
@@ -944,7 +1290,8 @@
           return { op: 'set', key: k, value: v };
         });
         await idbBackend.batch(ops);
-        const got = await idbGetMany(chunk);
+        // 逻辑视图回读：复习状态键会被落成块记录，校验必须按逻辑键展开（不能直接 get 物理键）
+        const got = await Store.readLogicalMany(chunk);
         mismatch = firstMismatch(chunk, got, (i) => values[i]);
         if (mismatch) break;
         verified += chunk.length;
@@ -987,7 +1334,7 @@
       const CHUNK = 32;
       for (let i = 0; i < keys.length; i += CHUNK) {
         const part = keys.slice(i, i + CHUNK);
-        const got = await idbGetMany(part);
+        const got = await Store.readLogicalMany(part); // 逻辑视图读（自动展开复习状态块）
         const bad = firstMismatch(part, got, (j) => src.get(part[j]));
         if (bad) { if (mismatched.length < 5) mismatched.push(bad); }
         else same += part.length;
@@ -1097,15 +1444,16 @@
         Store.mode = 'ls';
         return { mode: m, keys: 0 };
       }
-      const recs = (await txGetAll()) || [];
-      const keys = recs.filter((r) => !isBootstrap(r.key));
+      const recs = expandRecords((await txGetAll()) || []);
       let written = 0;
+      const entries = [];
+      recs.forEach((value, key) => { if (!isBootstrap(key)) entries.push({ key: key, value: value }); });
       try {
-        keys.forEach((r) => { lsSet(r.key, r.value); written++; });
+        entries.forEach((r) => { lsSet(r.key, r.value); written++; });
         // 逐键回读校验
-        for (let i = 0; i < keys.length; i++) {
-          if (!QB.deepEqual(lsGet(keys[i].key, undefined), keys[i].value)) {
-            throw new Error('回退校验失败：' + keys[i].key);
+        for (let i = 0; i < entries.length; i++) {
+          if (!QB.deepEqual(lsGet(entries[i].key, undefined), entries[i].value)) {
+            throw new Error('回退校验失败：' + entries[i].key);
           }
         }
       } catch (e) {
@@ -1117,7 +1465,7 @@
       Store.writeMarker('ls');
       lsSet('meta:lsBackupState', 'rollback-current');
       Store.mode = 'ls';
-      return { mode: m, keys: keys.length };
+      return { mode: m, keys: entries.length };
     },
 
     /** 重新启用 IndexedDB（回退后用户主动切回；调用方负责刷新页面） */

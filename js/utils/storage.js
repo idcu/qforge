@@ -31,6 +31,21 @@
 
   const Storage = {
     _cache: new Map(),
+    /**
+     * 复习状态二级缓存：物理块键 → `{hash: state}`（启动水合不再展开成 50k 逻辑键）。
+     * 读取仍同步：`get` 先查 `_cache`（本标签写入/跨标签合并的最新值），未命中再查块。
+     * 这是启动性能的关键：50k Map + 50k 字符串在刚反序列化 10MB 的堆上会触发主 GC。
+     */
+    _chunkStates: new Map(),
+    /**
+     * 逻辑键视图缓存（`keys()` 的物化结果）。
+     * `keys()` 每次重建 50k 逻辑键字符串在启动期要付 6 次（迁移快速路径 + 首屏数据加载），
+     * 因此只物化一次，任何写入/删除/跨标签/迁移/后端切换都通过 `_invalidateKeys()` 递增版本；
+     * 版本不一致时**整体重建**（保守策略：宁可重算也不返回可能过期的键）。
+     */
+    _keysCache: null,
+    _keysRev: 0,
+    _keysRevCached: -1,
     _pending: new Map(),
     _timer: null,
     _errorListeners: [],
@@ -60,6 +75,32 @@
       return fullKeyOf(key);
     },
     _isIdb() { return this.mode === 'idb'; },
+
+    /** 逻辑键视图失效：任何可能改变「存在哪些键」的路径都必须调用（见各写入/删除/同步点） */
+    _invalidateKeys() {
+      this._keysRev += 1;
+    },
+
+    /** 逻辑复习状态键 → 块内状态（未命中返回 undefined；不可与「值为 undefined」混淆用 hasOwnProperty） */
+    _chunkLookup(key) {
+      const S = QB.Store;
+      if (!S || typeof S.reviewStateParts !== 'function' || typeof QB.KEYS.reviewChunkOfHash !== 'function') return undefined;
+      const parts = S.reviewStateParts(key);
+      if (!parts) return undefined;
+      const states = this._chunkStates.get(QB.KEYS.reviewChunkOfHash(parts.bank, parts.hash));
+      if (!states || !Object.prototype.hasOwnProperty.call(states, parts.hash)) return undefined;
+      return states[parts.hash];
+    },
+
+    /** 删除键时同步从块视图移除，避免 get/keys 从块里重新看到已删除状态 */
+    _chunkForget(key) {
+      const S = QB.Store;
+      if (!S || typeof S.reviewStateParts !== 'function' || typeof QB.KEYS.reviewChunkOfHash !== 'function') return;
+      const parts = S.reviewStateParts(key);
+      if (!parts) return;
+      const states = this._chunkStates.get(QB.KEYS.reviewChunkOfHash(parts.bank, parts.hash));
+      if (states && Object.prototype.hasOwnProperty.call(states, parts.hash)) delete states[parts.hash];
+    },
 
     /* ---------------- 后端切换（唯一入口） ---------------- */
 
@@ -92,10 +133,27 @@
       this._pending.clear();
       this._awaiting = false;
       this._awaitDeletes.clear();
+      this._chunkStates = new Map();
+      this._keysCache = null;
+      this._keysRevCached = -1;
+      this._keysRev += 1;
       if (i.mode === 'idb') {
         // 启动水合带 records；迁移完成路径不带 records —— 调用方已保证现有缓存包含全部业务键，
         // 直接沿用可避免整库再解析一遍（少一份全量克隆，降低迁移峰值）。
-        if (i.records) this._cache = new Map(i.records);
+        // records 里的复习状态块拆到二级缓存，其余键进 _cache（不再展开成 50k 逻辑键）。
+        if (i.records) {
+          const cache = new Map();
+          const chunks = new Map();
+          i.records.forEach((v, k) => {
+            if (QB.Store && typeof QB.Store.isReviewChunkKey === 'function' && QB.Store.isReviewChunkKey(k)) {
+              if (v && typeof v === 'object') chunks.set(k, v);
+              return;
+            }
+            cache.set(k, v);
+          });
+          this._cache = cache;
+          this._chunkStates = chunks;
+        }
         this.mode = 'idb';
         QB.Store.onWrite = (keys) => this._broadcastIdbWrite(keys);
         this._subscribeBroadcast();
@@ -110,6 +168,7 @@
     /** 迁移/回退后刷新后端状态（不重读数据时使用；完整切换请重新 initStore/adoptStore） */
     refreshMode() {
       this.mode = (QB.Store && QB.Store.mode === 'idb') ? 'idb' : 'ls';
+      this._invalidateKeys();
       return this.mode;
     },
 
@@ -194,6 +253,9 @@
       }
       // success 但未切换（IDB 中途不可用 → 回落 LS）：保留待写，由调用方 flush 按 LS
       // 既有语义落盘；失败则待写保留重试，本页不丢数据。
+      this._keysCache = null;
+      this._keysRevCached = -1;
+      this._invalidateKeys();
     },
 
     _wakeAwaiters() {
@@ -256,6 +318,7 @@
           this._pending.set(key, value);
         });
         this._awaiting = true;
+        this._invalidateKeys();
         return false;
       }
       await this._applyPendingWrites(pending, deletes, clear);
@@ -276,7 +339,10 @@
         this._enqueue({ op: 'del', key: key });
       });
       if (clear) this._clearPending = true;
-      if (pending.size || deletes.size || clear) await this.flush();
+      if (pending.size || deletes.size || clear) {
+        this._invalidateKeys();
+        await this.flush();
+      }
     },
 
     /**
@@ -372,6 +438,7 @@
         });
         deletes.forEach((key) => this._awaitDeletes.add(key));
         if (clear) this._clearPending = true;
+        this._invalidateKeys();
         return { switched: false, res: res, error: error };
       }
       await this._applyPendingWrites(pending, deletes, clear);
@@ -391,15 +458,20 @@
      */
     async _handleIdbExternal(d) {
       if (!this._isIdb() || !d || !Array.isArray(d.keys)) return;
-      const keys = d.keys.slice();
-      const values = {};
-      await Promise.all(keys.map((k) => QB.Store.get(k).then((v) => { values[k] = v; }, () => { values[k] = undefined; })));
+      // 物理块键不直接进缓存（正常写入只广播逻辑键；迁移写块不广播，这里仅作防御性过滤）
+      const keys = d.keys.filter((k) => !(QB.Store && QB.Store.isReviewChunkKey && QB.Store.isReviewChunkKey(k)));
+      if (!keys.length) return;
+      // 逻辑视图批量读：复习状态键会自动解析回所在物理块（不复刻分块规则）
+      let values = {};
+      try { values = await QB.Store.readLogicalMany(keys); } catch (_) { values = {}; }
       keys.forEach((k) => {
         const v = values[k];
         const hook = this._mergeHookFor(k);
         if (v === undefined) {
           this._cache.delete(k);
           this._pending.delete(k);
+          // 块视图同步遗忘，否则被外部删除的状态会从二级缓存里被 keys()/get 重新看到
+          this._chunkForget(k);
         } else if (hook) {
           const merged = hook.merge(this._cache.get(k), v);
           this._cache.set(k, merged);
@@ -409,6 +481,7 @@
           this._pending.delete(k);
         }
       });
+      this._invalidateKeys();
     },
 
     /* ---------------- 错误通知与待写落盘 ---------------- */
@@ -432,8 +505,13 @@
      */
     _trackQuotaSet(key, value) {
       if (!QB.Quota || typeof QB.Quota.trackWrite !== 'function') return;
-      const oldKnown = this._cache.has(key);
-      QB.Quota.trackWrite(key, value, oldKnown ? this._cache.get(key) : undefined, oldKnown);
+      let oldKnown = this._cache.has(key);
+      let oldValue = oldKnown ? this._cache.get(key) : undefined;
+      if (!oldKnown && this._isIdb()) {
+        const chunked = this._chunkLookup(key);
+        if (chunked !== undefined) { oldKnown = true; oldValue = chunked; }
+      }
+      QB.Quota.trackWrite(key, value, oldValue, oldKnown);
     },
 
     _notifyError(e) {
@@ -470,12 +548,14 @@
       global.localStorage.setItem(fullKeyOf(key), JSON.stringify(value));
       this._cache.set(key, value);
       this._pending.delete(key);
+      this._invalidateKeys();
       return true;
     },
     _deleteBootstrap(key) {
       global.localStorage.removeItem(fullKeyOf(key));
       this._cache.delete(key);
       this._pending.delete(key);
+      this._invalidateKeys();
     },
 
     /** 入队一次写/删（IDB 模式；同一微任务内的多次调用合并为一个事务） */
@@ -563,6 +643,7 @@
       this._trackQuotaSet(key, value);
       this._cache.set(key, value);
       this._pending.set(key, value);
+      this._invalidateKeys();
       if (this._awaiting) return true; // F2：只排队，不落 LS
       if (this._isIdb()) {
         this._enqueue({ op: 'set', key: key, value: value });
@@ -585,6 +666,7 @@
       this._trackQuotaSet(key, value);
       this._cache.set(key, value);
       this._pending.set(key, value);
+      this._invalidateKeys();
       if (this._awaiting) return true; // F2：只排队，不落 LS
       if (this._isIdb()) {
         this._enqueue({ op: 'set', key: key, value: value });
@@ -644,11 +726,17 @@
 
     /** 删除；LS 模式同步生效，IDB 模式入队删除（缓存立即失效） */
     remove(key) {
-      const oldKnown = this._cache.has(key);
-      const oldValue = oldKnown ? this._cache.get(key) : undefined;
+      let oldKnown = this._cache.has(key);
+      let oldValue = oldKnown ? this._cache.get(key) : undefined;
+      if (!oldKnown && this._isIdb()) {
+        const chunked = this._chunkLookup(key);
+        if (chunked !== undefined) { oldKnown = true; oldValue = chunked; }
+      }
       if (QB.Quota && typeof QB.Quota.trackDelete === 'function') QB.Quota.trackDelete(key, oldValue, oldKnown);
       this._cache.delete(key);
       this._pending.delete(key);
+      this._chunkForget(key);
+      this._invalidateKeys();
       // 引导键（迁移锁/后端标记）删除也必须立即可见：等待期释放锁不能被 _awaitDeletes 拖延
       if (isBootstrapKey(key)) {
         this._awaitDeletes.delete(key);
@@ -718,6 +806,7 @@
           this._cache.delete(key);
         }
       }
+      this._invalidateKeys();
     },
 
     /**
@@ -728,8 +817,11 @@
       if (this._cache.has(key) || this._pending.has(key)) return this._cache.get(key);
       // F2：等待迁移期间删除的键不能再从 LS 读回旧值
       if (this._awaiting && this._awaitDeletes.has(key)) return defaultValue;
-      // IDB 模式：启动已全量水合，缓存即权威；缺失就是缺失（不回读磁盘，避免同步 API 变异步）
-      if (this._isIdb()) return defaultValue;
+      // IDB 模式：缓存即权威；复习状态再查物理块二级缓存（仍然同步，不回读磁盘）
+      if (this._isIdb()) {
+        const chunked = this._chunkLookup(key);
+        return chunked === undefined ? defaultValue : chunked;
+      }
       let value;
       try {
         const raw = global.localStorage.getItem(fullKeyOf(key));
@@ -743,9 +835,11 @@
       if (value === undefined) {
         this._cache.delete(key);
         this._pending.delete(key);
+        this._invalidateKeys();
         return defaultValue;
       }
       this._cache.set(key, value);
+      this._invalidateKeys();
       return value;
     },
 
@@ -769,7 +863,8 @@
       }
       if (this._isIdb()) {
         if (this._cache.has(key)) return this._cache.get(key);
-        return defaultValue;
+        const chunked = this._chunkLookup(key);
+        return chunked === undefined ? defaultValue : chunked;
       }
       let value;
       try {
@@ -783,19 +878,41 @@
       if (value === undefined) {
         this._cache.delete(key);
         this._pending.delete(key);
+        this._invalidateKeys();
         return defaultValue;
       }
       this._cache.set(key, value);
       this._pending.delete(key);
+      this._invalidateKeys();
       return value;
     },
 
-    /** 列出所有逻辑键（合并存储与内存，避免防抖未落盘时漏键） */
+    /**
+     * 列出所有逻辑键（合并存储与内存，避免防抖未落盘时漏键）。
+     * 结果按 `_keysRev` 版本缓存：无变更时返回同一份物化结果的浅拷贝（O(n) 数组拷贝，不再重建 50k 字符串）。
+     * 任何写入/删除/跨标签同步/迁移/后端切换都会使版本失效，下一次调用整体重建。
+     */
     keys() {
+      if (!this._keysCache || this._keysRevCached !== this._keysRev) {
+        this._keysCache = this._buildKeys();
+        this._keysRevCached = this._keysRev;
+      }
+      return this._keysCache.slice();
+    },
+
+    /** 按当前缓存/磁盘视图构建逻辑键集合（唯一重建实现） */
+    _buildKeys() {
       if (this._isIdb()) {
         const out = new Set();
         this._cache.forEach((v, k) => { if (v !== undefined) out.add(k); });
         this._pending.forEach((v, k) => { if (v !== undefined) out.add(k); });
+        // 二级缓存按需还原逻辑键（仅重建时付出 50k 字符串成本）
+        const S = QB.Store;
+        this._chunkStates.forEach((states, chunkKey) => {
+          const parts = S && S.reviewChunkParts ? S.reviewChunkParts(chunkKey) : null;
+          if (!parts || !states) return;
+          Object.keys(states).forEach((hash) => out.add(QB.KEYS.reviewState(parts.bank, hash)));
+        });
         return Array.from(out);
       }
       QB.Storage.forceSync();
@@ -819,6 +936,8 @@
     clearAll() {
       // C009：整库清空后用量快照必然失效，交给下一次 refresh 重建基线
       if (QB.Quota && typeof QB.Quota.reset === 'function') QB.Quota.reset();
+      this._chunkStates.clear();
+      this._invalidateKeys();
       if (this._awaiting) {
         // F2：等待期清空只作用于内存；切换后由 _completeMigrationSwitch 补发 clear 到 IDB
         this._cache.clear();
@@ -861,6 +980,12 @@
         this._pending.forEach((v, k) => {
           if (v === undefined || this._cache.has(k)) return;
           total += Q.bytesOfValue(k, v);
+        });
+        const S = QB.Store;
+        this._chunkStates.forEach((states, chunkKey) => {
+          const parts = S && S.reviewChunkParts ? S.reviewChunkParts(chunkKey) : null;
+          if (!parts || !states) return;
+          Object.keys(states).forEach((hash) => { total += Q.bytesOfValue(QB.KEYS.reviewState(parts.bank, hash), states[hash]); });
         });
         return total;
       }

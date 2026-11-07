@@ -21,8 +21,28 @@
     favorite: (bankId) => 'user:fav:' + bankId,
     // 旧整表布局（迁移前/旧备份）；schema v5 起仅作兼容读取来源，不再整体写入
     review: (bankId) => 'user:review:' + bankId,
-    // per-hash 布局（schema v5）：单题调度状态独立键，写入 O(1)；hash 为 contentHash（含 '3:' 前缀）
+    // per-hash 逻辑键（schema v5）：上层读写的最小单位；hash 为 contentHash（含 '3:' 前缀）
     reviewState: (bankId, hash) => 'user:review:' + bankId + ':' + hash,
+    /**
+     * 物理分块键（schema v7）：每库固定 256 桶（由 hash 前 2 个十六进制字符决定），
+     * 值 = `{v:1, s:{hash: state, …}}`。启动水合时展开回 `reviewState` 逻辑键，
+     * 上层（Storage.get/keys、ReviewStore、备份）语义不变。
+     */
+    reviewChunk: (bankId, bucket) => 'user:reviewChunk:' + bankId + ':' + bucket,
+    /** 逻辑状态键 → 所在物理分块键（分桶函数唯一实现，读写/迁移/跨标签共用） */
+    reviewChunkOfHash: (bankId, hash) => 'user:reviewChunk:' + bankId + ':' + QB.KEYS.reviewBucket(hash),
+    /**
+     * contentHash → 分桶标识（固定 256 桶，确定性映射）：去掉版本前缀后取前 2 个十六进制字符。
+     * 不用「顺序分块 + 尾部追加」是为了避免多标签同时新增 hash 时争抢块号（会互相覆盖整块）；
+     * 非十六进制/过短 hash 归入 '00'，保证任何输入都落到确定的桶。
+     */
+    reviewBucket: (hash) => {
+      const s = String(hash == null ? '' : hash);
+      const cut = s.indexOf(':');
+      const body = cut >= 0 ? s.slice(cut + 1) : s;
+      const m = /^[0-9a-fA-F]{2}/.exec(body);
+      return m ? m[0].toLowerCase() : '00';
+    },
     // per-hash 布局清单（版本/键数），不进入备份（备份折叠回 review 整表）
     reviewMeta: (bankId) => 'user:reviewMeta:' + bankId,
     // 本地复习版本号（多标签合并/写前重读的单调版本；服务端对应 review_rev，仅本机同步元数据，不进备份）

@@ -163,7 +163,7 @@ section('迁移 v6：完整复制 + 逐键一致 + LS 保留');
   ok(be.migrated && be.migrated.keys > 0, '迁移复制了业务键（' + (be.migrated && be.migrated.keys) + '）');
   eq(S.mode, 'idb', 'QB.Storage 门面已切 IDB');
   eq(QB.Store.marker, 'idb', '后端标记为 idb');
-  eq(S.get(QB.KEYS.metaSchema), 6, 'schema 版本推进到 6');
+  eq(S.get(QB.KEYS.metaSchema), 7, 'schema 版本推进到 7');
   ok(await lsMatchesIdb(QB), '旧 LS vs 新 IDB 逐键深比对一致');
   // LS 旧数据保留（退路）
   ok(before.length > 0 && windowHasKey(QB, QB.KEYS.banks), 'LocalStorage 旧业务数据保留（未删除）');
@@ -180,12 +180,13 @@ section('迁移 v6：完整复制 + 逐键一致 + LS 保留');
   // 单次评分写入：多个键聚合成一个事务后落盘
   await QB.DB.reviews.record(seeded.bank.id, { [items[0].contentHash]: { last: 9999, due: 1, s: 1, d: 1 } }, [{ h: items[0].contentHash, b: seeded.bank.id, r: 3, t: 9999 }]);
   await S.flush();
-  eq((await QB.Store.get(QB.KEYS.reviewState(seeded.bank.id, items[0].contentHash))).last, 9999, '评分状态写入 IDB');
+  const logical = await QB.Store.readLogicalMany([QB.KEYS.reviewState(seeded.bank.id, items[0].contentHash)]);
+  eq(logical[QB.KEYS.reviewState(seeded.bank.id, items[0].contentHash)].last, 9999, '评分状态写入 IDB（逻辑键展开读）');
   const tail = await QB.Store.logTail(seeded.bank.id, 3);
   eq(tail[0].t, 9999, '评分日志写入 IDB 分段并可查尾条');
-  // 备份导出包含 schema 6、不包含后端运行期标记
+  // 备份导出包含 schema 7、不包含后端运行期标记
   const bk = await QB.Backup.buildBackup();
-  eq(bk.schemaVersion, 6, '备份 schemaVersion=6');
+  eq(bk.schemaVersion, 7, '备份 schemaVersion=7');
   ok(!('meta:storageBackend' in bk.data), '备份不含后端选择标记');
 }
 
@@ -308,7 +309,7 @@ section('回落：IDB 不可用 / 打开失败 → 安全回落 LS');
   eq(QB.Store.marker, 'ls-fallback', '写入 ls-fallback 标记（下次启动可重试/显式启用）');
   const r = await QB.Migration.run();
   eq(r.backend.backend, 'ls', 'v6 迁移在无 IDB 环境下回落 LS');
-  eq(S.get(QB.KEYS.metaSchema), 6, 'schema 仍推进到 6（不阻塞启动）');
+  eq(S.get(QB.KEYS.metaSchema), 7, 'schema 仍推进到 7（不阻塞启动）');
   eq((await QB.DB.banks.list()).length, 1, '数据可见（不白屏）');
   eq((await QB.DB.questions.list(bank.id, {})).items.length, 1, '题目可读');
 }
@@ -511,6 +512,147 @@ section('C009：IDB 用量走 navigator.storage.estimate（quota 未知也用它
   ok(idb.usageBytes() < before, '删除题后驱动记账下降（' + before + ' → ' + idb.usageBytes() + ' B）');
   const v2 = await QB.Quota.refresh();
   ok(v2.usedBytes < v.usedBytes, '再次 refresh 取到更小的 used（' + v.usedBytes + ' → ' + v2.usedBytes + ' B）');
+}
+
+/* ---------- v6→v7：复习状态物理分块 ---------- */
+
+/** 直接向内存 IDB 写物理记录（测试构造 v6 per-hash 布局，不经过 Store 的逻辑键转换） */
+function rawIdbWrite(win, records) {
+  return new Promise((resolve, reject) => {
+    const req = win.indexedDB.open('qforge-kv');
+    req.onerror = () => reject(req.error || new Error('raw open failed'));
+    req.onsuccess = () => {
+      const db = req.result;
+      let tx;
+      try { tx = db.transaction(['kv'], 'readwrite'); } catch (e) { reject(e); return; }
+      const st = tx.objectStore('kv');
+      records.forEach((r) => st.put(r));
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error || new Error('raw write failed')); };
+      tx.onabort = () => { db.close(); reject(new Error('raw write aborted')); };
+    };
+  });
+}
+
+function rawReviewRecords(QB, bank, pairs) {
+  return pairs.map((p) => ({
+    key: QB.KEYS.reviewState(bank, p[0]), bank: bank, kind: 'reviewState', seq: -1, value: p[1]
+  }));
+}
+
+section('v6→v7 分块：块记录 / 逻辑键展开 / 同步读语义不变');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H = await makeHarness({ indexedDB: idb, raw: raw });
+  const QB = H.QB;
+  QB.DB.init();
+  QB.Store.writeMarker('idb');
+  await QB.Storage.initStore();
+  const bank = 'bk1';
+  const hA = '3:aa00000000000001'; // 同桶（前 2 位 aa）
+  const hB = '3:aa00000000000002';
+  const kB = QB.KEYS.reviewBucket(hA);
+  await rawIdbWrite(H.window, rawReviewRecords(QB, bank, [[hA, { last: 1 }], [hB, { last: 2 }]]));
+  await QB.Storage.initStore(); // 重新水合（含 v6 per-hash 物理记录）
+  eq(QB.Storage.mode, 'idb', 'IDB 后端');
+  QB.Storage.setSync(QB.KEYS.metaSchema, 6);
+  ok(QB.Storage.get(QB.KEYS.reviewState(bank, hA)).last === 1, '迁移前逻辑键可读');
+
+  const r = await QB.Migration.run();
+  ok(r.reviewChunks && r.reviewChunks.states === 2,
+    'v6→v7 完成（校验 2 个状态 / ' + (r.reviewChunks && r.reviewChunks.chunks) + ' 块）');
+  eq(QB.Storage.get(QB.KEYS.metaSchema), 7, 'schema 推进到 7');
+  const chunkKey = QB.KEYS.reviewChunkOfHash(bank, hA);
+  eq(chunkKey, QB.KEYS.reviewChunkOfHash(bank, hB), '同前 2 位的 hash 落入同一物理块');
+  const chunk = await QB.Store.get(chunkKey);
+  ok(chunk && chunk.v === 1 && chunk.s[hA] && chunk.s[hB], '块记录含两条状态（bucket=' + kB + '）');
+  eq(await QB.Store.get(QB.KEYS.reviewState(bank, hA)), undefined, '旧 per-hash 物理键已删除');
+  eq(QB.Storage.get(QB.KEYS.reviewState(bank, hA)).last, 1, 'Storage.get 同步读到逻辑键（缓存语义不变）');
+  ok(QB.Storage.keys().indexOf(chunkKey) < 0, '物理块键不进入逻辑缓存（keys 语义不变）');
+  const stats = await QB.Store.stats();
+  eq(stats.reviewStates, 2, 'stats.reviewStates 按展开后的逻辑状态计数');
+  const q = await QB.Store.query({ kind: 'reviewState' });
+  eq(q.length, 2, 'query(kind=reviewState) 展开为 per-hash 条目');
+  ok(q.every((e) => e.key.indexOf('user:review:') === 0), '查询结果键为逻辑键');
+  // 备份：折叠回 per-hash 形状，且不含物理块键
+  const bk = await QB.Backup.buildBackup();
+  ok(bk.data[QB.KEYS.review(bank)][hA].last === 1, '备份保留复习状态（折叠为旧整表形状）');
+  ok(Object.keys(bk.data).every((k) => k.indexOf('user:reviewChunk:') < 0), '备份不含物理块键');
+}
+
+section('v7 块写入：跨标签同块不同 hash 不丢更新（先红后绿）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw: raw });
+  const H2 = await makeHarness({ indexedDB: idb, raw: raw });
+  const A = H1.QB;
+  const B = H2.QB;
+  A.Store.writeMarker('idb');
+  await A.Storage.initStore();
+  await B.Storage.initStore();
+  eq(A.Storage.mode, 'idb', '标签 A 为 IDB');
+  eq(B.Storage.mode, 'idb', '标签 B 为 IDB');
+  const bank = 'bk1';
+  const hA = '3:cc00000000000001';
+  const hB = '3:cc00000000000002'; // 同桶
+  const chunkKey = A.KEYS.reviewChunkOfHash(bank, hA);
+  eq(chunkKey, A.KEYS.reviewChunkOfHash(bank, hB), '两个 hash 同块');
+  // 标签 A 写入 hA → 落盘
+  A.Storage.setSync(A.KEYS.reviewState(bank, hA), { last: 10 });
+  await A.Storage.flush();
+  // 标签 B 写同块另一个 hash → 块内读改写，不能覆盖 A
+  B.Storage.setSync(B.KEYS.reviewState(bank, hB), { last: 20 });
+  await B.Storage.flush();
+  const both = await A.Store.readLogicalMany([A.KEYS.reviewState(bank, hA), A.KEYS.reviewState(bank, hB)]);
+  ok(both[A.KEYS.reviewState(bank, hA)].last === 10, 'A 的写入未被 B 覆盖（绿）');
+  ok(both[A.KEYS.reviewState(bank, hB)].last === 20, 'B 的写入落盘（绿）');
+  // 红例：整块覆盖（旧式「读缓存整块 put」语义）会丢掉对方写入
+  await A.Store.writeReviewChunks([{ bank: bank, bucket: A.KEYS.reviewBucket(hA), states: { [hA]: { last: 10 } } }]);
+  const overwritten = await A.Store.get(chunkKey);
+  ok(!overwritten.s[hB], '红例复现：整块覆盖丢失并发写入（hB 不在块内）');
+  // 修复后：下一次业务写入以持久块为基准合并，hB 重新落盘
+  B.Storage.setSync(B.KEYS.reviewState(bank, hB), { last: 20 });
+  await B.Storage.flush();
+  const back = await A.Store.readLogicalMany([A.KEYS.reviewState(bank, hB)]);
+  ok(back[A.KEYS.reviewState(bank, hB)].last === 20, '块内读改写恢复 hB（绿）');
+}
+
+section('v6→v7 中断续跑：不丢状态、不提前写 schema');
+{
+  const fail = { on: false, count: 0, at: 20 };
+  const idb = createMemoryIDB({ failWrite: () => (fail.on ? (++fail.count === fail.at) : false) });
+  const raw = new Map();
+  const H = await makeHarness({ indexedDB: idb, raw: raw });
+  const QB = H.QB;
+  QB.DB.init();
+  QB.Store.writeMarker('idb');
+  await QB.Storage.initStore();
+  // 多个题库 → 多个块写入，确保中断点落在分块迁移阶段（而不是自动备份阶段）
+  const pairs = [];
+  for (let b = 0; b < 60; b++) {
+    for (let i = 0; i < 2; i++) pairs.push(['bk' + b, '3:ee000000' + String(b).padStart(4, '0') + String(i)]);
+  }
+  const records = [];
+  pairs.forEach((p) => records.push(...rawReviewRecords(QB, p[0], [[p[1], { last: Number(p[1].slice(-2)) }]])));
+  await rawIdbWrite(H.window, records);
+  await QB.Storage.initStore();
+  QB.Storage.setSync(QB.KEYS.metaSchema, 6);
+  fail.on = true;
+  await throwsAsync(() => QB.Migration.run(), /模拟写入失败|事务|完整性|迁移|备份/, 'v6→v7 中途被打断');
+  eq(QB.Storage.get(QB.KEYS.metaSchema), 6, '中断时 schema 仍为 6（未写半成品版本）');
+  ok(QB.Storage.get(QB.KEYS.reviewState('bk0', pairs[0][1])).last != null, '中断时旧记录仍完整（未删）');
+  fail.on = false;
+  const r = await QB.Migration.run();
+  eq(QB.Storage.get(QB.KEYS.metaSchema), 7, '续跑后 schema=7');
+  ok(r.reviewChunks.resumed === true, '续跑识别断点（未从头重跑）');
+  ok(r.reviewChunks.states > 0 && r.reviewChunks.states < 120,
+    '续跑只校验剩余状态（本次 ' + r.reviewChunks.states + ' / 共 120）');
+  const keys = pairs.map((p) => QB.KEYS.reviewState(p[0], p[1]));
+  const logical = await QB.Store.readLogicalMany(keys);
+  ok(pairs.every((p) => logical[QB.KEYS.reviewState(p[0], p[1])].last != null), '120 个状态全部可从块读回');
+  eq(await QB.Store.get(QB.KEYS.reviewState('bk0', pairs[0][1])), undefined, '续跑完成后旧物理键已清理');
 }
 
 /* ============================================================ */
