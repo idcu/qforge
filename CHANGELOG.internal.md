@@ -11,7 +11,7 @@
 
 ### docs(arch): 收口分层/端口/路径/计数与样例数据口径（D-1/D-2/D-4~D-8）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`d8c2acf / 0d5d237 / 1d27fa5 / adce732`（依次 D-1/D-2/D-4 · D-5 · D-6 · D-7）
 
 **核心改动**
 - **D-1**：`docs/ARCHITECTURE.md` §2 由「表现/应用/数据」3 层图改为 **4 概念层（L3→L0）** 图，并显式声明
@@ -47,7 +47,7 @@
 
 ### test(docs): docs-check 新增章节标题唯一性判据，修复 ARCHITECTURE 重复标题（R-16 / D-3）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`8b02c82 / ed344a6`（依次 D-3 · R-16；D-3 必须先落，否则 R-16 中间态红）
 
 **核心改动**
 - `scripts/docs-check.mjs`：新增 `headingProblems(doc)` 与 `markdownFiles()`（README + `docs/**/*.md` 递归）。
@@ -71,7 +71,7 @@
 
 ### fix(ui): 存储迁移等待状态栏显示阶段与已等待秒数（R-18）
 
-**Commit Hash**：`80396f8`
+**Commit Hash**：`6ec4f08`
 
 **核心改动**
 - `js/app.js`：迁移等待块抽出 `paintWait(stage, tail)` 与 `waitedSeconds()`，状态栏文案改为
@@ -102,7 +102,7 @@
 
 ### test(sw): 固化 SW 缓存版本基线红证据，新增 CSP 三处同步门禁（R-12 / R-13）
 
-**Commit Hash**：`a765e4f`
+**Commit Hash**：`7510c5b`（R-12/R-13 合并保留：R-12 无 tracked 改动，单独拆出只能是空提交）
 
 **核心改动**
 - **R-12（不新增脚本，复用既有基线门禁）**：`scripts/sw-runtime.test.mjs` 已用
@@ -137,7 +137,7 @@
 
 ### perf(api): 列表接口 ETag 协商缓存，304 复用解析结果（R-09）
 
-**Commit Hash**：`1b814d5`
+**Commit Hash**：`4f3496f`
 
 **核心改动**
 - `scripts/serve-api.mjs`：新增 `jsonEtag(req,res,body)`（响应体 sha1 前 20 位做强 ETag，`If-None-Match`
@@ -166,7 +166,7 @@
 
 ### fix(sync): 跨标签错题本按键合并，避免整值覆盖丢题（R-08 方案 A）
 
-**Commit Hash**：`1f97a6e`
+**Commit Hash**：`5cd0a85`
 
 **核心改动**
 - `js/data/local-adapter.js`：新增纯函数 `mergeWrongLists(local, incoming)`（按 `questionKey` 并集，
@@ -197,7 +197,7 @@
 
 ### refactor(modules): 装配契约落地 tier，门禁禁止向上依赖（R-05）
 
-**Commit Hash**：`0b46065`
+**Commit Hash**：`70ac382`
 
 **核心改动**
 - `contracts/modules.json`：86 条全部新增 `tier`（`L0:30 / L1:9 / L2:43 / L3:4`）；`utils.storage`、
@@ -229,7 +229,7 @@
 
 ### refactor(data): 数据层端口注入，消解 L1 → L2 反向依赖（R-03）
 
-**Commit Hash**：`f9d56a6`
+**Commit Hash**：`cb5562d`
 
 **核心改动**
 - `js/data/local-adapter.js`：新增 `QB.LocalAdapter.hooks`（`schedInvalidate` / `backup`）与
@@ -273,7 +273,7 @@
 
 ### perf(stats): 统计页 forecast 缓存（P-6）
 
-**Commit Hash**：`960cadb`
+**Commit Hash**：`931446a`
 
 **核心改动**
 - `js/app.js`：新增 `State.forecastCache`（`{bankId, qRev, logRev, value}`）；`case 'stats'` 先按
@@ -312,7 +312,7 @@
 
 ### refactor(storage): 字节口径唯一化（R-07）
 
-**Commit Hash**：`d526b56`
+**Commit Hash**：`003cb77`
 
 **核心改动**
 - `js/utils/storage.js`：公开 `fullKeyOf(key)`（LS 物理键唯一实现）；`usageBytes()` 的 IDB/LS 两分支
@@ -347,7 +347,7 @@
 
 ### docs(arch): 启动分层水合 spike 判定 no-go（R-10，未实施）
 
-**Commit Hash**：`9402aef`
+**Commit Hash**：`cf86469`
 
 **核心改动**
 - **未修改任何生产代码**。新增临时 spike `.analysis/architecture-audit/r10-spike.mjs`（不入库），
@@ -377,7 +377,7 @@
 
 ### perf(share): 分享前先精确估算回链体积（R-19）
 
-**Commit Hash**：`9556401`
+**Commit Hash**：`2913ffc`
 
 **核心改动**
 - `js/modules/share-link.js`：新增 `QB.ShareLink.estimateChars(bytes)`，纯算术
@@ -417,7 +417,7 @@
 
 ### fix(import): 导入体积在读取前预检（R-20）
 
-**Commit Hash**：`4d75763`
+**Commit Hash**：`834d7b3`
 
 **核心改动**
 - `js/config.js`：新增 `LIMITS.IMPORT_MAX_BYTES = 16 MiB`（REFACTOR-PLAN 初值，待产品确认）。
@@ -448,7 +448,7 @@
 
 ### perf(progress): 收卷错题改为一次读改写（R-02）
 
-**Commit Hash**：`c3a3121`
+**Commit Hash**：`63c702a`
 
 **核心改动**
 - `js/data/contracts.js`：`OPTIONAL_CONTRACTS` 增 `progress: ['wrongAddMany']`（缺失时领域层降级）。
@@ -483,7 +483,7 @@
 
 ### refactor(config): 容量阈值收敛到 LIMITS 单一事实源（R-15）
 
-**Commit Hash**：`f81fbf1`
+**Commit Hash**：`8d89960`
 
 **核心改动**
 - `js/config.js`：`LIMITS` 新增 `BACKUP_LS_WARN_BYTES = 4MiB`、`QUIZLET_MAX_TEXT_LENGTH = 4MiB`
@@ -527,7 +527,7 @@
 
 ### fix(sw): 缓存清理收窄到本站命名空间（R-11）
 
-**Commit Hash**：`7ac18bf`
+**Commit Hash**：`cbbbed8`
 
 **核心改动**
 - `sw.js`：新增 `CACHE_PREFIX = 'qforge-'`；activate 的清理从 `keys.filter(k => k !== CACHE)`
@@ -560,7 +560,7 @@
 
 ### fix(security): WebDAV 密码不再写入 HTML 属性（R-14）
 
-**Commit Hash**：`7452aa8`
+**Commit Hash**：`05401b5`
 
 **核心改动**
 - `js/modules/sync-dav.js`：设置弹窗的密码输入框由
@@ -595,7 +595,7 @@
 
 ### feat(contract): 声明可选契约并提供统一能力检测（R-06）
 
-**Commit Hash**：`12e1029`
+**Commit Hash**：`83cbea8`
 
 **核心改动**
 - `js/data/contracts.js`：新增 `QB.OPTIONAL_CONTRACTS = { reviews: ['get','patch'], revlog: ['revision'] }`、
@@ -637,7 +637,7 @@
 
 ### fix(render): 渲染代次守卫，过期 render 不得覆盖新视图（R-01）
 
-**Commit Hash**：`183ebef`
+**Commit Hash**：`6bea685`
 
 **核心改动**
 - `js/app.js`：新增模块级 `renderSeq`；`render()` 入口取号 `seq = ++renderSeq`，在
@@ -670,7 +670,7 @@
 
 ### fix(app): boot 整体兜底——启动失败可见错误态 + 诊断下载（R-21）
 
-**Commit Hash**：`6024900`
+**Commit Hash**：`1a4ed04`
 
 **核心改动**
 - `js/app.js`：`boot()` 改为 `try { await startApp() } catch` 整体兜底；原 boot 主体改名为 `startApp()`，行为不变。
@@ -706,7 +706,7 @@
 
 ### test(bench): 阶段 0 度量基线（写放大 / 启动水合 / 分享体积）
 
-**Commit Hash**：`8d97075`
+**Commit Hash**：`4f598bb`
 
 **核心改动**
 - `scripts/bench.mjs` 新增 3 组**观测行**（不新增门禁、不调阈值）：
