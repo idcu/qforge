@@ -609,6 +609,23 @@ row('首页渲染 HTML 构建（3000 题库，与题库规模无关）', await t
   homeHtml3k = UI.renderHome(bigBank, counts3k);
 }, 50), 'HTML ' + homeHtml3k.length + ' 字符');
 
+/* ---------- 11c-2. 统计页 forecast（P-6）：单次全量扫描成本 ---------- */
+/* A/B：改造前每次进入统计页付 1 次；P-6 缓存命中后 0 次（app-boot 4 项断言）。
+   forecast 只读、不写任何键；额外记一次 GC 前后的 heap 边界（1 次采样，不进 --assert 门禁）。 */
+const fcTime = await timed(async () => {
+  await QB.SRSStore.forecast(bigBank.id, bigAll, 7);
+}, 5);
+bestEffortGc();
+const fcHeapBefore = process.memoryUsage().heapUsed;
+await QB.SRSStore.forecast(bigBank.id, bigAll, 7);
+const fcHeapAfter = process.memoryUsage().heapUsed;
+bestEffortGc();
+const fcHeapResident = process.memoryUsage().heapUsed;
+row('统计页 forecast 单次（3000 题全量复习状态）', fcTime,
+  'A/B：改造前每次进入统计页付 1 次；P-6 缓存命中后 0 次（app-boot 4 项断言）；' +
+  '扫描 3000 条 / 命中后 0 条；heap 边界 ' + mb(fcHeapAfter - fcHeapBefore) +
+  '（GC 后驻留 ' + mb(fcHeapResident - fcHeapBefore) + '，含未回收临时对象）');
+
 const QUIZ_N = QB.CONFIG.QUESTIONS_PER_QUIZ;
 const eng = new QB.QuizEngine();
 eng.loadQuestions(bigAll.slice(0, QUIZ_N), 'mixed', {});

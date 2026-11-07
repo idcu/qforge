@@ -6,7 +6,7 @@
  * 本套件只验证 app.js 的「入口分派、参数传递、状态迁移、失败反馈」是否接线正确。
  *
  * 判据（负例带牙齿）：
- *   1. 正常模式下所有断言必须通过（71 项）；
+ *   1. 正常模式下所有断言必须通过（91 项）；
  *   2. `node scripts/app-boot.test.mjs --mutate-commit-import` 会把 app.js 源码里的
  *      `DataIO.commitImport` 调用改坏（改为 res=null），整套件必须出现失败并 exit 1，
  *      否则说明本套件没有覆盖到该入口 → exit 2。
@@ -477,6 +477,38 @@ section('渲染代次守卫（R-01）：旧 render 不得覆盖新视图');
   ok(env.dom.document.getElementById('tabs').innerHTML.indexOf('class="tab active" data-tab="home"') >= 0,
     '标签栏保持新视图（首页激活）');
   QB.SRSStore.forecast = realForecast;
+  env.restore();
+}
+
+/* ============================================================
+ * 7. 统计页 forecast 缓存（P-6）
+ * ============================================================ */
+section('统计页 forecast 缓存（P-6）：同修订重复进入 0 次重算，写后失效');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  const bank = await QB.DB.banks.create({ name: '统计缓存库' });
+  QB.App.State.bankId = bank.id;
+  QB.App.State.banksLoaded = false;
+  await QB.DB.setCurrentBankId(bank.id);
+  let calls = 0;
+  const realForecast = QB.SRSStore.forecast;
+  QB.SRSStore.forecast = async (...args) => { calls++; return realForecast.apply(QB.SRSStore, args); };
+  QB.App.State.view = 'stats';
+  await QB.App.render();
+  eq(calls, 1, '首次进入统计页：forecast 调用 1 次');
+  await QB.App.render();
+  eq(calls, 1, '题库/日志未变再次渲染：forecast 0 次（缓存命中）');
+  QB.DB.revlog.append([{ id: 'p6l1', t: 1, h: '2:deadbeef', r: 3 }]);
+  await QB.App.render();
+  eq(calls, 2, '评分日志 revision 变化后：forecast 重新计算 1 次');
+  QB.App.State.view = 'home';
+  await QB.App.render();
+  QB.App.State.view = 'stats';
+  await QB.App.render();
+  eq(calls, 2, '离开再进入统计页：缓存仍命中（不重复扫描）');
+  QB.SRSStore.forecast = realForecast;
+  QB.App.State.view = 'home';
   env.restore();
 }
 
