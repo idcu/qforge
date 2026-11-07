@@ -9,6 +9,30 @@
 
 ## 最新记录
 
+### test(docs): docs-check 新增章节标题唯一性判据，修复 ARCHITECTURE 重复标题（R-16 / D-3）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `scripts/docs-check.mjs`：新增 `headingProblems(doc)` 与 `markdownFiles()`（README + `docs/**/*.md` 递归）。
+  判据按作用域：**H1/H2 全文唯一**；**H3+ 仅在所属 H2 小节内唯一**——决策记录类文档在不同决策小节下
+  重复 `### 现状` 属合法结构，不误杀。重复项输出「文件:行号 + 首次出现行号」。
+- `docs/ARCHITECTURE.md`：删除重复的 `## 3. 模块清单与职责`（D-3，第 58/60 行两处）。
+- `docs/DEVELOPMENT.md`：docs-check 段落补 R-16 判据说明。
+- `--selftest` 新增 2 例：同作用域重复必须红；不同 H2 下重复 H3 必须绿。
+
+**验证数据（实测）**
+- 红：加入判据、未修 D-3 时 `node scripts/docs-check.mjs --static` →
+  **`docs/ARCHITECTURE.md:60：重复章节标题 ## 3. 模块清单与职责（首次出现在第 58 行）`，exit 1**。
+  原始输出：`.analysis/architecture-audit/stage6-red-heading.txt`。
+- 绿：删除重复标题后 → **全部一致，exit 0**；`--selftest` **5/5 exit 0**。
+  原始输出：`.analysis/architecture-audit/stage6-green-heading.txt`。
+- 全量：`verify:fast` exit **0**（36 运行项 / **5514** 断言）；`bench --assert` **64/64 exit 0**。
+
+**遗留 TODO / 风险**
+- 标题判重只按「层级 + 文本」字面比较；标题编号变化（`## 3.` vs `## 3.1`）不会互相比较。
+- 扫描范围仅为 `README.md` 与 `docs/` 下 `.md`；仓库根其它 Markdown 不参与判重。
+
 ### fix(ui): 存储迁移等待状态栏显示阶段与已等待秒数（R-18）
 
 **Commit Hash**：`80396f8`
