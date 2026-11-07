@@ -195,6 +195,47 @@ function readDoc(rel) {
   return { rel, text, lines: text.split(/\r?\n/) };
 }
 
+/* ---------- 5.1 章节标题唯一性（R-16） ----------
+ * `## 3.` 这类重复标题在阅读时像「滚动出错」，却不会被任何数字门禁发现（D-3）。
+ * 判据分作用域：H1/H2 全文唯一；H3+ 仅在同名 H2 小节内唯一（决策记录类文档
+ * 在不同决策小节下重复 `### 现状` 是合法结构，不误杀）。 */
+function headingProblems(doc) {
+  const out = [];
+  const seen = new Map();
+  let section = '';
+  doc.text.split(/\r?\n/).forEach((line, i) => {
+    const m = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (!m) return;
+    const level = m[1].length;
+    const title = m[2].trim();
+    if (level <= 2) section = level === 2 ? title : '';
+    const key = level <= 2
+      ? m[1] + ' ' + title
+      : '##' + section + ' > ' + m[1] + ' ' + title;
+    if (seen.has(key)) {
+      out.push(doc.rel + ':' + (i + 1) + '：重复章节标题 ' + m[1] + ' ' + title
+        + '（首次出现在第 ' + seen.get(key) + ' 行）');
+    } else {
+      seen.set(key, i + 1);
+    }
+  });
+  return out;
+}
+
+/** README 与 docs 目录下全部 .md（递归） */
+function markdownFiles() {
+  const out = [path.join(ROOT, 'README.md')];
+  const walk = (dir) => {
+    fs.readdirSync(dir, { withFileTypes: true }).forEach((e) => {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.md')) out.push(p);
+    });
+  };
+  walk(path.join(ROOT, 'docs'));
+  return out.map((abs) => path.relative(ROOT, abs).split(path.sep).join('/'));
+}
+
 /* ---------- 6. 自检：三种「静默绿」都必须被判红 ---------- */
 if (SELFTEST) {
   const fakeBase = {
@@ -223,6 +264,17 @@ if (SELFTEST) {
     {
       name: '基线被手改（合计与逐套件之和不等）',
       hit: () => baselineProblems({ ...fakeBase, totalAssertions: 4 }, ctx.runOrder, ctx.suiteFiles).length > 0
+    },
+    {
+      name: '重复章节标题（同作用域出现两次）',
+      hit: () => headingProblems({ rel: 'FAKE.md', text: '## 3. 模块清单\n\n## 3. 模块清单\n' }).length > 0
+    },
+    {
+      name: '不同 H2 小节下重复 H3（合法结构，不得误杀）',
+      hit: () => headingProblems({
+        rel: 'FAKE.md',
+        text: '## 决策 A\n\n### 现状\n\n## 决策 B\n\n### 现状\n'
+      }).length === 0
     }
   ];
   let ok = true;
@@ -294,6 +346,11 @@ const DOCS_WITH_NUMBERS = [
 const ctx = { counts, totalAssertions, gateCount, runOrder, suiteFiles, firstScreen };
 DOCS_WITH_NUMBERS.forEach((doc) => {
   auditDoc(doc, ctx).forEach((p) => problems.push(p));
+});
+
+// R-16：章节标题唯一性（README + docs/**/*.md）
+markdownFiles().forEach((rel) => {
+  headingProblems(readDoc(rel)).forEach((p) => problems.push(p));
 });
 
 console.log('\n================ 文档数字校验 ================');
