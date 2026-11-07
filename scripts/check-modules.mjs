@@ -7,18 +7,20 @@
  * 唯一事实源是 `contracts/modules.json`（装配清单）：它声明每个脚本的 id / 文件 / 层 / 前置依赖 /
  * 导出符号。`index.html` 只是这份清单的**投影**，判据核对两边逐条一致。
  *
- * 查七件事：
+ * 查八件事：
  *   1. 清单合法：schemaVersion=1、id 唯一、at 连续、每个文件都存在；
  *   2. `index.html` 的 `<script src>` 序列与清单**逐条相等**（加/删/调序都要同步改清单）；
  *   3. `requires` 是数组、id 存在、不重复，且确实排在本条之前（加载期前置依赖 DAG）；
  *   4. `keeps` 是数组且**每个声明都在本模块源码里有对应赋值**（防误删导出后静默 undefined）；
  *   5. 入口 `js/app.js` 最后、配置 `js/config.js` 最先（`sample-data` 例外）；
  *   6. `js/**` 下每个脚本都被引用（`js/workers/*` 例外，由 Worker 自己加载）；
- *   7. `index.html` 里写的每个 src 都真实存在。
+ *   7. `index.html` 里写的每个 src 都真实存在；
+ *   8. 依赖方向：`tier` 必须为枚举值，`requires` 的目标 `tier` 不得高于本条（L3 > L2 > L1 > L0）；
+ *      确有向上依赖的必须登记 `allowUpward: [{id, until, reason}]`，到期即判红（不允许无限期挂账）。
  *
  * 用法：
  *   node scripts/check-modules.mjs            校验仓库
- *   node scripts/check-modules.mjs --selftest 负例自检（乱序 / 不存在依赖 / 删导出 必须全红）
+ *   node scripts/check-modules.mjs --selftest 负例自检（乱序 / 不存在依赖 / 删导出 / tier 向上 / 例外到期 必须全红）
  * 退出码：0 通过；1 有违约（selftest 下：1 = 未全部拦截，0 = 全部拦截成功）。
  */
 import fs from 'node:fs';
@@ -44,9 +46,13 @@ try {
   problems.push('装配清单不可读：' + e.message);
 }
 
-/** 1/2/3/4：纯清单校验（selftest 复用同一实现，避免自检与被检逻辑分叉） */
-function checkManifest(mods, sources) {
+/** tier 方向：L3 表现 > L2 领域 > L1 数据 > L0 基础；P 为外围，不参与方向比较 */
+const TIER_RANK = { L0: 0, L1: 1, L2: 2, L3: 3, P: null };
+
+/** 1/2/3/4/8：纯清单校验（selftest 复用同一实现，避免自检与被检逻辑分叉） */
+function checkManifest(mods, sources, today = new Date()) {
   const out = [];
+  const stats = { upward: 0, allowed: 0 };
   const ids = new Set();
   const byIndex = new Map();
   mods.forEach((m, i) => {
@@ -56,6 +62,52 @@ function checkManifest(mods, sources) {
     if (m.at !== i + 1) out.push(`${m.id} 的 at 应为 ${i + 1}，实际 ${m.at}`);
     if (!Array.isArray(m.requires)) out.push(`${m.id} 缺少 requires 数组`);
     if (!Array.isArray(m.keeps)) out.push(`${m.id} 缺少 keeps 数组`);
+  });
+
+  /* 8. 依赖方向（tier 不得向上；例外须登记且未到期） */
+  mods.forEach((m) => {
+    if (m.tier === undefined || TIER_RANK[m.tier] === undefined) {
+      out.push(`${m.id} 的 tier 非法：${m.tier}（应为 L0 / L1 / L2 / L3 / P）`);
+      return;
+    }
+    const allow = new Map();
+    if (m.allowUpward !== undefined) {
+      if (!Array.isArray(m.allowUpward)) {
+        out.push(`${m.id} 的 allowUpward 必须是数组`);
+      } else {
+        m.allowUpward.forEach((e) => {
+          if (!e || typeof e.id !== 'string' || typeof e.until !== 'string' || typeof e.reason !== 'string') {
+            out.push(`${m.id} 的 allowUpward 条目必须含 id / until / reason`);
+            return;
+          }
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(e.until)) {
+            out.push(`${m.id} 的 allowUpward ${e.id} until 非法：${e.until}（应为 YYYY-MM-DD）`);
+          } else if (new Date(e.until + 'T23:59:59Z') < today) {
+            out.push(`${m.id} 的向上依赖例外 ${e.id} 已到期（until ${e.until}）：必须解除或重新评审，不得延期挂账`);
+          }
+          if (!ids.has(e.id)) out.push(`${m.id} 的 allowUpward 指向不存在的 id：${e.id}`);
+          allow.set(e.id, e);
+        });
+      }
+    }
+    const rank = TIER_RANK[m.tier];
+    if (rank === null) return; // P 不参与方向比较
+    const used = new Set();
+    for (const dep of m.requires || []) {
+      const d = mods[byIndex.get(dep)];
+      if (!d || TIER_RANK[d.tier] === null) continue;
+      if (TIER_RANK[d.tier] > rank) {
+        used.add(dep);
+        if (allow.has(dep)) stats.allowed++;
+        else {
+          stats.upward++;
+          out.push(`${m.id}（${m.tier}）向上依赖 ${dep}（${d.tier}）：未登记 allowUpward`);
+        }
+      }
+    }
+    allow.forEach((e, depId) => {
+      if (!used.has(depId)) out.push(`${m.id} 登记了 allowUpward ${depId}，但当前已不构成向上依赖（请删除过期例外）`);
+    });
   });
 
   const declared = mods.map((m) => String(m.file));
@@ -90,7 +142,7 @@ function checkManifest(mods, sources) {
       if (!re.test(src)) out.push(`${m.id} 未导出声明的 ${keep}（源码里找不到对应赋值）`);
     }
   });
-  return out;
+  return { problems: out, stats: stats };
 }
 
 function definitionRe(keep) {
@@ -102,6 +154,7 @@ function definitionRe(keep) {
   return new RegExp('\\b(?:window|globalThis|global|root|self)\\.' + name + '\\s*=');
 }
 
+let tierStats = { upward: 0, allowed: 0 };
 if (manifest) {
   if (manifest.schemaVersion !== 1) problems.push(`schemaVersion 应为 1，实际 ${manifest.schemaVersion}`);
   const mods = manifest.modules || [];
@@ -114,7 +167,9 @@ if (manifest) {
     const full = path.join(ROOT, String(m.file));
     return [m.file, fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : null];
   }));
-  problems.push(...checkManifest(mods, sources));
+  const checked = checkManifest(mods, sources);
+  problems.push(...checked.problems);
+  tierStats = checked.stats;
 }
 
 /* 5. 入口最后 / 配置最先 */
@@ -146,7 +201,7 @@ for (const f of walk(path.join(ROOT, 'js'))) {
   if (!srcs.includes(f)) problems.push(`孤儿脚本（没有任何入口加载它）：${f}`);
 }
 
-/* ---- 负例自检：证明「乱序 / 不存在依赖 / 删导出」真的会被判红 ---- */
+/* ---- 负例自检：证明「乱序 / 不存在依赖 / 删导出 / tier 向上 / 例外到期」真的会被判红 ---- */
 if (process.argv.includes('--selftest')) {
   const mods = manifest.modules;
   const baseSources = new Map(mods.map((m) => [m.file, fs.readFileSync(path.join(ROOT, m.file), 'utf8')]));
@@ -157,12 +212,12 @@ if (process.argv.includes('--selftest')) {
       const tmp = bad[1];
       bad[1] = bad[2];
       bad[2] = tmp;
-      return checkManifest(bad, baseSources).some((p) => p.includes('项不一致'));
+      return checkManifest(bad, baseSources).problems.some((p) => p.includes('项不一致'));
     }],
     ['不存在依赖（requires 指向 ghost）', () => {
       const bad = cloneMods();
       bad[2].requires = (bad[2].requires || []).concat('ghost.module');
-      return checkManifest(bad, baseSources).some((p) => p.includes('不存在的 id'));
+      return checkManifest(bad, baseSources).problems.some((p) => p.includes('不存在的 id'));
     }],
     ['删导出（移除 QB.Storage 赋值）', () => {
       const bad = mods.map((m) => ({ ...m }));
@@ -170,7 +225,23 @@ if (process.argv.includes('--selftest')) {
       const target = bad.find((m) => (m.keeps || []).includes('QB.Storage'));
       const src = sources.get(target.file);
       sources.set(target.file, src.replace(/\bQB\.Storage\s*=/, '/* removed */'));
-      return checkManifest(bad, sources).some((p) => p.includes('未导出声明的 QB.Storage'));
+      return checkManifest(bad, sources).problems.some((p) => p.includes('未导出声明的 QB.Storage'));
+    }],
+    ['tier 向上依赖未登记（移除 backup 的 allowUpward）', () => {
+      const bad = cloneMods();
+      const target = bad.find((m) => m.id === 'modules.backup');
+      target.allowUpward = [];
+      return checkManifest(bad, baseSources).problems.some((p) => p.includes('未登记 allowUpward'));
+    }],
+    ['allowUpward 已到期（until 2000-01-01）', () => {
+      const bad = cloneMods();
+      bad.find((m) => m.id === 'modules.backup').allowUpward[0].until = '2000-01-01';
+      return checkManifest(bad, baseSources).problems.some((p) => p.includes('已到期'));
+    }],
+    ['tier 非法（写成 L9）', () => {
+      const bad = cloneMods();
+      bad[2].tier = 'L9';
+      return checkManifest(bad, baseSources).problems.some((p) => p.includes('tier 非法'));
     }]
   ];
   let caught = 0;
@@ -185,9 +256,16 @@ if (process.argv.includes('--selftest')) {
 } else {
   const layerCount = manifest ? new Set((manifest.modules || []).map((m) => m.layer)).size : 0;
   const keepCount = manifest ? (manifest.modules || []).reduce((n, m) => n + (m.keeps || []).length, 0) : 0;
+  const tierDist = manifest
+    ? Object.entries((manifest.modules || []).reduce((acc, m) => {
+        acc[m.tier] = (acc[m.tier] || 0) + 1;
+        return acc;
+      }, {})).map(([t, n]) => t + ':' + n).join(' ')
+    : '';
   console.log(`modules: ${localJs.length} 个本地脚本 + ${srcs.length - localJs.length} 个 vendor，`
     + `${manifest ? (manifest.modules || []).length : 0} 条清单，${layerCount} 层，${keepCount} 个导出符号，`
     + `${problems.length} 处违约`);
+  console.log(`tier: ${tierDist}；未登记向上依赖 ${tierStats.upward}，已登记例外 ${tierStats.allowed}`);
   for (const p of problems) console.error('  - ' + p);
   process.exitCode = problems.length ? 1 : 0;
 }
