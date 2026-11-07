@@ -11,7 +11,7 @@
 
 ### docs(arch): 收口分层/端口/路径/计数与样例数据口径（D-1/D-2/D-4~D-8）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`6d03182`
 
 **核心改动**
 - **D-1**：`docs/ARCHITECTURE.md` §2 由「表现/应用/数据」3 层图改为 **4 概念层（L3→L0）** 图，并显式声明
@@ -47,7 +47,7 @@
 
 ### test(docs): docs-check 新增章节标题唯一性判据，修复 ARCHITECTURE 重复标题（R-16 / D-3）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`5979d25`
 
 **核心改动**
 - `scripts/docs-check.mjs`：新增 `headingProblems(doc)` 与 `markdownFiles()`（README + `docs/**/*.md` 递归）。
