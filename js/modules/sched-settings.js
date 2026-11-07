@@ -197,4 +197,9 @@
       (local, incoming) => { bankCache.clear(); return incoming; }
     );
   }
+
+  /* R-03：领域向数据层注册端口（L2 → L1 注册），数据层不再反向点名本模块。 */
+  if (QB.LocalAdapter && QB.LocalAdapter.hooks) {
+    QB.LocalAdapter.hooks.schedInvalidate = invalidate;
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

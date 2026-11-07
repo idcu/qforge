@@ -974,4 +974,9 @@
     confirmRestore,
     download, pickAndRestore, openFlow
   };
+
+  /* R-03：领域向数据层注册端口（L2 → L1 注册），local-adapter 不再反向点名本模块。 */
+  if (QB.LocalAdapter && QB.LocalAdapter.hooks) {
+    QB.LocalAdapter.hooks.backup = { readAllData: readAllData, applyData: applyData };
+  }
 })(window);

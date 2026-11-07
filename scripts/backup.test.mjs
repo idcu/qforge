@@ -479,6 +479,20 @@ section('forceSync 等待 IDB 落盘并上抛错误（P2-11）');
   Store.batch = origBatch;
 }
 
+section('数据层端口注册（R-03：L2 → L1，数据层不反向点名领域）');
+{
+  ok(typeof QB.LocalAdapter.hooks.schedInvalidate === 'function', 'schedInvalidate 端口已由 sched-settings 注册');
+  ok(typeof QB.LocalAdapter.hooks.backup.readAllData === 'function'
+    && typeof QB.LocalAdapter.hooks.backup.applyData === 'function', 'backup 端口已由 backup 模块注册');
+  const saved = QB.LocalAdapter.hooks.backup;
+  QB.LocalAdapter.hooks.backup = null;
+  let err = null;
+  try { QB.LocalAdapter.backup.export(); } catch (e) { err = e; }
+  ok(!!err && err.message.indexOf('备份模块未加载') >= 0, '端口缺失时抛可读错误（不静默返回空数据）');
+  QB.LocalAdapter.hooks.backup = saved;
+  ok(!!QB.LocalAdapter.backup.export().data, '恢复端口后 export 正常返回 { data }');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }

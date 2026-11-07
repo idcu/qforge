@@ -190,9 +190,11 @@
   let weightsCache = null;
 
   /* ---------------- BankRepository ---------------- */
-  /** C019：题库记录变更后让 QB.SchedSettings 的按库缓存失效（模块可能尚未加载，故做存在性守卫）。 */
+  /** C019：题库记录变更后丢弃按库调度缓存——经数据层端口通知（由 modules/sched-settings.js 注册）。 */
   function invalidateSchedCache(bankId) {
-    if (QB.SchedSettings && typeof QB.SchedSettings.invalidate === 'function') QB.SchedSettings.invalidate(bankId);
+    if (QB.LocalAdapter && typeof QB.LocalAdapter.notifySchedInvalidate === 'function') {
+      QB.LocalAdapter.notifySchedInvalidate(bankId);
+    }
   }
   const banks = {
     async list() { const r = await req('GET', ROUTES.banks); return (r.items || []).map(fromWireBank); },

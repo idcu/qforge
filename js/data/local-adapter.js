@@ -11,10 +11,28 @@
 
   function now() { return Date.now(); }
 
-  /** C019：题库记录变更后让 QB.SchedSettings 的按库缓存失效（模块可能尚未加载，故做存在性守卫）。
-   *  bankId 为空表示整表失效（备份恢复可能替换任意库）。 */
+  /* ---------------- 数据层端口表（L2 → L1 注册，数据层不反向点名领域模块） ----------------
+   * 领域模块在自身 IIFE 末尾向本对象注册能力；数据层只按端口名调用。
+   * 端口缺失时退化为 no-op（与「模块未加载」旧行为一致），不抛错。
+   */
+  const hooks = { schedInvalidate: null, backup: null };
+
+  /** C019：题库记录变更后丢弃按库调度缓存（由 modules/sched-settings.js 注册）。 */
+  function notifySchedInvalidate(bankId) {
+    if (typeof hooks.schedInvalidate === 'function') hooks.schedInvalidate(bankId);
+  }
+
   function invalidateSchedCache(bankId) {
-    if (QB.SchedSettings && typeof QB.SchedSettings.invalidate === 'function') QB.SchedSettings.invalidate(bankId);
+    notifySchedInvalidate(bankId);
+  }
+
+  /** 备份端口缺失时抛可读错误（不静默返回空数据）。 */
+  function backupPort() {
+    const p = hooks.backup;
+    if (!p || typeof p.readAllData !== 'function' || typeof p.applyData !== 'function') {
+      throw new Error('备份模块未加载：缺少 LocalAdapter.hooks.backup（应加载 js/modules/backup.js）');
+    }
+    return p;
   }
 
   /** 附带 contentHash 与时间戳的标准题目 */
@@ -1528,7 +1546,7 @@
   const backup = {
     /** 全量数据载荷 { data }（未脱敏；备份文件外壳与脱敏由 QB.Backup 负责） */
     export() {
-      const data = QB.Backup.readAllData();
+      const data = backupPort().readAllData();
       // IDB 模式：先把待写聚合成事务落盘（readAllData 读的是内存权威值，落盘只为持久性）
       if (QB.Storage.mode === 'idb' && typeof QB.Storage.flush === 'function') {
         return QB.Storage.flush().then(() => ({ data: data }));
@@ -1542,7 +1560,7 @@
       let out;
       try {
         // C017：applyData 现在会 await forceSync，IDB 写入失败在此上抛，不再「先报恢复成功」
-        out = await QB.Backup.applyData(data, mode);
+        out = await backupPort().applyData(data, mode);
       } finally {
         // C016：恢复同样是一次整库题目写（绕过 insertMany 等写路径），
         // 必须递增题目写修订号，否则 QB.DB.loadQuestions 会继续命中恢复前的旧缓存。
@@ -1640,6 +1658,8 @@
   // REVLOG_MAX：revlog FIFO 上限的唯一常量定义源，fsrs-opt 的 LOG_LIMIT 再导出此处
   QB.LocalAdapter = {
     banks, questions, progress, reviews, revlog, weights, backup,
+    hooks: hooks,
+    notifySchedInvalidate: notifySchedInvalidate,
     REVLOG_MAX: REVLOG_MAX
   };
   QB.QuestionShards = QuestionShards;   // 分片读写公共抽象（migrate 等复用，避免重复实现）
