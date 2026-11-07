@@ -23,7 +23,7 @@
 `node scripts/test-all.mjs --selftest` 注入一个「通过: 0 且 exit 0」的假套件并断言门禁拦下它
 （拦截 = exit 0，放行 = exit 1），用于证明这道闸真的会失败，而不是永远绿。
 
-**断言原语（C024）**：34 个套件的 `ok/eq/deepEq/section/throws` 统一来自 `scripts/lib/assert.mjs`
+**断言原语（C024）**：36 个运行项（1 冒烟 + 35 套件）的 `ok/eq/deepEq/section/throws` 统一来自 `scripts/lib/assert.mjs`
 的 `createAssert({ failures, onPass })`。各套件**仍保留**自己的 `let pass = 0; const failures = []`，
 通过 `onPass` 回写计数、通过共享 `failures` 数组收集失败——所以「通过: N」的输出格式、基线计数与
 总闸语义完全不变。`createAssert` 只做断言与记录，不接管汇总、不调用 `process.exit`；
