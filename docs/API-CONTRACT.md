@@ -13,6 +13,7 @@
 | 时间 | 毫秒时间戳（数值），字段名 `created_at` / `updated_at` |
 | 错误体 | `{ "error": { "code": "NOT_FOUND", "message": "题库不存在" } }` |
 | 幂等 | `PUT` / `DELETE` 幂等；`POST` 非幂等 |
+| 缓存协商（R-09） | `GET /api/banks` 与 `GET /api/banks/{id}/questions` 返回强 `ETag`（响应体 sha1 前 20 位）；客户端带 `If-None-Match` 且内容未变 → `304`（空体）。响应仍为 `Cache-Control: no-store`，条件请求由 `api-adapter` 显式发起；写操作后内容变化，旧 ETag 自然不命中（服务端回 `200` + 新 ETag），客户端无需主动清缓存 |
 | CORS | 默认**不放行跨源**（同源部署零配置）；跨源验收需参考后端显式 `CORS_ORIGIN`（逗号分隔来源或 `*`）。放行来源的预检 `OPTIONS` 返回 `204` + `Access-Control-Allow-Origin/Methods/Headers`；未放行来源预检返回 `403`，普通响应不带 ACAO |
 | 请求体上限 | 参考后端默认 32MB（`MAX_BODY_BYTES` 可调），超限返回 `413 PAYLOAD_TOO_LARGE` |
 | 限流 | 参考后端默认 **1200 次/分钟/IP**（`RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` 可调，`RATE_LIMIT_MAX=0` 关闭；`TRUST_PROXY=1` 时按 `X-Forwarded-For` 首段分桶）。仅 `/api/*` 受限，静态文件与 `/health` 不受影响；超限返回 `429 RATE_LIMITED` + `Retry-After` + `X-RateLimit-Limit/Remaining/Reset` |
@@ -23,7 +24,7 @@
 
 | 方法 | 路径 | 说明 | 请求体 | 响应 |
 | --- | --- | --- | --- | --- |
-| GET | `/api/banks` | 题库列表 | — | `{ items: Bank[], total }` |
+| GET | `/api/banks` | 题库列表（支持 ETag / 304） | — | `{ items: Bank[], total }` + `ETag` |
 | POST | `/api/banks` | 新建题库 | `{ name, description?, category? }` | `201` + `Bank` |
 | GET | `/api/banks/{id}` | 题库详情 | — | `Bank` |
 | PATCH | `/api/banks/{id}` | 修改（部分字段）；可选乐观并发 | `{ name?, description?, category?, source?, sched?, base_updated_at? }`；`source` 为 `{kind,uri,fetchedAt,checksum,refreshable}` 对象；`base_updated_at` 与服务端 `updated_at` 不一致 → `409 CONFLICT` + `current`，不覆盖他端修改 | `Bank`（`updated_at` 单调递增） |
@@ -44,7 +45,7 @@
 
 | 方法 | 路径 | 说明 | 请求体 | 响应 |
 | --- | --- | --- | --- | --- |
-| GET | `/api/banks/{id}/questions` | 分页查询 | — （query: `type`、`category`、`q`(关键词)、`page`、`size`） | `{ items, total, page, size }` |
+| GET | `/api/banks/{id}/questions` | 分页查询（支持 ETag / 304） | — （query: `type`、`category`、`q`(关键词)、`page`、`size`） | `{ items, total, page, size }` + `ETag` |
 | POST | `/api/banks/{id}/questions` | 新增单题 | `Question`（不含 id/bankId） | `201` + `Question` |
 | GET | `/api/questions/{qid}` | 单题详情 | — | `Question` |
 | PATCH | `/api/questions/{qid}` | 修改单题；可选 `base_updated_at` 启用乐观并发 | `Question` 部分字段 + `base_updated_at?` | `Question`；版本过期 → `409 { error:{code:"CONFLICT"}, current }`；`base_updated_at` 显式非有限数值 → `400 BAD_REQUEST`；响应 `content_hash` 由服务端按合并结果重算 |
