@@ -14,6 +14,12 @@
  *   v5 → v6（存储底座）：LocalStorage → IndexedDB（`QB.Store` 统一接口）。
  *     不做数据形状转换：分批复制 → 逐键深比对 → 最后写 'idb' 标记；LS 旧数据保留为退路。
  *     IDB 不可用（隐私模式/配额拒绝/版本冲突）时写 'ls-fallback' 标记并继续用 LS（不白屏）。
+ *   v6 → v7（复习状态分块）：`user:review:<bank>:<hash>` → `user:reviewChunk:<bank>:<bucket>`。
+ *     物理每库固定 256 桶（hash 前 2 位十六进制），启动水合展开回 per-hash 逻辑键，
+ *     上层语义不变；目的是把水合记录数从「状态数」降到「桶数」，降低 IDB 批量读开销。
+ *     两阶段可续跑：① 按库写块并逐 hash 校验；② **全部库校验通过后**才分批删除旧
+ *     per-hash 物理键（校验前旧记录全程保留，任何中断都可续跑，且逻辑视图中两份副本按
+ *     last 合并，不存在半成品可读窗口）。
  *
  * 可靠性设计：
  *   - **幂等/可重入**：每库先把 oldHash→newHash 映射写入 meta:hashMap:<bankId>，再改题目与
@@ -32,7 +38,7 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
 
-  const SCHEMA_VERSION = 6;
+  const SCHEMA_VERSION = 7;
   const LOCK_TTL_MS = 30000;
   /** 持锁迁移期间续租间隔：远小于 TTL，保证「胜者只是慢」时等待者不会误判为崩溃 */
   const LOCK_RENEW_MS = 2000;
@@ -482,6 +488,167 @@
     return { backend: 'idb', migrated: migrated };
   }
 
+  /* ---------------- v6 → v7：复习状态物理分块 ---------------- */
+
+  const CHUNK_PHASE = 'v6-to-v7';
+  /** 每事务最多写 64 个块（粗估 ≤1.5MB），避免单事务过大 */
+  const CHUNK_WRITE_BATCH = 64;
+  /** 每事务最多删 256 个旧 per-hash 物理键 */
+  const CHUNK_DELETE_BATCH = 256;
+
+  /** 用当前逻辑缓存（权威视图）构建某库的分桶值：bucket → {hash: state} */
+  function buildBankChunks(bank, hashes) {
+    const buckets = new Map();
+    hashes.forEach((hash) => {
+      const value = QB.Storage.get(QB.KEYS.reviewState(bank, hash));
+      if (value === undefined || value === null) return; // 已删除状态不进块
+      const bucket = QB.KEYS.reviewBucket(hash);
+      let states = buckets.get(bucket);
+      if (!states) { states = {}; buckets.set(bucket, states); }
+      states[hash] = value;
+    });
+    return Array.from(buckets.entries()).map(([bucket, states]) => ({ bank: bank, bucket: bucket, states: states }));
+  }
+
+  async function writeBankChunks(items) {
+    for (let i = 0; i < items.length; i += CHUNK_WRITE_BATCH) {
+      await QB.Store.writeReviewChunks(items.slice(i, i + CHUNK_WRITE_BATCH));
+    }
+  }
+
+  /** 逐 hash 校验块内容与逻辑视图一致；返回首个不一致逻辑键或 null */
+  async function verifyBankChunks(bank, hashes) {
+    const keys = hashes.map((h) => QB.KEYS.reviewState(bank, h));
+    const got = await QB.Store.readLogicalMany(keys);
+    for (let i = 0; i < keys.length; i++) {
+      const cur = QB.Storage.get(keys[i]);
+      if (cur === undefined) continue;
+      if (!QB.deepEqual(cur, got[keys[i]])) return keys[i];
+    }
+    return null;
+  }
+
+  /**
+   * v6 → v7 主流程（幂等、可续跑、可回退）。
+   * 阶段 1（write）：按库写块并逐 hash 校验（旧 per-hash 记录全程保留）；
+   * 阶段 2（delete）：**全部库校验通过后**才分批删除旧物理键，中断可续跑。
+   * 断点存 `meta:migrationProgress`（phase='v6-to-v7'，written/deleted 库列表）。
+   * @returns {Promise<{skipped?:string, banks?:number, states?:number, chunks?:number,
+   *   removed?:number, merged?:number, resumed?:boolean, ms?:number}>}
+   */
+  async function migrateV6ToV7() {
+    const Store = QB.Store;
+    const started = Date.now();
+    if (!Store || Store.mode !== 'idb' || !Store.available) return { skipped: 'non-idb' };
+
+    // 逻辑视图（缓存）= 块 ∪ 旧 per-hash，任何时刻都完整；按库分组
+    const byBank = new Map();
+    let totalStates = 0;
+    QB.Storage.keys().forEach((key) => {
+      const parts = Store.reviewStateParts(key);
+      if (!parts) return;
+      if (!byBank.has(parts.bank)) byBank.set(parts.bank, []);
+      byBank.get(parts.bank).push(parts.hash);
+      totalStates++;
+    });
+
+    const prev = Store.migrationProgress();
+    const resumable = !!(prev && prev.phase === CHUNK_PHASE);
+    const bankSet = new Set(byBank.keys());
+    if (resumable && Array.isArray(prev.banks)) prev.banks.forEach((b) => bankSet.add(b));
+    const banks = Array.from(bankSet).sort();
+    banks.forEach((b) => { if (!byBank.has(b)) byBank.set(b, []); });
+    const written = new Set(resumable && Array.isArray(prev.written) ? prev.written : []);
+    const deleted = new Set(resumable && Array.isArray(prev.deleted) ? prev.deleted : []);
+    let stage = (resumable && prev.stage === 'delete') ? 'delete' : 'write';
+
+    let chunks = 0;
+    let verified = 0;
+    let removed = 0;
+    let merged = 0;
+
+    const report = () => {
+      const doneUnits = written.size + (stage === 'delete' ? deleted.size : 0);
+      const totalUnits = banks.length * 2;
+      Store.reportMigrationProgress({
+        phase: CHUNK_PHASE,
+        stage: stage,
+        banks: banks,
+        written: Array.from(written),
+        deleted: Array.from(deleted),
+        totalStates: totalStates,
+        done: doneUnits,
+        total: totalUnits,
+        percent: totalUnits ? Math.floor((doneUnits / totalUnits) * 100) : 100,
+        at: new Date().toISOString()
+      });
+    };
+
+    if (stage === 'write') report();
+    for (let bi = 0; bi < banks.length && stage === 'write'; bi++) {
+      const bank = banks[bi];
+      if (written.has(bank)) continue;
+      const hashes = byBank.get(bank);
+      let items = buildBankChunks(bank, hashes);
+      await writeBankChunks(items);
+      chunks += items.length;
+      let bad = await verifyBankChunks(bank, hashes);
+      if (bad) {
+        // 竞争写入导致块落后 → 以当前逻辑视图重建一次再校验；仍不一致则中止（可续跑）
+        items = buildBankChunks(bank, hashes);
+        await writeBankChunks(items);
+        chunks += items.length;
+        bad = await verifyBankChunks(bank, hashes);
+        if (bad) {
+          const e = new Error('迁移完整性校验失败（v6→v7 分块）：' + bad);
+          e.resumeFrom = { phase: CHUNK_PHASE, stage: 'write', bank: bank };
+          throw e;
+        }
+      }
+      verified += hashes.length;
+      written.add(bank);
+      report();
+    }
+
+    if (stage === 'write') {
+      if (!banks.every((b) => written.has(b))) {
+        throw new Error('迁移完整性校验失败（v6→v7）：存在未完成校验的题库，旧记录已保留可续跑');
+      }
+      stage = 'delete';
+      report();
+    }
+
+    for (let bi = 0; bi < banks.length; bi++) {
+      const bank = banks[bi];
+      if (deleted.has(bank)) continue;
+      const hashes = byBank.get(bank);
+      for (let i = 0; i < hashes.length; i += CHUNK_DELETE_BATCH) {
+        const keys = hashes.slice(i, i + CHUNK_DELETE_BATCH).map((h) => QB.KEYS.reviewState(bank, h));
+        // 防御：旧标签可能仍写 per-hash 物理键；删前比对，发现更新先并入块并落盘再删
+        const physical = await Store.readPhysicalMany(keys);
+        let dirty = 0;
+        keys.forEach((k) => {
+          const old = physical[k];
+          if (old === undefined) return;
+          const cur = QB.Storage.get(k);
+          if (QB.deepEqual(cur, old)) return;
+          QB.Storage.set(k, Store.mergeReviewStates(cur, old));
+          dirty++;
+        });
+        if (dirty) { await QB.Storage.flush(); merged += dirty; }
+        await Store.deletePhysical(keys);
+        removed += keys.length;
+      }
+      deleted.add(bank);
+      report();
+    }
+
+    return {
+      banks: banks.length, states: verified, chunks: chunks,
+      removed: removed, merged: merged, resumed: resumable, ms: Date.now() - started
+    };
+  }
+
   /* ---------------- 入口 ---------------- */
 
   /**
@@ -560,10 +727,12 @@
         throw e;
       }
 
-      // 迁移写入缓冲：业务键只进内存（LS 只写引导键），v5→v6 统一复制进 IDB。
-      // IDB 不可用或用户回退 LS 时缓冲无意义（LS 就是目标），保持旧路径直接写 LS。
+      // 迁移写入缓冲：仅 LS → IDB 迁移（fromVersion < 6）需要「业务键只进内存」。
+      // v6→v7 已在 IDB 内改写布局，不需要缓冲：正常写入直接按新布局落盘，
+      // 且失败时不改写 LS，无需快照。
+      const needBuffer = !!(idbUsable && fromVersion < 6);
       const snap = idbUsable ? null : snapshotAll();
-      const buffer = idbUsable ? QB.Storage.beginMigrationBuffer() : null;
+      const buffer = needBuffer ? QB.Storage.beginMigrationBuffer() : null;
       const result = {
         fromVersion: fromVersion, version: SCHEMA_VERSION,
         autoBackup: !!autoBackup, preflight: preflight
@@ -572,13 +741,18 @@
         if (fromVersion < 2) result.migrated = await migrateV1ToV2();
         if (fromVersion < 3) result.sharded = await migrateV2ToV3();
         if (fromVersion < 4) result.repaired = await migrateV3ToV4();
-        result.layout = await migrateV4ToV5();
+        // v4→v5 只在旧版本或显式自愈（force，备份恢复可能带回旧布局）时执行；
+        // 已是 v6 的常规升级不再整库重跑布局归一，避免无谓的 50k 状态遍历。
+        if (fromVersion < 5 || force) result.layout = await migrateV4ToV5();
+        else result.layout = { skipped: 'already-v5' };
         try {
           result.reviewMeta = QB.ReviewStore.convertMetaLayouts();
         } catch (e) {
           result.reviewMeta = { banks: 0, migrated: 0, failed: 1, anomalies: [String((e && e.message) || e)] };
         }
         result.backend = await migrateV5ToV6();
+        // v6→v7：已有 IDB 安装的复习状态分块（新装/从 LS 升级在复制时已按块写入，无需再跑）
+        if (idbUsable && fromVersion >= 6) result.reviewChunks = await migrateV6ToV7();
         QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
         await QB.Storage.flush();
         QB.Storage.endMigrationBuffer(buffer, true);
@@ -602,7 +776,7 @@
 
   QB.Migration = {
     SCHEMA_VERSION, run, currentVersion, ensureLayout,
-    migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6,
+    migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7,
     LOCK_TTL_MS
   };
 })(typeof window !== 'undefined' ? window : globalThis);
