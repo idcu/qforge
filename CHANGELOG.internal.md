@@ -9,6 +9,38 @@
 
 ## 最新记录
 
+### refactor(modules): 装配契约落地 tier，门禁禁止向上依赖（R-05）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `contracts/modules.json`：86 条全部新增 `tier`（`L0:30 / L1:9 / L2:43 / L3:4`）；`utils.storage`、
+  `utils.quota`、`utils.hash-remap` 归 `L1`（三者 `requires: utils.storage`，按「不得向上」只能归数据访问）。
+- 5 条 L2 → L3 例外登记 `allowUpward: [{id: "modules.ui-renderer", until: "2026-12-31", reason: "R-04…"}]`
+  （`bank-manager` / `data-io` / `exporter` / `backup` / `sync-dav`）。
+- `scripts/check-modules.mjs`：新增 tier 枚举/缺失校验、`requires` 不得向上、例外必须含
+  `id/until/reason` 且不得过期、已登记但未实际使用的例外反查；输出 tier 分布与
+  「未登记向上依赖 / 已登记例外」计数；selftest 3 → **6** 条负例。
+- 文档：`docs/ARCHITECTURE.md` §2.1（4 概念层 + 8 装配段、方向硬规则、例外到期）；本文档。
+- **契约/API**：`contracts/modules.json` 只加字段（`schemaVersion` 仍为 1），唯一消费方
+  `check-modules.mjs` 同 commit 更新；不改变加载顺序、不改变运行时行为。
+- **影响面**：无 `js/**` 改动、无数据迁移；回滚即 revert（若保留 `tier` 字段也不影响运行）。
+
+**验证数据（实测）**
+- 红：`node scripts/check-modules.mjs`（tier 已写入、例外未登记）→ **5 处违约 / exit 1**：
+  `modules.bank-manager`、`data-io`、`exporter`、`backup`、`sync-dav`（L2）向上依赖
+  `modules.ui-renderer`（L3）。原始输出：`.analysis/architecture-audit/stage4-red-tier.txt`。
+- 绿：同命令 **0 处违约 / exit 0**，`tier: L0:30 L1:9 L2:43 L3:4；未登记向上依赖 0，已登记例外 5`；
+  `--selftest` **6/6 已拦截**（新增：tier 向上未登记、例外到期 2000-01-01、tier 非法 L9）。
+  原始输出：`.analysis/architecture-audit/stage4-green-tier.txt`。
+- 门禁（同树实跑，含本提交改动）：`verify:fast` exit **0**（36 运行项 / **5490** 断言）；
+  `bench --assert` **64/64 exit 0**；`docs-check --static` exit **0**。
+
+**遗留 TODO / 风险**
+- 5 条例外依赖 R-04（领域 UI 解耦，阶段 7 **已延后**）；`until 2026-12-31` 到期后门禁转红，
+  必须重新评审，不允许延期掩盖。
+- **未实机验证**：无（本提交为装配语义与只读门禁，不改运行时与浏览器行为）。
+
 ### refactor(data): 数据层端口注入，消解 L1 → L2 反向依赖（R-03）
 
 **Commit Hash**：`（待回填）`
