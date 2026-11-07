@@ -10,8 +10,8 @@
 
 | 读数 | 当前值 | 事实源 |
 | --- | --- | --- |
-| SW 缓存版本 | qforge-v32 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
-| 数据 schemaVersion | 6 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
+| SW 缓存版本 | qforge-v33 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+| 数据 schemaVersion | 7 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
 | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
 
 > 加一行读数的前提：代码里有**唯一常量**可对。没有唯一常量（例如"首屏体积"），

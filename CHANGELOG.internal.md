@@ -9,6 +9,111 @@
 
 ## 最新记录
 
+### feat(storage): 复习状态 v7 物理分块与 keys 逻辑视图缓存
+
+**Commit Hash**：`c96b692`
+
+**核心改动**
+- `js/data/store.js`：复习状态物理键 `user:review:<bank>:<hash>` 折叠为每库 256 桶的
+  `user:reviewChunk:<bank>:<bucket>`（`{v:1,s:{hash:state}}`）；`Store.initStore` 只等 `banks` 一个事务，
+  `getAllKeys`/其余键并行；块记录进 `Storage._chunkStates`（≤1024 条），不再展开 50k 条 Map/字符串。
+  新增 `readLogicalMany/readPhysicalMany/reviewStateParts/reviewChunkParts/isReviewChunkKey/
+  chunkLogicalStates/writeReviewChunks/deletePhysical` 作为批量读与迁移直写的唯一入口。
+- `js/utils/storage.js`：`keys()` 改为 `_keysCache + _keysRev/_keysRevCached` 版本缓存，同一修订只物化一次，
+  版本不一致**整体重建**（保守策略：宁可重建也不返回可能过期的键）；`_buildKeys()` 为重建唯一实现。
+  失效点：`adoptStore`、`refreshMode`、迁移缓冲进出/失败、`flush` 前、跨标签 `BroadcastChannel`/LS `storage`
+  事件、`_writeBootstrap/_deleteBootstrap`、`set/setSync/remove/getFresh`、`clearAll`。`_flushOps` 只清
+  `_pending`（`_cache` 保留、逻辑键集不变）不失效。
+- `js/data/contracts.js`：新增 `KINDS.reviewChunk` 与 `reviewBucket/reviewChunkOfHash/reviewChunk` 键工具。
+  `Storage.get/keys` 同步签名不变；未水合键返回空语义不变；块布局/备份格式不变。
+- `scripts/idb.test.mjs`：新增 v7 分块 29 项断言（折叠/展开逐条等价、跨标签读改写、v6→v7 逐键一致、备份往返）。
+- 文档：`docs/ARCHITECTURE.md` §4.19、`docs/STORAGE.md` §9.7、`docs/DATABASE.md`、`docs/user-guide.md`、
+  `docs/BACKUP.md`、`docs/CAPACITY.md` 同步（详见末尾 docs 条目）。
+
+**验证数据（真机 Chromium 50k，同脚本同数据集同埋点）**
+- 红（修复前）：`Storage.keys()` 单次 **10.7ms**（启动期 15–19ms）；启动 6 次合计 **75.6–100.3ms**
+  （中位 85.2，首轮 87.2）；水合窗口后首个长任务 **141–179ms**（中位 **151**）。
+- 绿（修复后）：单次稳态 **0–0.1ms**；启动 6 次合计 **12.4–16.1ms**（中位 14.2，仅首次 build）；
+  窗口后长任务 **76–92ms**（中位 **79**，−72ms）。
+- 真机验收 10 轮：`initStore` **P50=193.1ms / P95=238.3ms / 最大 238.3ms**，窗口内长任务 **max=0ms**；
+  逐轮 222 / 189.4 / 193.1 / 190.5 / 238.3 / 185.1 / 202.4 / 191.8 / 218.8 / 186.8（4 轮 >200ms，如实记录）。
+- 契约等价性 **17/17**：50k 逐键 `get` 50000/50000、`keys()` 业务键 50257/50257、`readAll` 展开
+  50257/50257，四类边界（含未 flush 即时可见/删除立即消失）断言全过，**diff=0**。
+- 安全回归：中断续跑 resumed=true 零丢失；Quota 注入 schema 保持 6 零丢失；跨标签红→绿两侧保留且
+  `get/keys()` 对端立即可见。
+- 单题保存：v7 **P95=14.4ms / 块 7163B / 放大 53×**（历史对照 16.8ms / 7163B）。
+- 门禁：`verify:fast=0`、`bench --assert=0`、`docs-check --static=0`。
+
+**遗留 TODO / 风险**
+- 4/10 轮 `initStore` >200ms（P95=238.3ms 仍 ≤300ms 门禁）；波动来源未定位到单点（GC 与浏览器调度叠加）。
+- `_keysCache` 常驻 50k 逻辑键字符串：**未单独打点常驻内存增量**；写入后首次 `keys()` 仍付一次
+  `_buildKeys()`（~12–16ms），之后命中缓存。
+- 回滚到 v6 旧代码前必须清空新块记录（否则旧代码把 `user:reviewChunk:*` 当未知键）。
+
+### feat(migrate): v6→v7 复习状态分块迁移（两阶段可续跑）
+
+**Commit Hash**：`a2cdc38`
+
+**核心改动**
+- `js/modules/migrate.js`：新增 v6→v7 迁移——阶段 1 按库写块（64 块/事务）并逐 hash 与逻辑视图深比对；
+  全部库通过后才进入阶段 2，每批 256 键先 `readPhysicalMany` 比对、把旧标签更新并入块再 `deletePhysical`；
+  断点 `meta:migrationProgress`（`phase=v6-to-v7`）。失败/中断保留旧 per-hash 全量数据。
+- `v4→v5` 布局归一仅在 `fromVersion<5` 或显式 force 时执行，v6 常规升级不再整库重跑。
+- `scripts/migrate.test.mjs` / `scripts/shard.test.mjs` 同步迁移与分片用例。
+
+**验证数据（真机验收 10 轮，55/55）**
+- 迁移：4 库 / **50000 状态 → 1024 块** / 移除 50000 旧键 / merged=0 / **5145ms**（读写总计 5511.6ms）。
+- 中断续跑：写阶段 2/8 单元被杀 → schema 保持 6、旧 per-hash 50000 条完整；续跑 resumed=true、
+  **6450ms**、零丢失。
+- Quota 注入：迁移失败但启动不中断（schema=6、逻辑视图 50000）；续跑 resumed=true、**6543ms**、零丢失。
+- 容量（IDB estimate）：**V6 60.75MB → V7 10.95MB（−49.8MB）**。
+- 门禁：`verify:fast=0`、`bench --assert=0`、`docs-check --static=0`。
+
+**遗留 TODO / 风险**
+- 50k 一次性迁移约 **5.1s**（后台执行、状态栏显示进度）；迁移期间新写入走块合并路径，未做端到端
+  长事务压测（仅单题评分与中断/Quota 场景覆盖）。
+
+### feat(backup): v7 物理块在备份中折叠回 per-hash 逻辑形状
+
+**Commit Hash**：`e8df9a1`
+
+**核心改动**
+- `js/modules/backup.js`：导出/迁移前备份时把 `user:reviewChunk:<bank>:<bucket>` 的 `s` 合并进
+  per-hash 状态集合；备份 JSON/WebDAV 载荷与 v6 同形（不含 `reviewChunk` 物理键），导入后重新分块。
+
+**验证数据（实测）**
+- `idb.test.mjs` v7 组「备份往返」通过：导出含 50k 逻辑状态、无 `reviewChunk` 键，导回逐键一致。
+- 契约等价性 17/17（`readAll` 展开 50257/50257，diff=0）。
+- 门禁：`verify:fast=0`、`bench --assert=0`、`docs-check --static=0`。
+
+**遗留 TODO / 风险**
+- 备份体积口径未单列（逻辑状态条数不变，物理块在导出时展开为 per-hash，导出后字节与 v6 同级）。
+
+### docs(arch): 同步 v7 分块布局、keys 缓存与门禁数字
+
+**Commit Hash**：本提交（紧随 `e8df9a1`，`git log --oneline -1` 可查）
+
+**核心改动**
+- `docs/ARCHITECTURE.md`：新增 §4.19（物理分块/水合/keys 缓存与失效策略/实测/影响范围），§5 公共抽象表
+  增加 v7 键工具与 `Store` 批量读写行，更新 `QB.Storage` 行。
+- `docs/DATABASE.md`：`review` 逻辑键与 `reviewChunk` 物理块两行 + v6→v7 迁移说明。
+- `docs/STORAGE.md`：新增 §9.7（块布局、keys 版本缓存、失效点、跨标签）。
+- `docs/user-guide.md`：§10 启动水合补充 v7 自动升级与实测收益；`docs/BACKUP.md`、`docs/CAPACITY.md` 同步。
+- `docs/BENCH.md` 首屏 **376.3 KB gzip / 1058.7 KB raw**；`docs/DEVELOPMENT.md` SW `qforge-v33`、schema **7**；
+  `docs/TESTING.md` idb 套件 **156** 项、合计 **5543**。
+- `sw.js` `qforge-v33` + `scripts/sw-baseline.json`（93 files / `c51e9589e497…`，`--write-baseline` 重算）；
+  `scripts/docs-baseline.json` 按 `--write` 实跑重算（36 运行项 / 5543 断言 / 64 门禁 / 376.3 KB gzip / 1058.7 KB raw）。
+
+**验证数据（实测）**
+- `node scripts/sw-runtime.test.mjs --write-baseline` → 写入 `qforge-v33 / 93 files / c51e9589e497…`，exit 0。
+- `node scripts/docs-check.mjs --write` → 36 运行项 / **5543** 断言 / 64 门禁 / 376.3 KB gzip / 1058.7 KB raw，exit 0。
+- `node scripts/docs-check.mjs --static` → 全部一致，exit 0。
+- `verify:fast` exit **0**（36 运行项 / 5543 断言）；`bench --assert` **64/64 exit 0**。
+
+**遗留 TODO / 风险**
+- `docs/EVALUATION-*.md` 等历史评估文档保留本机绝对路径（docs-links 仅告警，不阻断）。
+- keys 视图常驻内存增量仍未单独打点（见 feat(storage) 风险项）。
+
 ### docs(arch): 收口分层/端口/路径/计数与样例数据口径（D-1/D-2/D-4~D-8）
 
 **Commit Hash**：`d8c2acf / 0d5d237 / 1d27fa5 / adce732`（依次 D-1/D-2/D-4 · D-5 · D-6 · D-7）

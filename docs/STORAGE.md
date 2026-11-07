@@ -122,3 +122,22 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 用两个独立 harness 共享同一底层存储（真实走 `ReviewStore.put` + 逐键 storage 事件），断言双方 `stateKeys`/`readMap`
 覆盖 h1+h2、meta 载荷 ≤16B 且不含 keys。错题合并另有用例：本地 `q1` + 远端 `q2` 并集为 2 条、同题
 `wrongCount`/`lastAt` 取较大值；收藏用例锁定「整值覆盖」现状，防未来误改。
+
+### 9.7 复习状态物理分块与逻辑键视图缓存（v7）
+
+- **物理块**：`user:review:<bank>:<hash>` 在 IDB 中折叠为每库 256 桶的
+  `user:reviewChunk:<bank>:<bucket>`（`{v:1,s:{hash:state}}`）。启动水合把块记录放进 `Storage._chunkStates`
+  （≤1024 条），不再展开成 50k 条 Map 与字符串；`Storage.get('user:review:…')` 先查 `_cache`，未命中再
+  `_chunkLookup` 读块，仍是**同步**返回；未水合键返回空。
+- **逻辑键视图缓存**：`Storage.keys()` 由 `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制，
+  同一修订只物化一次（首次 `_buildKeys()`），版本不一致时整体重建；每次返回 `slice()`，
+  调用方修改返回值不会污染缓存。
+- **失效点（显式，宁可重建不返回脏键）**：`adoptStore`、`refreshMode`、迁移缓冲进出/失败、
+  `flush` 前、跨标签 `BroadcastChannel` 与 LS `storage` 事件、引导键写删、`set`/`setSync`/`remove`/`getFresh`
+  的缓存变更、`clearAll` 均调用 `_invalidateKeys()`；`_flushOps` 只清 `_pending`（`_cache` 保留）不失效。
+  迁移中途或块部分写入无法确认一致时一律整体重建。
+- **跨标签**：写入仍按**逻辑键**广播（块直写仅迁移专用、不广播）；对端收到后经 `Store.readLogicalMany`
+  展开为逻辑键落入 `_cache`，立即失效并重建视图。回归断言覆盖「写入后立即 `keys()` 可见」
+  「删除后立即消失」「跨标签写入后 `get`/`keys()` 可见」。
+- **实测（真机 Chromium 50k）**：`keys()` 单次 10.7ms → **0–0.1ms**（稳态）、启动 6 次 87.2ms →
+  **12.4–16.1ms**；水合窗口后长任务中位 153ms → **79ms**。契约等价性 17/17（diff=0）。

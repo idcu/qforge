@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-07T01:17:42.277Z",
+  "generatedAt": "2026-11-07T11:24:49.235Z",
   "runItems": 36,
   "suiteFiles": 35,
-  "totalAssertions": 5514,
+  "totalAssertions": 5543,
   "gateCount": 64,
   "counts": {
     "smoke-test.mjs": 731,
@@ -19,7 +19,7 @@
     "exporter.test.mjs": 204,
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
-    "idb.test.mjs": 127,
+    "idb.test.mjs": 156,
     "import-commit.test.mjs": 57,
     "importers-anki.test.mjs": 148,
     "importers-quizlet.test.mjs": 75,
@@ -45,7 +45,7 @@
   "firstScreen": {
     "scripts": 86,
     "files": 94,
-    "rawKB": "1026.9",
-    "gzipKB": "366.7"
+    "rawKB": "1058.7",
+    "gzipKB": "376.3"
   }
 }

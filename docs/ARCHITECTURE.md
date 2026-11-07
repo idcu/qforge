@@ -332,6 +332,34 @@ activate → caches.keys()
   无数据迁移。回滚即 revert。
 - 未实机验证：真实浏览器切页时的 long-task/帧时间未实测（本项只度量 Node 侧单次扫描成本）。
 
+### 4.19 复习状态物理分块与逻辑键视图缓存（v7）
+
+- **物理布局**：复习状态从 per-hash 物理键（`user:review:<bank>:<hash>`，50k 题 = 50k 记录）改为
+  **每库 256 桶**的块记录 `user:reviewChunk:<bank>:<bucket>`（值 `{v:1,s:{hash:state}}`）；
+  桶号由 `QB.KEYS.reviewBucket(bank, hash)` 稳定散列，`reviewChunkOfHash` / `reviewChunk` 是键拼接唯一实现。
+  逻辑键视图不变：`Storage.get('user:review:…')` 仍同步返回状态，「未水合键返回空」语义不变。
+- **水合**：`Store.init()` 的 8 个并发只读事务只等 `banks` 一个，`getAllKeys`/其余键并行；
+  块记录进 `Storage._chunkStates`（≤1024 条）而不是展开成 50k 条 Map/字符串，避免在刚反序列化
+  10MB 的堆上触发 major GC。读取走 `_cache` → `_chunkLookup` 两级；写入仍经 `_pending`/`_ops` 微任务批量事务。
+- **逻辑键视图缓存**（本项修复）：`Storage.keys()` 原本每次都从 `_chunkStates` 重建 50k 逻辑键字符串，
+  启动固定付 6 次（迁移快速路径 `convertMetaLayouts` + `bankIds` + `stateKeys`）。现在由
+  `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制：**同一修订只物化一次**，版本不一致时整体重建；
+  返回 `slice()`，调用方增删不影响缓存。
+- **失效策略（显式失效点，宁可重建不返回脏键）**：`_invalidateKeys()` 递增 `_keysRev`，在每个可能改变
+  「存在哪些键」的路径调用：`adoptStore` / `refreshMode` / 迁移缓冲进出与失败分支 / `flush` 前
+  （`_applyPendingWrites`）/ 跨标签 `_handleIdbExternal` 与 LS `storage` 事件 / 引导键写删 / `set`、`setSync`、
+  `remove`、`getFresh` 的缓存变更 / `clearAll`。**`_flushOps` 不失效**：它只清 `_pending`，`_cache` 保留，
+  逻辑键集合不变。迁移中途、块部分写入或任何无法确认一致的状态一律走版本失效 → 整体重建，
+  不以局部增量维护换取「可能过期」的键。
+- **实测（真机 Chromium 50k，同脚本同数据集）**：修复前 `keys()` 单次 10.7ms（启动期 15–19ms）、
+  启动 6 次合计 87.2ms、水合窗口结束后首个长任务中位 153ms（141–179）；修复后单次稳态 **0–0.1ms**、
+  6 次合计 **12.4–16.1ms**（仅首次 build）、窗口后长任务中位 **79ms**（76–92）。
+  10 轮 `initStore` P50=193.1ms / P95=238.3ms / 最大值 238.3ms，窗口内长任务 0ms；
+  契约等价性 17/17（50k 逐键 `get`、`keys()` 全集、`readAll` 展开、四类边界，diff=0）。
+- **影响范围**：`contracts.js` 仅增 `KINDS.reviewChunk` 与桶/块键工具；`Storage.get/keys` 同步签名不变；
+  备份格式不变（导出仍折叠回 per-hash，由 `expandRecords` 还原）；回滚需先回旧代码再清空 IDB 新块
+  （否则旧代码会把块记录当未知键）。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |
@@ -363,7 +391,8 @@ activate → caches.keys()
 | API 列表 ETag 协商（R-09） | `GET /api/banks` 与 `GET /api/banks/{id}/questions` 由 `jsonEtag` 返回内容 sha1 强 ETag；`api-adapter` 的 `req(..., {etag:true})` 保存 `{etag, payload}` 并带 `If-None-Match`，**304 直接复用上次解析结果（0 解析/0 传输）**；写后服务端内容变化自然回 200，客户端不主动清缓存。仅 local/api 两种后端的**列表读路径**；写路径与单题读路径不变 | `scripts/serve-api.mjs`、`api-adapter`、`scripts/api-backend.test.mjs` |
 | `QB.SchedSettings.ofBankId/invalidate`（C019） | 按库缓存的**唯一失效契约**：`save` 写库后覆盖缓存；`banks.update`（含 `sched`）、`banks.remove`、`backup.import`（local/api 双后端）与跨标签 `banks` 合并钩子经 `LocalAdapter.hooks.schedInvalidate` 立即失效（R-03）；**不在每次 `ofBankId` 重读 bank**（避免 API 模式评分多一个 GET） | `SRSStore.grade/gradeMany`、local-adapter/api-adapter（经端口）、Storage 合并钩子、`scripts/sched.test.mjs` |
 | `shuffle(arr, seed?)` / `shuffleOptions(q, seed?)` | 随机/种子化洗牌；选项乱序+答案重映射的派生克隆 | 抽题、答题选项乱序 |
-| `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步/按键合并；`getFresh` 写前重读；**R-07 `fullKeyOf(key)` 为 LS 物理键唯一实现，`usageBytes` 值字节统一走 `Quota.bytesOfValue`** | local-adapter 及所有持久化；`Quota.diskBytes` |
+| `QB.Storage` | 防抖批写 + `setSync` 同步穿透（关键学习数据）；落盘失败经 `onError` 上抛、待写保留可重试；跨标签 storage 事件同步/按键合并；`getFresh` 写前重读；**R-07 `fullKeyOf(key)` 为 LS 物理键唯一实现，`usageBytes` 值字节统一走 `Quota.bytesOfValue`**；**v7 `_chunkStates` 二级缓存 + `_keysCache`（按 `_keysRev` 版本失效，写入/删除/迁移/跨标签/adoptStore 全部显式失效；`_buildKeys` 是逻辑键重建唯一实现）** | local-adapter 及所有持久化；`Quota.diskBytes` |
+| `QB.KEYS.reviewBucket/reviewChunkOfHash/reviewChunk` + `QB.Store.readLogicalMany/readPhysicalMany/reviewStateParts/reviewChunkParts/chunkLogicalStates/writeReviewChunks/deletePhysical` | **v7 分块布局唯一实现**：桶号/块键/逻辑键互转、批量逻辑读（自动展开块）、物理直读/直写/删除（迁移专用、不广播）；迁移校验、跨标签刷新、备份展开共用，禁止各处自行拼 `user:reviewChunk:` 前缀或展开块值 | local-adapter、`Storage`、`migrate`、`backup`、`store` |
 | `QB.DB` + Repo 接口 | 数据访问统一入口，屏蔽后端差异 | 全部业务模块 |
 | `Adapters.toStandard` | 任意来源 → 标准题目模型 | 全部导入器 |
 | `Adapters.validateQuestions(questions)` | 校验汇总：`warnings`（可继续导入）+ **`errors`（致命，整包拒绝）**。当前唯一致命项 = 材料题小问 `< MATERIAL_MIN_CHILDREN(2)` | `registry.runImport`、`data-io` 粘贴回退、Node 断言 |
