@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-07T00:31:00.984Z",
+  "generatedAt": "2026-11-07T00:40:12.032Z",
   "runItems": 36,
   "suiteFiles": 35,
-  "totalAssertions": 5490,
+  "totalAssertions": 5495,
   "gateCount": 64,
   "counts": {
     "smoke-test.mjs": 731,
@@ -36,7 +36,7 @@
     "source.test.mjs": 39,
     "srs.test.mjs": 63,
     "static-server.test.mjs": 29,
-    "storage.test.mjs": 67,
+    "storage.test.mjs": 72,
     "sw-runtime.test.mjs": 34,
     "sync-dav.test.mjs": 69,
     "ui-renderer.test.mjs": 218,
@@ -45,7 +45,7 @@
   "firstScreen": {
     "scripts": 86,
     "files": 94,
-    "rawKB": "1023.8",
-    "gzipKB": "365.5"
+    "rawKB": "1025.1",
+    "gzipKB": "366.0"
   }
 }

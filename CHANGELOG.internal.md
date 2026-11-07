@@ -9,6 +9,37 @@
 
 ## 最新记录
 
+### fix(sync): 跨标签错题本按键合并，避免整值覆盖丢题（R-08 方案 A）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `js/data/local-adapter.js`：新增纯函数 `mergeWrongLists(local, incoming)`（按 `questionKey` 并集，
+  同题 `wrongCount`/`lastAt` 取 max）；在 `Storage.registerMerge` 注册 `user:wrong:<bankId>` 合并钩子。
+  与 `QB.HashRemap.mergeWrong`（改题冲突相加）语义不同，注释明确禁止互相替代。
+- **不做方案 B**：收藏（toggle）保持整值覆盖；per-hash 布局未实施（延后项，需独立迁移立项）。
+- `scripts/storage.test.mjs`：新增 R-08 用例 **67 → 72**（并集、同题 count/lastAt 取 max、本地独有题保留、
+  收藏 LWW 锁定现状）。
+- 文档：`docs/STORAGE.md` §9.6 合并策略表补 `user:wrong` / `user:favorite` 两行与语义边界；
+  `docs/TESTING.md`（storage 72、合计 **5495**、SW v29）；`docs/DEVELOPMENT.md`（SW v29）；
+  `docs/BENCH.md`（**366.0 KB gzip / 1025.1 KB raw**）；`scripts/docs-baseline.json` 重算。
+- `sw.js`：`qforge-v28` → `qforge-v29`（改 `js/**` 须递增），`scripts/sw-baseline.json`
+  （93 files / `f89d0d73b5d6…`）。
+- **影响面**：仅 local 后端跨标签 `storage` 事件路径；localStorage 单标签、API 后端零影响；回滚即 revert。
+
+**验证数据（实测）**
+- 红：`node scripts/storage.test.mjs` → **71 通过 / 1 失败，exit 1**，失败项「并集保留双方错题」期望 2 实际 1
+  （整值覆盖）。原始输出：`.analysis/architecture-audit/stage5-red-r08.txt`。
+- 绿：同命令 **72 通过 / 0 失败，exit 0**。原始输出：`.analysis/architecture-audit/stage5-green-r08.txt`。
+- 门禁：`verify:fast` exit **0**（36 运行项 / **5495** 断言）；`bench --assert` **64/64 exit 0**；
+  `docs-check --static` exit **0**。
+
+**遗留 TODO / 风险**
+- 两标签**同时**给同一题记错时按 `max` 而非相加，计数可能偏小（避免重复计一次事件）；已在代码注释与
+  `STORAGE.md` 写明。
+- 收藏跨标签仍为 last-write-wins；彻底解决需方案 B（per-hash 布局 + 迁移 v6→v7），**本轮不做**。
+- **未实机验证**：真实浏览器双标签 `storage` 事件（Node 以 `_handleExternalChange` 模拟同一路径）。
+
 ### refactor(modules): 装配契约落地 tier，门禁禁止向上依赖（R-05）
 
 **Commit Hash**：`0b46065`

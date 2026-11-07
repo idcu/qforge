@@ -783,6 +783,28 @@
     }
   }
 
+  /**
+   * 跨标签错题表合并（R-08 方案 A）：按 questionKey 并集，同题 wrongCount/lastAt 取较大值。
+   * 语义边界：两标签同时给同一题记错时按 max 而非相加（并发事件重合时总数偏小，避免重复计一次事件）。
+   * 与 QB.HashRemap.mergeWrong（同题因改题冲突而相加）不同，禁止互相替代。
+   */
+  function mergeWrongLists(local, incoming) {
+    if (!Array.isArray(local)) return incoming;
+    if (!Array.isArray(incoming)) return local;
+    const byKey = new Map();
+    [local, incoming].forEach((list) => list.forEach((e) => {
+      if (!e || !e.questionKey) return;
+      const prev = byKey.get(e.questionKey);
+      if (!prev) {
+        byKey.set(e.questionKey, Object.assign({}, e));
+        return;
+      }
+      prev.wrongCount = Math.max(Number(prev.wrongCount) || 1, Number(e.wrongCount) || 1);
+      prev.lastAt = Math.max(Number(prev.lastAt) || 0, Number(e.lastAt) || 0);
+    }));
+    return Array.from(byKey.values());
+  }
+
   const progress = {
     // 错题本（键用 contentHash，跨导入稳定）
     async wrongList(bankId) {
@@ -1625,6 +1647,12 @@
     Storage.registerMerge(
       (key) => key.indexOf(K.reviewRev('')) === 0,
       (local, incoming) => Math.max(Number(local) || 0, Number(incoming) || 0)
+    );
+    // R-08：错题本 user:wrong:<bankId> —— 两标签各自 add 时按键并集，避免整值覆盖丢题。
+    // 收藏（toggle）无法安全合并，保持整值覆盖（方案 B per-hash 布局另立项）。
+    Storage.registerMerge(
+      (key) => key.indexOf(K.wrong('')) === 0,
+      (local, incoming) => mergeWrongLists(local, incoming)
     );
     // revlog 分段：按条目 id 并集，避免另一标签的追加被整段覆盖
     const SEG_PREFIX = 'user:revlog:';

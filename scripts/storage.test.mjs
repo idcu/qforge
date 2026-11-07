@@ -164,6 +164,32 @@ section('跨标签合订（A4）：review 键按 ReviewMerge 合并而非覆盖'
   S.clearAll();
 }
 
+section('R-08 跨标签错题合并（并集 + wrongCount/lastAt 取最大）');
+{
+  S.clearAll();
+  const bank = 'bank-wrong';
+  const wk = QB.KEYS.wrong(bank);
+  S.setSync(wk, [{ questionKey: 'q1', wrongCount: 2, lastAt: 100 }]);
+  // 另一标签新增 q2（模拟 storage 事件）
+  S._handleExternalChange({ key: 'qb:' + wk, newValue: JSON.stringify([{ questionKey: 'q2', wrongCount: 1, lastAt: 200 }]) });
+  eq(S.get(wk).length, 2, '并集保留双方错题（不整值覆盖）');
+  // 同题：错误次数与 lastAt 均取较大值，不清零、不回退
+  S._handleExternalChange({
+    key: 'qb:' + wk,
+    newValue: JSON.stringify([{ questionKey: 'q1', wrongCount: 5, lastAt: 300 }, { questionKey: 'q2', wrongCount: 1, lastAt: 200 }])
+  });
+  const merged = S.get(wk);
+  eq(merged.find((w) => w.questionKey === 'q1').wrongCount, 5, '同题错误次数取较大值（不清零）');
+  eq(merged.find((w) => w.questionKey === 'q1').lastAt, 300, '同题 lastAt 取较大值');
+  ok(merged.some((w) => w.questionKey === 'q2'), '本地独有题未被覆盖丢失');
+  // 收藏（toggle 语义无法安全合并）：保持整值覆盖，本测试锁定现状，防误改
+  const fk = QB.KEYS.favorite(bank);
+  S.setSync(fk, [{ questionKey: 'q1', addedAt: 1 }]);
+  S._handleExternalChange({ key: 'qb:' + fk, newValue: JSON.stringify([{ questionKey: 'q2', addedAt: 2 }]) });
+  eq(S.get(fk).length, 1, '收藏保持整值覆盖（toggle 语义，方案 A 不解决）');
+  S.clearAll();
+}
+
 section('C008/P2-06 跨标签复习状态：物理键并集、meta 不再并集大清单');
 {
   // 双标签复现：两个独立 harness 共享同一底层 localStorage（A/B 各自一套模块状态）
