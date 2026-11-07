@@ -356,6 +356,21 @@ activate → caches.keys()
   6 次合计 **12.4–16.1ms**（仅首次 build）、窗口后长任务中位 **79ms**（76–92）。
   10 轮 `initStore` P50=193.1ms / P95=238.3ms / 最大值 238.3ms，窗口内长任务 0ms；
   契约等价性 17/17（50k 逐键 `get`、`keys()` 全集、`readAll` 展开、四类边界，diff=0）。
+- **常驻内存成本（实测）**：`_keysCache` 保存 50k 逻辑键字符串属于净增常驻开销，两种口径分别实测：
+  **真机 Chromium 158.0.8127.18**（CDP `HeapProfiler.collectGarbage` + `Runtime.getHeapUsage`，`keys()` 返回数组先释放）
+  50k·4 库 keysLen **50264**、三次 GC 后增量 **3,403,236 / 3,401,836 / 3,401,524 B**（中位 **3.40MB**），
+  建成后 heapUsed **37,466,268 B** → **9.08%**；**Node v24.14.0 `--expose-gc`**（post-hydration records 直构）
+  keysLen **50253**、增量中位 **5,235,176 B（5.23MB）**、heapUsed **46,071,384 B** → **11.36%**。
+  两口径不可直接对比（差 1.83MB）。浏览器侧口径局限：`performance.memory` 100KB 量化、测量点 `pmDelta=0`，
+  同页读数 63.3MB 与 CDP usedSize 40.1MB 相差约 23MB；`measureUserAgentSpecificMemory` 不可用
+  （`crossOriginIsolated=false`）。**取舍：保留当前实现**——换得启动期 5 次重建降为 1 次、稳态 0–0.1ms；
+  惰性/分片键视图无法回避调用方需要全量字符串（统计/导出/迁移/备份/契约检查），只会外移一致性责任。
+- **启动波动归因（20 轮 ×2 批，同页 `reload`）**：`initStore` 的 **98.5%** 在 `readAll`（中位 178.8ms），
+  `adopt` 中位 0.4ms；`readAll` = 单次 getAll 最大值（中位 148.8ms）+ 块展开（中位 31.8ms）。
+  init~expand 相关系数 **0.893**、init~getAll **0.413**、init~≥50MB GC 降堆 **0.823**；降堆 ≥50MB 的轮次
+  （第一批 5 轮）init 196.1–231.7ms，无 major GC 的 15 轮 171.7–185.2ms，>200ms 轮全部落在降堆组。
+  但第二批最大降堆落在 `initEnd` 之后，GC 采样受 `performance.memory` 限制（与主线程同阻塞、无 MUAS），
+  **无法判定 GC 发生在窗口内**；结论为「`readAll` 路径可归因 + 浏览器 GC/调度时机未定位」，未改实现。
 - **影响范围**：`contracts.js` 仅增 `KINDS.reviewChunk` 与桶/块键工具；`Storage.get/keys` 同步签名不变；
   备份格式不变（导出仍折叠回 per-hash，由 `expandRecords` 还原）；回滚需先回旧代码再清空 IDB 新块
   （否则旧代码会把块记录当未知键）。
