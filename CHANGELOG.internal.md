@@ -9,6 +9,37 @@
 
 ## 最新记录
 
+### fix(ui): 存储迁移等待状态栏显示阶段与已等待秒数（R-18）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `js/app.js`：迁移等待块抽出 `paintWait(stage, tail)` 与 `waitedSeconds()`，状态栏文案改为
+  `存储迁移·等待切换（已等待 N 秒）：另一标签正在迁移，本页写入暂存`，每秒刷新；超时接管阶段改为
+  `存储迁移·接管重试（已等待 N 秒）：等待超时，本页正在接管并重试`。
+  **只增强可观测性**：30 秒超时值、接管语义、无取消按钮均不变（半迁移状态的风险高于收益）。
+  `setInterval` 在内层 `try/finally` 与 catch 中清理，不存在等待结束后仍改写状态栏的定时器。
+- `scripts/app-boot.test.mjs`：`makeEnv` 支持 `migrationLocked` / `takeoverDelayMs` / `onTakeoverWait`
+  并注入可控 `waitForMigrationTakeover`；新增 R-18 段 9 项（首帧含阶段+0 秒、1 秒后递增、切换完成清理、
+  完成提示、0 未处理 rejection）。**91 → 100**。
+- 文档：`docs/user-guide.md` 补多标签迁移状态栏说明；`docs/TESTING.md`（app-boot 100、合计 **5514**、
+  变异基线 92/8）；`docs/BENCH.md`（**366.7 KB gzip / 1026.9 KB raw**）；`scripts/docs-baseline.json` 重算。
+- `sw.js`：`qforge-v30` → `qforge-v31`；`scripts/sw-baseline.json`（93 files / `bc9d33ae0e17…`）。
+- **影响面**：仅迁移等待/接管期间的状态栏文案与测试辅助选项；正常启动与成功路径不变；回滚即 revert。
+
+**验证数据（实测）**
+- 红：把 `paintWait` 临时改回旧文案（无阶段/秒数）→ `node scripts/app-boot.test.mjs`
+  **97 通过 / 3 失败，exit 1**（首帧阶段、0 秒、1 秒递增三项失败）。
+  原始输出：`.analysis/architecture-audit/stage5-red-r18.txt`。
+- 绿：恢复后 **100 通过 / 0 失败，exit 0**。原始输出：`.analysis/architecture-audit/stage5-green-r18.txt`。
+- 变异基线：`--mutate-commit-import` → **92 通过 / 8 失败，exit 1**（预期红，证明 commitImport 覆盖未退化）。
+- 全量：`verify:fast` exit **0**（36 运行项 / **5514** 断言）；`bench --assert` **64/64 exit 0**；
+  `docs-check --static` exit **0**（见门禁输出文件）。
+
+**遗留 TODO / 风险**
+- 秒数刷新依赖 `setInterval`；页面在后台标签时浏览器会节流，显示的秒数可能滞后（不影响迁移正确性）。
+- **未实机验证**：真实浏览器双标签迁移等待、后台节流与 SW 生命周期（Node 以可控 Promise 模拟等待）。
+
 ### test(sw): 固化 SW 缓存版本基线红证据，新增 CSP 三处同步门禁（R-12 / R-13）
 
 **Commit Hash**：`（待回填）`
