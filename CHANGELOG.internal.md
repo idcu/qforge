@@ -11,7 +11,7 @@
 
 ### perf(stats): 统计页 forecast 缓存（P-6）
 
-**Commit Hash**：`（提交后回填）`
+**Commit Hash**：`960cadb`
 
 **核心改动**
 - `js/app.js`：新增 `State.forecastCache`（`{bankId, qRev, logRev, value}`）；`case 'stats'` 先按
