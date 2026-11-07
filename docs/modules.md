@@ -21,7 +21,7 @@
 
 | layer | 覆盖 | 说明 |
 |---|---|---|
-| `sample` | `js/data/sample-data.js` | 内置样例数据，只挂 `window.SAMPLE_DATA`，刻意放在配置之前 |
+| `sample` | `js/data/sample-data.js` | 内置样例数据，只挂 `QB.SAMPLE`，刻意放在配置之前 |
 | `config` | `js/config.js` | `QB.CONFIG` 唯一事实源，必须最先 |
 | `data` | `js/data/*` | 持久化引擎、运行时契约、适配器、访问层（分两段加载） |
 | `utils` | `js/utils/*` | 纯函数公共抽象（哈希、判分、ZIP/XML 适配、时间、富文本…） |

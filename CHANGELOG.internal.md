@@ -9,6 +9,42 @@
 
 ## 最新记录
 
+### docs(arch): 收口分层/端口/路径/计数与样例数据口径（D-1/D-2/D-4~D-8）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- **D-1**：`docs/ARCHITECTURE.md` §2 由「表现/应用/数据」3 层图改为 **4 概念层（L3→L0）** 图，并显式声明
+  「8 个装配段只描述加载顺序，不是分层」；与 §2.1 的 `tier` 表（阶段 4 落地）对齐。
+- **D-2**：§2 新增「端口与例外」段：数据层反向能力已改为 `QB.LocalAdapter.hooks` 端口注册；L2 直调
+  `QB.UIRenderer` 的 5 条例外在 `contracts/modules.json` 登记、`until` 到期判红；`QB.UIPort` 属阶段 7，**未实施**。
+- **D-4**：§1 目标表 `qb/js/config.js` → `js/config.js`。
+- **D-5**：`docs/TESTING.md` 「34 个套件」→「36 个运行项（1 冒烟 + 35 套件）」。
+- **D-6**：`.github/workflows/test.yml` 装配顺序步骤注释「81 个 script」→「86 个 script」。
+- **D-7**：`index.html` 注释 `window.SAMPLE_DATA` → `QB.SAMPLE`；`docs/modules.md` 同口径修正
+  （`js/data/sample-data.js` 实际只挂 `QB.SAMPLE`）。
+- **D-8（无需改动）**：`docs/API-CONTRACT.md` 已有 `reviews.patch` 可选契约条目（R-06 阶段已落地并接线），
+  本次核对确认与 `js/data/contracts.js` 的 `OPTIONAL_CONTRACTS` 一致，不重复修改。
+- `sw.js`：`qforge-v31` → `qforge-v32`（`index.html` 注释变更使缓存摘要变化）；
+  `scripts/sw-baseline.json` 刷新为 93 files / `89be0ac32e97…`；
+  `scripts/docs-baseline.json` 按实跑重算（36 运行项 / 5514 断言 / 64 门禁 / 366.7 KB gzip / 1026.9 KB raw）。
+- 文档：`docs/DEVELOPMENT.md` SW 读数 v32；`docs/TESTING.md` SW 读数 v32。
+
+**验证数据（实测）**
+- 标题与数字门禁：`node scripts/docs-check.mjs --static` → **全部一致，exit 0**
+  （36 运行项 / 5514 断言 / 64 门禁 / 94 文件 / 86 内联 js / 366.7 KB gzip / 1026.9 KB raw）。
+  原始输出：`.analysis/architecture-audit/stage6-docscheck-docs.txt`。
+- 基线重算：`node scripts/docs-check.mjs --write` → 写入 `scripts/docs-baseline.json`，exit 0
+  （原始输出 `.analysis/architecture-audit/stage6-docs-write.txt`）。
+- 全量：`verify:fast` exit **0**（36 套件 / **5514** 断言）；`bench --assert` **64/64 exit 0**。
+- **未复现（如实标注）**：D-1/D-2/D-4~D-7 属静态文档口径校正，没有可执行负例；由 R-16 标题唯一性、
+  docs-check 数字校验、`check-modules`（86 条清单）与 `docs-links`（SW 版本读数）共同守护，
+  不是「改完看起来对了」。
+
+**遗留 TODO / 风险**
+- `QB.UIPort`（R-04）与 `QB.App.State` 收口（R-17）仍延后；本文只标注「未实施」，未改代码。
+- 首屏体积未因 index.html 注释缩短而变化（gzip/raw 读数不变，基线按实测重写而非容差放行）。
+
 ### test(docs): docs-check 新增章节标题唯一性判据，修复 ARCHITECTURE 重复标题（R-16 / D-3）
 
 **Commit Hash**：`（待回填）`

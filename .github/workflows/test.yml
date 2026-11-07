@@ -25,7 +25,7 @@ jobs:
         run: node scripts/check-ci-coverage.mjs
       - name: 文档链接 / 锚点 / 版本读数
         run: node scripts/docs-links.mjs
-      - name: 装配顺序（81 个 script 的顺序即依赖图）
+      - name: 装配顺序（86 个 script 的顺序即依赖图）
         run: node scripts/check-modules.mjs
       - name: 依赖方向（数据层不得反向点名领域模块）
         run: node scripts/check-layers.mjs
