@@ -11,7 +11,7 @@
 
 ### refactor(modules): 装配契约落地 tier，门禁禁止向上依赖（R-05）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`0b46065`
 
 **核心改动**
 - `contracts/modules.json`：86 条全部新增 `tier`（`L0:30 / L1:9 / L2:43 / L3:4`）；`utils.storage`、
@@ -43,7 +43,7 @@
 
 ### refactor(data): 数据层端口注入，消解 L1 → L2 反向依赖（R-03）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`f9d56a6`
 
 **核心改动**
 - `js/data/local-adapter.js`：新增 `QB.LocalAdapter.hooks`（`schedInvalidate` / `backup`）与
