@@ -88,7 +88,7 @@ function apiStub(stat) {
 
 /**
  * 建一个可运行 app.js 的环境；返回 QB/DOM/调用记录。
- * opts: { api, share, shareCode, appSource }
+ * opts: { api, share, shareCode, appSource, migrationLocked, takeoverDelayMs, takeoverResult, onTakeoverWait }
  */
 async function makeEnv(opts) {
   const o = opts || {};
@@ -161,7 +161,22 @@ async function makeEnv(opts) {
 
   // —— 观察迁移 / DB 初始化 / 网络 ——
   // migration 的 schema 细节由 migrate.test 覆盖；这里只验证 app.js 是否按后端分支调用它
-  QB.Migration.run = async () => { stat.migration++; return { locked: false, migrated: 0 }; };
+  QB.Migration.run = async () => {
+    stat.migration++;
+    return o.migrationLocked ? { locked: true, migrated: 0 } : { locked: false, migrated: 0 };
+  };
+  // R-18：可控接管等待；采样 app.js 在等待期间写入状态栏的「阶段 + 已等待秒数」
+  if (o.migrationLocked) {
+    stat.waitSamples = [];
+    QB.Storage.waitForMigrationTakeover = () => new Promise((resolve) => {
+      const readStatus = () => String(dom.document.getElementById('status-text').textContent || '');
+      stat.waitSamples.push(readStatus());
+      if (typeof o.onTakeoverWait === 'function') {
+        o.onTakeoverWait({ samples: stat.waitSamples, readStatus: readStatus });
+      }
+      setTimeout(() => resolve(o.takeoverResult || { switched: true, takeover: false }), o.takeoverDelayMs || 0);
+    });
+  }
   const origInit = QB.DB.init;
   QB.DB.init = function (...args) { stat.dbInit++; return origInit.apply(QB.DB, args); };
   const realFetch = globalThis.fetch;
@@ -250,7 +265,34 @@ section('boot：空库启动 + 顶栏/主题/SW/迁移接线');
 }
 
 /* ============================================================
- * 2. 有题库：文件 / 文本 / URL / 拖拽 / 导出
+ * 2. R-18 迁移等待：状态栏显示阶段 + 已等待秒数
+ * ============================================================ */
+section('R-18 迁移等待：状态栏显示阶段与已等待秒数，切换后清理');
+{
+  const env = await makeEnv({
+    migrationLocked: true,
+    takeoverDelayMs: 1300,
+    onTakeoverWait: ({ samples, readStatus }) => {
+      setTimeout(() => samples.push(readStatus()), 1050);
+    }
+  });
+  eq(env.migration, 1, '持锁启动时仍执行一次迁移检查');
+  ok(env.waitSamples.length >= 2, '等待期采样 ' + env.waitSamples.length + ' 次（首帧 + 1s 后）');
+  const first = env.waitSamples[0] || '';
+  const later = env.waitSamples[1] || '';
+  ok(first.indexOf('存储迁移·等待切换') >= 0, '首帧含阶段「等待切换」：' + first);
+  ok(/已等待 0 秒/.test(first), '首帧显示 0 秒：' + first);
+  ok(/已等待 1 秒/.test(later), '1 秒后秒数递增：' + later);
+  eq(env.booted, true, '等待完成后 boot 继续（未被等待阻塞）');
+  const finalText = String(env.dom.document.getElementById('status-text').textContent || '');
+  ok(finalText.indexOf('已等待') < 0, '切换完成后状态栏不再停留在等待文案：' + finalText);
+  ok(toastsText(env).indexOf('存储迁移完成') >= 0, '切换完成有可见提示');
+  eq(rejections.length, 0, '等待路径无未处理 rejection');
+  env.restore();
+}
+
+/* ============================================================
+ * 3. 有题库：文件 / 文本 / URL / 拖拽 / 导出
  * ============================================================ */
 section('有题库：文件·文本·URL·拖拽导入与导出分派');
 {

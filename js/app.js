@@ -1743,21 +1743,34 @@
     }
     // F2：另一标签持锁迁移，或它已在本次启动期间完成切换（本标签仍停在 LS），都要等待/切换。
     // 本标签不写 LocalStorage（会被迁移后的清理当旧数据删除），期间写入进内存队列，切换后补写 IDB。
+    // R-18：等待/接管阶段在状态栏显示「阶段 + 已等待秒数」，让用户能判断仍在推进还是卡住。
+    // 只增强可观测性：超时值（30s）与接管语义不变，不提供取消（半迁移状态的风险高于收益）。
+    const waitStartedAt = Date.now();
+    const waitedSeconds = () => Math.max(0, Math.floor((Date.now() - waitStartedAt) / 1000));
+    const paintWait = (stage, tail) => {
+      const el = document.getElementById('status-text');
+      if (el) el.textContent = '存储迁移·' + stage + '（已等待 ' + waitedSeconds() + ' 秒）：' + tail;
+    };
+    let waitTimer = null;
     try {
       if (runRes && (runRes.locked || (markerIdb && QB.Storage.mode !== 'idb'))) {
-        const st = document.getElementById('status-text');
-        if (st) st.textContent = '另一标签正在迁移存储，本页等待切换…';
+        paintWait('等待切换', '另一标签正在迁移，本页写入暂存');
         UI.toast('另一标签正在迁移存储，本页写入将暂存，完成切换后自动保存', 'ok');
+        waitTimer = setInterval(() => paintWait('等待切换', '另一标签正在迁移，本页写入暂存'), 1000);
         // 等待超过 TTL 后主动重抢过期锁并重试迁移（胜者崩溃不再永久卡死）；
         // 锁心跳保证「胜者只是慢」时不会被误抢，接管失败则持久提示本页写入未落盘。
-        const waitRes = await QB.Storage.waitForMigrationTakeover({
-          timeoutMs: 30000,
-          onTimeout: () => {
-            const el = document.getElementById('status-text');
-            if (el) el.textContent = '存储迁移超时，本页正在接管并重试…';
-            UI.toast('另一标签迁移超时，本页正在接管并重试；写入暂存在内存，请保持页面打开', 'err');
-          }
-        });
+        let waitRes = null;
+        try {
+          waitRes = await QB.Storage.waitForMigrationTakeover({
+            timeoutMs: 30000,
+            onTimeout: () => {
+              paintWait('接管重试', '等待超时，本页正在接管并重试');
+              UI.toast('另一标签迁移超时，本页正在接管并重试；写入暂存在内存，请保持页面打开', 'err');
+            }
+          });
+        } finally {
+          if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
+        }
         if (waitRes.switched) {
           State.storageNotice = '';
           if (waitRes.takeover) UI.toast('另一标签迁移已中断，本页已接管并保存暂存写入', 'ok');
@@ -1775,6 +1788,7 @@
       }
     } catch (e) {
       // 等待/接管本身失败：不得静默吞掉，也不得让页面显示成「已保存」
+      if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
       console.error('[Migration] 等待另一标签迁移失败：', e);
       State.storageNotice = '本页写入尚未落盘（迁移未完成），请保持本页打开';
       const el = document.getElementById('status-text');
