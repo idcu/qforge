@@ -113,6 +113,8 @@
 
 **补测（随后一次 docs 提交追加；真机与 Node 数据分列，不混用）**
 
+**Commit Hash**：`0c217b3`（本补测主体提交；此条目为实测内容回填，非空哈希回填）
+
 - `_keysCache` 常驻内存（**真机** Chromium 158.0.8127.18 / headless / 50k·4 库）：
   口径 = CDP `HeapProfiler.collectGarbage` + `Runtime.getHeapUsage`，`keys()` 返回数组先释放再 GC。
   keysLen **50264**；三轮 GC 后增量 **3,403,236 / 3,401,836 / 3,401,524 B**（中位 **3,401,836 B = 3.40MB**）；
@@ -159,6 +161,55 @@
   （IDB getAll 延迟 + 块展开分配），major GC 与慢轮强相关但时序与因果**未定位**；门禁阈值未放宽
   （P50≤200 / P95≤300 / 窗口长任务≤50），两批实测均通过。
 - `docs/EVALUATION-*.md` 等历史评估文档保留本机绝对路径（docs-links 仅告警，不阻断）。
+
+### perf(storage): keys() 精准失效——更新已存在键不再整体重建（C1）
+
+**Commit Hash**：`28f88e8`
+
+**核心改动**
+- `js/utils/storage.js`：新增**唯一**可见性判定 `_logicalKeyVisible(key)`，覆盖 `_cache`（值 `undefined`
+  视为 tombstone）、`_pending`、`_chunkLookup`（物理块）、`_awaitDeletes`、LS 实键，与 `_buildKeys()`
+  完全同构；新增**唯一**单键失效入口 `_invalidateKeysIfChanged(key, before)`——只有前后可见性翻转
+  （新增 / 真正删除）才推进 `_keysRev`，更新已存在键的版本号不再失效。
+  接入点：`set` / `setSync` / `remove` / `get` / `getFresh` / `_writeBootstrap` / `_deleteBootstrap`。
+- 跨标签 `_handleIdbExternal`：复用已重读的 `values[k]` 做「处理前后可见性」比较，不改广播协议。
+- LS `storage` 事件：底层实键已被对端改写，`_logicalKeyVisible(key, true)` 改用当前物化视图的
+  成员关系回答「变更前是否可见」；视图已过期返回 `null` → 跳过（下一次 `keys()` 必然重建）。
+- 结构性变化仍直接 `_invalidateKeys()`：`adoptStore` / `refreshMode` / 迁移缓冲进出与失败 /
+  `_applyPendingWrites` / `clearAll`；`_flushOps` 不失效（只清 `_pending`，`_cache` 保留）。
+- 契约零变化：`get`/`keys` 同步签名、未水合键返回空、`keys()` 返回副本（新增断言覆盖）。
+
+**验证数据（真机与 Node 分列，不混用）**
+- **真机** Chromium 158.0.8127.18（50k/4 库，5 场景 × 5 轮，同脚本同口径）：
+  - 红（`c96b692`，写入即失效）：S1 连答 30 题 **3 次重建/轮、34.0ms/轮（占 39.5%）**；
+    S3 跨标签 B 读 **6 次/轮、70.0ms**；S4 导入 5k **1 次、8.3ms**；S5 导出 **1 次、10.0ms**；
+    每轮中位合计 **122.3ms**。
+  - 绿（`28f88e8`）：S1 **1 次/轮（中位 9.4ms，冷轮 3 次）**；S2/S3/S4/S5 **0 次**；
+    全场景中位合计 **9.4ms（−92.3%）**。剩余 1 次来自真实新增键（日志尾段 / 首条状态），非无谓重建。
+  - 契约等价性 **17/17**：50k 逐键 `get`、`keys()` 全集、`readAll`、四类边界（含未 flush 即时可见），diff=0。
+  - 安全回归 **50/50**：中断续跑、Quota 注入、跨标签红/绿（绿例含「对端写入后 `keys()` 可见」）。
+  - 启动 **10 轮**：P50 **185.0ms** / P95 **236.9ms** / max 236.9ms，窗口内长任务 **0ms**
+    （对照 193.1 / 238.3 / 0，无回退）。
+- **Node** v24.14.0 `--expose-gc`（50k/IDB 档，5/20 采样）：
+  `keys()` 首次构建中位 **15.08–17.38ms**（三次门禁最小 11.89–14.22 / 最大 32.83–40.61，门禁按中位数判定）；
+  写已存在键后 **0.11–0.12ms**（0.08 / 0.27；门禁 ≤2ms，误失效会回落到首次构建量级）。
+  常驻内存两笔成本不变（仍为真机 3.40MB / Node 5.23MB，见上「补测」）。
+
+**门禁与基线**
+- `node --expose-gc scripts/bench.mjs --assert` → **66/66，exit 0**（新增两行：首次构建 ≤40ms、写入后 ≤2ms）。
+- `node scripts/docs-check.mjs --write` → 36 运行项 / **5579** 断言 / **66** 门禁 / 377.3 KB gzip / 1062.3 KB raw，exit 0；
+  `--static` → 全部一致，exit 0。
+- `npm run verify:fast` → **exit 0**（36 运行项 / 5579 断言）；断言与阈值只增不减。
+- SW：`qforge-v33 → qforge-v34`，`sw-runtime.test.mjs --write-baseline` 重算（93 files），exit 0。
+
+**遗留 TODO / 风险**
+- 可见性语义现在依赖 `_logicalKeyVisible` 与 `_buildKeys` 的同构性：**新增可见性来源时必须同改两处**，
+  否则会出现「判定认为可见、重建却不产出」的静默缺键；现有 36 项断言覆盖五类来源与两个模式。
+- LS `storage` 事件在「视图已过期」时跳过版本推进是**有意的**（下一次 `keys()` 必重建），不是漏判。
+- 首次构建（15–16.5ms/会话）与常驻（3.40MB 真机）两笔成本不变；若后续 50k 以上题库出现内存压力，
+  仍优先评估分片与 `_cache` 本身，而非键视图。
+- 跨标签高频新键场景（如对端批量导入）仍会按真实新增键失效；这是键集合语义的一部分，不做合并批处理。
+
 
 ### docs(arch): 收口分层/端口/路径/计数与样例数据口径（D-1/D-2/D-4~D-8）
 
