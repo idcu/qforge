@@ -11,7 +11,7 @@
 
 ### fix(ui): 存储迁移等待状态栏显示阶段与已等待秒数（R-18）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`80396f8`
 
 **核心改动**
 - `js/app.js`：迁移等待块抽出 `paintWait(stage, tail)` 与 `waitedSeconds()`，状态栏文案改为
@@ -42,7 +42,7 @@
 
 ### test(sw): 固化 SW 缓存版本基线红证据，新增 CSP 三处同步门禁（R-12 / R-13）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`a765e4f`
 
 **核心改动**
 - **R-12（不新增脚本，复用既有基线门禁）**：`scripts/sw-runtime.test.mjs` 已用
@@ -77,7 +77,7 @@
 
 ### perf(api): 列表接口 ETag 协商缓存，304 复用解析结果（R-09）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`1b814d5`
 
 **核心改动**
 - `scripts/serve-api.mjs`：新增 `jsonEtag(req,res,body)`（响应体 sha1 前 20 位做强 ETag，`If-None-Match`
@@ -106,7 +106,7 @@
 
 ### fix(sync): 跨标签错题本按键合并，避免整值覆盖丢题（R-08 方案 A）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`1f97a6e`
 
 **核心改动**
 - `js/data/local-adapter.js`：新增纯函数 `mergeWrongLists(local, incoming)`（按 `questionKey` 并集，
