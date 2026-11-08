@@ -11,9 +11,11 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–2 已实施（2026-11-08，见下方最新记录）；步骤 3–6 未实施**。
+- **状态**：**步骤 1–3 前半已实施（2026-11-08，见下方最新记录）；步骤 3 后半 + 4–6 未实施**。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
-  88 处既有调用点 0 改动；`js/**` 仅步骤1 改过，SW 已递增 `qforge-v40` → `qforge-v41`。
+  步骤3 前半迁 B 段 3/6（`convertLegacy` 1054、`remap` 1095/1098），新增作用域枚举
+  `ReviewStore.stateKeysScoped`；调用点 88 → 89（S 类 4 处）。
+  `js/**` 步骤1 与步骤3 各改一次，SW 已递增 `qforge-v40` → `v41` → `v42`。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -29,6 +31,43 @@
 - **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(storage): B 段重映射读取迁移到 getScopedFresh（C 步骤3 前半，3/6）
+
+**Commit Hash**：`（本提交）`
+
+**核心改动**
+- `js/data/local-adapter.js`：`convertLegacy` 的 per-hash 读取、`remap` 的两次状态读取
+  （旧基线 1054 / 1095 / 1098）从 `Storage.getFresh` 改为 `Storage.getScopedFresh(key, bankId, null)`；
+  同步签名不变。
+- 新增公共抽象 `ReviewStore.stateKeysScoped(bankId)`（内部 `Storage.keysScoped`，未水合必抛），
+  与既有宽松 `stateKeys` 共享过滤实现 `stateKeysOf(keys, bankId)`；`stateKeys` 语义不变
+  （C 段热路径 `readMap`/`count` 继续使用）。
+- `convertLegacy` / `remap` 的枚举前置改用 `stateKeysScoped`：未水合不再“残缺视图枚举为空 →
+  静默返回 0 / 静默迁移”，而在读取前抛 `NotHydratedError`。
+- `scripts/idb.test.mjs`：新增 B 段段 20 条断言（226 → 246）：未水合抛错、pending 旧整表
+  不得覆盖较新 per-hash（last=9000 保留）、不得删除旧整表、文案含 bankId、三处兜底静态证据、
+  水合后收敛。
+- `scripts/backup-hydration.test.mjs`：静态冻结口径纳入 `getScoped/getScopedFresh/keysScoped`，
+  合计 88 → 89（`local-adapter.js` 49 → 50），断言数保持 52。
+- `sw.js`：`qforge-v41` → `qforge-v42`（`js/**` 变更触发摘要门禁），重算 `scripts/sw-baseline.json`。
+
+**验证数据（实跑，2026-11-08）**
+- 红：`node scripts/idb.test.mjs` **238 通过 / 8 失败 / exit 1**
+  （`remap` 静默 0；`convertLegacy` 用 last=5000 旧整表覆盖 last=9000 的 per-hash 状态）。
+- 绿：同命令 **246 通过 / 0 失败 / exit 0**；断言 226 → 246（+20）。
+- `verify:fast`：**exit 0**（37 套件 / 5737 断言 / 基线一致）。
+- `bench --assert`：**exit 0**（性能门禁全部通过；heapUsed +28.53MB ≤ 40MB，P95 5.12ms ≤ 50ms）。
+- `docs-check --static`：**exit 0**（37 运行项 / 5737 断言 / 66 门禁；首屏
+  386.0 KB gzip · 1089.3 KB raw）。
+
+**遗留 TODO / 风险**
+- B 段剩余 3 处：`legacyReviewMap`（`local-adapter.js:953`，缺“建库/进入新库前 ensureBank”前置，
+  新建空库首屏会 toast 失败）、`convertMetaLayouts`（`local-adapter.js:1198`，用户要求暂缓）、
+  `hash-remap.js:32`（有 errBox/toast 兜底，但被 `ReviewStore.remap` 先抛错短路，留待下一批）。
+- `ReviewStore.remap` 未水合时现在会抛错；依赖“静默返回 0”的外部调用方需改为显式降级（仓库内
+  调用方均已有 try/catch，见 STORAGE.md 逐处表）。
+- 生产 strict、C 段 22 处、`__strictReads` 默认值均未动。
 
 ### test(storage): 核对 A 段 20 处跨库读取前置（C 步骤2，0 处需补）
 

@@ -140,7 +140,7 @@ function scanStorageCalls() {
     });
   })(path.join(ROOT, 'js'));
 
-  const re = /\bStorage\.(keys|get|getFresh)\s*\(/g;
+  const re = /\bStorage\.(keys|get|getFresh|keysScoped|getScoped|getScopedFresh)\s*\(/g;
   const perFile = {};
   let total = 0;
   files.forEach((file) => {
@@ -199,13 +199,14 @@ function prettyMap(m) {
 async function main() {
   const tStart = Date.now();
 
-  A.section('静态护栏：Storage.keys|get|getFresh 调用点冻结');
+  A.section('静态护栏：Storage.keys|get|getFresh|*Scoped 调用点冻结');
   const scan = scanStorageCalls();
-  // 实测（去注释/字符串）为 88 处；转述口径 85 的差异在报告中逐文件列明，不调口径。
+  // 实测（去注释/字符串）为 89 处；C 步骤3 起把 getScoped/getScopedFresh/keysScoped 一并纳入
+  // 冻结口径（作用域读取同样要求前置水合，新增点必须先归类）。
   const EXPECTED_SITES = {
     'js/app.js': 2,
     'js/data/db.js': 1,
-    'js/data/local-adapter.js': 49,
+    'js/data/local-adapter.js': 50,
     'js/modules/backup.js': 10,
     'js/modules/migrate.js': 19,
     'js/modules/package.js': 1,
@@ -214,7 +215,7 @@ async function main() {
     'js/utils/hash-remap.js': 1
   };
   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
-  A.eq(scan.total, 88, '可执行调用点合计 88（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
+  A.eq(scan.total, 89, '可执行调用点合计 89（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
 
   // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
   A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');

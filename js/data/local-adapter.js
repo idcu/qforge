@@ -927,6 +927,14 @@
 
   function reviewStateKey(bankId, hash) { return K.reviewState(bankId, hash); }
 
+  /** 复习状态键过滤（唯一实现）：从任意逻辑键视图提取本库 per-hash 列表（不含前缀）。 */
+  function stateKeysOf(keys, bankId) {
+    const prefix = K.review(bankId) + ':';
+    return keys
+      .filter((k) => k.indexOf(prefix) === 0)
+      .map((k) => k.slice(prefix.length));
+  }
+
   /** per-bank hash 集合缓存（写路径 O(1)）：随 meta 对象替换自动失效。
    *  v4 起 meta 不再携带 keys，集合由物理状态键枚举（stateKeys）构建。 */
   const reviewKeySets = new Map();
@@ -970,10 +978,15 @@
 
     /** 物理状态键的 hash 列表（唯一事实源；不读 meta.keys，旧清单/跨标签都不影响可见性） */
     stateKeys(bankId) {
-      const prefix = K.review(bankId) + ':';
-      return Storage.keys()
-        .filter((k) => k.indexOf(prefix) === 0)
-        .map((k) => k.slice(prefix.length));
+      return stateKeysOf(Storage.keys(), bankId);
+    },
+
+    /**
+     * 作用域枚举（C 步骤3）：目标库未水合必然抛 NotHydratedError，
+     * 不再按残缺视图枚举（迁移/重映射在空视图上“成功”比直接报错更危险）。
+     */
+    stateKeysScoped(bankId) {
+      return stateKeysOf(Storage.keysScoped(bankId), bankId);
     },
 
     /** 整表合并视图（per-hash 优先；同 last 保留 per-hash，语义与 ReviewMerge 一致） */
@@ -1048,10 +1061,10 @@
     convertLegacy(bankId) {
       const legacy = legacyReviewMap(bankId);
       const raw = ReviewStore.meta(bankId);
-      const known = new Set(ReviewStore.stateKeys(bankId));
+      const known = new Set(ReviewStore.stateKeysScoped(bankId));
       let converted = 0;
       Object.keys(legacy).forEach((h) => {
-        const own = Storage.getFresh(reviewStateKey(bankId, h), null);
+        const own = Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null);
         const val = (own && typeof own === 'object')
           ? QB.ReviewMerge.mergeMaps({ s: legacy[h] }, { s: own }).s
           : legacy[h];
@@ -1089,13 +1102,13 @@
     remap(bankId, mapping) {
       if (!mapping || !mapping.size) return 0;
       let n = 0;
-      const keys = ReviewStore.stateKeys(bankId);
+      const keys = ReviewStore.stateKeysScoped(bankId);
       keys.forEach((h) => {
         if (!mapping.has(h)) return;
-        const state = Storage.getFresh(reviewStateKey(bankId, h), null);
+        const state = Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null);
         if (!state || typeof state !== 'object') return;
         const nh = mapping.get(h);
-        const prev = Storage.getFresh(reviewStateKey(bankId, nh), null);
+        const prev = Storage.getScopedFresh(reviewStateKey(bankId, nh), bankId, null);
         const merged = (prev && typeof prev === 'object')
           ? QB.ReviewMerge.mergeMaps({ s: state }, { s: prev }).s
           : state;

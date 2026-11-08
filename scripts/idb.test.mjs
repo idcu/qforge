@@ -12,6 +12,7 @@
  * 不是业务代码的替身）。**浏览器真实配额/持久化语义未验证**，本文只验证接口与事务语义。
  * 运行：node scripts/idb.test.mjs
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
@@ -1056,6 +1057,107 @@ section('作用域读取 API + 严格守卫（C 步骤1：API + 契约测试，�
   S.__strictReads = false;
   eq(S.get('user:review:' + B.id + ':不存在', 'SENTINEL'), 'SENTINEL',
     '关闭严格模式后恢复宽松语义（逐字不变）');
+}
+
+section('B 段迁移（C 步骤3 前半：哈希重映射 3 处）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  const A = await Q1.DB.banks.create({ name: '重映射库A' });
+  const B = await Q1.DB.banks.create({ name: '重映射库B' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(1, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk(1, 'B'), { dedupe: false, mode: 'overwrite' });
+  const aHash = (await Q1.DB.questions.list(A.id, {})).items[0].contentHash;
+  const bHash = (await Q1.DB.questions.list(B.id, {})).items[0].contentHash;
+  await Q1.DB.reviews.record(A.id, { [aHash]: { due: 2000, s: 1, d: 1, last: 1000 } }, []);
+  // 库 B 的 per-hash 状态“更新”（last=9000），旧整表“更旧”（last=5000）
+  await Q1.DB.reviews.record(B.id, { [bHash]: { due: 2000, s: 1, d: 1, last: 9000 } }, []);
+  Q1.Storage.setSync(Q1.KEYS.review(B.id), { [bHash]: { due: 900, s: 2, d: 2, last: 5000 } });
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const errorOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const bLegacy = Q2.KEYS.review(B.id);
+  const bState = Q2.KEYS.reviewState(B.id, bHash);
+
+  // 前置：B 未水合，旧整表与 per-hash 状态键均不在同步视图
+  eq(S.isBankHydrated(B.id), false, '前置：库 B 未水合');
+  ok(S.keys().indexOf(bLegacy) < 0 && S.keys().indexOf(bState) < 0,
+    '前置：B 的复习键在部分视图中不可见');
+
+  // 红①：remap（1095/1098）未水合时枚举为空 → 旧行为静默返回 0，掩盖“整库重映射未执行”
+  const eRemap = errorOf(() => Q2.ReviewStore.remap(B.id, new Map([[bHash, 'n' + bHash]])));
+  ok(!!eRemap && eRemap.name === 'NotHydratedError',
+    'remap 未水合库抛 NotHydratedError（红：旧行为静默返回 0）',
+    '（实测 ' + (eRemap ? eRemap.name + ': ' + eRemap.message : '未抛错（静默返回空）') + '）');
+  eq(S.isBankHydrated(B.id), false, 'remap 抛错后库仍为未水合（不产生半写副作用）');
+
+  // 红②：convertLegacy（1054）。用 pending 旧整表模拟跨标签投递的旧布局数据：
+  // 此时 B 仍未被判为已水合，旧行为会按“残缺视图”转换，可能用较旧整表覆盖较新 per-hash 状态。
+  S.setSync(bLegacy, { [bHash]: { due: 900, s: 2, d: 2, last: 5000 } });
+  eq(S.isBankHydrated(B.id), false, '旧整表 pending 不会让库被判为已水合');
+  const eConvert = errorOf(() => Q2.ReviewStore.convertLegacy(B.id));
+  ok(!!eConvert && eConvert.name === 'NotHydratedError',
+    'convertLegacy 未水合库抛 NotHydratedError（红：旧行为静默按残缺视图转换）',
+    '（实测 ' + (eConvert ? eConvert.name + ': ' + eConvert.message : '未抛错（静默返回 converted=0）') + '）');
+  await S.flush();
+  const persisted = await Q2.Store.readLogicalMany([bState, bLegacy]);
+  eq(persisted[bState] && persisted[bState].last, 9000,
+    '未水合转换不得用较旧整表覆盖较新 per-hash 状态（数据保护）');
+  ok(!!(persisted[bLegacy] && typeof persisted[bLegacy] === 'object'),
+    '未水合转换不得删除旧整表键（不产生半迁移）');
+
+  // 错误文案可直接进上游 errBox / toast（用户可理解，不是 undefined）
+  const msg = eConvert && eConvert.message || '';
+  ok(msg.indexOf('题库未水合') >= 0 && msg.indexOf(B.id) >= 0 && eConvert.bankId === B.id,
+    'NotHydratedError 文案含「题库未水合」与 bankId（可直接展示）');
+
+  // 兜底路径存在：编辑器 errBox / 备份恢复 toast / 迁移 toast（静态证据）
+  const edSrc = fs.readFileSync(path.join(ROOT, 'js/modules/question-editor.js'), 'utf8');
+  const bkSrc2 = fs.readFileSync(path.join(ROOT, 'js/modules/backup.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+  const laSrc = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  ok(edSrc.indexOf("errBox.textContent = '保存失败：' + ex.message") >= 0,
+    '兜底①：编辑器保存 catch 写入 errBox「保存失败：…」（question-editor.js:602/713）');
+  ok(bkSrc2.indexOf("QB.UIRenderer.toast('恢复失败：' + e.message, 'err')") >= 0,
+    '兜底②：备份恢复失败 toast（backup.js:831）');
+  ok(appSrc.indexOf("UI.toast('当前环境不支持本地新版存储") >= 0,
+    '兜底③：迁移失败 toast 并回退（app.js:1797）');
+
+  // 静态迁移证据：两处都先做作用域枚举，再对 per-hash 键做 scoped 读取
+  ok(laSrc.indexOf('const known = new Set(ReviewStore.stateKeysScoped(bankId));') >= 0 &&
+     laSrc.indexOf('const keys = ReviewStore.stateKeysScoped(bankId);') >= 0,
+    'convertLegacy/remap 改用 stateKeysScoped（未水合即抛，不再按残缺视图枚举）');
+  ok(laSrc.indexOf('Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null)') >= 0 &&
+     laSrc.indexOf('Storage.getScopedFresh(reviewStateKey(bankId, nh), bankId, null)') >= 0,
+    '1054/1095/1098 改用 getScopedFresh（保留同步签名）');
+
+  // 水合后行为收敛：convertLegacy 以 per-hash 为准并删旧整表；remap 正常写新键删旧键
+  await S.ensureBank(B.id);
+  const conv = Q2.ReviewStore.convertLegacy(B.id);
+  eq(conv.converted, 0, '水合后 convertLegacy 不拿较旧整表覆盖 per-hash（converted=0）');
+  ok(S.getFresh(bLegacy, 'SENTINEL') === 'SENTINEL', '水合后 convertLegacy 删除旧整表键');
+  ok(!!S.getFresh(bState, null) && S.getFresh(bState).last === 9000, '水合后保留较新的 per-hash 状态');
+  const rm = Q2.ReviewStore.remap(B.id, new Map([[bHash, 'n' + bHash]]));
+  ok(rm >= 1, '水合后 remap 返回重映射条数（实测 ' + rm + '）');
+  ok(!!S.getFresh(Q2.KEYS.reviewState(B.id, 'n' + bHash), null) &&
+     S.getFresh(bState, 'SENTINEL') === 'SENTINEL', '水合后 remap 写入新键并删除旧键');
+  ok(errorOf(() => Q2.ReviewStore.remap(A.id, new Map([[aHash, 'n' + aHash]]))) === null,
+    'remap 已水合库不抛错（保持同步签名与正常路径）');
 }
 
 /* ============================================================ */
