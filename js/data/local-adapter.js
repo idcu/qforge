@@ -139,7 +139,7 @@
      */
     indexesOf(bankId) {
       const prefix = 'questions:' + bankId + ':';
-      return Storage.keys()
+      return Storage.keysScoped(bankId)
         .filter((k) => k.indexOf(prefix) === 0 && k.slice(prefix.length) !== 'meta')
         .map((k) => k.slice(prefix.length))
         .filter((s) => /^\d+$/.test(s))
@@ -147,9 +147,9 @@
         .sort((a, b) => a - b);
     },
 
-    /** 旧单 blob（分片迁移前）读取，非数组返回 [] */
+    /** 旧单 blob（分片迁移前）读取，非数组返回 []；未水合库抛 NotHydratedError（不返回伪空） */
     legacyOf(bankId) {
-      const legacy = Storage.get(K.questions(bankId), []);
+      const legacy = Storage.getScopedFresh(K.questions(bankId), bankId, []);
       return Array.isArray(legacy) ? legacy : [];
     },
 
@@ -815,7 +815,7 @@
   const progress = {
     // 错题本（键用 contentHash，跨导入稳定）
     async wrongList(bankId) {
-      return Storage.get(K.wrong(bankId), []).slice();
+      return Storage.getScopedFresh(K.wrong(bankId), bankId, []).slice();
     },
     async wrongAdd(bankId, question) {
       return progress.wrongAddMany(bankId, [question]);
@@ -823,13 +823,14 @@
     /** 批量加入（R-02）：整表只读一次、只写一次；空数组不写 */
     async wrongAddMany(bankId, questions) {
       const batch = questions || [];
-      const list = Storage.get(K.wrong(bankId), []).slice();
+      const list = Storage.getScopedFresh(K.wrong(bankId), bankId, []).slice();
       batch.forEach((q) => applyWrongEntry(list, q));
       if (batch.length) Storage.set(K.wrong(bankId), list);
       return list;
     },
     async wrongRemove(bankId, questionKey) {
-      const list = Storage.get(K.wrong(bankId), []).filter((w) => w.questionKey !== questionKey);
+      const list = Storage.getScopedFresh(K.wrong(bankId), bankId, [])
+        .filter((w) => w.questionKey !== questionKey);
       Storage.set(K.wrong(bankId), list);
     },
     async wrongClear(bankId) {
@@ -842,7 +843,7 @@
     },
     async favoriteToggle(bankId, question) {
       const key = QB.makeQuestionKey(question);
-      let list = Storage.get(K.favorite(bankId), []).slice();
+      let list = Storage.getScopedFresh(K.favorite(bankId), bankId, []).slice();
       const idx = list.findIndex((f) => f.questionKey === key);
       let added;
       if (idx >= 0) {
@@ -1145,7 +1146,7 @@
      * @returns {{migrated:boolean, listed:number, physical:number, missing:number, unlisted:number, verified:boolean, failed?:string}}
      */
     convertMetaLayout(bankId) {
-      const raw = Storage.getFresh(K.reviewMeta(bankId), null);
+      const raw = Storage.getScopedFresh(K.reviewMeta(bankId), bankId, null);
       const physical = ReviewStore.stateKeys(bankId);
       const base = { migrated: false, listed: 0, physical: physical.length, missing: 0, unlisted: 0, verified: true };
       if (!raw || !(raw.v === 3 && Array.isArray(raw.keys))) return base;
@@ -1170,7 +1171,7 @@
         stats.failed = String((e && e.message) || e);
         return stats;
       }
-      const after = Storage.getFresh(K.reviewMeta(bankId), null);
+      const after = Storage.getScopedFresh(K.reviewMeta(bankId), bankId, null);
       if (!after || after.v !== REVIEW_LAYOUT_VERSION || Array.isArray(after.keys)) {
         throw new Error('reviewMeta 布局迁移校验失败（' + bankId + '）');
       }

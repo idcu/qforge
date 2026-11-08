@@ -442,14 +442,15 @@ switchBank(nextId) = 快照 {bankId, view}
   首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`。
   **首屏用户可见最大长任务 83 ms（中位 54 ms）属于本次改造未覆盖的既有成本，不代表「启动阻塞已消除」。**
 
-### 4.22 作用域读取 API（C 步骤1–3 已完成；步骤4–6 未实施）
+### 4.22 作用域读取 API（C 步骤1–3 已完成；步骤4 进行中 8/22；步骤5–6 未实施）
 
 - **状态**：**步骤1（API + 契约测试）已完成**；**步骤2（A 段 20 处前置核对）已完成**
   （2026-11-08）：**20/20 已有 `ensureAll` 或等价全量前置，0 处需补**；**步骤3 已完成**
   （2026-11-08）：B 段 6 处中 **4/6 已迁移**（`legacyReviewMap` 953、`convertLegacy` 1054、
   `remap` 1095/1098），剩余 2 处（`convertMetaLayouts` 1198、`hash-remap.js:32`）未迁；
-  步骤4–6（C 迁移、CI 默认严格、生产 strict）**未实施**。完整提案（未跟踪、不随仓库发布）：
-  `.analysis/architecture-audit/scoped-read-api-proposal.md`。
+  **步骤4 进行中**（2026-11-08）：C 段 22 处已按实测频次分冷热，**冷路径 10 处中已迁 8 处
+  （8/22）**，热路径 12 处**只出数据不改**；步骤5–6（CI 默认严格、生产 strict）**未实施**。
+  完整提案（未跟踪、不随仓库发布）：`.analysis/architecture-audit/scoped-read-api-proposal.md`。
 - **问题**：`Storage.get/keys` 是同步契约，分阶段水合只覆盖启动作用域；未水合库读取静默返回
   `undefined`/`defaultValue`（见 §4.21 与 [STORAGE.md](STORAGE.md) 结论 b）。现有静态护栏只能拦
   「新增调用点/计数漂移」，**不能拦「已有调用点归类错误」**。
@@ -479,9 +480,10 @@ switchBank(nextId) = 快照 {bankId, view}
   `app.js:284` toast + `app.js:287` 状态栏（`render()` 返回 false，无 unhandled rejection）、
   迁移 `app.js:1797` toast、备份恢复 `backup.js:831` toast、改题保存
   `question-editor.js:602/713` errBox。
-- **6 步灰度（当前进度 3/6）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
+- **6 步灰度（当前进度 3/6，步骤4 进行中）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
   `ensureAll` 职责（**已完成，0 处需补**）；③ B 类 6 处迁移到 `getScoped`（**已完成 4/6**：
-  1054/1095/1098/953 已迁；1198/hash-remap:32 未迁）；④ C 类 22 处按模块迁移；
+  1054/1095/1098/953 已迁；1198/hash-remap:32 未迁）；④ C 类 22 处按模块迁移
+  （**进行中 8/22**：冷路径 `142/152/818/826/832/845/1148/1173` 已迁；热路径 12 处未动）；
   ⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 是否开启由下一阶段实测决定。
 - **为何唯一覆盖两类风险**：O1 让新增调用点在未水合时立即失败；`__strictReads` 让既有调用点
   的归类错误在测试/CI 暴露。O2（`withBank` 门面）引入生命周期与门面过期读错库；O3（严格/宽松
@@ -509,8 +511,18 @@ switchBank(nextId) = 快照 {bankId, view}
   以及 4 处调用方 `ensureBank` 静态前置缺失。绿例同一负例：`ensureBank` 后
   题目 **2** / 复习状态 **2** / 待复习 **2** / 错题 **1** / 收藏 **1**，并在 `readMap` 水合后正常返回。
   静态调用点仍 **89**（`getFresh` → `getScopedFresh` 同类计数不变），`backup-hydration` 断言 52。
+- **步骤4 实测（2026-11-08）**：`.analysis/architecture-audit/c4-frequency.mjs` 对 C 段 22 处做
+  运行时埋点（真实数据层 + 内存 IDB，300 题/库 × 2 库；包装 `get/getFresh/keys` + 函数调用帧归因，
+  **不用 `Error.stack`**）：热路径 12 处（`readMap` per-hash 每帧 **300** 次、`stateKeys` 峰值 6、
+  `ReviewStore.get` 批量 **200** 次等），冷路径 10 处（峰值 1–4 次）。冷路径迁移 **8 处**：
+  `wrongList/wrongAddMany/wrongRemove/favoriteToggle/indexesOf/legacyOf/convertMetaLayout(1148+1173)`
+  → `getScopedFresh` / `keysScoped`；`1541/1542` 暂缓（未水合已被 `readMap` 的 S 段作用域读取先拦截，
+  无独立负例）。`idb.test.mjs` 红 **284 通过 / 13 失败（exit 1）** → 绿 **297 通过 / 0 失败（exit 0）**；
+  断言 **268 → 297**（+29）。等价性断言在迁移前后同一已水合场景逐项相同（先等价段后负数段）。
+  **行为面变化**：未水合库 `questions.count/list` 由返回 0/空改为抛 `NotHydratedError`
+  （3 处旧断言同步改为 fail-loud，更强）。静态调用点仍 **89**（同类 API 计数不变）。
 - **未验证项**：生产 strict 的全局键白名单与跨标签行为；浏览器真机 `keysScoped` 成本；
-  迁移 A 段的行为级负例（v6 物理 per-hash 夹具未构造）。
+  迁移 A 段的行为级负例（v6 物理 per-hash 夹具未构造）；热路径 12 处迁移后的真实浏览器 P95。
 
 ## 5. 公共抽象与影响范围
 

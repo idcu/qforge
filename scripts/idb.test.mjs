@@ -487,6 +487,7 @@ section('C009：IDB 用量走 navigator.storage.estimate（quota 未知也用它
   await QB.Storage.initStore();
   QB.DB.init();
   const bank = await QB.DB.banks.create({ name: 'C009 估算库' });
+  await QB.Storage.ensureBank(bank.id); // 真实建库路径（app bank-create）先 ensureBank 再写题
   const qs = [];
   for (let i = 0; i < 10; i++) {
     qs.push({ type: 'single', question: '估算题' + i + '？', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' });
@@ -802,6 +803,7 @@ section('跨标签 fail-loud：读失败保留缓存并通知（Phase 0 批次1-
   await QB.Storage.initStore();
   const S = QB.Storage;
   const bank = await QB.DB.banks.create({ name: '跨标签库' });
+  await QB.Storage.ensureBank(bank.id); // 真实建库路径（app bank-create）先 ensureBank 再写题
   await QB.DB.questions.insertMany(bank.id, [{
     type: 'single', question: '跨标签题',
     options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
@@ -886,7 +888,12 @@ section('分阶段水合：启动只水合当前库 + ensureBank（Phase 0 批�
   eq(info.mode, 'idb', '新页面按 IDB 启动');
   eq(scope, A.id, '启动水合作用域=当前库（实测 ' + (scope || '未记录') + '）');
   eq((await Q2.DB.questions.list(A.id, {})).items.length, 5, '当前库题目首屏可见');
-  eq((await Q2.DB.questions.list(B.id, {})).items.length, 0, '非当前库题目不水合（等切库）');
+  // C 步骤4：未水合库不再「静默读空」，统一 fail-loud（旧断言期望 0，迁移后转抛错）
+  const attemptRead = async (fn) => { try { return { value: await fn() }; } catch (e) { return { error: e }; } };
+  const lB = await attemptRead(() => Q2.DB.questions.list(B.id, {}));
+  ok(!!lB.error && lB.error.code === 'STORAGE_NOT_HYDRATED',
+    '非当前库题目不水合：读 fail-loud（实测 ' +
+    (lB.error ? lB.error.code : '返回 ' + lB.value.items.length + ' 条') + '）');
   eq(S.keys().filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length, 1,
     '当前库复习键可见（实测 ' + S.keys().filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length + '）');
   ok(S.keys().indexOf('user:review:' + B.id + ':' + bItems[0].contentHash) < 0,
@@ -907,7 +914,10 @@ section('分阶段水合：启动只水合当前库 + ensureBank（Phase 0 批�
 
   // 全量操作（备份）必须自己 ensureAll：库C 从未按库水合，仍要被覆盖
   ok(!S.isBankHydrated(C.id), '前置：库C 仍未水合');
-  eq((await Q2.DB.questions.list(C.id, {})).items.length, 0, '前置：库C 题目在同步视图不可见');
+  const lC = await attemptRead(() => Q2.DB.questions.list(C.id, {}));
+  ok(!!lC.error && lC.error.code === 'STORAGE_NOT_HYDRATED',
+    '前置：库C 题目在同步视图不可见（fail-loud，实测 ' +
+    (lC.error ? lC.error.code : '返回 ' + lC.value.items.length + ' 条') + '）');
   const bk = await Q2.Backup.buildBackup();
   const cShards = Object.keys(bk.data).filter((k) => k.indexOf(Q2.KEYS.questions(C.id) + ':') === 0);
   ok(cShards.length >= 1, '备份覆盖未水合库C的题目分片（实测 ' + cShards.length + ' 个分片键）');
@@ -948,7 +958,10 @@ section('分阶段水合：删除非当前库按库水合后再级联清理（Ph
   await Q2.Storage.initStore();
   const S = Q2.Storage;
   ok(!S.isBankHydrated(C.id), '前置：待删库C 未水合');
-  eq((await Q2.DB.questions.list(C.id, {})).items.length, 0, '前置：待删库C 题目不可见');
+  const delC = await (async () => { try { return { n: (await Q2.DB.questions.list(C.id, {})).items.length }; } catch (e) { return { error: e }; } })();
+  ok(!!delC.error && delC.error.code === 'STORAGE_NOT_HYDRATED',
+    '前置：待删库C 题目不可见（fail-loud，实测 ' +
+    (delC.error ? delC.error.code : '返回 ' + delC.n + ' 条') + '）');
   await Q2.DB.banks.remove(C.id, { cascade: true });
   await S.flush();
   eq(await Q2.Store.get(Q2.KEYS.questionsMeta(C.id)), undefined,
@@ -1284,6 +1297,134 @@ section('B 段前置：建库/进入新库 ensureBank（C 步骤3 后半：legac
   ok(!!st1 && st1.due === 1000, 'ensureBank 后作用域读取返回真实状态（不是残缺 Map）');
   eq(errorOf2(() => Q2.ReviewStore.readMap(C.id)), null, '水合后 readMap 正常返回（不再抛错）');
   eq(S.getFresh(cLegacy, 'SENTINEL'), 'SENTINEL', 'C 无旧整表键：合并视图不受影响');
+}
+
+section('C 步骤4 冷路径：8 处作用域读取（818/826/832/845/142/152/1148+1173）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  // H1（全量会话）：A=当前库（2 题/2 复习状态）；B=冷路径库（旧单 blob 题目 + 1 错题 + 1 收藏 + v3 复习清单）
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种跨库写（真实启动只水合当前库）
+  const A = await Q1.DB.banks.create({ name: 'C4库A' });
+  const B = await Q1.DB.banks.create({ name: 'C4冷路径库B' });
+  const E = await Q1.DB.banks.create({ name: 'C4等价库E' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(2, 'A'), { dedupe: false, mode: 'overwrite' });
+  const aItems = (await Q1.DB.questions.list(A.id, {})).items;
+  await Q1.DB.reviews.record(A.id, {
+    [aItems[0].contentHash]: { last: 100, due: 2000, s: 1, d: 1 },
+    [aItems[1].contentHash]: { last: 101, due: 2001, s: 1, d: 1 }
+  }, []);
+  const bQ = mk(2, '冷B');
+  const bKey1 = Q1.makeQuestionKey(bQ[0]);
+  [B, E].forEach((bank) => { // B=负数库（保持未水合）；E=等价库（随后水合比对）
+    Q1.Storage.setSync(Q1.KEYS.questions(bank.id), bQ); // 旧单 blob 布局（无分片清单 → legacyOf:152）
+    Q1.Storage.setSync(Q1.KEYS.wrong(bank.id), [{ questionKey: bKey1, wrongCount: 1, lastAt: 100 }]);
+    Q1.Storage.setSync(Q1.KEYS.favorite(bank.id), [{ questionKey: bKey1, addedAt: 100 }]);
+    Q1.Storage.setSync(Q1.KEYS.reviewState(bank.id, '1:abc'), { last: 100, due: 2000, s: 1, d: 1 });
+    Q1.Storage.setSync(Q1.KEYS.reviewMeta(bank.id), { v: 3, keys: ['1:abc'] });
+  });
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  // H2（部分视图）：当前库 A 已水合，B 从未水合
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const attempt = async (fn) => {
+    try { return { value: await fn() }; } catch (e) { return { error: e }; }
+  };
+  const errOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const isNotHydrated = (e) => !!e && e.name === 'NotHydratedError' &&
+    e.code === 'STORAGE_NOT_HYDRATED' && e.bankId === B.id;
+
+  eq(S.isBankHydrated(B.id), false, '前置：负数库 B 未水合');
+  eq(S.isBankHydrated(E.id), false, '前置：等价库 E 未水合');
+  ok(S.getFresh(Q2.KEYS.wrong(B.id), 'SENTINEL') === 'SENTINEL',
+    '前置：B 的错题键不在同步视图');
+
+  // 等价性先行（避免负数调用污染状态）：同一已水合场景，迁移前后结果逐项相同。
+  // 本段在迁移前（红例）单独运行也全部通过 —— 见 .analysis/architecture-audit/C4-step4-red.log
+  await S.ensureBank(E.id);
+  ok(S.isBankHydrated(E.id), '等价性前置：E 已水合');
+  const wl = await Q2.DB.progress.wrongList(E.id);
+  eq(wl.length, 1, '等价 818：已水合 wrongList 条数不变');
+  eq(wl[0].questionKey, bKey1, '等价 818：已水合 wrongList 条目键不变');
+  const wa = await Q2.DB.progress.wrongAddMany(E.id, [bQ[1]]);
+  eq(wa.length, 2, '等价 826：已水合 wrongAddMany 追加后条数不变');
+  eq(wa[1] && wa[1].questionKey, Q2.makeQuestionKey(bQ[1]), '等价 826：追加条目键一致');
+  await Q2.DB.progress.wrongRemove(E.id, bKey1);
+  const wl2 = await Q2.DB.progress.wrongList(E.id);
+  eq(wl2.length, 1, '等价 832：已水合 wrongRemove 后条数不变');
+  const fav1 = await Q2.DB.progress.favoriteToggle(E.id, bQ[0]);
+  eq(fav1 && fav1.added, false, '等价 845：已有收藏切换为取消（added=false）');
+  eq((await Q2.DB.progress.favoriteList(E.id)).length, 0, '等价 845：取消后收藏为空');
+  const fav2 = await Q2.DB.progress.favoriteToggle(E.id, bQ[0]);
+  eq(fav2 && fav2.added, true, '等价 845：再次切换为新增（added=true）');
+  eq((await Q2.DB.progress.favoriteList(E.id)).length, 1, '等价 845：新增后收藏为 1');
+  eq(Q2.QuestionShards.indexesOf(A.id).join(','), '0',
+    '等价 142：已水合 indexesOf 仍返回物理分片索引（2 题 → [0]）');
+  const legacy = Q2.QuestionShards.legacyOf(E.id);
+  eq(legacy.length, 2, '等价 152：已水合 legacyOf 仍返回旧单 blob 题目');
+  eq(legacy[0] && legacy[0].question, '冷B题0', '等价 152：旧单 blob 首题不变');
+  const cvt = Q2.ReviewStore.convertMetaLayout(E.id);
+  ok(cvt.migrated === true && cvt.physical === 1 && cvt.verified === true,
+    '等价 1148/1173：已水合 v3 清单仍正常压缩（实测 ' + JSON.stringify(cvt) + '）');
+  const metaAfter = S.getFresh(Q2.KEYS.reviewMeta(E.id), null);
+  ok(!!metaAfter && metaAfter.v === 4 && !Array.isArray(metaAfter.keys),
+    '等价 1148/1173：压缩后清单为 v4 标记（不再逐键枚举）');
+
+  // 红→绿：未水合库读到空 → 迁移后必须抛 NotHydratedError（不再静默返回 []/{}/0）
+  const n818 = await attempt(() => Q2.DB.progress.wrongList(B.id));
+  ok(isNotHydrated(n818.error),
+    '818 wrongList 未水合库抛 NotHydratedError（红：旧行为静默返回 []）',
+    '（实测 ' + (n818.error ? n818.error.name + ': ' + n818.error.message : '未抛错，返回 ' + JSON.stringify(n818.value)) + '）');
+  const n826 = await attempt(() => Q2.DB.progress.wrongAddMany(B.id, [bQ[1]]));
+  ok(isNotHydrated(n826.error),
+    '826 wrongAddMany 未水合库抛 NotHydratedError（红：旧行为按空表读改写，丢已有错题）',
+    '（实测 ' + (n826.error ? n826.error.name : '未抛错，返回 ' + JSON.stringify(n826.value)) + '）');
+  const n832 = await attempt(() => Q2.DB.progress.wrongRemove(B.id, bKey1));
+  ok(isNotHydrated(n832.error),
+    '832 wrongRemove 未水合库抛 NotHydratedError（红：旧行为静默 no-op）');
+  const n845 = await attempt(() => Q2.DB.progress.favoriteToggle(B.id, bQ[0]));
+  ok(isNotHydrated(n845.error),
+    '845 favoriteToggle 未水合库抛 NotHydratedError（红：旧行为按空表切换，产生错误收藏）');
+  const n142 = errOf(() => Q2.QuestionShards.indexesOf(B.id));
+  ok(isNotHydrated(n142),
+    '142 indexesOf 未水合库抛 NotHydratedError（红：旧行为返回 []，伪装「无分片」）',
+    '（实测 ' + (n142 ? n142.name : '未抛错') + '）');
+  const n152 = errOf(() => Q2.QuestionShards.legacyOf(B.id));
+  ok(isNotHydrated(n152),
+    '152 legacyOf 未水合库抛 NotHydratedError（红：旧行为返回 []，伪装「空库」）');
+  const nCvt = errOf(() => Q2.ReviewStore.convertMetaLayout(B.id));
+  ok(isNotHydrated(nCvt),
+    '1148/1173 convertMetaLayout 未水合库抛 NotHydratedError（红：旧行为静默返回 migrated:false）',
+    '（实测 ' + (nCvt ? nCvt.name : '未抛错') + '）');
+
+  // 静态护栏：8 处均改走作用域读取，且默认 get/keys 语义未被改
+  const laSrc3 = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  ok(laSrc3.indexOf('Storage.getScopedFresh(K.wrong(bankId), bankId, [])') >= 0 &&
+     laSrc3.indexOf('Storage.getScopedFresh(K.favorite(bankId), bankId, [])') >= 0,
+    '静态：错题/收藏 4 处（818/826/832/845）改走 getScopedFresh');
+  ok(laSrc3.indexOf('return Storage.keysScoped(bankId)') >= 0 &&
+     laSrc3.indexOf('Storage.getScopedFresh(K.questions(bankId), bankId, [])') >= 0,
+    '静态：142 indexesOf 改走 keysScoped、152 legacyOf 改走 getScopedFresh');
+  ok(laSrc3.indexOf('const raw = Storage.getScopedFresh(K.reviewMeta(bankId), bankId, null);') >= 0 &&
+     laSrc3.indexOf('const after = Storage.getScopedFresh(K.reviewMeta(bankId), bankId, null);') >= 0,
+    '静态：1148/1173 convertMetaLayout 两次读均改走 getScopedFresh');
+  const storeSrc = fs.readFileSync(path.join(ROOT, 'js/utils/storage.js'), 'utf8');
+  ok(storeSrc.indexOf('__strictReads: false') >= 0 && storeSrc.indexOf('this.__strictReads') >= 0,
+    '静态：默认 get/keys 语义未改（__strictReads 仍默认 false）');
 }
 
 /* ============================================================ */

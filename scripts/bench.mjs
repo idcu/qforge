@@ -254,6 +254,7 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
   const IQ = ih.QB;
   IQ.DB.init();
   const ibank = await IQ.DB.banks.create({ name: '阶段0-写放大-IDB' });
+  await IQ.Storage.ensureBank(ibank.id); // 与 app 建库路径一致：先水合再写题
   await IQ.DB.questions.insertMany(ibank.id, wrongQs, { dedupe: true, mode: 'overwrite' });
   const IK = IQ.KEYS.wrong(ibank.id);
   const resetIdb = async () => { IQ.Storage.setSync(IK, []); await IQ.Storage.flush(); };
@@ -1155,6 +1156,7 @@ function instrumentMigPeak(Q, mode) {
 async function buildLegacyBankFor(Q, n, tier) {
   Q.Storage.clearAll();
   const bank = await Q.DB.banks.create({ name: 'IDB压测库' + tier });
+  if (!Q.Storage.isBankHydrated(bank.id)) await Q.Storage.ensureBank(bank.id); // writeAll/clear 走作用域读取
   const questions = [];
   const oldMap = {};
   const oldLog = [];
@@ -1515,6 +1517,7 @@ let c018GetSeq = 0;
   await HQ.Storage.initStore();
   HQ.DB.init();
   const c009Bank = await HQ.DB.banks.create({ name: 'C009 50k' });
+  await HQ.Storage.ensureBank(c009Bank.id); // 与 app 建库路径一致：先水合再写题
   const c009Qs = [];
   for (let i = 0; i < 50000; i++) {
     c009Qs.push({

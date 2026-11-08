@@ -11,12 +11,15 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–3 已实施（2026-11-08，见下方最新记录）；步骤 4–6 未实施**。
+- **状态**：**步骤 1–3 已实施；步骤 4 部分实施（冷路径 8/22，2026-11-08，见下方最新记录）；
+  步骤 5–6 未实施**。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
   步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
   新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
-  调用点 89（S 类 5 处）。`js/**` 步骤1/步骤3 两次变更，SW 已递增
-  `qforge-v40` → `v41` → `v42` → `v43`。
+  步骤4 完成 C 段 22 处**实测频次排序 + 冷热分组**，冷路径迁移 **8/22**（142/152/818/826/832/845/1148/1173），
+  热路径 12 处只出数据未改（`1541/1542` 暂缓，未水合时已被更早的 S 段读取拦截，无独立负例）。
+  调用点 89（S 类 5 处）。`js/**` 步骤1/步骤3/步骤4 三次变更，SW 已递增
+  `qforge-v40` → `v41` → `v42` → `v43` → `v44`。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -32,6 +35,71 @@
 - **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(storage): C 步骤4 实测频次排序 + 冷热分组，冷路径 8 处迁 scoped 读取（8/22）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `js/data/local-adapter.js`：8 处冷路径读取迁到作用域入口（签名不变）——
+  `indexesOf` 142（`Storage.keys()` → `keysScoped(bankId)`）、`legacyOf` 152、
+  `progress.wrongList/wrongAddMany/wrongRemove` 818/826/832、
+  `progress.favoriteToggle` 845（均 `Storage.get` → `getScopedFresh(key,bankId,[])`）、
+  `convertMetaLayout` 首读 1148 与写后校验读 1173（`getFresh` → `getScopedFresh(...,null)`）。
+  未水合库由“静默读空”改为抛 `NotHydratedError`；已水合库返回值逐项不变。
+- 测量脚本（未跟踪，不随仓库发布）：`.analysis/architecture-audit/c4-frequency.mjs`——
+  真实 `createHarness` + 内存 IDB，包装 `Storage.get/getFresh/keys` 用 `hrtime` 计时，
+  按调用帧归因到行号（不用 `Error.stack`）；A 已水合、B 未水合（300 题/库）。
+- 测试：`scripts/idb.test.mjs` 新增「C 步骤4 冷路径 8 处」29 项（含 7 处行为负例、
+  等价性逐项、静态护栏），3 处旧“静默读空”断言改 fail-loud（更强）；断言 268 → **297**。
+- 夹具修正（非放宽断言）：`idb.test.mjs:489/806`、`bench.mjs` 3 处建库后补
+  `Storage.ensureBank`（与 `app.js` 建库路径一致）。
+- 文档：`docs/STORAGE.md`（频率表/冷热分组/迁移进度 8/22）、`docs/ARCHITECTURE.md` §4.22
+  （步骤4 进行中 8/22）、`docs/TESTING.md`（idb 297 / 合计 5788）、`docs/BENCH.md`
+  （首屏 386.6 KB / 1090.6 KB）、`docs/DEVELOPMENT.md`（SW v44）。
+- `sw.js`：`qforge-v43` → **`qforge-v44`**，`scripts/sw-baseline.json` 已重算。
+
+**实测频次（迁移前，单操作内峰值；完整 22 行见 `docs/STORAGE.md`）**
+| 调用点 | 所属路径 | 次数 | 峰值耗时 ms | 冷/热 |
+| --- | --- | --- | --- | --- |
+| `1000` readMap per-hash | 首屏每帧 | 300 | 0.498 | 热 |
+| `124` metaOf | 首屏/统计/切库 | 3 | 0.007 | 热 |
+| `984` stateKeys | 首屏/统计/切库 | 6 | 0.250 | 热 |
+| `1009` ReviewStore.get | 答题收卷 | 200 | 0.239 | 热 |
+| `1499` touched | 答题收卷 | 105 | 0.149 | 热 |
+| `967` meta | 答题收卷 | 100 | 0.044 | 热 |
+| `1542/1541` save prev | 备份恢复 | 3 / 1 | 0.003 / 0.001 | 冷（暂缓） |
+| `1148/1173` convertMetaLayout | 启动迁移 | 4 / 1 | 0.004 / 0.001 | 冷（已迁） |
+| `152/142/818/826/832/845` | 旧布局/维护/错题/收藏 | 1–2 | 0.001–0.003 | 冷（已迁） |
+
+每操作总耗时（ms，迁移前）：home-cold 1.318 / home-warm 1.515 / stats 1.820 /
+submit-batch-100 2.684 / switch-B 2.600 / import-100 3.523 / restore-save 2.458 /
+convert-v3 2.383 / backup-export 5.641（该路径 0 处 C 段读取）。
+冷热分组：热 **12**、冷 **10**（其中 8 已迁、2 暂缓）。
+
+**验证数据（实跑，2026-11-08）**
+- 红：`node scripts/idb.test.mjs` → **284 通过 / 13 失败 / exit 1**。真实失败：未水合 B 库
+  `wrongList` 返回 `[]`、`wrongAddMany` 空表覆盖丢错题、`indexesOf` 返回 `[]`、
+  `convertMetaLayout` 返回 `migrated:false`，另 3 处旧静默读空断言、3 处静态护栏。
+- 绿：同命令 → **297 通过 / 0 失败 / exit 0**；断言 **268 → 297（+29，只增不减）**。
+  等价性：同一已水合库 E 的 `wrongList`/`wrongAddMany`/`wrongRemove`/`favoriteToggle`/
+  `indexesOf`/`legacyOf`/`convertMetaLayout` 在迁移前后逐项相同（先等价段后负数段）。
+- `npm run verify:fast` → **exit 0**（37 套件 / **5788** 断言 / 基线一致）。
+- `npm run bench` → **exit 0**（66 项门禁；`gradeMany` 首跑 5.40 > 5.35 属计时抖动，
+  复跑 **5.15** 通过，未调阈值/容差，如实记录）。
+- `node scripts/docs-check.mjs --static` → **exit 0**（37 运行项 / 5788 断言 / 66 门禁；
+  首屏 **386.6 KB gzip / 1090.6 KB raw**）。
+
+**遗留 TODO / 风险**
+- 热路径 **12 处未迁**：`124/129/841/967/984/1000/1009/1039/1469/1488/1489/1499`。
+  `1000/984` 作用域化不降复杂度，需「按库键索引 `_keysByBank`」新机制（提案 §5，本轮只登记不实施）；
+  评分写路径（`967/1009/1469/1488/1489/1499`）迁移前提是所有写调用方先 `ensureBank`。
+- `1541/1542` 暂缓：未水合时已被 `readMap → legacyReviewMap` 的 S 段作用域读取先拦截，
+  构造不出独立的“读到空”负例，**不谎称已迁**。
+- 行为面变化（有意）：`questions.count/list` 对未水合库抛 `NotHydratedError`；
+  上一轮新增 `convertMetaLayout:1198` 与 `hash-remap.js:32` 仍维持原状。
+- 待决策：热路径迁移顺序（先只读渲染 3 处，还是先加按库键索引再迁全部）；
+  `1541/1542` 是否需要 `readMap` 之外的独立防护。
 
 ### feat(storage): 建库/进入新库补 ensureBank 前置并迁移 legacyReviewMap（B 段 4/6）
 

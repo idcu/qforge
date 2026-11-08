@@ -339,3 +339,88 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 - **C1 验收（真机 Chromium 50k，5 场景 × 5 轮）**：重建次数 S1 3→**1**（中位 9.4ms，冷轮 3 次）、
   S3 6→**0**、S4 1→**0**、S5 1→**0**；全场景中位合计 **122.3ms → 9.4ms**。Node 50k 门禁：
   首次构建 15.08–17.38ms（≤40ms）、写已存在键后 0.11–0.12ms（≤2ms）。契约等价性 17/17（diff=0）。
+
+#### C 步骤4：C 段 22 处频次排序 + 冷热分组 + 冷路径迁移 8/22（2026-11-08）
+
+- **测量口径（实测，非代码位置推断）**：`.analysis/architecture-audit/c4-frequency.mjs`（未跟踪）——
+  真实数据层 `createHarness` + 内存 IDB（300 题/库 × A/B 两库，A 已水合、B 未水合），
+  包装 `Storage.get/getFresh/keys` 用 `process.hrtime.bigint()` 计时；通过包装 22 处所属函数维护
+  调用帧，按「最近被测函数帧 + key 前缀」归因到具体行号（**不用 `Error.stack`**）。
+  计时含包装开销，绝对值仅供量级比较；峰值耗时 = 该操作内该调用点累计。
+  原始日志：`C4-step4-frequency-pre.log`（迁移前）/ `C4-step4-frequency.log`（迁移后）。
+
+- **频次排序（按单操作峰值降序；数据取自迁移前实测）**
+
+  | # | 调用点 | 所属函数 | 所属路径 | 单次操作内调用次数（峰值） | 单次耗时（峰值累计 ms） | 冷/热 | 本轮 |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | 1 | `local-adapter.js:1000` | `readMap` per-hash `getFresh` | 首屏渲染 / 统计页 / 切库 / 备份恢复 | **300**（home 每帧；= 状态键数） | 0.498 | 热 | 不改 |
+  | 2 | `local-adapter.js:124` | `QuestionShards.metaOf` | 首屏渲染 / 统计页 / 切库 / 导入导出 | 3 | 0.007 | 热 | 不改 |
+  | 3 | `local-adapter.js:984` | `ReviewStore.stateKeys` | 首屏渲染 / 统计页 / 切库 / 备份恢复 | 6 | 0.250 | 热 | 不改 |
+  | 4 | `local-adapter.js:129` | `QuestionShards.shardOf` | 首屏渲染（冷帧）/ 切库 / 导入导出 | 2 | 0.004 | 热 | 不改 |
+  | 5 | `local-adapter.js:841` | `progress.favoriteList` | 首屏渲染（每帧） | 1 | 0.007 | 热 | 不改 |
+  | 6 | `local-adapter.js:1009` | `ReviewStore.get` | 答题收卷（逐题评分；批量 100 题 × 2） | 200 | 0.239 | 热 | 不改 |
+  | 7 | `local-adapter.js:1499` | `commitReview` touched `getFresh` | 答题收卷（逐 touched 键） | 105 | 0.149 | 热 | 不改 |
+  | 8 | `local-adapter.js:967` | `ReviewStore.meta` | 答题收卷（逐题 put） | 100 | 0.044 | 热 | 不改 |
+  | 9 | `local-adapter.js:1148` | `convertMetaLayout` 首次读 | 启动迁移（v3→v4） | 4 | 0.004 | 冷 | **已迁** |
+  | 10 | `local-adapter.js:1542` | `reviews.save` `prevLegacy` | 导入导出（备份恢复） | 3 | 0.003 | 冷 | 暂缓（见下） |
+  | 11 | `local-adapter.js:152` | `QuestionShards.legacyOf` | 旧布局首次打开 / 迁移 | 2 | 0.001 | 冷 | **已迁** |
+  | 12 | `local-adapter.js:845` | `progress.favoriteToggle` | 收藏夹（用户点按） | 2 | 0.001 | 冷 | **已迁** |
+  | 13 | `local-adapter.js:1039` | `ReviewStore.removeHash` | 改题重映射 / 收卷删除 | 2 | 0.002 | 热（写循环） | 不改 |
+  | 14 | `local-adapter.js:1173` | `convertMetaLayout` 写后校验读 | 启动迁移（v3→v4） | 1 | 0.001 | 冷 | **已迁** |
+  | 15 | `local-adapter.js:1469` | `reviewRevOf` | 答题收卷（每次提交 1 次） | 1 | 0.002 | 热（写路径） | 不改 |
+  | 16 | `local-adapter.js:1488` | `commitReview` `prevLegacy` | 答题收卷（每次提交 1 次） | 1 | 0.001 | 热（写路径） | 不改 |
+  | 17 | `local-adapter.js:1489` | `commitReview` `prevMeta` | 答题收卷（每次提交 1 次） | 1 | 0.001 | 热（写路径） | 不改 |
+  | 18 | `local-adapter.js:142` | `QuestionShards.indexesOf` | 维护（compact/clear）/ 导入导出 | 1 | 0.003 | 冷 | **已迁** |
+  | 19 | `local-adapter.js:818` | `progress.wrongList` | 错题本 | 1 | 0.001 | 冷 | **已迁** |
+  | 20 | `local-adapter.js:826` | `progress.wrongAddMany` | 答题收卷（交卷批量加入错题） | 1 | 0.001 | 冷 | **已迁** |
+  | 21 | `local-adapter.js:832` | `progress.wrongRemove` | 错题本（用户移除） | 1 | 0.001 | 冷 | **已迁** |
+  | 22 | `local-adapter.js:1541` | `reviews.save` `prevMeta` | 导入导出（备份恢复） | 1 | 0.001 | 冷 | 暂缓（见下） |
+
+  - 每操作总耗时（ms，迁移前）：home-cold **1.318** / home-warm **1.515** / stats **1.820** /
+    submit-batch-100 **2.684** / switch-B **2.600** / import-100 **3.523** / restore-save **2.458** /
+    convert-v3 **2.383** / backup-export **5.641**（该路径 **0 处 C 段读取**，耗时来自全量导出本身）。
+  - **改归说明**：`152 legacyOf` 主要服务于旧单 blob 布局与迁移，但其调用点是 `readAll`
+    （渲染读的兼容回退）；仍按 C 段处理（作用域键 `questions:<bank>`），已在“冷路径”迁移，
+    等价位仅限**已水合**库。`1039`/`1541`/`1542` 虽属冷路径语义，但未水合时
+    已被更早的 S 段作用域读取拦截（`ReviewStore.get` → `legacyReviewMap`；`reviews.save` → `readMap`
+    → `legacyReviewMap`），**构造不出独立的“读到空”负例**，本轮不改，不谎称已迁。
+
+- **冷路径迁移清单（8 处，X/22 = 8/22）**
+
+  | 调用点 | 迁移前 | 迁移后 | 未水合负例（迁移前真实行为） |
+  | --- | --- | --- | --- |
+  | 818 | `Storage.get(K.wrong)` | `getScopedFresh(K.wrong(bankId), bankId, [])` | 返回 `[]`（错题本显示为空） |
+  | 826 | 同上 | 同上 | 按空表读改写，**丢失已有错题** |
+  | 832 | 同上 | 同上 | 静默 no-op |
+  | 845 | `Storage.get(K.favorite)` | `getScopedFresh(K.favorite(bankId), bankId, [])` | 按空表切换，产生错误收藏 |
+  | 142 | `Storage.keys()` | `keysScoped(bankId)` | 返回 `[]`，伪装“无分片” |
+  | 152 | `Storage.get(K.questions)` | `getScopedFresh(K.questions(bankId), bankId, [])` | 返回 `[]`，伪装“空库” |
+  | 1148 | `Storage.getFresh(K.reviewMeta)` | `getScopedFresh(K.reviewMeta(bankId), bankId, null)` | 静默 `migrated:false` |
+  | 1173 | 同上（写后校验读） | 同上 | 同函数，随 1148 一并生效 |
+
+- **红→绿（`node scripts/idb.test.mjs`，日志 `C4-step4-red.log` / `C4-step4-green.log`）**：
+  红 **284 通过 / 13 失败 / exit 1**（7 处行为负例 + 3 处静态护栏 + 3 处旧“静默读空”断言）；
+  绿 **297 通过 / 0 失败 / exit 0**（断言 268 → **297**，+29，只增不减）。
+  红例对应真实失败输出：`wrongList` 返回 `[]`、`wrongAddMany` 返回 1 条（原 2 条中 1 条被空表覆盖）、
+  `indexesOf` 返回 `[]`、`convertMetaLayout` 返回 `migrated:false`。
+- **等价性断言（同一已水合场景逐项相同）**：先跑等价段再跑负数段，避免负数调用污染状态；
+  等价库 E 的 `wrongList` 条数/键、`wrongAddMany` 追加条数/键、`wrongRemove` 后条数、
+  `favoriteToggle` 的 `added` 与收藏条数、`indexesOf(A)` = `[0]`、`legacyOf` 2 题且首题不变、
+  `convertMetaLayout` = `migrated:true, listed:3, physical:3, verified:true` + v4 清单，
+  在迁移前（红例）与迁移后（绿例）均全部通过。
+- **行为面变化（有意为之）**：`questions.count/list` 对**未水合库**由“返回 0/空数组”改为抛
+  `NotHydratedError`（经 `legacyOf` 作用域化）；`idb.test.mjs` 三处旧断言同步改为 fail-loud
+  断言（更强，不是放宽）。生产侧调用方均已有前置：`app.js` 建库/切库/恢复、备份 `ensureAll`。
+- **夹具修正（非断言放宽）**：`idb.test.mjs:489/806`、`bench.mjs:257/1157/1526` 建库后补
+  `ensureBank`（与 `app.js` 建库路径一致），否则写题会命中 `legacyOf` 的 fail-loud。
+
+- **热路径（12 处，本轮只出数据）与成本/风险（未实施）**
+  - `1000`/`984`（每帧 300 次 `getFresh` + 1 次 `keys()` 全量物化）：作用域化**不改变复杂度**，
+    只是把“键不在视图 → 默认值”改为抛错；真正降本需要「按库键索引 / `_keysByBank`」新机制
+    （见提案 §5，本轮只登记不实施）。
+  - `124`/`129`/`841`（首屏 0.001–0.007ms）：作用域化风险低，但属渲染路径，需 A 段前置保证
+    （A 段 20/20 已核对）。
+  - `967`/`1009`/`1499`/`1469`/`1488`/`1489`（评分/收卷写路径，逐题触发）：迁移前提是所有
+    写调用方（单题评分、交卷、改题、备份恢复）先 `ensureBank`；建议与提交批量化/索引一起做。
+- **待决策**：热路径 12 处的迁移顺序（先做只读渲染 3 处，还是先给 `keys()` 加按库索引再迁移全部）；
+  以及 `1541/1542` 是否需要在 `readMap` 之外独立防护。
