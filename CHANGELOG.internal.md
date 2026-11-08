@@ -47,7 +47,7 @@
 
 ### docs(scope): C 步骤6——生产 strict 评估裁定 no-go（不改生产行为）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`f2e4ca9`
 
 **核心改动**
 - 仅文档：`docs/STORAGE.md` 新增「C 步骤6」小节（成本实测表、测试面证据、可达失败负例、
