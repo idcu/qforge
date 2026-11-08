@@ -169,6 +169,8 @@
       this._keysCache = null;
       this._keysRevCached = -1;
       this._keysRev += 1;
+      // 已水合的库集合：分阶段水合时只包含当前库；null = 未知/全量视图（LS 或迁移后沿用缓存）
+      this._hydratedBanks = null;
       if (i.mode === 'idb') {
         // 启动水合带 records；迁移完成路径不带 records —— 调用方已保证现有缓存包含全部业务键，
         // 直接沿用可避免整库再解析一遍（少一份全量克隆，降低迁移峰值）。
@@ -185,6 +187,7 @@
           });
           this._cache = cache;
           this._chunkStates = chunks;
+          this._markHydratedFromRecords(i.records);
         }
         this.mode = 'idb';
         QB.Store.onWrite = (keys) => this._broadcastIdbWrite(keys);
@@ -243,8 +246,57 @@
         }
         this._cache.set(k, v);
       });
+      // ensureAll 后同步视图覆盖全部物理记录（等价于全量水合）
+      this._hydratedBanks = null;
       this._invalidateKeys();
       return { mode: 'idb', records: records.size };
+    },
+
+    /**
+     * 从全量 records 推导「已水合的库」（adoptStore 专用）。
+     * 覆盖：复习块键所属库、逻辑状态键（含旧整表）、reviewMeta/reviewRev 键所属库；
+     * 另把 `banks` 元数据里没有任何复习物理键的库视为已水合（其转换本就是空操作）。
+     * @param {Map<string,*>} records
+     */
+    _markHydratedFromRecords(records) {
+      const set = new Set();
+      const S = QB.Store;
+      const addBankOf = (prefix, key) => {
+        const rest = key.slice(prefix.length);
+        const cut = rest.indexOf(':');
+        set.add(cut < 0 ? rest : rest.slice(0, cut));
+      };
+      records.forEach((v, k) => {
+        if (S && typeof S.isReviewChunkKey === 'function' && S.isReviewChunkKey(k)) {
+          const p = S.reviewChunkParts ? S.reviewChunkParts(k) : null;
+          if (p) set.add(p.bank);
+          return;
+        }
+        if (k.indexOf('user:reviewMeta:') === 0) { set.add(k.slice('user:reviewMeta:'.length)); return; }
+        if (k.indexOf('user:reviewRev:') === 0) { set.add(k.slice('user:reviewRev:'.length)); return; }
+        if (k.indexOf('user:review:') === 0) addBankOf('user:review:', k);
+      });
+      const banks = records.get(QB.KEYS.banks);
+      if (Array.isArray(banks)) banks.forEach((b) => { if (b && b.id) set.add(String(b.id)); });
+      this._hydratedBanks = set;
+    },
+
+    /**
+     * 某库的复习数据是否已水合（同步视图可见）。
+     * 未水合库的转换/枚举必须显式跳过并上报，**不得**当作「没有数据」静默处理。
+     * @param {string} bankId
+     * @returns {boolean} LS 模式恒 true；`_hydratedBanks=null`（全量视图）恒 true
+     */
+    isBankHydrated(bankId) {
+      if (!this._isIdb()) return true;
+      if (!this._hydratedBanks) return true;
+      const id = String(bankId);
+      if (this._hydratedBanks.has(id)) return true;
+      // 本标签会话内新建/写入的库：标记键或块已在可见视图里（否则会把刚写的库误判为未水合）
+      if (this._cache.has(QB.KEYS.reviewMeta(id) || '') || this._cache.has(QB.KEYS.reviewRev(id) || '')) return true;
+      const chunkPrefix = 'user:reviewChunk:' + id + ':';
+      for (const k of this._chunkStates.keys()) { if (k.indexOf(chunkPrefix) === 0) return true; }
+      return false;
     },
 
     _subscribeBroadcast() {

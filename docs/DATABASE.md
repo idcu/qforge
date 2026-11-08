@@ -46,7 +46,7 @@ users 1 ──<（wrong_questions / favorites / attempts / sessions）   # 多�
 | `qb:user:fav:<bankId>` | `favorites` | `{questionKey, addedAt}` |
 | `qb:user:review:<bankId>:<hash>` | `review_schedule` | **schema v5 起的逻辑键**：单题一项 `{algo:'fsrs', due, stability, difficulty, reps, lapses, last, learning?}`，评分只写改动键（O(改动数)）。**schema v7 起物理落在下表 `reviewChunk` 块内，逻辑键读写契约不变**（`Storage.get/keys` 同步签名不变，未水合键仍返回空） |
 | `qb:user:reviewChunk:<bankId>:<bucket>` | `review_schedule`（**物理块，schema v7**） | `{v:1, s:{<hash>: <单题状态>}}`；每库固定 **256 桶**，桶号由 `QB.KEYS.reviewBucket(bank, hash)` 稳定散列。启动只把块记录折进 `Storage._chunkStates`（≤1024 条），不再展开 50k 逻辑键；v6→v7 自动迁移（见下文 v6→v7） |
-| `qb:user:reviewMeta:<bankId>` | `review_schedule`（布局标记） | `{v:4}` 紧凑标记（P2-06）；键集合由物理 `user:review:<bankId>:<hash>` 前缀枚举，**不再存 keys/count**；旧 `{v:3,count,keys}` 由启动期 `ReviewStore.convertMetaLayouts()` 幂等压缩（旧清单与物理键集合不一致时保留原清单并记录 anomalia，不丢状态） |
+| `qb:user:reviewMeta:<bankId>` | `review_schedule`（布局标记） | `{v:4}` 紧凑标记（P2-06）；键集合由物理 `user:review:<bankId>:<hash>` 前缀枚举，**不再存 keys/count**；旧 `{v:3,count,keys}` 由启动期 `ReviewStore.convertMetaLayouts()` 幂等压缩（旧清单与物理键集合不一致时保留原清单并记录 anomalia，不丢状态）；**Phase 0 fail-loud：未水合库（物理存在但同步视图不可见）显式跳过并记入 `skipped`，真实转换错误上抛中止迁移**，不得静默继续 |
 | `qb:user:review:<bankId>` | `review_schedule`（旧整表） | 兼容读：迁移前/迁移中断/旧备份导入；`QB.ReviewStore` 合并旧整表与 per-hash（per 优先），写路径不再产生此键 |
 | `qb:user:reviewRev:<bankId>` | 本地同步元数据 | 单调递增的本地复习版本号（服务端 `review_rev` 的本地对应物）；用于 storage 事件按版本合并与写前重读，不进备份 |
 | `qb:user:history` | `attempts` | 全局数组，元素含 `bankId` |

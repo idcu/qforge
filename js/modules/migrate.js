@@ -661,16 +661,11 @@
   function run(opts) {
     const force = !!(opts && opts.force);
     if (currentVersion() >= SCHEMA_VERSION && !force) {
-      // 版本已最新也可能残留旧 reviewMeta v3 清单（P2-06）：每次启动做一次幂等压缩，
-      // 失败只记录不抛（读取路径按物理键枚举，旧清单保留不影响可用性）。
-      let reviewMeta = null;
-      try {
-        reviewMeta = QB.ReviewStore && typeof QB.ReviewStore.convertMetaLayouts === 'function'
-          ? QB.ReviewStore.convertMetaLayouts()
-          : null;
-      } catch (e) {
-        reviewMeta = { banks: 0, migrated: 0, failed: 1, anomalies: [String((e && e.message) || e)] };
-      }
+      // 版本已最新也可能残留旧 reviewMeta v3 清单（P2-06）：每次启动做一次幂等压缩。
+      // fail-loud：未水合库显式跳过（结果带 skipped），真实转换错误直接上抛中止，不静默吞。
+      const reviewMeta = QB.ReviewStore && typeof QB.ReviewStore.convertMetaLayouts === 'function'
+        ? QB.ReviewStore.convertMetaLayouts()
+        : null;
       return Promise.resolve({ fromVersion: SCHEMA_VERSION, version: SCHEMA_VERSION, reviewMeta: reviewMeta });
     }
     if (inflight) return inflight;
@@ -745,11 +740,8 @@
         // 已是 v6 的常规升级不再整库重跑布局归一，避免无谓的 50k 状态遍历。
         if (fromVersion < 5 || force) result.layout = await migrateV4ToV5();
         else result.layout = { skipped: 'already-v5' };
-        try {
-          result.reviewMeta = QB.ReviewStore.convertMetaLayouts();
-        } catch (e) {
-          result.reviewMeta = { banks: 0, migrated: 0, failed: 1, anomalies: [String((e && e.message) || e)] };
-        }
+        // fail-loud：未水合库显式跳过（结果带 skipped），真实转换错误上抛中止迁移（不半转换继续）
+        result.reviewMeta = QB.ReviewStore.convertMetaLayouts();
         result.backend = await migrateV5ToV6();
         // v6→v7：已有 IDB 安装的复习状态分块（新装/从 LS 升级在复制时已按块写入，无需再跑）
         if (idbUsable && fromVersion >= 6) result.reviewChunks = await migrateV6ToV7();

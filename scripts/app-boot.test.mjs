@@ -163,6 +163,7 @@ async function makeEnv(opts) {
   // migration 的 schema 细节由 migrate.test 覆盖；这里只验证 app.js 是否按后端分支调用它
   QB.Migration.run = async () => {
     stat.migration++;
+    if (o.migrationResult) return o.migrationResult;
     return o.migrationLocked ? { locked: true, migrated: 0 } : { locked: false, migrated: 0 };
   };
   // R-18：可控接管等待；采样 app.js 在等待期间写入状态栏的「阶段 + 已等待秒数」
@@ -261,6 +262,25 @@ section('boot：空库启动 + 顶栏/主题/SW/迁移接线');
   await clickAction(env, 'backup-manage');
   await waitUntil(() => env.backup > 0);
   eq(env.backup, 1, '备份恢复入口无题库也能打开');
+  env.restore();
+}
+
+/* ============================================================
+ * 1.5 迁移结果可见：未水合/失败库不得静默（Phase 0 批次1-2）
+ * ============================================================ */
+section('迁移结果可见：跳过/失败的复习索引整理有明确提示');
+{
+  const env = await makeEnv({
+    migrationResult: {
+      locked: false, migrated: 0,
+      reviewMeta: { banks: 3, migrated: 0, failed: 1, skipped: ['bank-hidden'], anomalies: ['bank-bad:注入失败'] }
+    }
+  });
+  const text = toastsText(env);
+  ok(text.indexOf('复习索引未完整整理') >= 0, '迁移跳过/失败有可见提示（实测：' + (text || '无提示') + '）');
+  ok(text.indexOf('跳过 1 个未水合库') >= 0, '提示含跳过数量');
+  eq(env.booted, true, '提示不阻断启动');
+  eq(rejections.length, 0, '该路径无未处理 rejection');
   env.restore();
 }
 

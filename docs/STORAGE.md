@@ -134,6 +134,10 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   不假成功）→ `Store.readAll(true, true)` 全量读（strict 读失败抛错）→ 把普通键合并进 `_cache`、
   块状态合并进 `_chunkStates`（跳过 `_pending/_ops` 中仍在途的键，避免覆盖本标签更新/删除）→
   失效键视图。读失败/落盘失败一律 reject，调用方必须提示用户，**不得退回部分视图**。
+- **已水合库判定（`Storage.isBankHydrated(bankId)`）**：IDB 模式下由 `adoptStore()` 的 records 推导
+  （复习块键/逻辑状态键/`reviewMeta`/`reviewRev` 所属库，`banks` 元数据中的空库视为已水合）；
+  本标签会话内新写入的库若可见标记/块也算已水合；LS 模式恒 true。未水合库的转换/枚举必须显式
+  跳过并上报，不得当作「没有数据」。
 - **逻辑键视图缓存**：`Storage.keys()` 由 `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制，
   同一修订只物化一次（首次 `_buildKeys()`），版本不一致时整体重建；每次返回 `slice()`，
   调用方修改返回值不会污染缓存。

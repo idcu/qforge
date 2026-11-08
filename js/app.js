@@ -1741,6 +1741,16 @@
     } finally {
       if (offProgress) offProgress();
     }
+    // fail-loud（Phase 0 批次1-2）：迁移跳过的未水合库/转换失败必须可见，不得静默；
+    // 只提示不阻断（读取路径按物理键枚举，未转换的旧清单不影响可用性）。
+    if (runRes && runRes.reviewMeta) {
+      const skipped = Array.isArray(runRes.reviewMeta.skipped) ? runRes.reviewMeta.skipped.length : 0;
+      const failed = runRes.reviewMeta.failed || 0;
+      if (skipped || failed) {
+        UI.toast('复习索引未完整整理：跳过 ' + skipped + ' 个未水合库、失败 ' + failed
+          + ' 个（数据未受影响，稍后自动重试）', 'err');
+      }
+    }
     // F2：另一标签持锁迁移，或它已在本次启动期间完成切换（本标签仍停在 LS），都要等待/切换。
     // 本标签不写 LocalStorage（会被迁移后的清理当旧数据删除），期间写入进内存队列，切换后补写 IDB。
     // R-18：等待/接管阶段在状态栏显示「阶段 + 已等待秒数」，让用户能判断仍在推进还是卡住。

@@ -1155,19 +1155,27 @@
       return stats;
     },
 
-    /** 全部题库的清单压缩（启动/迁移/备份恢复统一入口；幂等，失败只记录不抛） */
+    /**
+     * 全部题库的清单压缩（启动/迁移/备份恢复统一入口；幂等）。
+     * 失败语义（Phase 0 fail-loud）：
+     * - 未水合的库（物理存在但同步视图不可见）**显式跳过**并记录进 `skipped`，不得当作无数据静默处理；
+     * - 真实转换错误**上抛中止**，不得塞进 `anomalies` 后继续（否则迁移会带着半转换状态往下走）。
+     * @returns {{banks:number, migrated:number, failed:number, skipped:string[], anomalies:string[]}}
+     */
     convertMetaLayouts() {
-      const out = { banks: 0, migrated: 0, failed: 0, anomalies: [] };
-      ReviewStore.bankIds().forEach((bankId) => {
+      const out = { banks: 0, migrated: 0, failed: 0, skipped: [], anomalies: [] };
+      const ids = new Set(ReviewStore.bankIds());
+      // 补充 banks 元数据中的库：库可能没有复习物理键（空库），不应漏计；
+      // 未水合库是否真有数据由 Storage.isBankHydrated 判定，这里只补全候选集合。
+      const banks = Storage.get(QB.KEYS.banks, []);
+      if (Array.isArray(banks)) banks.forEach((b) => { if (b && b.id) ids.add(String(b.id)); });
+      ids.forEach((bankId) => {
         out.banks++;
-        let r;
-        try {
-          r = ReviewStore.convertMetaLayout(bankId);
-        } catch (e) {
-          out.failed++;
-          out.anomalies.push(bankId + ':' + ((e && e.message) || e));
+        if (typeof Storage.isBankHydrated === 'function' && !Storage.isBankHydrated(bankId)) {
+          out.skipped.push(bankId);
           return;
         }
+        const r = ReviewStore.convertMetaLayout(bankId);
         if (r.migrated) out.migrated++;
         if (r.failed) { out.failed++; out.anomalies.push(bankId + ':' + r.failed); }
         else if (!r.verified) out.anomalies.push(bankId + ':index-physical-mismatch');

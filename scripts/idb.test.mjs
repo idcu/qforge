@@ -726,6 +726,59 @@ section('备份 fail-loud：全量导出前 ensureAll + 主导出按钮失败可
   }
 }
 
+section('迁移 fail-loud：未水合库显式跳过 + 真实错误中止（Phase 0 批次1-2）');
+{
+  const idb = createMemoryIDB();
+  const H = await makeHarness({ indexedDB: idb });
+  const QB = H.QB;
+  QB.DB.init();
+  QB.Store.writeMarker('idb');
+  await QB.Storage.initStore();
+  QB.Storage.setSync(QB.KEYS.metaSchema, 7);
+  const S = QB.Storage;
+  const q = (n) => ({
+    type: 'single', question: n, options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  });
+  const bankA = await QB.DB.banks.create({ name: '迁移库A' });
+  const bankB = await QB.DB.banks.create({ name: '迁移库B' });
+  await QB.DB.questions.insertMany(bankA.id, [q('A1')], { dedupe: false, mode: 'overwrite' });
+  await QB.DB.questions.insertMany(bankB.id, [q('B1')], { dedupe: false, mode: 'overwrite' });
+  const itemA = (await QB.DB.questions.list(bankA.id, {})).items[0];
+  const itemB = (await QB.DB.questions.list(bankB.id, {})).items[0];
+  await QB.DB.reviews.record(bankA.id, { [itemA.contentHash]: { last: 100, due: 0, s: 1, d: 1 } }, []);
+  await QB.DB.reviews.record(bankB.id, { [itemB.contentHash]: { last: 100, due: 0, s: 1, d: 1 } }, []);
+  // 旧 v3 清单（转换入口应当看见并压缩；未水合时不得静默处理）
+  S.setSync(QB.KEYS.reviewMeta(bankB.id), { v: 3, keys: [itemB.contentHash] });
+  await S.flush();
+
+  // 模拟分阶段水合：库B 物理存在，但同步视图与已水合集合都不含它
+  const removed = S.keys().filter((k) => k.indexOf(bankB.id) >= 0);
+  removed.forEach((k) => S._cache.delete(k));
+  Array.from(S._chunkStates.keys()).forEach((k) => { if (k.indexOf(bankB.id) >= 0) S._chunkStates.delete(k); });
+  if (S._hydratedBanks) S._hydratedBanks.delete(bankB.id);
+  S._invalidateKeys();
+  eq(S.keys().filter((k) => k.indexOf(bankB.id) >= 0).length, 0,
+    '前置：库B在同步视图不可见（模拟未水合，移除 ' + removed.length + ' 个键）');
+
+  const out = QB.ReviewStore.convertMetaLayouts();
+  ok(Array.isArray(out.skipped) && out.skipped.indexOf(bankB.id) >= 0,
+    '未水合库显式进入 skipped（实测：' + (Array.isArray(out.skipped) ? out.skipped.join(',') : '无 skipped 字段') + '）');
+  ok(out.banks >= 2, '候选库集合含 banks 元数据中的未水合库（实测 banks=' + out.banks + '）');
+
+  // 真实转换错误必须中止（旧实现塞进 anomalies 继续）
+  const orig = QB.ReviewStore.convertMetaLayout;
+  QB.ReviewStore.convertMetaLayout = () => { throw new Error('注入：布局转换失败'); };
+  let threw = null;
+  try { QB.ReviewStore.convertMetaLayouts(); } catch (e) { threw = e; }
+  QB.ReviewStore.convertMetaLayout = orig;
+  ok(!!threw && threw.message === '注入：布局转换失败',
+    '真实转换错误上抛中止（实测：' + (threw ? threw.message : '被吞，返回 partial 结果') + '）');
+
+  const res = await QB.Migration.run();
+  ok(!!res.reviewMeta && Array.isArray(res.reviewMeta.skipped) && res.reviewMeta.skipped.indexOf(bankB.id) >= 0,
+    'Migration.run 结果携带 skipped（实测：' + JSON.stringify(res.reviewMeta && res.reviewMeta.skipped) + '）');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

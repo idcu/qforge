@@ -341,6 +341,9 @@ activate → caches.keys()
 - **水合**：`Store.init()` 的 8 个并发只读事务只等 `banks` 一个，`getAllKeys`/其余键并行；
   块记录进 `Storage._chunkStates`（≤1024 条）而不是展开成 50k 条 Map/字符串，避免在刚反序列化
   10MB 的堆上触发 major GC。读取走 `_cache` → `_chunkLookup` 两级；写入仍经 `_pending`/`_ops` 微任务批量事务。
+- **错误语义（Phase 0 fail-loud）**：全量路径（备份/迁移）前置 `Storage.ensureAll()`；未水合库由
+  `Storage.isBankHydrated()` 显式识别，`convertMetaLayouts()` 记入 `skipped` 并在启动后提示，
+  真实转换错误上抛中止；任一失败都不得静默退回部分视图或当作「没有数据」。
 - **逻辑键视图缓存**（本项修复）：`Storage.keys()` 原本每次都从 `_chunkStates` 重建 50k 逻辑键字符串，
   启动固定付 6 次（迁移快速路径 `convertMetaLayouts` + `bankIds` + `stateKeys`）。现在由
   `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制：**同一修订只物化一次**，版本不一致时整体重建；
