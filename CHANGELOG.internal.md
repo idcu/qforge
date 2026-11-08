@@ -34,7 +34,7 @@
 
 ### feat(storage): B 段重映射读取迁移到 getScopedFresh（C 步骤3 前半，3/6）
 
-**Commit Hash**：`（本提交）`
+**Commit Hash**：`179283d`
 
 **核心改动**
 - `js/data/local-adapter.js`：`convertLegacy` 的 per-hash 读取、`remap` 的两次状态读取
