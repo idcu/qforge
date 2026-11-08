@@ -204,6 +204,49 @@
       return this.mode;
     },
 
+    /**
+     * 全量可见性保障（**唯一实现**）：备份/迁移等「必须看到全部物理数据」的路径前置调用。
+     * 同步视图只保证「已水合的库」可见；本方法把持久层全部记录合并回 `_cache/_chunkStates`，
+     * 使 `keys()/get()` 覆盖全部物理键。既有同步签名不变（本方法自身异步）。
+     * 失败即 reject（落盘失败/读失败都不吞），调用方负责提示用户，不得退回部分视图。
+     * @returns {Promise<{mode:string, records:number}>}
+     */
+    async ensureAll() {
+      if (!this._isIdb()) {
+        // LS 模式：keys()/get() 直接读磁盘，不存在「未水合」
+        return { mode: 'ls', records: this.keys().length };
+      }
+      const S = QB.Store;
+      if (!S || typeof S.readAll !== 'function') throw new Error('Storage.ensureAll：QB.Store.readAll 不可用');
+      // 先把本标签待写落盘：失败必须上抛（否则全量读取会拿到旧磁盘值）
+      if (this._pending.size || this._ops.size) await this.flush();
+      const records = await S.readAll(true, true); // strict：IDB 读失败抛错
+      if (!records || typeof records.forEach !== 'function') {
+        throw new Error('Storage.ensureAll：QB.Store.readAll 返回值无效');
+      }
+      records.forEach((v, k) => {
+        // 在途写入/删除以本标签为准，避免重读覆盖（极少数与 await 并发的写入）
+        if (this._pending.has(k) || this._ops.has(k)) return;
+        if (S.isReviewChunkKey && S.isReviewChunkKey(k)) {
+          const states = (v && typeof v === 'object' && v.s && typeof v.s === 'object') ? v.s
+            : (v && typeof v === 'object' ? v : null);
+          if (!states) return;
+          const parts = S.reviewChunkParts ? S.reviewChunkParts(k) : null;
+          const cur = this._chunkStates.get(k) || {};
+          Object.keys(states).forEach((h) => {
+            const logical = parts ? QB.KEYS.reviewState(parts.bank, h) : null;
+            if (logical && (this._pending.has(logical) || this._ops.has(logical))) return;
+            cur[h] = states[h];
+          });
+          this._chunkStates.set(k, cur);
+          return;
+        }
+        this._cache.set(k, v);
+      });
+      this._invalidateKeys();
+      return { mode: 'idb', records: records.size };
+    },
+
     _subscribeBroadcast() {
       if (this._bc || typeof global.BroadcastChannel !== 'function') return;
       try {

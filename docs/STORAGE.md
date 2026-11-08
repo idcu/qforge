@@ -129,6 +129,11 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   `user:reviewChunk:<bank>:<bucket>`（`{v:1,s:{hash:state}}`）。启动水合把块记录放进 `Storage._chunkStates`
   （≤1024 条），不再展开成 50k 条 Map 与字符串；`Storage.get('user:review:…')` 先查 `_cache`，未命中再
   `_chunkLookup` 读块，仍是**同步**返回；未水合键返回空。
+- **全量可见性（`Storage.ensureAll()`，唯一实现）**：分阶段水合后同步视图只含已水合的库；
+  备份/迁移等「必须看到全部物理数据」的路径先 `await ensureAll()`：先 `await flush()`（失败即 reject，
+  不假成功）→ `Store.readAll(true, true)` 全量读（strict 读失败抛错）→ 把普通键合并进 `_cache`、
+  块状态合并进 `_chunkStates`（跳过 `_pending/_ops` 中仍在途的键，避免覆盖本标签更新/删除）→
+  失效键视图。读失败/落盘失败一律 reject，调用方必须提示用户，**不得退回部分视图**。
 - **逻辑键视图缓存**：`Storage.keys()` 由 `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制，
   同一修订只物化一次（首次 `_buildKeys()`），版本不一致时整体重建；每次返回 `slice()`，
   调用方修改返回值不会污染缓存。

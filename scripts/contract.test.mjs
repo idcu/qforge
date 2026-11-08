@@ -266,7 +266,7 @@ section('backup 仓库（本地）');
 {
   QB.Storage.remove(QB.KEYS.banks);
   QB.Storage.set(QB.KEYS.banks, [{ id: 'bk1', name: '库1' }]);
-  const payload = QB.DB.backup.export();
+  const payload = await QB.DB.backup.export();
   ok(payload && payload.data && payload.data[QB.KEYS.banks], 'export 返回 { data } 且含逻辑键');
   eq(JSON.parse(JSON.stringify(payload.data[QB.KEYS.banks]))[0].name, '库1', '载荷含题库数据');
   // backup.import 自 C017 起为 async（IDB 落盘失败需上抛），拒绝走 rejected Promise

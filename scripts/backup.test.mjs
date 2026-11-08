@@ -487,10 +487,10 @@ section('数据层端口注册（R-03：L2 → L1，数据层不反向点名领�
   const saved = QB.LocalAdapter.hooks.backup;
   QB.LocalAdapter.hooks.backup = null;
   let err = null;
-  try { QB.LocalAdapter.backup.export(); } catch (e) { err = e; }
+  try { await QB.LocalAdapter.backup.export(); } catch (e) { err = e; }
   ok(!!err && err.message.indexOf('备份模块未加载') >= 0, '端口缺失时抛可读错误（不静默返回空数据）');
   QB.LocalAdapter.hooks.backup = saved;
-  ok(!!QB.LocalAdapter.backup.export().data, '恢复端口后 export 正常返回 { data }');
+  ok(!!(await QB.LocalAdapter.backup.export()).data, '恢复端口后 export 正常返回 { data }');
 }
 
 console.log('\n================ 汇总 ================');

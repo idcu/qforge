@@ -1566,12 +1566,17 @@
   };
 
   const backup = {
-    /** 全量数据载荷 { data }（未脱敏；备份文件外壳与脱敏由 QB.Backup 负责） */
-    export() {
+    /**
+     * 全量数据载荷 { data }（未脱敏；备份文件外壳与脱敏由 QB.Backup 负责）。
+     * **全量出口前置 ensureAll**：分阶段水合后同步视图只含当前库，这里必须先补齐全部物理记录，
+     * 否则备份会静默漏掉其它库（P1-5 实测漏 37,500 条状态）。ensureAll 失败即 reject（不假成功）。
+     */
+    async export() {
+      if (typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
       const data = backupPort().readAllData();
-      // IDB 模式：先把待写聚合成事务落盘（readAllData 读的是内存权威值，落盘只为持久性）
+      // IDB 模式：待写已由 ensureAll 落盘；这里保留一次 flush 作为既有「导出前持久性」语义
       if (QB.Storage.mode === 'idb' && typeof QB.Storage.flush === 'function') {
-        return QB.Storage.flush().then(() => ({ data: data }));
+        await QB.Storage.flush();
       }
       return { data: data };
     },

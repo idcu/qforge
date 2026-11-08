@@ -900,8 +900,13 @@
       (modal) => {
         modal.querySelector('[data-bk="close"]').onclick = () => QB.UIRenderer.closeModal();
         modal.querySelector('[data-bk="export"]').onclick = async () => {
-          const r = await download();
-          QB.UIRenderer.toast(r.assetCount ? '备份已生成（含图片 ' + r.assetCount + ' 张，.qfbk）' : '备份已生成（.json）', 'ok');
+          try {
+            const r = await download();
+            QB.UIRenderer.toast(r.assetCount ? '备份已生成（含图片 ' + r.assetCount + ' 张，.qfbk）' : '备份已生成（.json）', 'ok');
+          } catch (e) {
+            // fail-loud：全量导出失败（含 ensureAll 失败）必须可见，不得只留 unhandled rejection
+            QB.UIRenderer.toast('备份导出失败：' + ((e && e.message) || e), 'err');
+          }
         };
         modal.querySelector('[data-bk="export-legacy"]').onclick = async () => {
           try {

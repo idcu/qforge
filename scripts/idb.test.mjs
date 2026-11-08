@@ -655,6 +655,77 @@ section('v6→v7 中断续跑：不丢状态、不提前写 schema');
   eq(await QB.Store.get(QB.KEYS.reviewState('bk0', pairs[0][1])), undefined, '续跑完成后旧物理键已清理');
 }
 
+section('备份 fail-loud：全量导出前 ensureAll + 主导出按钮失败可见（Phase 0 批次1-1）');
+{
+  const idb = createMemoryIDB();
+  const H = await makeHarness({ indexedDB: idb });
+  const QB = H.QB;
+  QB.DB.init();
+  QB.Store.writeMarker('idb');
+  await QB.Storage.initStore();
+  QB.Storage.setSync(QB.KEYS.metaSchema, 7);
+  const S = QB.Storage;
+  const q = (n) => ({
+    type: 'single', question: n, options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  });
+  const bankA = await QB.DB.banks.create({ name: '备份库A' });
+  const bankB = await QB.DB.banks.create({ name: '备份库B' });
+  await QB.DB.questions.insertMany(bankA.id, [q('A1'), q('A2')], { dedupe: false, mode: 'overwrite' });
+  await QB.DB.questions.insertMany(bankB.id, [q('B1'), q('B2')], { dedupe: false, mode: 'overwrite' });
+  const itemsB = (await QB.DB.questions.list(bankB.id, {})).items;
+  await QB.DB.reviews.record(bankB.id,
+    { [itemsB[0].contentHash]: { last: 100, due: 0, s: 1, d: 1 } },
+    [{ h: itemsB[0].contentHash, b: bankB.id, r: 3, t: 100 }]);
+  await S.flush();
+
+  // 模拟分阶段水合：库B 物理存在，但同步视图中不可见
+  const removed = S.keys().filter((k) => k.indexOf(bankB.id) >= 0);
+  removed.forEach((k) => S._cache.delete(k));
+  Array.from(S._chunkStates.keys()).forEach((k) => { if (k.indexOf(bankB.id) >= 0) S._chunkStates.delete(k); });
+  S._invalidateKeys();
+  eq(S.keys().filter((k) => k.indexOf(bankB.id) >= 0).length, 0,
+    '前置：库B在同步视图中不可见（模拟未水合，移除 ' + removed.length + ' 个键）');
+
+  const bk = await QB.Backup.buildBackup();
+  const shards = Object.keys(bk.data).filter((k) => k.indexOf(QB.KEYS.questions(bankB.id) + ':') === 0);
+  ok(shards.length >= 1, '备份覆盖未水合库的题目分片（实测 ' + shards.length + ' 个分片键）');
+  const table = bk.data[QB.KEYS.review(bankB.id)];
+  ok(!!(table && Object.keys(table).length >= 1), '备份覆盖未水合库的复习状态（折叠整表）');
+  ok(S.keys().filter((k) => k.indexOf(bankB.id) >= 0).length > 0,
+    'ensureAll 后库B重新出现在同步视图（' + S.keys().filter((k) => k.indexOf(bankB.id) >= 0).length + ' 键）');
+
+  // 主导出按钮：失败必须冒泡到 UI（旧实现只产生 unhandled rejection）
+  const buttons = {};
+  const fakeModal = {
+    querySelector(sel) {
+      const m = /data-bk="([^"]+)"/.exec(sel);
+      if (!m) return null;
+      return buttons[m[1]] || (buttons[m[1]] = { onclick: null });
+    },
+    querySelectorAll() { return []; },
+    setAttribute() {},
+    focus() {}
+  };
+  const toasts = [];
+  QB.UIRenderer = {
+    openModal(html, onMount) { onMount(fakeModal); },
+    closeModal() {},
+    toast(msg) { toasts.push(String(msg)); }
+  };
+  const origExport = QB.DB.backup.export;
+  QB.DB.backup.export = async () => { throw new Error('注入：备份读取失败'); };
+  try {
+    QB.Backup.openFlow();
+    let rejected = null;
+    try { await buttons.export.onclick(); } catch (e) { rejected = e; }
+    ok(rejected === null, '主导出按钮失败不向调用方抛异常（旧实现：unhandled rejection）');
+    ok(toasts.some((t) => t.indexOf('备份导出失败') >= 0),
+      '主导出按钮失败有明确 toast（实测：' + (toasts.join(' | ') || '无提示') + '）');
+  } finally {
+    QB.DB.backup.export = origExport;
+  }
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
