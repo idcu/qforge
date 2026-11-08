@@ -316,6 +316,48 @@ section('渲染顶层错误策略：fire-and-forget 调用有用户可见提示'
 }
 
 /* ============================================================
+ * 1.7 切库事务化：持久化失败必须回滚原库（Phase 0 批次1-5）
+ * ============================================================ */
+section('切库事务化：失败回滚原库，不留下半更新状态');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  const a = await QB.DB.banks.create({ name: '库A', description: '' });
+  const b = await QB.DB.banks.create({ name: '库B', description: '' });
+  await QB.DB.setCurrentBankId(a.id);
+  QB.App.State.bankId = a.id;
+  QB.App.State.banksLoaded = false;
+  QB.App.State.view = 'home';
+  await QB.App.render();
+  const statusText = () => String(env.dom.document.getElementById('status-text').textContent || '');
+  ok(statusText().indexOf('库A') >= 0, '前置：状态栏为原库（实测：' + statusText() + '）');
+
+  // 首次持久化注入失败，后续（回退）调用恢复真实实现
+  const origSet = QB.DB.setCurrentBankId;
+  let calls = 0;
+  QB.DB.setCurrentBankId = async (x) => {
+    calls++;
+    if (calls === 1) throw new Error('注入：切库持久化失败');
+    return origSet.call(QB.DB, x);
+  };
+  await clickAction(env, 'bank-select', { 'data-id': b.id });
+  await tick(20);
+  eq(QB.App.State.bankId, a.id, 'bankId 回滚原库（实测：' + QB.App.State.bankId + '）');
+  eq(await QB.DB.getCurrentBankId(), a.id, '持久化当前库仍为原库');
+  ok(toastsText(env).indexOf('切换题库失败') >= 0, '失败提示可见（实测：' + (toastsText(env) || '无提示') + '）');
+  ok(statusText().indexOf('库A') >= 0 && statusText().indexOf('库B') < 0,
+    '状态栏停留在原库：' + statusText());
+  eq(rejections.length, 0, '切库失败不产生未处理 rejection');
+
+  QB.DB.setCurrentBankId = origSet;
+  await clickAction(env, 'bank-select', { 'data-id': b.id });
+  await tick(20);
+  eq(QB.App.State.bankId, b.id, '正常切库生效');
+  ok(statusText().indexOf('库B') >= 0, '状态栏跟随新库：' + statusText());
+  env.restore();
+}
+
+/* ============================================================
  * 2. R-18 迁移等待：状态栏显示阶段 + 已等待秒数
  * ============================================================ */
 section('R-18 迁移等待：状态栏显示阶段与已等待秒数，切换后清理');

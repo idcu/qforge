@@ -372,8 +372,7 @@ activate → caches.keys()
   - Node `--expose-gc` 50k 门禁：`keys()` 首次构建中位 **15.08–17.38ms**（三次门禁最小 11.89–14.22 / 最大 32.83–40.61，门禁按中位数判定）；
     写已存在键后 **0.11–0.12ms**（0.08 / 0.27，门禁 ≤2ms；误失效会回落到首次构建量级）。
 - **实测（真机 Chromium 50k，同脚本同数据集）**：修复前 `keys()` 单次 10.7ms（启动期 15–19ms）、
-  启动 6 次合计 87.2ms、水合窗口结束后首个长任务中位 153ms（141–179）；修复后单次稳态 **0–0.1ms**、
-  6 次合计 **12.4–16.1ms**（仅首次 build）、窗口后长任务中位 **79ms**（76–92）。
+  启动 6 次合计 87.2ms、水合窗口结束后首个长任务中位 153ms（141–179）；修复后单次稳态 **0–0.1ms**、6 次合计 **12.4–16.1ms**（仅首次 build）、窗口后长任务中位 **79ms**（76–92）。
   10 轮 `initStore` P50=193.1ms / P95=238.3ms / 最大值 238.3ms，窗口内长任务 0ms；
   C1 复审同口径 10 轮：P50=185.0ms / P95=236.9ms / 最大值 236.9ms、窗口内长任务 0ms（无回退）；
   契约等价性 17/17（50k 逐键 `get`、`keys()` 全集、`readAll` 展开、四类边界，diff=0）。
@@ -395,6 +394,29 @@ activate → caches.keys()
 - **影响范围**：`contracts.js` 仅增 `KINDS.reviewChunk` 与桶/块键工具；`Storage.get/keys` 同步签名不变；
   备份格式不变（导出仍折叠回 per-hash，由 `expandRecords` 还原）；回滚需先回旧代码再清空 IDB 新块
   （否则旧代码会把块记录当未知键）。
+
+### 4.20 切库事务化（Phase 0 批次1-5）
+
+```
+switchBank(nextId) = 快照 {bankId, view}
+  → await Storage.ensureAll()            // 目标库数据先可见（失败即中止）
+  → await DB.setCurrentBankId(nextId)    // 持久化
+  → State.bankId = nextId; State.view = home|banks; invalidateReviewLog()
+  → await render()；返回 false 视为失败
+  catch → State 回滚到快照 → DB.setCurrentBankId(prev) 回退（回退失败经 notifyBackgroundError 可见）
+        → toast「切换题库失败：<message>（已保留原题库）」→ render() 恢复原视图
+```
+
+- **唯一实现**：`bank-select` / `bank-open` 两个 action 与顶栏 `#bank-switch` 的 change 监听都调用它，
+  不再各自写「改 State → 持久化 → 渲染」的复制粘贴流程。
+- **失败语义**：任一环节（数据可见性、持久化、渲染）失败都整体回滚，**不允许**出现
+  `bankId` 已切、计数半更新、状态栏仍旧库的中间态；回退持久化失败时叠加同错误去重的
+  「回退当前题库失败」提示，不掩盖原始错误。
+- **批次 2 衔接**：分阶段水合落地后把 `ensureAll()` 换成按库 `ensureBank(nextId)`，
+  事务边界与回滚逻辑不变。
+- **验证**：`scripts/app-boot.test.mjs` 1.7（7 项）——注入 `DB.setCurrentBankId` 首次抛错后
+  `State.bankId` 与原库持久化值均保持、状态栏停留原库、失败提示可见、0 unhandled rejection；
+  恢复后正常切库生效并跟随新库。
 
 ## 5. 公共抽象与影响范围
 

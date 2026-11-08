@@ -223,6 +223,34 @@
     invalidateReviewLog();
   }
 
+  /**
+   * 切库唯一实现（Phase 0 批次1-5，事务化）：先把目标库数据变为可见，再持久化与切状态，
+   * 最后渲染。任一步失败都把 State/持久化/视图整体回滚到原库——不允许出现
+   * 「bankId 已切、计数半更新、状态栏仍旧库」的中间态。
+   * 批次 2 分阶段水合落地后，把 ensureAll 换成按库 ensureBank(id)，其余流程不变。
+   */
+  async function switchBank(nextId) {
+    const prev = { bankId: State.bankId, view: State.view };
+    try {
+      await QB.Storage.ensureAll();
+      await QB.DB.setCurrentBankId(nextId);
+      State.bankId = nextId || null;
+      State.view = State.bankId ? 'home' : 'banks';
+      invalidateReviewLog();
+      if (!(await render())) throw new Error('界面刷新失败');
+      return true;
+    } catch (e) {
+      State.bankId = prev.bankId;
+      State.view = prev.view;
+      if (typeof console !== 'undefined' && console.error) console.error('[switchBank] 切换题库失败：', e);
+      try { await QB.DB.setCurrentBankId(prev.bankId); }
+      catch (e2) { notifyBackgroundError('回退当前题库失败', e2); }
+      UI.toast('切换题库失败：' + ((e && e.message) || String(e)) + '（已保留原题库）', 'err');
+      render();
+      return false;
+    }
+  }
+
   /* ---------------- 渲染分发 ---------------- */
 
   let backgroundErrorMsg = '';
@@ -700,12 +728,9 @@
         return render();
       }
       case 'bank-select':
-      case 'bank-open': {
-        State.bankId = id;
-        await QB.DB.setCurrentBankId(id);
-        State.view = 'home';
-        return render();
-      }
+      case 'bank-open':
+        await switchBank(id);
+        return;
       case 'bank-rename': {
         const bank = State.banks.find((b) => b.id === id) || await QB.DB.banks.get(id);
         if (bank) await QB.BankManager.rename(bank);
@@ -1437,10 +1462,7 @@
 
     const sel = document.getElementById('bank-switch');
     if (sel) sel.addEventListener('change', async () => {
-      State.bankId = sel.value || null;
-      await QB.DB.setCurrentBankId(State.bankId);
-      State.view = State.bankId ? 'home' : 'banks';
-      render();
+      await switchBank(sel.value || null);
     });
 
     const tabs = document.getElementById('tabs');
