@@ -9,6 +9,32 @@
 
 ## 最新记录
 
+### fix(storage): 跨标签读失败不再当作删除（Phase 0 批次1-3）
+
+**Commit Hash**：`cd90145`
+
+**核心改动**
+- `js/utils/storage.js::_handleIdbExternal()`：`readLogicalMany` 抛错时保留 `_cache/_chunkStates`，
+  经 `_notifyError()` 通知后**直接返回**；删除分支只在「读取成功且值确实为 `undefined`」时执行。
+- `_subscribeBroadcast()`：`.catch(()=>{})` 改为 `.catch((e) => this._notifyError(e))`。
+- LS 事件 `_handleExternalChange()`：`JSON.parse` 失败保留本地缓存并通知；仅对端 `newValue=null` 视为删除。
+- 文档：`docs/STORAGE.md` 跨标签小节新增「读失败 ≠ 删除」。
+- SW：`qforge-v36` → `qforge-v37`，`sw-baseline` 重算（93 files / `0f6922fbf699…`）。
+- 基线：断言 5594→**5599**（idb 167→**172**）；首屏 379.6/1069.1→**379.7/1069.4 KB**。
+
+**验证数据（红→绿，`node scripts/idb.test.mjs`）**
+- 红（stash 修复、仅留负例）：**167 通过 / 5 失败，exit 1**。实测：注入 `readLogicalMany` 抛错后
+  `banks` 缓存被清空、`keys()` 键数下降、`onError` **0 次**；LS 注入坏 JSON 后内存待写值被删
+  （`get` 回退磁盘为 `undefined`）。
+- 绿（恢复修复）：**172 通过 / 0 失败，exit 0**。实测：`banks` JSON 逐字保留、`keys()` 数量不变、
+  `onError` 收到 **1 次**「注入：跨标签读取失败」；LS 保留 `dark` 且 `onError` 1 次。
+- 门禁实跑退出码：`verify:fast` → **exit 0**（36 套件 / 5599 断言 / 66 门禁）；
+  `bench --assert` → **exit 0**；`docs-check --static` → **exit 0**。
+
+**遗留 TODO / 风险**
+- 读失败当前不重试；依赖下一笔广播/刷新恢复。批次 2 若引入按库水合，需要确认失败后未水合库
+  不会因键视图过期而被判为删除（已有 `_hydratedBanks` 隔离，待联调）。
+
 ### fix(migrate): 未水合库显式跳过、真实转换错误中止（Phase 0 批次1-2）
 
 **Commit Hash**：`f7f0514`
