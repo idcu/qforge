@@ -9,6 +9,37 @@
 
 ## 最新记录
 
+### feat(storage): 全量导出前置 ensureAll 并让备份失败可见（Phase 0 批次1-1）
+
+**Commit Hash**：`47c803c`
+
+**核心改动**
+- `js/utils/storage.js`：新增 `ensureAll()`（全量可见性唯一实现）。IDB 模式先 `await flush()`（失败即 reject）
+  再 `Store.readAll(true, true)`，普通键合并 `_cache`、块状态合并 `_chunkStates`（跳过 `_pending/_ops` 在途键），
+  结束时 `_invalidateKeys()`；LS 模式无未水合直接返回。读/落盘失败一律 reject，不退回部分视图。
+- `js/data/local-adapter.js`：`backup.export()` 改 async 并前置 `await Storage.ensureAll()`；`readAllData()`
+  保持同步纯折叠。契约变化：`QB.DB.backup.export()` 由同步 `{data}` 改为 `Promise<{data}>`（唯一调用方
+  `QB.Backup.buildBackup` 已 await；`scripts/contract.test.mjs`、`scripts/backup.test.mjs` 同步改用 await）。
+- `js/modules/backup.js`：主导出按钮 `[data-bk="export"]` 补 try/catch，失败 toast「备份导出失败：…」，
+  与旧版兼容导出按钮错误策略统一。
+- 文档：`docs/STORAGE.md` §9.7（ensureAll 语义）、`docs/BACKUP.md`（导出前置全量可见性 + 失败提示）。
+- SW：js 变更 → `qforge-v34` → `qforge-v35`，`scripts/sw-baseline.json` 重算（93 files / `3bb79beb5a11…`）。
+- 基线：`scripts/docs-baseline.json` 断言 5579→**5585**、idb 156→**162**、首屏 377.3/1062.3→**378.2/1065.2 KB**；
+  `docs/TESTING.md`、`docs/BENCH.md`、`docs/DEVELOPMENT.md` 同步。
+
+**验证数据（红→绿，`node scripts/idb.test.mjs`）**
+- 红（stash 修复、仅留负例）：**157 通过 / 5 失败**，exit 1。实测：模拟未水合库（物理存在、同步视图不可见）
+  后备份题目分片 **0**、折叠复习整表缺失；注入 `QB.DB.backup.export` 抛错时主导出按钮**reject 且 toast 0 条**。
+- 绿（恢复修复）：**162 通过 / 0 失败**，exit 0。实测：备份覆盖未水合库 **2 个分片键** + 折叠复习整表；
+  `ensureAll` 后该库 **5 键**重新可见；按钮失败无 rejection 且 toast「备份导出失败：注入：备份读取失败」。
+- 门禁实跑退出码：`npm run verify:fast` → **exit 0**（36 套件 / 5585 断言 / 66 门禁）；
+  `node --expose-gc scripts/bench.mjs --assert` → **exit 0**（性能门禁全部通过）；
+  `node scripts/docs-check.mjs --static` → **exit 0**（文档数字全部一致）。
+
+**遗留 TODO / 风险**
+- `ensureAll()` 是额外一次全量读（探针实测取数约 147.4 ms），只在备份/迁移等全量路径调用，不进首屏。
+- 批次 2 需要把 `ensureAll` 的合并逻辑与「按库惰性水合」联动；当前实现为全量并集，不做物理删除剪枝。
+
 ### feat(storage): 复习状态 v7 物理分块与 keys 逻辑视图缓存
 
 **Commit Hash**：`c96b692`
