@@ -154,17 +154,26 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   `LocalAdapter.backup.export`、`Backup.saveAutoBackup`、`Backup.applyData`、图片 GC
   （`globallyReferencedAssetIds`）、`Migration.doRun`（锁内，失败释放锁并中止）、
   `Exporters.collect`、`DataIO.commitImport`、`banks.remove` 级联、`App.switchBank`。
-- **未水合库读取语义（结论 b，Phase 0 收尾实测）**：`Storage.get(key[, default])` /
-  `getFresh(key[, default])` 对未水合库的业务键**不抛 `NotHydratedError`，而是返回
-  `undefined`/`defaultValue`**；`keys()` 同样不包含该库键。这是同步契约的既有语义（保持
-  `keys/get` 同步签名不变）。**可接受的前提**：任何可能触达非当前库的入口必须按上方清单
-  前置 `ensureAll/ensureBank`；读写路径不得凭「读不到 = 没有数据」继续改写。
-  **遗留风险（待修，未扩大改造）**：语义本身仍是静默空；新增跨库调用点若忘记前置 ensure，
-  只会表现为空数据。因此以**可执行护栏**兜底：`scripts/backup-hydration.test.mjs`
-  ① 断言未水合库 `get/getFresh` 返回 defaultValue、`ensureBank` 后同一键可见；
-  ② 去注释/字符串后冻结 `Storage.keys|get|getFresh` 可执行调用点（88 处 / 9 文件，
-  逐文件计数），新增或漂移即失败，必须归类并前置 ensure 后同步本表。
-- **调用点逐类归属（复核口径：去注释/字符串后的可执行调用，2026-11-08 实测 88 处）**：
+- **未水合库读取语义（结论 b）——未修复的语义缺口（已知风险）**：
+  **(a) 当前行为**：`Storage.get(key[, default])` / `getFresh(key[, default])` 对未水合库的
+  业务键**不抛 `NotHydratedError`，而是返回 `undefined`/`defaultValue`**；`keys()` 同样不包含
+  该库键。这是同步契约的既有语义（`keys/get/getFresh` 保持同步签名，水合是异步的）。
+  **(b) 为什么暂不修**：同步读取无法等待异步水合，抛同步错会破坏 88 处同步调用契约；
+  引入异步读取或全局阻塞水合都会违背 Phase 0 的启动性能判据。
+  **(c) 归类错误时会发生什么**：若把一个跨库读取误判为「当前库」，该读取会**静默返回空/
+  默认值**，读改写路径可能把「读不到 = 没有数据」继续落盘，形成静默数据缺口——与 P1 同类
+  风险，只是位置不同。**明确：这是已知、未修复的语义缺口，不是已解决的问题**；下方 9 处
+  入口与护栏只降低触发概率，不消除语义本身。
+- **静态护栏的覆盖面与局限**：`scripts/backup-hydration.test.mjs` ① 断言未水合库
+  `get/getFresh` 返回 defaultValue、`ensureBank` 后同一键可见；② 去注释/字符串后冻结
+  `Storage.keys|get|getFresh` 可执行调用点，**能拦「新增调用点 / 计数漂移」**，但**不能拦
+  「已有调用点归类错误」**——归类仍需按下方归属表人工复核（G/C/B/A 四类）。
+- **调用点计量口径（2026-11-08 实测）**：可执行调用 **88 hit / 9 文件**；源码 **87 行**
+  （`js/modules/backup.js:128` 一行同时含 `keys()` 与 `get()` 两次调用）。逐文件：
+  app 2、db 1、local-adapter 49、backup 10、migrate 19、package 1、start-prefs 2、
+  sync-dav 3、hash-remap 1。早期转述的 **85** 未留扫描脚本/口径，无法逐一复现；本轮固定以
+  可执行 hit=88 冻结，差异 3 处不做猜测性归因，复盘中请以上述逐文件计数为准。
+- **调用点逐类归属（复核口径同上，G/C/B/A 合计 88）**：
 
   | 文件 | 调用点 | 类别 | 保障方式 |
   | --- | --- | --- | --- |
