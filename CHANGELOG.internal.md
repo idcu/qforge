@@ -32,7 +32,7 @@
 
 ### feat(storage): 作用域读取 API（C 步骤1，默认行为不变）
 
-**Commit Hash**：`待回填（本提交）`
+**Commit Hash**：`89bd3cf`
 
 **核心改动**
 - `js/utils/storage.js` 新增 `Storage.getScoped(key, bankId[, defaultValue])`、
