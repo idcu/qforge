@@ -9,6 +9,52 @@
 
 ## 最新记录
 
+### test(backup): 三条备份路径完整性验收 + 未水合读取语义 + 调用点静态护栏
+
+**Commit Hash**：`ae68584`
+
+**核心改动**
+- 新增 `scripts/backup-hydration.test.mjs`（43 断言）：50k/4 库真实写路径播种
+  （`DB.questions.insertMany` + `DB.reviews.record`），新页面懒启动后跑三条真实备份路径：
+  `Backup.buildBackup()`（→ `DB.backup.export` → `ensureAll`）、
+  `saveAutoBackup()+readAutoBackup()`（迁移前自动备份）、`applyData(data,'replace')`（恢复快照）。
+- 未水合库读取语义断言：`Storage.get/getFresh` 返回 `defaultValue`（结论 b，不抛错）、
+  `keys()` 不含该库键、`ensureBank` 后同一业务键可见。
+- 静态可执行护栏：去注释/字符串后 `Storage.keys|get|getFresh` 调用点按文件冻结（实测 88 处 /
+  9 文件），新增或漂移即失败。
+- 文档同步：`docs/STORAGE.md`（(b) 语义 + G/C/B/A 逐类归属表 + 9 处补齐入口）、
+  `docs/DATABASE.md §5.1`（三条路径覆盖结论）、`docs/ARCHITECTURE.md §4.21`（护栏与长任务说明）、
+  `docs/TESTING.md`（37 运行项 / 5,680 断言）、`scripts/test-order.mjs`、`docs-baseline.json`。
+- **公共抽象**：无生产代码新增/改动；测试复用 `createHarness`/`createMemoryIDB`/`QB.KEYS`/
+  `Storage.ensureAll|ensureBank|isBankHydrated`，计数函数仅测试内私有。
+
+**验证数据（红→绿）**
+- 红（`QFORGE_HYDRATION_RED=1`，仅测试进程把 `ensureAll` 置 no-op，未改生产文件）：
+  **26 通过 / 14 失败，exit 1**。路径1 `复习记录=12500 / 题目键=64 / 载荷键=67`；
+  路径2 `12500 / 64 / dataKeys=12566`；路径3 写入 67 键且**载荷外未水合库 E 的题目分片与
+  复习块残留**（`Store.get` 返回原值）。与 P1 红例同口径。
+- 绿：**43 通过 / 0 失败，exit 0**。路径1 `50,000 记录（4 表 × 12,500）/ 256 键`；
+  路径2 `50,000 / 256 / dataKeys=50,258`；路径3 写入 262 键、E 分片与复习块物理删除、
+  恢复后 4 库记录 50,000 / 题目键 256 / `banks=4`。
+- 口径：复习状态 = **记录计数**（折叠表条目）；题目键 = **按键计数**（物理分片 64/库）；
+  `Storage.keys()` 逻辑复习键 = 50,000（按键计数）。
+- 调用点口径核对：用户转述 85，去注释/字符串后实测 **88**（app 2、db 1、local-adapter 49、
+  backup 10、migrate 19、package 1、start-prefs 2、sync-dav 3、hash-remap 1），差异已在
+  `docs/STORAGE.md` 与报告中列明，未调口径。逐类归属：G 全局键 / C 当前库 / B caller 负责 /
+  A 全量跨库（对照 9 处 ensure 入口）。
+- 门禁实跑退出码：`npm run verify:fast` → **exit 0**（37 运行项 / 5,680 断言）；
+  `node --expose-gc scripts/bench.mjs --assert` → **exit 0**（66 项）；
+  `node scripts/docs-check.mjs --static` → **exit 0**（全部一致）。
+- **首屏长任务说明**：首屏用户可见最大长任务 **83 ms（中位 54 ms）属于本次改造未覆盖的既有成本**，
+  不得解读为「启动阻塞已消除」；已同步写入 `docs/ARCHITECTURE.md §4.21`。
+
+**遗留 TODO / 风险**
+- 未水合库读取本身仍是静默空（结论 b）；依靠 9 处入口 + 静态冻结护栏，新增跨库调用点必须
+  前置 `ensureAll/ensureBank` 并同步归属表。未引入 `NotHydratedError`（同步契约不变）。
+- 恢复产物为备份折叠布局（4 张 `user:review:<bank>` 整表），由后续 Migration 归一为 v7 分块；
+  本套件按记录计数验收，未额外跑 Migration 后的物理块计数。
+- 本套件为验收成本（约 3 s），已接入 `test-all`（37 运行项），不参与性能门禁。
+
 ### perf(hydration): 启动分阶段水合（Phase 0 批次2）
 
 **Commit Hash**：`dd97dba`
