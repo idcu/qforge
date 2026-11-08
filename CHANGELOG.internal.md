@@ -40,7 +40,7 @@
 
 ### feat(storage): C 步骤4 后半只读渲染 3 处迁 getScoped（11/22），索引提案评估后不实施
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`d7545ca`
 
 **核心改动**
 - `js/data/local-adapter.js`：3 处首屏/切库只读渲染路径由 `Storage.get` 改
