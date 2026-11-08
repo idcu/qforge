@@ -29,7 +29,55 @@
     return !!(QB.Store && typeof QB.Store.isBootstrap === 'function' && QB.Store.isBootstrap(key));
   }
 
+  /** 题库作用域键前缀（唯一清单：新增带 bankId 的键必须同步追加到此）。 */
+  const BANK_SCOPED_PREFIXES = [
+    'questions:', 'user:wrong:', 'user:fav:', 'user:review:', 'user:reviewMeta:',
+    'user:reviewRev:', 'user:reviewChunk:', 'meta:hashMap:'
+  ];
+
+  /**
+   * 键归属解析（唯一实现）：返回 bankId；null 表示全局键/无法识别的自定义键。
+   * 不能把「无法识别」当作某个库——作用域读取宁可不放行，也不能读错库。
+   * @param {string} key
+   * @returns {string|null}
+   */
+  function bankOfKey(key) {
+    const k = String(key);
+    for (let i = 0; i < BANK_SCOPED_PREFIXES.length; i += 1) {
+      const p = BANK_SCOPED_PREFIXES[i];
+      if (k.indexOf(p) !== 0) continue;
+      const rest = k.slice(p.length);
+      const cut = rest.indexOf(':');
+      return cut < 0 ? rest : rest.slice(0, cut);
+    }
+    return null;
+  }
+
+  /**
+   * 未水合读取错误（C 步骤1，公共类型）。
+   * 明确携带 bankId / key / code，避免把「读不到库」误当成「库里没有数据」。
+   */
+  class NotHydratedError extends Error {
+    constructor(bankId, key, hint) {
+      const id = String(bankId);
+      const where = key == null ? '' : ' key=' + key;
+      super('题库未水合：bank=' + id + where + '；' + (hint || '先 await Storage.ensureBank(bankId) 或 Storage.ensureAll()'));
+      this.name = 'NotHydratedError';
+      this.code = 'STORAGE_NOT_HYDRATED';
+      this.bankId = id;
+      this.key = key == null ? null : String(key);
+      this.hint = hint || '先 await Storage.ensureBank(bankId) 或 Storage.ensureAll()';
+    }
+  }
+  QB.NotHydratedError = NotHydratedError;
+
   const Storage = {
+    NotHydratedError: NotHydratedError,
+    /**
+     * 测试/开发期严格守卫（默认关闭）：开启后 `get/getFresh/keys` 命中未水合库同样抛
+     * NotHydratedError。默认 false 时既有宽松语义逐字不变（未水合库仍返回 defaultValue）。
+     */
+    __strictReads: false,
     _cache: new Map(),
     /**
      * 复习状态二级缓存：物理块键 → `{hash: state}`（启动水合不再展开成 50k 逻辑键）。
@@ -188,6 +236,9 @@
           this._cache = cache;
           this._chunkStates = chunks;
           this._markHydratedFromRecords(i.records);
+          // 当前作用域库即使没有任何复习状态也已水合（其题目/收藏等记录已整体读入）；
+          // 不能因为「空库」就让 getScoped/keysScoped 误报未水合。
+          if (i.scopeBank) this._hydratedBanks.add(String(i.scopeBank));
         }
         this.mode = 'idb';
         QB.Store.onWrite = (keys) => this._broadcastIdbWrite(keys);
@@ -333,6 +384,108 @@
       for (const k of this._cache.keys()) { if (k.indexOf(statePrefix) === 0) return true; }
       for (const k of this._pending.keys()) { if (k.indexOf(statePrefix) === 0) return true; }
       return false;
+    },
+
+    /**
+     * 严格守卫：旧入口 `get/getFresh` 命中未水合库时抛错（默认关闭，逐字保留旧语义）。
+     * 只检查可解析出 bankId 的键；全局键/未知键不受影响。
+     */
+    _assertStrictReadable(key) {
+      if (!this.__strictReads || !this._isIdb()) return;
+      const owner = bankOfKey(key);
+      if (!owner || this.isBankHydrated(owner)) return;
+      throw new NotHydratedError(owner, key, 'Storage.__strictReads 已开启：先 await Storage.ensureBank(bankId) 或 Storage.ensureAll()');
+    },
+
+    /** 已知题库 id（来自同步视图里的 `banks` 清单；无法解析时返回 null，严格模式按 fail-closed 处理）。 */
+    _knownBankIds() {
+      const raw = this._cache.get(QB.KEYS.banks);
+      if (Array.isArray(raw)) {
+        return raw.map((b) => (b && (b.id || b.bankId)) || null).filter(Boolean).map(String);
+      }
+      if (raw && typeof raw === 'object') return Object.keys(raw);
+      return null;
+    },
+
+    _scopeBankHint() {
+      const last = QB.Store && QB.Store.lastInit && QB.Store.lastInit.scopeBank;
+      if (last) return String(last);
+      if (this._hydratedBanks) {
+        const first = this._hydratedBanks.values().next();
+        if (!first.done) return String(first.value);
+      }
+      return 'unknown';
+    },
+
+    /**
+     * 严格守卫：`keys()` 只在全量视图下放行。
+     * 部分视图下逐个已知库判断；无法取得 banks 清单时 fail-closed（宁可报错也不返回残缺键集）。
+     */
+    _assertFullViewForStrict() {
+      if (!this.__strictReads || !this._isIdb() || !this._hydratedBanks) return;
+      const ids = this._knownBankIds();
+      if (!ids) {
+        throw new NotHydratedError(this._scopeBankHint(), null,
+          '严格模式无法确认全量视图：先 await Storage.ensureAll()');
+      }
+      for (let i = 0; i < ids.length; i += 1) {
+        if (!this.isBankHydrated(ids[i])) {
+          throw new NotHydratedError(ids[i], null, '严格模式 keys() 要求全量水合：先 await Storage.ensureAll()');
+        }
+      }
+    },
+
+    /**
+     * 作用域读取（C 步骤1，唯一实现）：目标库未水合**必然抛错**，不静默返回空。
+     * @param {string} key 库作用域键（必须与 bankId 归属一致）
+     * @param {string|null} bankId null 仅允许全局键
+     * @param {*} defaultValue
+     */
+    _getScopedCore(key, bankId, defaultValue, fresh) {
+      const id = bankId == null ? null : String(bankId);
+      const owner = bankOfKey(key);
+      if (id === null) {
+        if (owner !== null) {
+          throw new TypeError('Storage.getScoped：键 ' + key + ' 属于题库 ' + owner + '，全局读取必须传 null 且只能用全局键');
+        }
+      } else {
+        if (owner === null || owner === '') {
+          throw new TypeError('Storage.getScoped：键 ' + key + ' 不是可识别的题库作用域键，不能按 bankId=' + id + ' 读取');
+        }
+        if (owner !== id) {
+          throw new TypeError('Storage.getScoped：键归属题库 ' + owner + '，与传入 bankId=' + id + ' 不一致');
+        }
+        if (!this.isBankHydrated(id)) {
+          throw new NotHydratedError(id, key, 'getScoped/getScopedFresh 要求目标库已水合');
+        }
+      }
+      return fresh ? this.getFresh(key, defaultValue) : this.get(key, defaultValue);
+    },
+
+    getScoped(key, bankId, defaultValue) {
+      return this._getScopedCore(key, bankId, defaultValue, false);
+    },
+
+    getScopedFresh(key, bankId, defaultValue) {
+      return this._getScopedCore(key, bankId, defaultValue, true);
+    },
+
+    /**
+     * 作用域键视图（C 步骤1）：bankId=null 仅全局键；指定库返回全局键 + 该库逻辑键。
+     * 目标库未水合抛 NotHydratedError；结果由 `keys()` 同一物化缓存过滤而来（含 `_pending`）。
+     */
+    keysScoped(bankId) {
+      const id = bankId == null ? null : String(bankId);
+      if (id !== null && !this.isBankHydrated(id)) {
+        throw new NotHydratedError(id, null, 'keysScoped 要求目标库已水合：先 await Storage.ensureBank(bankId)');
+      }
+      const all = this._keysRawCached();
+      const out = [];
+      for (let i = 0; i < all.length; i += 1) {
+        const owner = bankOfKey(all[i]);
+        if (id === null ? owner === null : (owner === null || owner === id)) out.push(all[i]);
+      }
+      return out;
     },
 
     _subscribeBroadcast() {
@@ -999,6 +1152,7 @@
      * defaultValue：原始值为 null/undefined 时返回（默认 undefined）。
      */
     get(key, defaultValue) {
+      this._assertStrictReadable(key);
       if (this._cache.has(key) || this._pending.has(key)) return this._cache.get(key);
       // F2：等待迁移期间删除的键不能再从 LS 读回旧值
       if (this._awaiting && this._awaitDeletes.has(key)) return defaultValue;
@@ -1045,6 +1199,7 @@
      * LS 模式绕过缓存直读磁盘；IDB 模式读水合缓存（跨标签最新值由 BroadcastChannel 合并）。
      */
     getFresh(key, defaultValue) {
+      this._assertStrictReadable(key);
       if (this._pending.has(key)) {
         const pendingValue = this._cache.get(key);
         return pendingValue === undefined ? defaultValue : pendingValue;
@@ -1086,11 +1241,17 @@
      * 更新已存在键的版本号不会使视图失效。后端切换/迁移/清空等结构性变化仍直接推进版本。
      */
     keys() {
+      this._assertFullViewForStrict();
+      return this._keysRawCached().slice();
+    },
+
+    /** `keys()` 的物化缓存（唯一重建入口）；严格守卫由调用方 `keys()` 负责，keysScoped 直接复用。 */
+    _keysRawCached() {
       if (!this._keysCache || this._keysRevCached !== this._keysRev) {
         this._keysCache = this._buildKeys();
         this._keysRevCached = this._keysRev;
       }
-      return this._keysCache.slice();
+      return this._keysCache;
     },
 
     /** 按当前缓存/磁盘视图构建逻辑键集合（唯一重建实现；可见性语义必须与 `_logicalKeyVisible` 同构） */

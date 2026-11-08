@@ -11,8 +11,9 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**已立项、未实施**（2026-11-08）。本轮只登记决策，无 `js/**`、`sw.js`、
-  `contracts/`、测试改动；SW 版本不变（`qforge-v40`）。
+- **状态**：**步骤 1 已实施（2026-11-08，见下方最新记录）；步骤 2–6 未实施**。
+  只新增 API + 契约测试，默认行为不变；88 处既有调用点 0 改动；
+  SW 因 `js/utils/storage.js` 变更按既有门禁递增 `qforge-v40` → `qforge-v41`（摘要基线同 commit 重算）。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -24,9 +25,70 @@
   ④ C 22 处按模块迁移；⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 由下一阶段实测决定。
 - **影响面**：88 hit / 9 文件 / 87 行（G 40 / C 22 / B 6 / A 20）；同步签名不变；新增 3 个方法
   与 1 个错误类型。
-- **待实测**：`keysScoped` 50k 过滤成本（提案估 3–4ms）、生产 strict 全局键白名单与跨标签行为。
+- **已实测（步骤1）**：`keysScoped` 50k/IDB 两次实跑中位 **8.03 / 10.66 ms**（提案估 3–4ms，差异如实记录，未进门禁）。
+- **待实测（步骤2–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(storage): 作用域读取 API（C 步骤1，默认行为不变）
+
+**Commit Hash**：`待回填（本提交）`
+
+**核心改动**
+- `js/utils/storage.js` 新增 `Storage.getScoped(key, bankId[, defaultValue])`、
+  `getScopedFresh(key, bankId[, defaultValue])`、`keysScoped(bankId)`；**同步签名不变**，
+  不引入异步返回。目标库未水合一律抛 `QB.NotHydratedError`（`name='NotHydratedError'`、
+  `code='STORAGE_NOT_HYDRATED'`、`bankId`、`key`），不静默返回 `undefined`/`defaultValue`。
+- 归属校验走新增唯一实现 `bankOfKey(key)` + `BANK_SCOPED_PREFIXES`（`questions:` / `user:wrong:` /
+  `user:fav:` / `user:review:` / `user:reviewMeta:` / `user:reviewRev:` / `user:reviewChunk:` /
+  `meta:hashMap:`）：`bankId=null` 只许全局键；库键以 null 读、归属不一致、未知键均抛 `TypeError`。
+- 新增测试/开发期严格守卫 `Storage.__strictReads`（**默认 false**）：开启后 `get/getFresh` 命中级联
+  到未水合库抛 `NotHydratedError`；`keys()` 在部分视图下逐库核对，取不到 `banks` 清单时 fail-closed。
+  **默认关闭时旧行为逐字不变**（契约测试有专门断言：`get`/`getFresh` 返回哨兵值、`keys()` 照旧）。
+- `adoptStore` 把 `lastInit.scopeBank` 计入 `_hydratedBanks`：当前作用域库即使没有复习状态也算已水合
+  （空库不误报未水合）。**未把 `questions:` 当作水合证据**——该方案会让「A 已水合 / B 未水合」的
+  迁移前置断言误判，已实测红并回退。
+- `keys()` 拆出 `_keysRawCached()`（物化缓存唯一重建入口），`keysScoped` 复用它做前缀过滤。
+- **既有调用点 0 改动**：G/C/B/A 88 处一律未动；步骤 2–6 未实施。
+
+**验证数据（红→绿，`node scripts/idb.test.mjs` 真实输出）**
+- 红（实现前，测试已先行）：**通过 208 / 失败 18，exit 1**——`getScoped` 未定义、未水合三入口未抛错、
+  `__strictReads` 打开后仍返回 `undefined` 等按预期失败。
+- 绿（实现后）：**通过 226 / 失败 0，exit 0**。新增契约测试 **28 项**（套件 198 → 226）。
+- `keysScoped` 50k/IDB（bench 观测行，5 采样，两次同机复跑）：中位 **8.03 / 10.66 ms**
+  （min 7.24–7.55 / max 9.97–11.81），两次均返回全局+目标库键 **50,361 个**；
+  实现为**复用 `keys()` 物化缓存做前缀过滤**（不建库索引），依赖 `_keysCache`/`_chunkStates`，
+  `_pending` 由 `_buildKeys` 合并。**未进门禁**（门禁数仍 66），
+  提案估算 3–4 ms 与实测 8.03–10.66 ms 的差异如实记录，未调任何阈值。
+- 三道门禁实跑（2026-11-08，本机）：`npm run verify:fast` **exit 0**（37 运行项 / **5708** 断言 /
+  0 失败）；`node --expose-gc scripts/bench.mjs --assert` **exit 0**（**66** 项门禁全过）；
+  `node scripts/docs-check.mjs --static` **exit 0**（全部一致）。断言数 5680 → 5708（只增不减），
+  无阈值调整。
+
+**文档同步（同提交）**
+- `docs/STORAGE.md`：未水合语义标题改为「默认路径仍宽松（未修复），严格入口已提供」，
+  缺口表述保留；新增作用域 API 段（错误字段、`TypeError` 归属、`keysScoped` 实现与实测）。
+- `docs/ARCHITECTURE.md` §4.22：状态更新为「步骤 1 已完成；步骤 2–6 未实施」；§5 表补三方法 + 错误类型。
+- `docs/TESTING.md`：`scripts/idb.test.mjs` 198 → **226**，合计 5680 → **5708**（37 运行项）。
+- `docs/BENCH.md`：`keysScoped` 观测行（未进门禁）；首屏体积按实测更新为 **385.8 KB gzip / 1088.7 KB raw**。
+- `sw.js`：`CACHE` `qforge-v40` → `qforge-v41`（改 `js/**` 必须递增，`sw-runtime.test.mjs` 摘要门禁强制）；
+  `scripts/sw-baseline.json` 同 commit 以 `--write-baseline` 重算（digest `f814d18055d4…`）；
+  `docs/DEVELOPMENT.md` 读数行同步。
+- `scripts/docs-baseline.json` 随实测刷新（断言 **5708** / 37 运行项 / 门禁 **66**）。
+
+**公共抽象（新增，影响范围）**
+- `QB.NotHydratedError`：新增错误类型（`storage.js` 内定义并挂 `QB`，`Storage.NotHydratedError` 同名导出）。
+  仅有新入口使用；旧入口默认路径不抛，**不影响既有调用方**。
+- `bankOfKey(key)` + `BANK_SCOPED_PREFIXES`：键归属解析唯一实现（模块内私有）。
+  首次把这套前缀清单集中到一处；未改动既有键格式，**读写路径行为不变**。
+- `Storage._keysRawCached()`：`keys()` 与 `keysScoped()` 共享的物化缓存入口（模块内私有）。
+  `keys()` 语义与返回值不变（仍返回浅拷贝）。
+
+**遗留 TODO / 风险**
+- 默认路径仍宽松：88 处旧调用点未迁移，命中原未水合库时仍静默返回空（缺口**未修复**，只是有了严格入口）。
+- `keysScoped` O(键数) 过滤，50k 约 8 ms；若未来高频调用需评估库索引（当前无调用点，不预置）。
+- `__strictReads` 只在 IDB 模式生效（LS 模式本就是同步全量视图）；生产是否开启留待步骤 5/6 实测。
+- 跨标签行为、真实浏览器 IDB 未在严格模式下实测。
 
 ### test(backup): 三条备份路径完整性验收 + 未水合读取语义 + 调用点静态护栏
 

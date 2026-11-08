@@ -154,16 +154,39 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   `LocalAdapter.backup.export`、`Backup.saveAutoBackup`、`Backup.applyData`、图片 GC
   （`globallyReferencedAssetIds`）、`Migration.doRun`（锁内，失败释放锁并中止）、
   `Exporters.collect`、`DataIO.commitImport`、`banks.remove` 级联、`App.switchBank`。
-- **未水合库读取语义（结论 b）——未修复的语义缺口（已知风险）**：
-  **(a) 当前行为**：`Storage.get(key[, default])` / `getFresh(key[, default])` 对未水合库的
-  业务键**不抛 `NotHydratedError`，而是返回 `undefined`/`defaultValue`**；`keys()` 同样不包含
-  该库键。这是同步契约的既有语义（`keys/get/getFresh` 保持同步签名，水合是异步的）。
-  **(b) 为什么暂不修**：同步读取无法等待异步水合，抛同步错会破坏 88 处同步调用契约；
-  引入异步读取或全局阻塞水合都会违背 Phase 0 的启动性能判据。
-  **(c) 归类错误时会发生什么**：若把一个跨库读取误判为「当前库」，该读取会**静默返回空/
-  默认值**，读改写路径可能把「读不到 = 没有数据」继续落盘，形成静默数据缺口——与 P1 同类
-  风险，只是位置不同。**明确：这是已知、未修复的语义缺口，不是已解决的问题**；下方 9 处
-  入口与护栏只降低触发概率，不消除语义本身。
+- **未水合库读取语义（结论 b）——默认路径仍宽松（未修复），严格入口已提供（C 步骤1）**：
+  **(a) 默认行为（仍未修复）**：`Storage.get(key[, default])` / `getFresh(key[, default])`
+  对未水合库的业务键**不抛 `NotHydratedError`，仍返回 `undefined`/`defaultValue`**；
+  `keys()` 同样不包含该库键。`Storage.__strictReads` 默认 `false`，因此现有 88 处调用点
+  走的是同一条宽松路径——**缺口本身没有消失**。
+  **(b) 为什么默认不改成抛错**：同步读取无法等待异步水合，直接抛同步错会破坏 88 处同步
+  调用契约；引入异步读取或全局阻塞水合都会违背 Phase 0 的启动性能判据。因此严格语义只能
+  由**显式入口**提供，不能强加给旧入口。
+  **(c) 归类错误时会发生什么**：若把一个跨库读取误判为「当前库」且仍走旧入口，该读取会
+  **静默返回空/默认值**，读改写路径可能把「读不到 = 没有数据」继续落盘，形成静默数据缺口——
+  与 P1 同类风险。**9 处入口与静态护栏只降低触发概率；新严格入口只对已迁移的调用点生效，
+  未迁移的旧调用点仍会静默返回空。这是已知、未修复的语义缺口，不能表述为已解决。**
+- **作用域读取 API（C 步骤1，已实现；默认行为不变）**：
+  `Storage.getScoped(key, bankId[, default])` / `getScopedFresh(key, bankId[, default])`
+  / `keysScoped(bankId)`。
+  - **未水合即抛错**：目标库未水合时三个入口抛 `QB.NotHydratedError`
+    （`name='NotHydratedError'`、`code='STORAGE_NOT_HYDRATED'`、`bankId`、`key`、`hint`），
+    不静默返回空。`getScoped`/`getScopedFresh` 为同步签名，不返回 Promise。
+  - **归属校验**：`bankId=null` 仅允许全局键；库键以 `null` 读取、或键归属与传入 `bankId`
+    不一致、或键无法解析归属时抛 `TypeError`（宁可不放行，也不读错库）。归属解析唯一实现为
+    `bankOfKey(key)`，作用域前缀清单 `BANK_SCOPED_PREFIXES`（`questions:` / `user:wrong:` /
+    `user:fav:` / `user:review:` / `user:reviewMeta:` / `user:reviewRev:` /
+    `user:reviewChunk:` / `meta:hashMap:`）。
+  - **`keysScoped(bankId)` 语义**：`null` 返回仅全局键；指定库返回**全局键 + 该库逻辑键**，
+    并合并未落盘的 `_pending`。实现为对 `keys()` 同一物化缓存做**前缀过滤**（`_keysRawCached`
+    → `_keysCache`/`_buildKeys`），依赖 `_chunkStates` 提供逻辑复习键、`_pending` 提供即时新键；
+   不按库建索引，因此不会额外占用常驻内存，代价是 O(键数) 过滤。
+  - **实测成本（Node 内存 IDB，50k 题，`bench` 观测行，未进门禁）**：
+    两次实跑 `keysScoped` P50 **8.03 / 10.66 ms**（min 7.24–7.55 / max 9.97–11.81），各返回
+    **50,361** 个键（全局 + 目标库）；数据来自 `node --expose-gc scripts/bench.mjs`，不参与阈值断言。
+  - **严格守卫（默认关闭）**：`Storage.__strictReads=false` 时 `get/getFresh/keys` 行为逐字
+    不变；开启后旧入口命中未水合库同样抛 `NotHydratedError`，`keys()` 在部分视图下抛错
+    （`ensureAll` 后放行）。步骤1 未改任何既有调用点，故生产路径仍默认宽松。
 - **静态护栏的覆盖面与局限**：`scripts/backup-hydration.test.mjs` ① 断言未水合库
   `get/getFresh` 返回 defaultValue、`ensureBank` 后同一键可见；② 去注释/字符串后冻结
   `Storage.keys|get|getFresh` 可执行调用点，**能拦「新增调用点 / 计数漂移」**，但**不能拦

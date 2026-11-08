@@ -952,6 +952,112 @@ section('分阶段水合：删除非当前库按库水合后再级联清理（Ph
   eq((await Q2.DB.questions.list(A.id, {})).items.length, 2, '删除非当前库不影响当前库数据');
 }
 
+section('作用域读取 API + 严格守卫（C 步骤1：API + 契约测试，默认行为不变）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  const A = await Q1.DB.banks.create({ name: '作用域库A' });
+  const B = await Q1.DB.banks.create({ name: '作用域库B' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(3, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk(4, 'B'), { dedupe: false, mode: 'overwrite' });
+  const aHash = (await Q1.DB.questions.list(A.id, {})).items[0].contentHash;
+  const bHash = (await Q1.DB.questions.list(B.id, {})).items[0].contentHash;
+  await Q1.DB.reviews.record(A.id, { [aHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: aHash, b: A.id, r: 3, t: 1000 }]);
+  await Q1.DB.reviews.record(B.id, { [bHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: bHash, b: B.id, r: 3, t: 1000 }]);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  // 新页面：只水合当前库 A，库 B 未水合
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const aKey = Q2.KEYS.reviewState(A.id, aHash);
+  const bKey = Q2.KEYS.reviewState(B.id, bHash);
+  const errorOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+
+  // 默认路径逐字不变（严格守卫默认关闭）
+  eq(S.__strictReads, false, '严格守卫默认关闭（__strictReads=false）');
+  eq(S.get(bKey, 'SENTINEL'), 'SENTINEL', '默认关闭：未水合库 get 仍返回 defaultValue（逐字不变）');
+  eq(S.getFresh(bKey, 'SENTINEL'), 'SENTINEL', '默认关闭：未水合库 getFresh 仍返回 defaultValue（逐字不变）');
+  ok(S.keys().indexOf(bKey) < 0, '默认关闭：keys() 仍不含未水合库键（逐字不变）');
+
+  // 公共 API 存在性
+  ok(typeof S.getScoped === 'function', 'Storage.getScoped 已实现');
+  ok(typeof S.getScopedFresh === 'function', 'Storage.getScopedFresh 已实现');
+  ok(typeof S.keysScoped === 'function', 'Storage.keysScoped 已实现');
+  ok(typeof Q2.NotHydratedError === 'function' && S.NotHydratedError === Q2.NotHydratedError,
+    'NotHydratedError 作为公共类型导出');
+
+  // 未水合库：三个作用域入口都必须抛错，不得静默返回空
+  const eGet = errorOf(() => S.getScoped(bKey, B.id));
+  ok(!!eGet && eGet.name === 'NotHydratedError', 'getScoped 未水合库抛 NotHydratedError',
+    '（实测 ' + (eGet && (eGet.name + ': ' + eGet.message)) + '）');
+  ok(!!eGet && eGet.bankId === B.id && eGet.key === bKey && eGet.code === 'STORAGE_NOT_HYDRATED',
+    '错误携带 bankId / key / code');
+  const eFresh = errorOf(() => S.getScopedFresh(bKey, B.id));
+  ok(!!eFresh && eFresh.name === 'NotHydratedError', 'getScopedFresh 未水合库抛 NotHydratedError');
+  const eKeys = errorOf(() => S.keysScoped(B.id));
+  ok(!!eKeys && eKeys.name === 'NotHydratedError', 'keysScoped 未水合库抛 NotHydratedError');
+
+  // 已水合库：正常返回；全局键用 null
+  const attempt = (fn) => { try { return { value: fn() }; } catch (e) { return { error: e }; } };
+  const aVal = attempt(() => S.getScoped(aKey, A.id));
+  ok(!!aVal.value && aVal.value.due === 2000 && aVal.value.s === 1, 'getScoped 已水合库返回真实值');
+  const aFresh = attempt(() => S.getScopedFresh(aKey, A.id));
+  ok(!!aFresh.value && aFresh.value.due === 2000, 'getScopedFresh 已水合库返回真实值');
+  eq(attempt(() => S.getScoped(Q2.KEYS.metaCurrentBank, null)).value, A.id, 'getScoped(null) 可读全局键');
+  // 键归属与 bankId 不一致：显式 TypeError（不是静默空）
+  const eMismatchScoped = errorOf(() => S.getScoped(aKey, B.id));
+  ok(!!eMismatchScoped && eMismatchScoped.name === 'TypeError',
+    'bankId 与键归属不一致时抛 TypeError（不是 NotHydratedError）');
+  const eMismatchGlobal = errorOf(() => S.getScoped(aKey, null));
+  ok(!!eMismatchGlobal && eMismatchGlobal.name === 'TypeError', '库键以 bankId=null 读取时抛 TypeError');
+  const eUnknown = errorOf(() => S.getScoped('unknown:key', A.id));
+  ok(!!eUnknown && eUnknown.name === 'TypeError', '无法解析归属的键不允许按库读取');
+
+  // keysScoped：全局键 + 目标库键；null 仅全局键；合并 _pending
+  const ksA = attempt(() => S.keysScoped(A.id)).value || [];
+  ok(ksA.indexOf(aKey) >= 0 && ksA.indexOf(bKey) < 0 && ksA.indexOf(Q2.KEYS.banks) >= 0,
+    'keysScoped(A) = 全局键 + A 库键，不含 B 库键（实测 ' + ksA.length + ' 键）');
+  const ksG = attempt(() => S.keysScoped(null)).value || [];
+  ok(ksG.indexOf(Q2.KEYS.banks) >= 0 && ksG.indexOf(aKey) < 0 && ksG.indexOf(bKey) < 0,
+    'keysScoped(null) 仅全局键（实测 ' + ksG.length + ' 键）');
+  S.set('user:wrong:' + A.id, [{ id: 'pending-wrong' }]);
+  ok((attempt(() => S.keysScoped(A.id)).value || []).indexOf('user:wrong:' + A.id) >= 0,
+    'keysScoped 合并未落盘 _pending');
+
+  // 严格守卫：开启后旧入口命中未水合库同样抛错
+  S.__strictReads = true;
+  const sGet = errorOf(() => S.get(bKey, 'SENTINEL'));
+  ok(!!sGet && sGet.name === 'NotHydratedError', '严格模式 get 未水合库抛 NotHydratedError');
+  const sFresh = errorOf(() => S.getFresh(bKey, 'SENTINEL'));
+  ok(!!sFresh && sFresh.name === 'NotHydratedError', '严格模式 getFresh 未水合库抛 NotHydratedError');
+  const sKeys = errorOf(() => S.keys());
+  ok(!!sKeys && sKeys.name === 'NotHydratedError', '严格模式 keys() 在部分视图抛 NotHydratedError');
+  eq(S.get(Q2.KEYS.metaCurrentBank), A.id, '严格模式全局键读取不受影响');
+  await S.ensureBank(B.id);
+  const bAfter = S.get(bKey);
+  ok(!!bAfter && bAfter.due === 2000, '严格模式 ensureBank 后未水合库键可读');
+  await S.ensureAll();
+  ok(errorOf(() => S.keys()) === null, '严格模式 ensureAll 后 keys() 可读（全量视图）');
+  S.__strictReads = false;
+  eq(S.get('user:review:' + B.id + ':不存在', 'SENTINEL'), 'SENTINEL',
+    '关闭严格模式后恢复宽松语义（逐字不变）');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

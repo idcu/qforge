@@ -1356,6 +1356,18 @@ for (const tier of [5000, 20000, 50000]) {
       median: wb.median, min: wb.min, max: wb.max,
       extra: '更新已存在键不应使视图失效；误失效会回落到「首次构建」量级'
     });
+    // C 步骤1：keysScoped 只观测、不设门禁（跨机器阈值不稳定）。
+    if (!Q.Storage.isBankHydrated(legacy.bankId)) await Q.Storage.ensureBank(legacy.bankId);
+    let scopedLen = 0;
+    const sk = await timed((i) => {
+      const out = Q.Storage.keysScoped(legacy.bankId);
+      if (i === 0) scopedLen = out.length;
+    }, 5);
+    report.push({
+      name: 'keysScoped 过滤（50000 题 · IDB，未进门禁）',
+      median: sk.median, min: sk.min, max: sk.max,
+      extra: '返回全局+目标库键 ' + scopedLen + ' 个；按前缀过滤，复用 keys() 物化缓存'
+    });
   }
 
   // 阶段 0：启动全量水合（同机第二轮启动，复用本档迁移后的 IDB；只取 5k/50k 两档）

@@ -442,30 +442,36 @@ switchBank(nextId) = 快照 {bankId, view}
   首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`。
   **首屏用户可见最大长任务 83 ms（中位 54 ms）属于本次改造未覆盖的既有成本，不代表「启动阻塞已消除」。**
 
-### 4.22 作用域读取 API（立项，未实施）
+### 4.22 作用域读取 API（C 步骤1 已完成；步骤2–6 未实施）
 
-- **状态**：**已立项、未实施**（2026-11-08）。完整提案（未跟踪、不随仓库发布）：
-  `.analysis/architecture-audit/scoped-read-api-proposal.md`。本节只登记决策与灰度路径，
-  **不代表代码已实现**，本轮无 `js/**`、`sw.js`、`contracts/`、测试改动。
+- **状态**：**步骤1（API + 契约测试）已完成**（2026-11-08）；步骤2–6（既有调用点迁移、
+  CI 默认严格、生产 strict）**未实施**。完整提案（未跟踪、不随仓库发布）：
+  `.analysis/architecture-audit/scoped-read-api-proposal.md`。
 - **问题**：`Storage.get/keys` 是同步契约，分阶段水合只覆盖启动作用域；未水合库读取静默返回
   `undefined`/`defaultValue`（见 §4.21 与 [STORAGE.md](STORAGE.md) 结论 b）。现有静态护栏只能拦
   「新增调用点/计数漂移」，**不能拦「已有调用点归类错误」**。
-- **推荐方案（O1 + 测试期严格守卫）**：新增 `Storage.getScoped(bankId, key[, default])` /
-  `getScopedFresh` / `keysScoped(bankId)`；未水合读取抛 `NotHydratedError{bankId,key,hint}`；
-  `bankId=null` 仅表示全局键；`keysScoped` 返回全局键 + 该库逻辑键并合并 `_pending`，不触发
-  全量键重建；另设 `Storage.__strictReads`（仅测试/CI 默认开启）对旧入口做严格守卫，
-  生产默认宽松留待下一阶段实测决定。
-- **6 步灰度**：① 加 API + 六类契约测试；② A 类 20 处全量路径标注 `ensureAll` 职责；
-  ③ B 类 6 处迁移到 `getScoped`；④ C 类 22 处按模块迁移；⑤ CI 默认开 `__strictReads`；
-  ⑥ 生产 strict 是否开启由下一阶段实测决定。
+- **步骤1 已实现（默认行为不变）**：
+  `Storage.getScoped(key, bankId[, default])` / `getScopedFresh(key, bankId[, default])` /
+  `keysScoped(bankId)`；未水合抛 `QB.NotHydratedError`（`name` / `code='STORAGE_NOT_HYDRATED'`
+  / `bankId` / `key` / `hint`）；`bankId=null` 仅全局键，键归属不一致或无法解析时 `TypeError`；
+  `keysScoped` 返回全局键 + 目标库逻辑键并合并 `_pending`（对 `keys()` 物化缓存做前缀过滤，
+  不建库索引）。`Storage.__strictReads` **默认关闭**：关闭时 `get/getFresh/keys` 逐字保持旧语义；
+  开启后旧入口命中未水合库同样抛错、部分视图下 `keys()` 抛错（`ensureAll` 后放行）。
+- **步骤1 未做**：88 处既有调用点一处未改；未把 `__strictReads` 设为 CI 默认；生产 strict 未评估。
+- **6 步灰度（当前进度 1/6）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径标注
+  `ensureAll` 职责；③ B 类 6 处迁移到 `getScoped`；④ C 类 22 处按模块迁移；⑤ CI 默认开
+  `__strictReads`；⑥ 生产 strict 是否开启由下一阶段实测决定。
 - **为何唯一覆盖两类风险**：O1 让新增调用点在未水合时立即失败；`__strictReads` 让既有调用点
   的归类错误在测试/CI 暴露。O2（`withBank` 门面）引入生命周期与门面过期读错库；O3（严格/宽松
   双入口）默认仍宽松、覆盖不了既有归类；O4（`keys()` 按作用域）语义变化最大，全量误判会复现
   批次 2 的 P1 红例。
 - **影响面**：调用点基线 **88 hit / 9 文件 / 87 行**，分类 **G 40 / C 22 / B 6 / A 20**；
-  `get/getFresh/keys` 同步签名不变；新增 3 个方法与 1 个错误类型（公共抽象）；可与旧入口灰度并存。
-- **未验证项**：`keysScoped` 在 50k 数据下的过滤成本（提案估 3–4ms）需立项后实测；生产 strict
-  的全局键白名单与跨标签行为未验证。
+  `get/getFresh/keys` 同步签名不变；新增 3 个方法与 1 个错误类型（公共抽象）；与旧入口并存。
+- **实测（2026-11-08）**：`idb.test.mjs` 红 **208 通过 / 18 失败（exit 1）** → 绿 **226 通过 /
+  0 失败（exit 0）**；`keysScoped` 50k（Node 内存 IDB，bench 观测行**未进门禁**）
+  两次实跑 P50 **8.03 / 10.66 ms**（min 7.24–7.55 / max 9.97–11.81），返回 **50,361** 键
+  （高于提案估算 3–4ms，如实记录）。
+- **未验证项**：生产 strict 的全局键白名单与跨标签行为；浏览器真机 `keysScoped` 成本。
 
 ## 5. 公共抽象与影响范围
 
@@ -491,7 +497,8 @@ switchBank(nextId) = 快照 {bankId, view}
 | `QB.CONFIG.LIMITS.IMPORT_MAX_BYTES` + `runImport` 前置预检（R-20） | **导入体积唯一口径**：File/Blob `size`、二进制快照 `arrayBuffer.byteLength`；超限返回统一失败结构，读取前拒绝 | 文件/拖拽/URL 导入入口（全部经 `runImport`） |
 | `reviews.patch(bankId, delta, logs)`（可选） | 增量提交：api 模式只上行本批改动键（PATCH，O(改动数)）；local 与 record 共用同一合并/回滚实现；适配器未实现时 `SRSStore` 回退 `record` | srs-store.grade/gradeMany |
 | `Storage.ensureAll()` / `Storage.ensureBank(bankId)` | **全量/按库可见性唯一实现（Phase 0 批次2）**；两者共用 `_mergePhysicalRecords`（跳过在途 `_pending/_ops`，块状态按逻辑键判定）；失败 reject 不退回部分视图 | 备份导出、自动备份、`applyData`、迁移、图片 GC；切库、导出、导入、删库级联 |
-| `Storage.isBankHydrated(bankId)` | 库作用域可见性判定：只认复习块/逻辑复习键，不用 `reviewMeta/reviewRev`（分阶段水合下那两枚标记本就可见） | `ensureBank` 早退、迁移 `skipped` 判定、删库前置 |
+| `Storage.isBankHydrated(bankId)` | 库作用域可见性判定：只认复习块/逻辑复习键，不用 `reviewMeta/reviewRev`（分阶段水合下那两枚标记本就可见）；`adoptStore` 额外把 `lastInit.scopeBank` 标记为已水合（空库不误报） | `ensureBank` 早退、迁移 `skipped` 判定、删库前置、作用域读取入口 |
+| `Storage.getScoped/getScopedFresh/keysScoped` + `QB.NotHydratedError`（C 步骤1） | **作用域读取唯一入口**：未水合库抛 `NotHydratedError`（`code='STORAGE_NOT_HYDRATED'`、`bankId`、`key`、`hint`）；`bankOfKey` + `BANK_SCOPED_PREFIXES` 为键归属唯一解析；`keysScoped` 复用 `keys()` 物化缓存做前缀过滤并合并 `_pending`。`Storage.__strictReads` 默认关闭，开启后旧入口同样严格（仅测试/灰度用） | 步骤2–6 待迁移的调用点；当前仅 `scripts/idb.test.mjs` 合约测试使用 |
 | `Store.readBank(bankId)` / `Store.readAll(fromIdb, strict, {bank})` | 作用域读：`readBank` = 单库全键；`readAll` 作用域库取全部键、其它库仅 `reviewMeta/reviewRev`，作用域缺失退回全量 | `Storage.ensureBank` / `init` |
 | `Store.readScopeBank()` / `Store.lastInit.scopeBank` | 启动作用域唯一来源：单事务读 `banks` + `meta:currentBank`（合法当前库优先，否则第一库）；结果同时暴露给诊断/测试 | `Store.init`、`scripts/idb.test.mjs` |
 | `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | app.js 统计页缓存诊断结果与 **P-6 forecast 缓存**，避免每次 render 全量扫 revlog/复习状态 |
