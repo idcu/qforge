@@ -1550,6 +1550,165 @@ section('C 步骤4 后半：3 处只读渲染路径（124 metaOf / 129 shardOf /
     '静态：默认 get/keys 语义未改（__strictReads 仍默认 false）');
 }
 
+section('C 步骤4 第三批：stateKeys 984 / readMap per-hash 1000（13/22）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const NOW = Date.UTC(2027, 0, 1);
+  const DAY = 24 * 60 * 60 * 1000;
+  // H1（全量会话）：A=当前库（4 题、3 条 per-hash + 1 条旧整表、1 错题、1 收藏）；B=未水合库
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll();
+  const A = await Q1.DB.banks.create({ name: 'C4S当前库' });
+  const B = await Q1.DB.banks.create({ name: 'C4S未水合库' });
+  const mk = (tag) => [0, 1, 2, 3].map((i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk('复习A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk('复习B'), { dedupe: false, mode: 'overwrite' });
+  const aItems = (await Q1.DB.questions.list(A.id, {})).items;
+  const bItems = (await Q1.DB.questions.list(B.id, {})).items;
+  const h = aItems.map((q) => q.contentHash);
+  // 3 条 per-hash：+1 天 / +3 天 / +6 天到期；第 4 题只存在于旧整表（-1 天，逾期）
+  await Q1.DB.reviews.record(A.id, {
+    [h[0]]: { last: NOW - 3 * DAY, due: NOW + 1 * DAY, stability: 5, difficulty: 4, reps: 1 },
+    [h[1]]: { last: NOW - 2 * DAY, due: NOW + 3 * DAY, stability: 6, difficulty: 5, reps: 2 },
+    [h[2]]: { last: NOW - DAY, due: NOW + 6 * DAY, stability: 7, difficulty: 3, reps: 3 }
+  }, []);
+  Q1.Storage.setSync(Q1.KEYS.review(A.id), {
+    [h[3]]: { last: NOW - 4 * DAY, due: NOW - DAY, stability: 8, difficulty: 2, reps: 4 }
+  });
+  await Q1.DB.reviews.record(B.id, {
+    [bItems[0].contentHash]: { last: NOW - 3 * DAY, due: NOW + DAY, stability: 5, difficulty: 4, reps: 1 },
+    [bItems[1].contentHash]: { last: NOW - 2 * DAY, due: NOW + 3 * DAY, stability: 6, difficulty: 5, reps: 2 }
+  }, []);
+  Q1.Storage.setSync(Q1.KEYS.wrong(A.id), [{ questionKey: h[0], wrongCount: 2, lastAt: 100 }]);
+  Q1.Storage.setSync(Q1.KEYS.favorite(A.id), [{ questionKey: h[0], addedAt: 100 }]);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  // H2（真实启动视图）：只水合当前库 A；B 未水合但物理数据仍在
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S2 = Q2.Storage;
+  const errOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const isNotHydrated = (e) => !!e && e.name === 'NotHydratedError' &&
+    e.code === 'STORAGE_NOT_HYDRATED' && e.bankId === B.id;
+
+  eq(S2.isBankHydrated(A.id), true, '前置：当前库 A 已水合');
+  eq(S2.isBankHydrated(B.id), false, '前置：B 未水合但物理数据存在');
+
+  // 静态护栏：984/1000 已改作用域入口
+  const laSrcS = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  ok(laSrcS.indexOf('return stateKeysOf(Storage.keysScoped(bankId), bankId);') >= 0,
+    '静态：984 stateKeys 改走 keysScoped');
+  ok(laSrcS.indexOf('const st = Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null);') >= 0,
+    '静态：1000 readMap per-hash 改走 getScopedFresh');
+  ok(laSrcS.indexOf('return stateKeysOf(Storage.keys(), bankId);') < 0,
+    '静态：stateKeys 不再使用全量 Storage.keys()');
+
+  // 984 红→绿：未水合库枚举必须抛错（旧行为返回 []）
+  const n984 = errOf(() => Q2.ReviewStore.stateKeys(B.id));
+  ok(isNotHydrated(n984),
+    '984 stateKeys 未水合库抛 NotHydratedError（红：旧行为返回 []，伪装「无复习状态」）',
+    '（实测 ' + (n984 ? n984.name : '未抛错，返回 []') + '）');
+
+  // 1000 独立负例不可构造：readMap 首个读取点是上游 legacyMap（B 段已作用域化），
+  // per-hash 循环不可独立触达；这里如实证明它仍然 fail-loud，并用运行时探针证明迁移生效。
+  const n1000 = errOf(() => Q2.ReviewStore.readMap(B.id));
+  ok(n1000 && n1000.name === 'NotHydratedError' && n1000.key === Q2.KEYS.review(B.id),
+    '1000 readMap 未水合仍 fail-loud（首个抛错点为上游 legacyMap，per-hash 读取被前置拦截）',
+    '（实测 key=' + (n1000 ? n1000.key : '无') + '）');
+
+  // 已水合等价性 + 运行时探针（红：per-hash 走 getFresh 3 次 / scoped 仅 legacy 1 次）
+  // 注意：getScopedFresh 内部会调用 this.getFresh，故 getFresh 探针需排除 scoped 内部嵌套调用，
+  // 只统计「readMap 直接走宽松入口」的次数。
+  const calls = { directFresh: 0, scoped: 0 };
+  let inScoped = 0;
+  const origFresh = S2.getFresh;
+  const origScoped = S2.getScopedFresh;
+  S2.getFresh = function (...a) { if (!inScoped) calls.directFresh++; return origFresh.apply(S2, a); };
+  S2.getScopedFresh = function (...a) {
+    calls.scoped++;
+    inScoped++;
+    try { return origScoped.apply(S2, a); } finally { inScoped--; }
+  };
+  const mapA = Q2.ReviewStore.readMap(A.id);
+  S2.getFresh = origFresh;
+  S2.getScopedFresh = origScoped;
+  eq(Object.keys(mapA).sort().join(','), h.slice().sort().join(','),
+    '等价 1000：已水合 readMap 的 4 个 hash 与迁移前一致');
+  eq(mapA[h[0]].stability, 5, '等价 1000：per-hash 状态值不变（q0 stability=5）');
+  eq(mapA[h[3]].difficulty, 2, '等价 1000：旧整表合并值不变（q3 difficulty=2）');
+  eq(calls.scoped, 4, '1000 运行时探针：readMap 的 4 次读取全走 getScopedFresh（legacy 1 + per-hash 3）');
+  eq(calls.directFresh, 0, '1000 运行时探针：readMap 不再直接走宽松 getFresh');
+  eq(Q2.ReviewStore.stateKeys(A.id).sort().join(','), h.slice(0, 3).sort().join(','),
+    '等价 984：已水合 stateKeys 返回 3 个物理状态键');
+  eq(Q2.ReviewStore.count(A.id), 4, '等价：count 仍为 4（3 per-hash ∪ 1 旧整表）');
+
+  // 统计页：已学计数 + 未来 7 天分布（SRSStore.stats / forecast，固定 NOW）
+  const st = await Q2.SRSStore.stats(A.id, NOW);
+  eq(st.tracked, 4, '统计页已学：tracked=4');
+  eq(st.learned, 4, '统计页已学：learned=4（4 条均有 stability）');
+  const fc = await Q2.SRSStore.forecast(A.id, aItems, 7, NOW);
+  eq(fc.learned, 4, '统计页 forecast：learned=4');
+  eq(fc.newCount, 0, '统计页 forecast：newCount=0');
+  eq(fc.days.map((d) => d.scheduled).join(','), '1,1,0,1,0,0,1',
+    '统计页 forecast：未来 7 天分布不变（逾期并入今天）');
+  eq(fc.days[0].overdue, 1, '统计页 forecast：今天逾期 1 条');
+
+  // 备份导出：复习记录条数（foldLayout 后按库折叠为单表）
+  const backup = Q2.Backup.readAllData();
+  const folded = backup[Q2.KEYS.review(A.id)] || {};
+  eq(Object.keys(folded).length, 4, '备份导出：A 库复习记录 4 条（3 per-hash + 1 旧整表）');
+  eq(folded[h[3]].stability, 8, '备份导出：旧整表条目值不变');
+
+  // 首屏：题目数 / 待复习 / 错题 / 收藏（真实 UIRenderer.renderHome）
+  new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer.js'), 'utf8'))(
+    H2.window, H2.window);
+  const homeItems = (await Q2.DB.loadQuestions(A.id)).items;
+  const byType = {};
+  Q2.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
+  homeItems.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
+  const reviewMap = await Q2.SRSStore.readMap(A.id);
+  const daily = Q2.ReviewQueue.dailyFromLog([], A.id, NOW);
+  const queue = Q2.ReviewQueue.build(homeItems, reviewMap, {
+    settings: Q2.SchedSettings.ofBank(A), now: NOW, daily: daily
+  });
+  const homeHtml = Q2.UIRenderer.renderHome(A, {
+    total: homeItems.length, byType: byType, dueReview: queue.counts.total, queue: queue.counts
+  });
+  ok(homeHtml.indexOf('题目总数：<b>4</b>') >= 0, '首屏：题目总数 = 4（实测渲染文本）');
+  eq(queue.counts.total, 1, '首屏：待复习 = 1（仅逾期条目到期）');
+  ok(homeHtml.indexOf('1 题（新 0 / 到期 1') >= 0, '首屏：今日复习副标题「1 题（新 0 / 到期 1…）」');
+  eq((await Q2.DB.progress.wrongList(A.id)).length, 1, '首屏：错题入口数据 1 条');
+  eq((await Q2.DB.progress.favoriteList(A.id)).length, 1, '首屏：收藏入口数据 1 条');
+  ok(homeHtml.indexOf('data-action="start-wrong"') >= 0 && homeHtml.indexOf('data-action="start-favorite"') >= 0,
+    '首屏：错题/收藏入口均渲染');
+
+  // 答题收卷：写入状态值（固定 NOW，读路径迁移后写入结果不变）
+  await Q2.SRSStore.grade(A.id, aItems[0], 3, NOW + 1000);
+  const graded = Q2.ReviewStore.get(A.id, h[0]);
+  const afterMap = Q2.ReviewStore.readMap(A.id);
+  console.log('   [C4-S] graded state = ' + JSON.stringify(graded));
+  ok(graded && graded.stability > 0 && graded.difficulty > 0 && graded.due > NOW,
+    '收卷：q0 写入状态有效（stability/difficulty>0，due 在未来）');
+  eq(JSON.stringify(afterMap[h[0]]), JSON.stringify(graded),
+    '收卷：readMap 读回与单题 get 逐字段相同（迁移前后同值）');
+  eq((await Q2.DB.revlog.list()).length, 1, '收卷：评分日志写入 1 条');
+
+  const storeSrcS = fs.readFileSync(path.join(ROOT, 'js/utils/storage.js'), 'utf8');
+  ok(storeSrcS.indexOf('__strictReads: false') >= 0,
+    '静态：默认 get/keys 语义未改（__strictReads 仍默认 false）');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

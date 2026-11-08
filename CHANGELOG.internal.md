@@ -11,17 +11,20 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–3 已实施；步骤 4 部分实施（已迁 11/22，2026-11-08，见下方最新记录）；
+- **状态**：**步骤 1–3 已实施；步骤 4 部分实施（已迁 13/22，2026-11-08，见下方最新记录）；
   步骤 5–6 未实施**。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
   步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
   新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
-  步骤4 完成 C 段 22 处**实测频次排序 + 冷热分组**，已迁 **11/22**：冷路径 8 处
-  （142/152/818/826/832/845/1148/1173）+ 只读渲染 3 处（124/129/841）；剩余热路径 9 处只出数据未改
-  （`1541/1542` 暂缓，未水合时已被更早的 S 段读取拦截，无独立负例）。
+  步骤4 完成 C 段 22 处**实测频次排序 + 冷热分组**，已迁 **13/22**：冷路径 8 处
+  （142/152/818/826/832/845/1148/1173）+ 只读渲染 3 处（124/129/841）+ 热路径 2 处（984/1000）；
+  剩余热路径 7 处未改（评分写路径 6 处 `967/1009/1469/1488/1489/1499` + `1039`；
+  `1541/1542` 暂缓，未水合时已被更早的 S 段读取拦截，无独立负例）。
   「按库键索引」提案已评估、不实施（readMap 300 次/0.498ms，首屏 1.318ms，收益不可测）。
-  调用点 89（S 类 5 处）。`js/**` 步骤1/步骤3/步骤4 三次变更，SW 已递增
-  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45`。
+  **判断更正（2026-11-08）**：曾把 984/1000 归为「必须等索引机制才能迁」属判断失误——
+  否掉索引只说明不需要新增索引，与「两处能否 fail-loud 化」是两件独立的事。
+  调用点 88（第三批 `stateKeysScoped` 改委托后 89 → 88，S 类 4 处）。`js/**` 变更后 SW 已递增
+  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46`。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -31,12 +34,86 @@
   「既有归类错误」两类风险的方案；O2 门面有生命周期风险、O3 默认仍宽松、O4 语义变化最大。
 - **6 步灰度**：① API + 六类契约测试；② A 20 处 `ensureAll` 职责标注；③ B 6 处迁 `getScoped`；
   ④ C 22 处按模块迁移；⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 由下一阶段实测决定。
-- **影响面**：89 hit / 9 文件（G 40 / C 22 / B 2 / A 20 / S 5）；同步签名不变；新增 3 个方法
-  与 1 个错误类型。
+- **影响面**：88 hit / 9 文件（G 40 / C 22 / B 2 / A 20 / S 4）；同步签名不变；新增 3 个方法
+  与 1 个错误类型；`stateKeysScoped` 自第三批起为 `stateKeys` 的委托别名（单一实现）。
 - **已实测（步骤1）**：`keysScoped` 50k/IDB 两次实跑中位 **8.03 / 10.66 ms**（提案估 3–4ms，差异如实记录，未进门禁）。
 - **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(storage): C 步骤4 第三批 stateKeys/readMap 迁 scoped（13/22）
+
+**Commit Hash**：`本轮提交（hash 回填见紧随其后的 docs 提交）`
+
+**核心改动**
+- `js/data/local-adapter.js`
+  - `ReviewStore.stateKeys`（984）：`Storage.keys()` → `Storage.keysScoped(bankId)`；
+  - `readMap` per-hash（1000）：`Storage.getFresh(key, null)` →
+    `Storage.getScopedFresh(key, bankId, null)`（同步签名与缓存态语义不变）；
+  - `stateKeysScoped` 改为委托 `stateKeys`（**单一实现**，删除重复的 `keysScoped` 枚举）。
+- **判断更正**：上一轮把这两处归为「必须等索引机制才能迁」是判断失误。否掉
+  `_keysByBank` 索引只说明**不需要新增索引**，与「两处能否 fail-loud 化」是两件独立的事。
+  本轮迁移理由统一为 **未水合必须 fail-loud**，不以任何性能收益包装。
+- **影响面（重要）**：`stateKeys` 是 `readMap`/`count`/`writeMarker`/`put`/`reviewKeySetOf`/
+  `removeHash`/`clear` 的公共底座，迁移后**写入路径也继承 fail-loud**。
+  生产写调用方（单题评分、交卷、改题重映射、备份恢复）必须在写前 `ensureBank`；
+  当前未逐入口复核（剩余 6 处评分写路径前置清单见 `docs/STORAGE.md`）。
+- 测试：`scripts/idb.test.mjs` 新增 32 项（984 行为负例 + 1000 探针/等价性 + 静态护栏 +
+  统计/备份/首屏/收卷回归）；`scripts/app-boot.test.mjs` 新增 8 项（`stateKeys`/`readMap`
+  抛 `NotHydratedError` 走 `render()` 顶层 catch）。
+- **顺带修复历史偶发**：`app-boot` R-18「秒数递增」原以固定 1050ms 采样，
+  并行负载下会读到「已等待 0 秒」（连跑 12 次实测 1 次失败、docs-check 并发时 1 次失败）。
+  改为轮询到秒数真实递增再采样，等待窗口 1300 → 1850ms（boot 上限 2s 内）；
+  修后连跑 **12/12 exit 0**。断言语义未放宽（仍要求 ≥1 秒）。
+- 文档：`docs/STORAGE.md`（13/22、984/1000 迁移表、判断更正、50k 数据）、
+  `docs/ARCHITECTURE.md` §4.22（13/22、第三批实测、影响面）、`docs/TESTING.md`、
+  `docs/BENCH.md`、`docs/DEVELOPMENT.md`（SW v46）。
+- `sw.js`：`qforge-v45` → **`qforge-v46`**；`scripts/sw-baseline.json` 重算
+  （93 files / `ac87ba2cd40e…`）；`scripts/docs-baseline.json` 重算
+  （idb 349 / app-boot 136 / 合计 5860 / 首屏 386.7 KB gzip · 1090.9 KB raw）。
+
+**验证数据（实跑，2026-11-08）**
+- **红**（临时把两处退回旧实现后跑 `node scripts/idb.test.mjs`）：
+  **343 通过 / 6 失败 / exit 1**。真实失败：未水合库 `ReviewStore.stateKeys(B)` **未抛错，
+  返回 `[]`**（伪装「无复习状态」）；2 项运行时探针显示 `readMap(A)` 直接走宽松
+  `getFresh` **3 次**、`getScopedFresh` 仅 **1 次**；另 3 处静态护栏。
+  `readMap(B)` 的独立 per-hash 负例**不可构造**（上游 `legacyReviewMap` 已作用域化并先抛），
+  如实标注，未编造红例。
+- **绿**：同命令 → **349 通过 / 0 失败 / exit 0**；断言 **317 → 349（+32，只增不减）**；
+  探针 `getScopedFresh` **4 次**（legacy 1 + per-hash 3）、直接 `getFresh` **0 次**。
+- **已水合等价性（迁移前后逐项相同）**：`readMap` 4 个 hash 与状态值（q0 `stability=5`、
+  旧整表 q3 `difficulty=2`）、`stateKeys(A)` 3 键、`count(A)=4`；
+  `stats` tracked/learned **4/4**；`forecast` learned=4、newCount=0、
+  未来 7 天 scheduled **`1,1,0,1,0,0,1`**、今天逾期 1；
+  备份 `readAllData()` 折叠后 `user:review:<A>` **4 条**（旧整表条目保留）；
+  首屏 `UIRenderer.renderHome`：`题目总数：<b>4</b>`、待复习 **1**、`1 题（新 0 / 到期 1`、
+  错题 1 / 收藏 1；收卷 `grade` 后 `ReviewStore.get` 与 `readMap` 逐字段相同、revlog 1 条。
+- **50k 一次性实测（`.analysis/architecture-audit/c4-step4c-50k.mjs`，未跟踪）**：
+  已水合 50,000 条 per-hash 状态，迁移前后条数完全一致（`stateKeys`/`readMap`/备份折叠均
+  **50,000**）。耗时（单次，Node 内存 IDB）：
+  旧 `stateKeys` **8.31ms** / `readMap` **46.6ms** / 备份导出 **143.94ms**；
+  新 `stateKeys` **15.23 / 30.13 / 21.14ms**、`readMap` **60.09 / 65.62 / 64.65ms**、
+  备份导出 **135.71 / 142.02 / 151.81ms**（三次实跑，波动明显）。
+  `keysScoped` 的逐键归属过滤是本轮唯一可测增量；该场景 5 万条远高于门禁 3000 题夹具，
+  **未调任何阈值/容差**，如实记录。
+- `scripts/app-boot.test.mjs`：**136 通过 / 0 失败 / exit 0**（128 → 136，+8）；
+  2 个新注入场景均得到 toast「界面刷新失败：未水合：X」+ 状态栏「界面刷新失败」+
+  保留上次渲染内容（无白屏）+ **0 unhandled rejection**。
+- 门禁（提交前实跑）：
+  - `npm run verify:fast` → **exit 0**（37 套件 / **5860** 断言 / 基线一致；
+    `docs-check --static` 全部一致，首屏 386.7 KB gzip / 1090.9 KB raw）。
+  - `npm run bench` **连续 3 次 exit 0**（66 项门禁）：`grade` 比值 **2.73 / 2.67 / 2.70**
+    （≤2.90）；`gradeMany` **5.10 / 5.10 / 5.10**（≤5.35）；heapUsed
+    **5.07 / 5.41 / 5.06 MB**（≤40 MB）；首页 50k·IDB P95 **0.04 / 0.06 / 0.04 ms**（≤50 ms）。
+    三次均无失败，未调阈值/容差。
+
+**遗留 TODO / 风险**
+- 剩余 6 处评分写路径（`967/1009/1469/1488/1489/1499`）需先把 `ensureBank` 前置收敛到
+  `SRSStore.grade/gradeMany` 与 `commitReview` 唯一入口，再做迁移（下一批）。
+- `stateKeys` 连带 `writeMarker`/`put`/`removeHash`/`clear` fail-loud：需在真实设备上复核
+  「删除非当前库」「备份恢复跨库」两条写入链路均已前置水合（当前仅 Node 夹具覆盖）。
+- 50k 备份导出耗时在迁移后 3 次为 135.7–151.8ms（旧 143.9ms），波动大于差值，
+  暂不判定为性能变化；若后续门禁纳入 50k 备份，需固定采样轮次。
 
 ### feat(storage): C 步骤4 后半只读渲染 3 处迁 getScoped（11/22），索引提案评估后不实施
 

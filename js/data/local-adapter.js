@@ -980,17 +980,18 @@
       return meta;
     },
 
-    /** 物理状态键的 hash 列表（唯一事实源；不读 meta.keys，旧清单/跨标签都不影响可见性） */
+    /**
+     * 物理状态键的 hash 列表（唯一事实源；不读 meta.keys，旧清单/跨标签都不影响可见性）。
+     * C 步骤4：改用作用域枚举（`keysScoped`）——未水合库必然抛 NotHydratedError，
+     * 不再返回残缺视图的空键集（迁移/重映射在空视图上“成功”比直接报错更危险）。
+     */
     stateKeys(bankId) {
-      return stateKeysOf(Storage.keys(), bankId);
+      return stateKeysOf(Storage.keysScoped(bankId), bankId);
     },
 
-    /**
-     * 作用域枚举（C 步骤3）：目标库未水合必然抛 NotHydratedError，
-     * 不再按残缺视图枚举（迁移/重映射在空视图上“成功”比直接报错更危险）。
-     */
+    /** 兼容别名（C 步骤3 引入，语义与 stateKeys 相同；保留既有调用方，单一实现见上） */
     stateKeysScoped(bankId) {
-      return stateKeysOf(Storage.keysScoped(bankId), bankId);
+      return ReviewStore.stateKeys(bankId);
     },
 
     /** 整表合并视图（per-hash 优先；同 last 保留 per-hash，语义与 ReviewMerge 一致） */
@@ -998,7 +999,8 @@
       const legacy = legacyReviewMap(bankId);
       const per = {};
       ReviewStore.stateKeys(bankId).forEach((h) => {
-        const st = Storage.getFresh(reviewStateKey(bankId, h), null);
+        // C 步骤4：per-hash 读取走作用域入口（未水合必抛，不静默跳过）
+        const st = Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null);
         if (st && typeof st === 'object') per[h] = st;
       });
       if (!Object.keys(legacy).length) return per;

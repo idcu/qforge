@@ -1,15 +1,15 @@
 {
-  "generatedAt": "2026-11-08T13:57:15.831Z",
+  "generatedAt": "2026-11-08T15:18:30.450Z",
   "runItems": 37,
   "suiteFiles": 36,
-  "totalAssertions": 5820,
+  "totalAssertions": 5860,
   "gateCount": 66,
   "counts": {
     "smoke-test.mjs": 731,
     "a11y.test.mjs": 103,
     "annotation.test.mjs": 90,
     "api-backend.test.mjs": 320,
-    "app-boot.test.mjs": 128,
+    "app-boot.test.mjs": 136,
     "assets.test.mjs": 182,
     "backup-hydration.test.mjs": 52,
     "backup.test.mjs": 151,
@@ -20,7 +20,7 @@
     "exporter.test.mjs": 204,
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
-    "idb.test.mjs": 317,
+    "idb.test.mjs": 349,
     "import-commit.test.mjs": 57,
     "importers-anki.test.mjs": 148,
     "importers-quizlet.test.mjs": 75,
@@ -46,7 +46,7 @@
   "firstScreen": {
     "scripts": 86,
     "files": 94,
-    "rawKB": "1090.7",
-    "gzipKB": "386.6"
+    "rawKB": "1090.9",
+    "gzipKB": "386.7"
   }
 }

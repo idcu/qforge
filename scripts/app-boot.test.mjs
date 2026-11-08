@@ -376,6 +376,21 @@ section('作用域读取抛错：render 顶层 catch 的可见反馈（124/129/8
     QB.QuestionShards.shardOf = () => { throw notHydrated('分片读取'); };
   }, () => { QB.QuestionShards.shardOf = origShard; });
 
+  // C 步骤4 第三批：984 / 1000 在 render 内的抛错同样必须被顶层 catch 接住
+  const origStateKeys = QB.ReviewStore.stateKeys;
+  QB.App.State.favoriteBankId = bank.id; // 跳过收藏读取，让 readMap → stateKeys 成为首个抛错点
+  QB.App.State.banksLoaded = false;
+  await scenario('复习键枚举', () => {
+    QB.ReviewStore.stateKeys = () => { throw notHydrated('复习键枚举'); };
+  }, () => { QB.ReviewStore.stateKeys = origStateKeys; });
+
+  const origReadMap = QB.ReviewStore.readMap;
+  QB.App.State.favoriteBankId = bank.id;
+  QB.App.State.banksLoaded = false;
+  await scenario('复习整表', () => {
+    QB.ReviewStore.readMap = () => { throw notHydrated('复习整表'); };
+  }, () => { QB.ReviewStore.readMap = origReadMap; });
+
   env.restore();
 }
 
@@ -428,9 +443,21 @@ section('R-18 迁移等待：状态栏显示阶段与已等待秒数，切换后
 {
   const env = await makeEnv({
     migrationLocked: true,
-    takeoverDelayMs: 1300,
+    // 等待窗口 1.85s（boot 等待上限 2s）：即便事件循环被并行负载阻塞，
+    // 也保证「秒数递增」有足够观察窗口，且不至于超出 waitUntil 上限
+    takeoverDelayMs: 1850,
     onTakeoverWait: ({ samples, readStatus }) => {
-      setTimeout(() => samples.push(readStatus()), 1050);
+      // 秒数从 app.js 的 waitStartedAt 起算，而该时刻在迁移检查 await 之后才记录；
+      // 固定 1050ms 采样在并行/慢负载下会读到「0 秒」（实测 12 次中 1 次偶发失败）。
+      // 改为轮询到秒数真实递增再采样：仍是同一行为断言（未放宽），只消除时序竞态。
+      const timer = setInterval(() => {
+        const text = readStatus();
+        if (/已等待 [1-9]\d* 秒/.test(text)) {
+          samples.push(text);
+          clearInterval(timer);
+        }
+      }, 30);
+      setTimeout(() => clearInterval(timer), 5000);
     }
   });
   eq(env.migration, 1, '持锁启动时仍执行一次迁移检查');
@@ -439,7 +466,7 @@ section('R-18 迁移等待：状态栏显示阶段与已等待秒数，切换后
   const later = env.waitSamples[1] || '';
   ok(first.indexOf('存储迁移·等待切换') >= 0, '首帧含阶段「等待切换」：' + first);
   ok(/已等待 0 秒/.test(first), '首帧显示 0 秒：' + first);
-  ok(/已等待 1 秒/.test(later), '1 秒后秒数递增：' + later);
+  ok(/已等待 [1-9]\d* 秒/.test(later), '秒数递增（已等待 ≥1 秒）：' + later);
   eq(env.booted, true, '等待完成后 boot 继续（未被等待阻塞）');
   const finalText = String(env.dom.document.getElementById('status-text').textContent || '');
   ok(finalText.indexOf('已等待') < 0, '切换完成后状态栏不再停留在等待文案：' + finalText);
