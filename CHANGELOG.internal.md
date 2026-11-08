@@ -9,6 +9,39 @@
 
 ## 最新记录
 
+### fix(app): render 顶层错误统一出口（Phase 0 批次1-4）
+
+**Commit Hash**：`5439579`
+
+**核心改动**
+- `js/app.js`：`render()` 拆为「错误出口 + `renderView()` 实现」。`renderView()` 抛错不再逸出，
+  统一 `console.error('[render] …')` + `UI.toast('界面刷新失败：<message>')`（同错误去重，成功渲染后清空）
+  + 状态栏错误态 + `State.lastRenderError`，返回 `false`；`boot()` 末改为
+  `if (!(await render())) throw new Error('首屏渲染失败')`，进入既有启动失败错误页。
+- 新增 `notifyBackgroundError(prefix,e)`：评分落盘（`SRSStore.grade`）、成绩落盘（`gradeMany`）、
+  复习历史面板加载失败不再静默，统一去重提示（前缀区分：保存复习进度失败 / 保存成绩失败 / 加载复习历史失败）。
+- 公共抽象：`notifyBackgroundError` 仅在 `app.js` 内部使用，不新增 `QB.App` 导出面（`render`/`State`
+  沿用既有导出）；无跨模块调用方受影响。
+- 文档：`docs/ARCHITECTURE.md` §4.9 补「顶层错误策略」；`docs/TESTING.md` app-boot 104→**108**、
+  合计 5599→**5603**；`docs/BENCH.md` 首屏数字同步。
+- SW：`qforge-v37` → `qforge-v38`，`sw-baseline` 重算（93 files / `88d9ffb52f78…`）。
+
+**验证数据（红→绿，`node scripts/app-boot.test.mjs`）**
+- 红（stash `js/app.js`、仅留负例 1.6）：**105 通过 / 3 失败，exit 1**。实测：不 await 的
+  `QB.App.render()` 抛错后 `rejections` 新增 1 次（unhandled rejection）、无「界面刷新失败」toast、
+  状态栏未标记错误态。
+- 绿（恢复修复）：**108 通过 / 0 失败，exit 0**。实测：注入后 `rejections` 新增 **0** 次、
+  toast 命中「界面刷新失败：注入：渲染失败」、状态栏含「界面刷新失败」、同错误二次触发 toast 数不增加。
+- 复跑：一次 R-18「1 秒后秒数递增」时序抖动后重跑 108/0 exit 0（非代码回归）。
+- 门禁实跑退出码：`verify:fast` → **exit 0**（36 套件 / 5603 断言 / 66 门禁）；
+  `bench --assert` → **exit 0**；`docs-check --static` → **exit 0**（全部一致）。
+
+**遗留 TODO / 风险**
+- 本项只处理 `render()` 与三处后台增强的可见性；其余 `async` 事件处理器若新增未 catch 分支，
+  仍需按同一出口 `notifyBackgroundError` 处理，批次 2 改切库路径时一并覆盖。
+- 状态栏错误态会被下一次成功渲染覆盖（预期行为）；`State.lastRenderError` 当前仅供诊断读取，
+  未挂到「下载诊断信息」报告（批次 2 视需要接入）。
+
 ### fix(storage): 跨标签读失败不再当作删除（Phase 0 批次1-3）
 
 **Commit Hash**：`cd90145`
