@@ -121,12 +121,12 @@
     },
     /** 分片清单（非清单或旧版返回 null） */
     metaOf(bankId) {
-      return QuestionShards.parseMeta(Storage.get(K.questionsMeta(bankId), null));
+      return QuestionShards.parseMeta(Storage.getScoped(K.questionsMeta(bankId), bankId, null));
     },
     setMeta(bankId, meta) { Storage.set(K.questionsMeta(bankId), meta); },
 
     shardOf(bankId, i) {
-      const s = Storage.get(K.questionShard(bankId, i), []);
+      const s = Storage.getScoped(K.questionShard(bankId, i), bankId, []);
       return Array.isArray(s) ? s : [];
     },
     setShard(bankId, i, arr) { Storage.set(K.questionShard(bankId, i), arr); },
@@ -839,7 +839,7 @@
 
     // 收藏夹
     async favoriteList(bankId) {
-      return Storage.get(K.favorite(bankId), []).slice();
+      return Storage.getScoped(K.favorite(bankId), bankId, []).slice();
     },
     async favoriteToggle(bankId, question) {
       const key = QB.makeQuestionKey(question);

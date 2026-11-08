@@ -1427,6 +1427,129 @@ section('C 步骤4 冷路径：8 处作用域读取（818/826/832/845/142/152/11
     '静态：默认 get/keys 语义未改（__strictReads 仍默认 false）');
 }
 
+section('C 步骤4 后半：3 处只读渲染路径（124 metaOf / 129 shardOf / 841 favoriteList）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  // H1（全量会话）：A=当前库（2 题/2 到期状态/1 错题/1 收藏）；B=未水合库（同样数据，物理存在）
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll();
+  const A = await Q1.DB.banks.create({ name: 'C4R当前库' });
+  const B = await Q1.DB.banks.create({ name: 'C4R未水合库' });
+  const mk = (tag) => [0, 1].map((i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk('渲染A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk('渲染B'), { dedupe: false, mode: 'overwrite' });
+  const aItems = (await Q1.DB.questions.list(A.id, {})).items;
+  const bItems = (await Q1.DB.questions.list(B.id, {})).items;
+  const aKey0 = Q1.makeQuestionKey(aItems[0]);
+  const bKey0 = Q1.makeQuestionKey(bItems[0]);
+  // due 取远期过去值 → 两条状态均「到期」，首页待复习 = 2（不依赖当前日期）
+  await Q1.DB.reviews.record(A.id, {
+    [aItems[0].contentHash]: { last: 100, due: 1000, s: 1, d: 1 },
+    [aItems[1].contentHash]: { last: 101, due: 1001, s: 1, d: 1 }
+  }, []);
+  await Q1.DB.reviews.record(B.id, {
+    [bItems[0].contentHash]: { last: 100, due: 1000, s: 1, d: 1 },
+    [bItems[1].contentHash]: { last: 101, due: 1001, s: 1, d: 1 }
+  }, []);
+  Q1.Storage.setSync(Q1.KEYS.wrong(A.id), [{ questionKey: aKey0, wrongCount: 2, lastAt: 100 }]);
+  Q1.Storage.setSync(Q1.KEYS.favorite(A.id), [{ questionKey: aKey0, addedAt: 100 }]);
+  Q1.Storage.setSync(Q1.KEYS.wrong(B.id), [{ questionKey: bKey0, wrongCount: 2, lastAt: 100 }]);
+  Q1.Storage.setSync(Q1.KEYS.favorite(B.id), [{ questionKey: bKey0, addedAt: 100 }]);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  // H2（真实启动视图）：只水合当前库 A，B 从未水合（但其物理数据仍在同一 IDB）
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const errOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const attempt = async (fn) => {
+    try { return { value: await fn() }; } catch (e) { return { error: e }; }
+  };
+  const isNotHydrated = (e) => !!e && e.name === 'NotHydratedError' &&
+    e.code === 'STORAGE_NOT_HYDRATED' && e.bankId === B.id;
+  // 真实渲染器：按浏览器顺序补载（与 references.test / app-boot 同法，不手写替身）
+  new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer.js'), 'utf8'))(
+    H2.window, H2.window);
+
+  eq(S.isBankHydrated(A.id), true, '前置：当前库 A 已水合');
+  eq(S.isBankHydrated(B.id), false, '前置：B 未水合但物理数据存在');
+  ok(S.getFresh(Q2.KEYS.questionsMeta(B.id), 'SENTINEL') === 'SENTINEL',
+    '前置：B 的分片清单键不在同步视图（旧实现因此读到 null/[]）');
+
+  // 等价性先行：已水合场景（迁移前后结果必须逐项相同）
+  eq(Q2.QuestionShards.metaOf(A.id).count, 2,
+    '等价 124：已水合 metaOf 返回真实清单（count=2）');
+  eq(Q2.QuestionShards.shardOf(A.id, 0).length, 2,
+    '等价 129：已水合 shardOf 返回真实分片（2 题）');
+  eq(Q2.QuestionShards.shardOf(A.id, 0)[0].question, '渲染A题0',
+    '等价 129：已水合首题文本不变');
+  const favA = await Q2.DB.progress.favoriteList(A.id);
+  eq(favA.length, 1, '等价 841：已水合 favoriteList 条数不变');
+  eq(favA[0] && favA[0].questionKey, aKey0, '等价 841：已水合收藏条目键不变');
+
+  // 真实 UI 证明：用 UIRenderer.renderHome（真实渲染代码）+ app.js 同口径计数
+  const { items: homeItems } = await Q2.DB.loadQuestions(A.id);
+  const byType = {};
+  Q2.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
+  homeItems.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
+  const reviewMap = await Q2.SRSStore.readMap(A.id);
+  const daily = Q2.ReviewQueue.dailyFromLog([], A.id, Date.now());
+  const queue = Q2.ReviewQueue.build(homeItems, reviewMap, {
+    settings: Q2.SchedSettings.ofBank(A), now: Date.now(), daily: daily
+  });
+  const homeHtml = Q2.UIRenderer.renderHome(A, {
+    total: homeItems.length, byType: byType, dueReview: queue.counts.total, queue: queue.counts
+  });
+  ok(homeHtml.indexOf('题目总数：<b>2</b>') >= 0,
+    '真实 UI：首页显示「题目总数：2」（实测渲染文本）');
+  eq(queue.counts.total, 2, '真实 UI：待复习队列 = 2（两条 due 状态）');
+  ok(homeHtml.indexOf('2 题（新 0 / 到期 2') >= 0,
+    '真实 UI：今日复习副标题显示「2 题（新 0 / 到期 2…）」（实测文本）');
+  ok(homeHtml.indexOf('data-action="start-wrong"') >= 0 &&
+     homeHtml.indexOf('错题重练') >= 0,
+    '真实 UI：错题入口「错题重练」仍在');
+  ok(homeHtml.indexOf('data-action="start-favorite"') >= 0 &&
+     homeHtml.indexOf('收藏练习') >= 0,
+    '真实 UI：收藏入口「收藏练习」仍在');
+
+  // 红→绿：未水合库 + 该路径被调用 → 必须抛 NotHydratedError（不再静默读空）
+  const n124 = errOf(() => Q2.QuestionShards.metaOf(B.id));
+  ok(isNotHydrated(n124),
+    '124 metaOf 未水合库抛 NotHydratedError（红：旧行为返回 null，伪装「无分片清单」）',
+    '（实测 ' + (n124 ? n124.name + ' key=' + n124.key : '未抛错，返回 null') + '）');
+  const n129 = errOf(() => Q2.QuestionShards.shardOf(B.id, 0));
+  ok(isNotHydrated(n129),
+    '129 shardOf 未水合库抛 NotHydratedError（红：旧行为返回 []，伪装「空分片」）',
+    '（实测 ' + (n129 ? n129.name + ' key=' + n129.key : '未抛错，返回 []') + '）');
+  const n841 = await attempt(() => Q2.DB.progress.favoriteList(B.id));
+  ok(isNotHydrated(n841.error),
+    '841 favoriteList 未水合库抛 NotHydratedError（红：旧行为返回 []，伪装「无收藏」）',
+    '（实测 ' + (n841.error ? n841.error.name + ' key=' + n841.error.key : '未抛错，返回 []') + '）');
+
+  // 静态护栏：3 处改走缓存态作用域读取（getScoped），且默认 get/keys 语义未改
+  const laSrc4 = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  ok(laSrc4.indexOf('Storage.getScoped(K.questionsMeta(bankId), bankId, null)') >= 0,
+    '静态：124 metaOf 改走 getScoped');
+  ok(laSrc4.indexOf('Storage.getScoped(K.questionShard(bankId, i), bankId, [])') >= 0,
+    '静态：129 shardOf 改走 getScoped');
+  ok(laSrc4.indexOf('Storage.getScoped(K.favorite(bankId), bankId, [])') >= 0,
+    '静态：841 favoriteList 改走 getScoped');
+  const storeSrc2 = fs.readFileSync(path.join(ROOT, 'js/utils/storage.js'), 'utf8');
+  ok(storeSrc2.indexOf('__strictReads: false') >= 0,
+    '静态：默认 get/keys 语义未改（__strictReads 仍默认 false）');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

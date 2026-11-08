@@ -340,7 +340,7 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   S3 6→**0**、S4 1→**0**、S5 1→**0**；全场景中位合计 **122.3ms → 9.4ms**。Node 50k 门禁：
   首次构建 15.08–17.38ms（≤40ms）、写已存在键后 0.11–0.12ms（≤2ms）。契约等价性 17/17（diff=0）。
 
-#### C 步骤4：C 段 22 处频次排序 + 冷热分组 + 冷路径迁移 8/22（2026-11-08）
+#### C 步骤4：C 段 22 处频次排序 + 冷热分组 + 冷路径迁移 11/22（2026-11-08）
 
 - **测量口径（实测，非代码位置推断）**：`.analysis/architecture-audit/c4-frequency.mjs`（未跟踪）——
   真实数据层 `createHarness` + 内存 IDB（300 题/库 × A/B 两库，A 已水合、B 未水合），
@@ -354,10 +354,10 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | # | 调用点 | 所属函数 | 所属路径 | 单次操作内调用次数（峰值） | 单次耗时（峰值累计 ms） | 冷/热 | 本轮 |
   | --- | --- | --- | --- | --- | --- | --- | --- |
   | 1 | `local-adapter.js:1000` | `readMap` per-hash `getFresh` | 首屏渲染 / 统计页 / 切库 / 备份恢复 | **300**（home 每帧；= 状态键数） | 0.498 | 热 | 不改 |
-  | 2 | `local-adapter.js:124` | `QuestionShards.metaOf` | 首屏渲染 / 统计页 / 切库 / 导入导出 | 3 | 0.007 | 热 | 不改 |
+  | 2 | `local-adapter.js:124` | `QuestionShards.metaOf` | 首屏渲染 / 统计页 / 切库 / 导入导出 | 3 | 0.007 | 热 | **已迁（4b）** |
   | 3 | `local-adapter.js:984` | `ReviewStore.stateKeys` | 首屏渲染 / 统计页 / 切库 / 备份恢复 | 6 | 0.250 | 热 | 不改 |
-  | 4 | `local-adapter.js:129` | `QuestionShards.shardOf` | 首屏渲染（冷帧）/ 切库 / 导入导出 | 2 | 0.004 | 热 | 不改 |
-  | 5 | `local-adapter.js:841` | `progress.favoriteList` | 首屏渲染（每帧） | 1 | 0.007 | 热 | 不改 |
+  | 4 | `local-adapter.js:129` | `QuestionShards.shardOf` | 首屏渲染（冷帧）/ 切库 / 导入导出 | 2 | 0.004 | 热 | **已迁（4b）** |
+  | 5 | `local-adapter.js:841` | `progress.favoriteList` | 首屏渲染（每帧） | 1 | 0.007 | 热 | **已迁（4b）** |
   | 6 | `local-adapter.js:1009` | `ReviewStore.get` | 答题收卷（逐题评分；批量 100 题 × 2） | 200 | 0.239 | 热 | 不改 |
   | 7 | `local-adapter.js:1499` | `commitReview` touched `getFresh` | 答题收卷（逐 touched 键） | 105 | 0.149 | 热 | 不改 |
   | 8 | `local-adapter.js:967` | `ReviewStore.meta` | 答题收卷（逐题 put） | 100 | 0.044 | 热 | 不改 |
@@ -385,7 +385,7 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
     已被更早的 S 段作用域读取拦截（`ReviewStore.get` → `legacyReviewMap`；`reviews.save` → `readMap`
     → `legacyReviewMap`），**构造不出独立的“读到空”负例**，本轮不改，不谎称已迁。
 
-- **冷路径迁移清单（8 处，X/22 = 8/22）**
+- **冷路径迁移清单（11 处，X/22 = 11/22）**
 
   | 调用点 | 迁移前 | 迁移后 | 未水合负例（迁移前真实行为） |
   | --- | --- | --- | --- |
@@ -397,30 +397,54 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | 152 | `Storage.get(K.questions)` | `getScopedFresh(K.questions(bankId), bankId, [])` | 返回 `[]`，伪装“空库” |
   | 1148 | `Storage.getFresh(K.reviewMeta)` | `getScopedFresh(K.reviewMeta(bankId), bankId, null)` | 静默 `migrated:false` |
   | 1173 | 同上（写后校验读） | 同上 | 同函数，随 1148 一并生效 |
+  | **124** | `Storage.get(K.questionsMeta)` | `getScoped(K.questionsMeta(bankId), bankId, null)` | 返回 `null`，伪装“无分片清单” |
+  | **129** | `Storage.get(K.questionShard)` | `getScoped(K.questionShard(bankId, i), bankId, [])` | 返回 `[]`，伪装“空分片” |
+  | **841** | `Storage.get(K.favorite)` | `getScoped(K.favorite(bankId), bankId, [])` | 返回 `[]`，伪装“无收藏” |
 
-- **红→绿（`node scripts/idb.test.mjs`，日志 `C4-step4-red.log` / `C4-step4-green.log`）**：
-  红 **284 通过 / 13 失败 / exit 1**（7 处行为负例 + 3 处静态护栏 + 3 处旧“静默读空”断言）；
-  绿 **297 通过 / 0 失败 / exit 0**（断言 268 → **297**，+29，只增不减）。
-  红例对应真实失败输出：`wrongList` 返回 `[]`、`wrongAddMany` 返回 1 条（原 2 条中 1 条被空表覆盖）、
-  `indexesOf` 返回 `[]`、`convertMetaLayout` 返回 `migrated:false`。
+  后半 3 处刻意用**缓存态** `getScoped`（对应原 `Storage.get`），不改缓存语义，只把
+  “键不在视图 → 默认值”改为 `NotHydratedError`；迁移理由是 **fail-loud**，不是更快。
+
+- **红→绿（`node scripts/idb.test.mjs`，日志 `C4-step4-red.log` / `C4-step4-green.log` /
+  `C4-step4b-red.log` / `C4-step4b-green.log`）**：
+  - 前半：红 **284 通过 / 13 失败 / exit 1** → 绿 **297 通过 / 0 失败 / exit 0**（+29）。
+  - 后半：红 **311 通过 / 6 失败 / exit 1**（3 处行为负例 + 3 处静态护栏）→ 绿
+    **317 通过 / 0 失败 / exit 0**（断言 297 → **317**，+20，只增不减）。
+  - 后半红例真实失败输出：`metaOf(B)` **未抛错，返回 null**；`shardOf(B,0)` **未抛错，返回 []**；
+    `favoriteList(B)` **未抛错，返回 []**。迁移后三处均抛 `NotHydratedError`
+    （`name/code/bankId` 逐项校验，`key` 分别为 `questions:<B>:meta` / `questions:<B>:0` / `favorite:<B>`）。
 - **等价性断言（同一已水合场景逐项相同）**：先跑等价段再跑负数段，避免负数调用污染状态；
   等价库 E 的 `wrongList` 条数/键、`wrongAddMany` 追加条数/键、`wrongRemove` 后条数、
   `favoriteToggle` 的 `added` 与收藏条数、`indexesOf(A)` = `[0]`、`legacyOf` 2 题且首题不变、
   `convertMetaLayout` = `migrated:true, listed:3, physical:3, verified:true` + v4 清单，
+  后半 3 处：`metaOf(A).count=2`、`shardOf(A,0)` 2 题且首题 `渲染A题0`、`favoriteList(A)` 1 条且键不变，
   在迁移前（红例）与迁移后（绿例）均全部通过。
+- **真实 UI 证明（后半 3 处均在首屏/切库渲染路径）**：`idb.test.mjs` 用真实
+  `QB.UIRenderer.renderHome`（按浏览器顺序补载，不手写替身）+ `app.js` 同口径计数，
+  已水合库渲染结果逐项断言：`题目总数：<b>2</b>`、待复习队列 **2**、
+  今日复习副标题 `2 题（新 0 / 到期 2…）`、错题入口 `start-wrong`/「错题重练」、
+  收藏入口 `start-favorite`/「收藏练习」均在；迁移前后同一测试在红例与绿例均通过。
+  `scripts/app-boot.test.mjs` 新增 3 个注入场景（`favoriteList`/`metaOf`/`shardOf` 抛
+  `NotHydratedError`）走 `render()` 顶层 catch：**toast「界面刷新失败：未水合：X」+ 状态栏
+  「界面刷新失败」+ 保留上次渲染内容（无白屏）+ 0 unhandled rejection**（断言 116 → 128，+12）。
 - **行为面变化（有意为之）**：`questions.count/list` 对**未水合库**由“返回 0/空数组”改为抛
-  `NotHydratedError`（经 `legacyOf` 作用域化）；`idb.test.mjs` 三处旧断言同步改为 fail-loud
-  断言（更强，不是放宽）。生产侧调用方均已有前置：`app.js` 建库/切库/恢复、备份 `ensureAll`。
+  `NotHydratedError`（经 `legacyOf` 作用域化）；`favoriteList`/`metaOf`/`shardOf` 同样 fail-loud。
+  `idb.test.mjs` 三处旧断言同步改为 fail-loud 断言（更强，不是放宽）。
+  生产侧调用方均已有前置：`app.js` 建库/切库/恢复、备份 `ensureAll`；若未来出现未水合库渲染，
+  由 `render()` 顶层 catch 兜底（用户可见反馈见上，不白屏、不 unhandled rejection）。
 - **夹具修正（非断言放宽）**：`idb.test.mjs:489/806`、`bench.mjs:257/1157/1526` 建库后补
   `ensureBank`（与 `app.js` 建库路径一致），否则写题会命中 `legacyOf` 的 fail-loud。
 
-- **热路径（12 处，本轮只出数据）与成本/风险（未实施）**
+- **「按库键索引 `_keysByBank`」提案：已评估、不实施（2026-11-08）**
+  - 实测数据：`readMap` per-hash 单操作峰值 **300 次 / 0.498ms**（平均 **1.6µs/次**）；
+    首屏冷启动整体 **1.318ms**（含全部 C 段读取）。首屏渲染级收益测不出来。
+  - 结论：在该量级上引入常驻索引（每库一份键集合）+ 一组失效点（写入/删除/迁移/跨标签/
+    备份恢复/清理），**收益不可测、维护面显著增加**，故不实施；从待办清单移除，不保留“待做”状态。
+  - 热路径迁移的正当理由统一为 **未水合时必须 fail-loud，而不是更快**。
+- **热路径（9 处剩余，本轮只出数据）与成本/风险（未实施）**
   - `1000`/`984`（每帧 300 次 `getFresh` + 1 次 `keys()` 全量物化）：作用域化**不改变复杂度**，
-    只是把“键不在视图 → 默认值”改为抛错；真正降本需要「按库键索引 / `_keysByBank`」新机制
-    （见提案 §5，本轮只登记不实施）。
-  - `124`/`129`/`841`（首屏 0.001–0.007ms）：作用域化风险低，但属渲染路径，需 A 段前置保证
-    （A 段 20/20 已核对）。
+    只是把“键不在视图 → 默认值”改为抛错；索引提案已评估不实施（见上）。
   - `967`/`1009`/`1499`/`1469`/`1488`/`1489`（评分/收卷写路径，逐题触发）：迁移前提是所有
-    写调用方（单题评分、交卷、改题、备份恢复）先 `ensureBank`；建议与提交批量化/索引一起做。
-- **待决策**：热路径 12 处的迁移顺序（先做只读渲染 3 处，还是先给 `keys()` 加按库索引再迁移全部）；
-  以及 `1541/1542` 是否需要在 `readMap` 之外独立防护。
+    写调用方（单题评分、交卷、改题、备份恢复）先 `ensureBank`；建议与提交批量化一起做。
+  - `1039`（`removeHash` 写循环）：已由 `ReviewStore.get` 前置拦截，迁移收益低。
+- **待决策**：评分写路径（6 处）是否随下一轮提交批量化一起迁；`1541/1542` 是否需要在
+  `readMap` 之外独立防护（当前依赖上游 S 段读取拦截）。

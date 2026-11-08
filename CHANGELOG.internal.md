@@ -11,15 +11,17 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–3 已实施；步骤 4 部分实施（冷路径 8/22，2026-11-08，见下方最新记录）；
+- **状态**：**步骤 1–3 已实施；步骤 4 部分实施（已迁 11/22，2026-11-08，见下方最新记录）；
   步骤 5–6 未实施**。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
   步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
   新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
-  步骤4 完成 C 段 22 处**实测频次排序 + 冷热分组**，冷路径迁移 **8/22**（142/152/818/826/832/845/1148/1173），
-  热路径 12 处只出数据未改（`1541/1542` 暂缓，未水合时已被更早的 S 段读取拦截，无独立负例）。
+  步骤4 完成 C 段 22 处**实测频次排序 + 冷热分组**，已迁 **11/22**：冷路径 8 处
+  （142/152/818/826/832/845/1148/1173）+ 只读渲染 3 处（124/129/841）；剩余热路径 9 处只出数据未改
+  （`1541/1542` 暂缓，未水合时已被更早的 S 段读取拦截，无独立负例）。
+  「按库键索引」提案已评估、不实施（readMap 300 次/0.498ms，首屏 1.318ms，收益不可测）。
   调用点 89（S 类 5 处）。`js/**` 步骤1/步骤3/步骤4 三次变更，SW 已递增
-  `qforge-v40` → `v41` → `v42` → `v43` → `v44`。
+  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45`。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -35,6 +37,56 @@
 - **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(storage): C 步骤4 后半只读渲染 3 处迁 getScoped（11/22），索引提案评估后不实施
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `js/data/local-adapter.js`：3 处首屏/切库只读渲染路径由 `Storage.get` 改
+  `Storage.getScoped`（**缓存态**，不改缓存语义；签名不变）：
+  `QuestionShards.metaOf` 124、`QuestionShards.shardOf` 129、`progress.favoriteList` 841。
+  未水合库由“静默返回 null/[]”改为抛 `NotHydratedError`（fail-loud）；已水合库返回值不变。
+- 决策：**不实施「按库键索引 `_keysByBank`」**。实测 `readMap` 峰值 300 次 / 0.498ms
+  （平均 1.6µs/次）、首屏冷启动 1.318ms，索引收益不可测；不新增常驻内存与失效点。
+  索引方案标记「已评估、不实施」，从待办移除。
+- 测试：`scripts/idb.test.mjs` 新增 20 项（3 处行为负例 + 等价性 + 真实 `UIRenderer.renderHome`
+  UI 断言 + 3 处静态护栏）；`scripts/app-boot.test.mjs` 新增 12 项（`favoriteList`/`metaOf`/`shardOf`
+  抛 `NotHydratedError` 走 `render()` 顶层 catch）。
+- 文档：`docs/STORAGE.md`（11/22、3 处迁移表、UI 证明、索引不实施结论）、
+  `docs/ARCHITECTURE.md` §4.22（11/22、索引决策）、`docs/TESTING.md`、`docs/BENCH.md`、
+  `docs/DEVELOPMENT.md`（SW v45）。
+- `sw.js`：`qforge-v44` → **`qforge-v45`**，`scripts/sw-baseline.json` 已重算。
+
+**验证数据（实跑，2026-11-08）**
+- 红：`node scripts/idb.test.mjs` → **311 通过 / 6 失败 / exit 1**。真实失败：未水合库
+  `metaOf(B)` **未抛错，返回 null**；`shardOf(B,0)` **未抛错，返回 []**；
+  `favoriteList(B)` **未抛错，返回 []**；另 3 处静态护栏。
+- 绿：同命令 → **317 通过 / 0 失败 / exit 0**；断言 **297 → 317（+20，只增不减）**。
+  三处均抛 `NotHydratedError`（name/code/bankId 逐项校验，key=`questions:<B>:meta` /
+  `questions:<B>:0` / `favorite:<B>`）。
+- 等价性：同一已水合库 `metaOf(A).count=2`、`shardOf(A,0)` 2 题且首题 `渲染A题0`、
+  `favoriteList(A)` 1 条且键不变——迁移前后逐项相同（红例中该段也全部通过）。
+- 真实 UI：`UIRenderer.renderHome` 实测 `题目总数：<b>2</b>`、待复习 **2**、
+  `2 题（新 0 / 到期 2…）`、`start-wrong`/「错题重练」、`start-favorite`/「收藏练习」均在。
+- `scripts/app-boot.test.mjs`：**128 通过 / 0 失败 / exit 0**（116 → 128，+12）。3 个注入场景
+  均得到 toast「界面刷新失败：未水合：X」+ 状态栏「界面刷新失败」+ 保留上次渲染内容（无白屏）
+  + **0 unhandled rejection**。
+- 门禁（提交前实跑）：
+  - `npm run verify:fast` → **exit 0**（37 套件 / **5820** 断言 / 基线一致）。
+  - `npm run bench` **连续 3 次 exit 0**（66 项门禁）。`grade` 比值 **2.79 / 2.74 / 2.74**
+    （门禁 ≤2.90）；`gradeMany` **5.07 / 5.05 / 5.11**（门禁 ≤5.35）；heapUsed
+    **5.06 / 5.06 / 5.07 MB**（≤40 MB）；首页渲染 50k·IDB P95 **0.05 / 0.06 / 0.09 ms**
+    （≤50 ms）。三次均无失败，未调阈值/容差。
+  - `node scripts/docs-check.mjs --static` → **exit 0**（37 运行项 / 5820 断言 / 66 门禁；
+    首屏 **386.6 KB gzip / 1090.7 KB raw**）。
+
+**遗留 TODO / 风险**
+- 热路径 **9 处未迁**：`1000/984/967/1009/1039/1469/1488/1489/1499`。评分写路径 6 处
+  迁移前提是所有写调用方先 `ensureBank`，建议与提交批量化一起做。
+- `1541/1542` 仍暂缓（未水合已被上游 S 段读取拦截，无独立负例，不谎称已迁）。
+- 若未来出现“未水合库被渲染”的真实路径，UI 反馈为 toast+状态栏、无白屏、无 unhandled
+  rejection；但用户会看到错误态而非数据，属预期 fail-loud。
 
 ### feat(storage): C 步骤4 实测频次排序 + 冷热分组，冷路径 8 处迁 scoped 读取（8/22）
 

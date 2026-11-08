@@ -316,6 +316,70 @@ section('渲染顶层错误策略：fire-and-forget 调用有用户可见提示'
 }
 
 /* ============================================================
+ * 1.6b 作用域读取（C 步骤4 后半）抛错走 render() 顶层 catch：用户可见反馈
+ * ============================================================ */
+section('作用域读取抛错：render 顶层 catch 的可见反馈（124/129/841）');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  const bank = await QB.DB.banks.create({ name: '作用域错误库' });
+  await QB.DB.questions.insertMany(bank.id, [{
+    type: 'single', question: '渲染错误题',
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }], { dedupe: false, mode: 'overwrite' });
+  QB.App.State.banksLoaded = false;
+  QB.App.State.bankId = bank.id;
+  QB.App.State.view = 'home';
+  QB.App.State.favoriteBankId = null;
+
+  const notHydrated = (what) => {
+    const e = new Error('未水合：' + what);
+    e.name = 'NotHydratedError';
+    e.code = 'STORAGE_NOT_HYDRATED';
+    e.bankId = bank.id;
+    return e;
+  };
+  const statusText = () => String(env.dom.document.getElementById('status-text').textContent || '');
+  const viewHtml = () => String(env.dom.document.getElementById('view').innerHTML || '');
+
+  async function scenario(label, patch, restore) {
+    const before = rejections.length;
+    patch();
+    QB.App.render();
+    await tick(8);
+    restore();
+    eq(rejections.length, before, label + '：未 await 的 render 无 unhandled rejection');
+    ok(toastsText(env).indexOf('界面刷新失败：未水合：' + label) >= 0,
+      label + '：toast 可见（实测：' + (toastsText(env) || '无提示') + '）');
+    ok(statusText().indexOf('界面刷新失败') >= 0, label + '：状态栏标记错误态');
+    ok(viewHtml().length > 0, label + '：无白屏（保留上次已渲染内容 ' + viewHtml().length + ' 字符）');
+    rejections.length = before; // 与 1.6 同法：本次注入的 rejection 不污染后续用例
+  }
+
+  const origFav = QB.DB.progress.favoriteList;
+  await scenario('收藏', () => {
+    QB.App.State.favoriteBankId = null; // 强制 loadBankData 走 favoriteList
+    QB.DB.progress.favoriteList = async () => { throw notHydrated('收藏'); };
+  }, () => { QB.DB.progress.favoriteList = origFav; });
+
+  const origMeta = QB.QuestionShards.metaOf;
+  QB.App.State.favoriteBankId = bank.id; // 跳过收藏读取，让 count → metaOf 成为首个抛错点
+  QB.App.State.banksLoaded = false;
+  await scenario('分片清单', () => {
+    QB.QuestionShards.metaOf = () => { throw notHydrated('分片清单'); };
+  }, () => { QB.QuestionShards.metaOf = origMeta; });
+
+  const origShard = QB.QuestionShards.shardOf;
+  QB.App.State.favoriteBankId = bank.id;
+  QB.App.State.banksLoaded = false;
+  await scenario('分片读取', () => {
+    QB.QuestionShards.shardOf = () => { throw notHydrated('分片读取'); };
+  }, () => { QB.QuestionShards.shardOf = origShard; });
+
+  env.restore();
+}
+
+/* ============================================================
  * 1.7 切库事务化：持久化失败必须回滚原库（Phase 0 批次1-5）
  * ============================================================ */
 section('切库事务化：失败回滚原库，不留下半更新状态');
