@@ -50,7 +50,7 @@
 
 ### fix(storage): 删库级联在严格模式部分视图下不再撞全量 keys()
 
-**Commit Hash**：`TBD（本条随修复提交，hash 由后续 docs(changelog) 回填）`
+**Commit Hash**：`4cc22da`
 
 **核心改动**
 - `js/data/local-adapter.js` `RevlogStore.clear()`：先 `try { Storage.keys() }`（成功时逐字沿用旧循环，
