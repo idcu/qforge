@@ -1322,12 +1322,33 @@
       return true;
     },
 
-    /** 清空全部分段键、清单与旧整表键（整表重建/删库用） */
+    /**
+     * 清空全部分段键、清单与旧整表键（整表重建/删库用）。
+     * 删库级联（removeBank→replaceAll→clear）在「其他库未水合」时处于分阶段部分视图：
+     * 严格读取下 `keys()` 无法证明全量视图会抛 NotHydratedError，导致删除半途失败。
+     * 分段键是全局键族（user:revlog:<i>，不归属任何题库），不需要题目库键集：
+     *   - 优先沿用 `keys()`：保留清单外孤儿分段的清理能力，strict=false 路径逐字不变；
+     *   - 仅在严格守卫拒绝（部分视图）时，按清单 first..last 显式枚举分段键。
+     * 崩溃窗口中清单已落后于实际分段的孤儿键不在枚举范围（见 docs/STORAGE.md 遗留风险）。
+     */
     clear() {
-      Storage.keys().forEach((k) => {
-        if (k === K.revlogMeta) return;
-        if (k.indexOf('user:revlog:') === 0 && /^\d+$/.test(k.slice('user:revlog:'.length))) Storage.remove(k);
-      });
+      let all = null;
+      try {
+        all = Storage.keys();
+      } catch (e) {
+        if (!e || e.code !== 'STORAGE_NOT_HYDRATED') throw e;
+      }
+      if (all) {
+        all.forEach((k) => {
+          if (k === K.revlogMeta) return;
+          if (k.indexOf('user:revlog:') === 0 && /^\d+$/.test(k.slice('user:revlog:'.length))) Storage.remove(k);
+        });
+      } else {
+        const meta = revlogMetaOf();
+        if (meta) {
+          for (let i = meta.first; i <= meta.last; i++) Storage.remove(K.revlogSeg(i));
+        }
+      }
       Storage.remove(K.revlogMeta);
       Storage.remove(K.revlog);
     },

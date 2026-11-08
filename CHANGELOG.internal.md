@@ -12,6 +12,8 @@
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
 - **状态**：**步骤 1–5 已实施；步骤 6 已评估裁定 no-go（生产默认未改）**（2026-11-08）。
+  步骤6 收尾（2026-11-09）：删库级联缺陷已修（`RevlogStore.clear` 显式枚举全局分段），
+  真机四路径 29/29、0 未捕获错误；仍维持 no-go，缺口仅剩生产观察期数据与 API 后端/50k 量级未验证。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
   步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
   新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
@@ -25,7 +27,7 @@
   **判断更正（2026-11-08）**：曾把 984/1000 归为「必须等索引机制才能迁」属判断失误——
   否掉索引只说明不需要新增索引，与「两处能否 fail-loud 化」是两件独立的事。
   调用点 90（步骤5 `bankIds` 兜底枚举 +2；S 类 27 处）。`js/**` 变更后 SW 已递增
-  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46` → `v47` → `v48` → `v49`。
+  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46` → `v47` → `v48` → `v49` → `v50`。
   步骤5：测试/CI harness 默认 `__strictReads=true`，两处真实归类错误（`bankIds`、`ensureLayout`）
   修到绿，全套 5907/5907。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
@@ -40,10 +42,58 @@
 - **影响面**：90 hit / 9 文件（G 41 / C 0 / B 2 / A 20 / S 27）；同步签名不变；新增 4 个方法
   与 1 个错误类型；`stateKeysScoped` 自第三批起为 `stateKeys` 的委托别名（单一实现）。
 - **已实测（步骤1）**：`keysScoped` 50k/IDB 两次实跑中位 **8.03 / 10.66 ms**（提案估 3–4ms，差异如实记录，未进门禁）。
-- **待实测（步骤6 后）**：生产 strict 已裁定 no-go，重评条件见 `docs/STORAGE.md`「C 步骤6」；
-  真实浏览器 IDB 严格模式的启动/切库/删库/恢复仍待覆盖。
+- **真机验收（步骤6 后）**：Chromium 1254 + Playwright 1.65.0 覆盖 启动/切库/删库/备份恢复
+  四条路径，**29/29 断言通过、0 控制台/页面错误**；修复前 P3 删库可稳定复现
+  `NotHydratedError`（证据与修复见下条记录）。生产观察期数据仍待补。
 
 ## 最新记录
+
+### fix(storage): 删库级联在严格模式部分视图下不再撞全量 keys()
+
+**Commit Hash**：`TBD（本条随修复提交，hash 由后续 docs(changelog) 回填）`
+
+**核心改动**
+- `js/data/local-adapter.js` `RevlogStore.clear()`：先 `try { Storage.keys() }`（成功时逐字沿用旧循环，
+  保留清单外孤儿分段清理能力），仅在 `STORAGE_NOT_HYDRATED`（部分视图）时按 `revlogMeta` 的
+  `first..last` 显式枚举全局 `user:revlog:<i>` 分段并删除。未新增公共入口、未放宽 `keys()` 语义、
+  判断只在 `clear()` 内、不散落调用方；**公共抽象：0 新增 / 0 调整**。
+- 生产 `Storage.__strictReads` 保持 `false`；`strict=false` 分支执行路径逐字不变（只是多一层
+  try/空值判断），删库/备份恢复/remap 中「`keys()` 会抛错」的分支由硬失败变为可完成。
+- 影响面：`clear()` 唯一调用方 `replaceAll()` → 删库 `removeBank`、备份恢复 `applyData`、
+  hash remap；启动/切库未改动。
+- 测试：`scripts/idb.test.mjs` 新增 12 断言（A 已水合含 1 条评分日志 / B 未水合 / 严格下删 A）。
+  真机四路径脚本在 `.analysis/browser-acceptance/`（未跟踪、不提交）。
+- 文档：`docs/STORAGE.md`「C 步骤6 收尾」+ 遗留风险、`docs/ARCHITECTURE.md` §4.22、
+  `docs/TESTING.md`（396→408、5907→5919）、`docs/BENCH.md`（389.1 KB gzip / 1098.0 KB raw）、
+  `scripts/sw-baseline.json`（`sw.js` `CACHE` v49 → v50，js 变更后重写 DIGEST）。
+
+**验证数据（2026-11-09）**
+- 红（修复前）：
+  - 真机 P3：`删除失败：题库未水合：bank=B`；A 题目已物理删除、评分日志残留 **1** 条、
+    `State.bankId` 仍为已删除的 A；**1 处未捕获** `NotHydratedError`（`clear → replaceAll`）。
+  - 单测：3 条断言失败（`banks.remove` 抛 `NotHydratedError` / A 孤儿日志 1 条 /
+    持久化 `currentBank` 未清）。
+- 绿（修复后）：
+  - `node scripts/idb.test.mjs`：**408/408 通过，exit 0**；`test-all` **5919/5919，37 运行项，exit 0**。
+  - 真机四路径：**29/29**（P1 6 / P2 5 / P4 10 / P3 8），P3：删除成功、A 孤儿日志 **0**、
+    A 题目清单已删除、`currentBank` 置空且 `getCurrentBankId()` 回落到现存 B 并完成水合、
+    B 数据/日志保留且仍保持未水合、**0 控制台/页面错误**；`NotHydratedError` 仅出现在
+    已捕获的显式探测点（`bankIds`、`revlog.clear` 回退）。
+- 门禁（最终树，2026-11-09 实跑）：`npm run verify:fast` exit 0（37 项 / 5919 断言 / 43.1s，
+  首屏 389.1 KB gzip / 1098.0 KB raw）；`npm run bench` exit 0（grade 2.74≤2.90、
+  gradeMany 4.93≤5.35、heapUsed +5.08MB≤40MB、keys() 首次 16.10ms≤40ms、首页 50k P95 0.04ms、
+  单题 P95 0.00ms、智能组卷 P95 2.60ms、API PATCH P95 4.36ms）；
+  `node scripts/docs-check.mjs --static` exit 0（37 项 / 5919 断言 / 66 门禁）。
+- 抖动如实记录：`verify:fast` 首跑 app-boot.test.mjs exit=1（断言缺 136，早退），单跑与后续
+  复跑 5/5 + 整套复跑均 exit 0，未定位到确定性原因，作为时序抖动留档。
+
+**遗留 TODO / 风险**
+- 崩溃窗口（分段已写、清单未更新）造成的清单外孤儿分段在部分视图不可枚举；
+  下次全量视图 `keys()` 成功时清理。
+- API 后端与 50k 题量级下的删库路径未实测。
+- 步骤6 重评：条件①（`clear` 不再依赖全量视图）与②（真机四路径 0 未捕获）已满足，
+  ③（生产观察期错误率）仍缺 → **维持 no-go**。
+
 
 ### docs(scope): C 步骤6——生产 strict 评估裁定 no-go（不改生产行为）
 

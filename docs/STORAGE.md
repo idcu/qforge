@@ -598,7 +598,8 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   `node scripts/docs-check.mjs --static` **exit 0**。
 - **遗留风险**：严格守卫仅在 IDB 模式生效（LS 无「未水合」概念，`_isIdb()` 短路）；
   `keys()` 严格判定依赖 `banks` 清单存在，清单缺失时 fail-closed（测试夹具已覆盖）；
-  `RevlogStore.clear` 仍用全局 `keys()`（只处理全局 `user:revlog:*`，全量视图才被调用）。
+  `RevlogStore.clear` 优先沿用全局 `keys()`，严格守卫拒绝时按清单 `first..last` 显式枚举
+  分段键（2026-11-09 修复，见下「C 步骤6 收尾」；崩溃窗口的清单外孤儿分段不在回退枚举范围）。
 
 #### C 步骤6：生产是否开启 strict —— go/no-go 裁定 **no-go**（生产行为不变）
 
@@ -650,3 +651,45 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 
 **生产行为**：本步**未改**生产默认值；仅文档留档。测试/CI 侧的严格守卫（步骤5）保持开启，
 新代码一旦误用旧入口会先在 CI 变红。
+
+#### C 步骤6 收尾：删库级联缺陷修复（2026-11-09，生产默认值仍未改）
+
+**方案（删库前作用域补齐/枚举）**：`RevlogStore.clear()` 只清理全局键族
+`user:revlog:<i>`，不需要题目库键集。改为：
+- 先 `try { Storage.keys() }`：成功时逐字沿用旧循环（保留「清单外孤儿分段」清理能力，
+  `strict=false` 行为与执行路径不变）；
+- 仅在严格守卫拒绝（`STORAGE_NOT_HYDRATED`，即部分视图）时，按清单 `first..last`
+  显式枚举并删除分段键，再删清单与旧整表键。
+
+未新增 `keysGlobal()` 之类公共入口（不扩 API 面），未放宽 `keys()` 语义，判断只在
+`RevlogStore.clear` 内部，不散落到调用方。**公共抽象：0 新增、0 调整**。
+
+**影响面（先核对后动手）**：`clear()` 的调用方只有 `replaceAll()` → 删库级联
+（`removeBank`）、备份恢复（`applyData` 的 revlog 重建）、hash 重映射；这些路径在
+「`keys()` 会抛错」时此前都是硬失败，本次只把该失败分支变为可完成，`keys()` 成功的分支
+（含全部 `strict=false`、全量视图、LS 模式）逐字不变。启动/切库未改动。
+
+**红（修复前实测）**
+- 真机 P3（Chromium 1254）：UI 提示「删除失败：题库未水合：bank=B」，A 的题目已物理删除但
+  评分日志残留 1 条，`State.bankId` 停留在已删除的 A；1 处未捕获 `NotHydratedError`
+  （`clear → replaceAll`）。
+- 单测（`scripts/idb.test.mjs` 新增 12 断言）：3 条失败——`banks.remove(A,{cascade:true})`
+  抛 `NotHydratedError`、A 孤儿日志 1 条、持久化 `currentBank` 未清。
+
+**绿（修复后实测）**
+- 单测 `node scripts/idb.test.mjs`：**408/408 通过 / exit 0**；`test-all` **5919/5919 通过 / 37 项**。
+- 真机 P3：删除成功（无失败 toast）、A 孤儿日志 **0** 条、A 题目清单已物理删除、
+  `currentBank` 置空且 `getCurrentBankId()` 回落到现存 B 并完成水合、B 数据/日志保留、
+  B 仍保持未水合（未因删库全量水合）；全程 **0 控制台/页面错误**，`NotHydratedError`
+  仅出现在已捕获的显式探测点（`bankIds`、`revlog.clear` 回退）。
+- 真机四路径合计 **29/29 断言通过**（P1 6 / P2 5 / P4 10 / P3 8）。
+
+**遗留风险（如实）**：崩溃窗口（分段已写、清单未更新）造成的清单外孤儿分段，在部分视图
+下无法枚举；下次全量视图下 `keys()` 成功时会被清理。API 后端与 50k 题量级下的删库路径
+本轮未实测。
+
+**重评结论（2026-11-09）**：仍为 **no-go**，但缺口已收敛——
+①「`RevlogStore.clear` 不再依赖全量视图」**已满足**（调用点内显式枚举，未扩 API）；
+②「真实浏览器四条路径 0 未捕获错误」**已满足**（29 断言，见上）；
+③「生产错误率/观察期数据」**仍未满足**；另有 API 后端与大数据量未验证。
+即：不再存在已知可达的删库失败路径，但缺少生产观察数据，尚不足以把默认值改为 `true`。

@@ -458,7 +458,12 @@ switchBank(nextId) = 快照 {bankId, view}
   步骤6（生产 strict）**已评估，裁定 no-go**（2026-11-08）：成本可忽略（旧入口 +5.5–7.1 ns/次、
   评分热路径不受影响），但实测存在可达生产失败路径——删库级联
   `DB.banks.remove → cascadeDelete → RevlogStore.removeBank → replaceAll → clear → Storage.keys()`
-  在部分视图下抛 `NotHydratedError`；生产默认保持 `false`。详见 [STORAGE.md](STORAGE.md)「C 步骤6」小节。
+  在部分视图下抛 `NotHydratedError`；生产默认保持 `false`。
+  **收尾（2026-11-09）**：该失败路径已修——`RevlogStore.clear` 优先沿用 `keys()`，
+  严格守卫拒绝时按清单 `first..last` 显式枚举全局分段键（不扩 API、不放宽 `keys()` 语义、
+  `strict=false` 路径逐字不变）；单测 408/408、`test-all` 5919/5919，真机四路径 29/29、
+  0 未捕获错误。仍维持 no-go：缺生产观察期错误率数据，且 API 后端/50k 题量级删库未实测。
+  详见 [STORAGE.md](STORAGE.md)「C 步骤6」及「C 步骤6 收尾」小节。
   完整提案（未跟踪、不随仓库发布）：`.analysis/architecture-audit/scoped-read-api-proposal.md`。
 - **问题**：`Storage.get/keys` 是同步契约，分阶段水合只覆盖启动作用域；未水合库读取静默返回
   `undefined`/`defaultValue`（见 §4.21 与 [STORAGE.md](STORAGE.md) 结论 b）。现有静态护栏只能拦
@@ -506,9 +511,11 @@ switchBank(nextId) = 快照 {bankId, view}
   （**已完成 22/22**：冷路径 `142/152/818/826/832/845/1148/1173` + 只读渲染 `124/129/841`
   + 热路径 `984/1000` + 收尾 `967/1011/1039/1471/1490/1491/1501`（行号为收尾前基线）已迁；
   `1541/1542` 无有效行为负例留档不迁）；⑤ CI 默认开 `__strictReads`（**已完成**，红 exit 1 →
-  绿 5907/5907）；⑥ 生产 strict（**已完成评估：no-go**——实测删库级联
-  `cascadeDelete → RevlogStore.clear → Storage.keys()` 在部分视图抛 `NotHydratedError`，
-  成本仅 +5.5–7.1 ns/次；重评条件见 [STORAGE.md](STORAGE.md)「C 步骤6」）。
+  绿 5907/5907）；⑥ 生产 strict（**已评估：no-go**——原先实测删库级联
+  `cascadeDelete → RevlogStore.clear → Storage.keys()` 在部分视图抛 `NotHydratedError`；
+  **2026-11-09 已修**为 `clear` 内显式枚举全局分段键，真机四路径 29/29、0 未捕获错误，
+  仍因缺生产观察数据维持 no-go；成本仅 +5.5–7.1 ns/次；重评条件见
+  [STORAGE.md](STORAGE.md)「C 步骤6」与「C 步骤6 收尾」）。
 - **为何唯一覆盖两类风险**：O1 让新增调用点在未水合时立即失败；`__strictReads` 让既有调用点
   的归类错误在测试/CI 暴露。O2（`withBank` 门面）引入生命周期与门面过期读错库；O3（严格/宽松
   双入口）默认仍宽松、覆盖不了既有归类；O4（`keys()` 按作用域）语义变化最大，全量误判会复现

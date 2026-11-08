@@ -972,6 +972,60 @@ section('分阶段水合：删除非当前库按库水合后再级联清理（Ph
   eq((await Q2.DB.questions.list(A.id, {})).items.length, 2, '删除非当前库不影响当前库数据');
 }
 
+section('分阶段水合：严格模式下删除「当前库含评分日志 + 其他库未水合」（C 步骤6 收尾）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种跨库写
+  const A = await Q1.DB.banks.create({ name: '待删库A' });
+  const B = await Q1.DB.banks.create({ name: '未水合库B' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(2, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk(2, 'B'), { dedupe: false, mode: 'overwrite' });
+  const aHash = (await Q1.DB.questions.list(A.id, {})).items[0].contentHash;
+  const bHash = (await Q1.DB.questions.list(B.id, {})).items[0].contentHash;
+  // 待删库 A 必须已有评分日志：RevlogStore.removeBank 无日志会提前 return 0，走不到 replaceAll→clear
+  await Q1.DB.reviews.record(A.id, { [aHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: aHash, b: A.id, r: 3, t: 1000 }]);
+  await Q1.DB.reviews.record(B.id, { [bHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: bHash, b: B.id, r: 3, t: 1000 }]);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  // 新页面：只水合当前库 A，库 B 未水合（真机 P3 同构场景）
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const logsOf = (id) => Q2.DB.revlog.list().filter((e) => e && e.b === id).length;
+  ok(S.__strictReads === true, '前置：严格读取已开启（harness 默认，实测 ' + S.__strictReads + '）');
+  ok(!S.isBankHydrated(B.id), '前置：库B 未水合');
+  eq(logsOf(A.id), 1, '前置：待删库A 有 1 条评分日志（触达 replaceAll→clear）');
+
+  let delErr = null;
+  try { await Q2.DB.banks.remove(A.id, { cascade: true }); } catch (e) { delErr = e; }
+  ok(!delErr, '严格模式下删除已水合且含日志的库不抛 NotHydratedError（实测 ' +
+    (delErr ? (delErr.name + '/' + delErr.code) : 'ok') + '）');
+  eq(logsOf(A.id), 0, '删除后无 A 的孤儿评分日志（实测 ' + logsOf(A.id) + '）');
+  ok(!(await Q2.DB.banks.list()).some((b) => b.id === A.id), '题库清单中已无 A');
+  eq(await Q2.Store.get(Q2.KEYS.questionsMeta(A.id)), undefined, 'A 题目清单已从 IDB 物理删除');
+  eq(S.get(Q2.KEYS.metaCurrentBank, null), null,
+    '持久化的 currentBank 已置空（实测 ' + JSON.stringify(S.get(Q2.KEYS.metaCurrentBank, null)) + '）');
+  eq(await Q2.DB.getCurrentBankId(), B.id, '当前库回落到现存库B（不留陈旧 bankId）');
+  ok(await Q2.Store.get(Q2.KEYS.questionsMeta(B.id)) !== undefined, '库B 数据未被连带删除');
+  ok(!S.isBankHydrated(B.id), '未为删库全量水合库B（内存/耗时边界不变）');
+  eq(logsOf(B.id), 1, '库B 评分日志保留（实测 ' + logsOf(B.id) + '）');
+}
+
 section('作用域读取 API + 严格守卫（C 步骤1：API + 契约测试，默认行为不变）');
 {
   const idb = createMemoryIDB();
