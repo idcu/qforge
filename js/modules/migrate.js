@@ -216,8 +216,8 @@
       if (!renamed.size) continue;
 
       states += QB.ReviewStore.remap(bankId, renamed);
-      QB.HashRemap.remapList(QB.KEYS.wrong(bankId), renamed, QB.HashRemap.mergeWrong);
-      QB.HashRemap.remapList(QB.KEYS.favorite(bankId), renamed, QB.HashRemap.mergeFav);
+      QB.HashRemap.remapList(QB.KEYS.wrong(bankId), renamed, QB.HashRemap.mergeWrong, bankId);
+      QB.HashRemap.remapList(QB.KEYS.favorite(bankId), renamed, QB.HashRemap.mergeFav, bankId);
     }
 
     remapRevlog(globalRenamed, hashOwners);
@@ -361,8 +361,8 @@
     let states = 0;
     if (mapping && mapping.size) {
       states += QB.ReviewStore.remap(bankId, mapping);
-      QB.HashRemap.remapList(QB.KEYS.wrong(bankId), mapping, QB.HashRemap.mergeWrong);
-      QB.HashRemap.remapList(QB.KEYS.favorite(bankId), mapping, QB.HashRemap.mergeFav);
+      QB.HashRemap.remapList(QB.KEYS.wrong(bankId), mapping, QB.HashRemap.mergeWrong, bankId);
+      QB.HashRemap.remapList(QB.KEYS.favorite(bankId), mapping, QB.HashRemap.mergeFav, bankId);
     }
 
     // 布局转换（per-hash / 分段）——即便无映射也需执行（旧备份/旧库）

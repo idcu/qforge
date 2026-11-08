@@ -11,10 +11,12 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–4 已实施（C 段 22/22 收口）；步骤 5–6 未实施**（2026-11-08）。
+- **状态**：**步骤 1–4 已实施（C 段 22/22 + B 段 6/6 收口）；步骤 5–6 未实施**（2026-11-08）。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
   步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
   新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
+  B 段补完：`convertMetaLayouts` 走新增白名单入口 `getScopedIndicator`（B5）、
+  `HashRemap.remapList` 改为必传 `bankId` 并走 `getScopedFresh`（B6），B 段 6/6；
   步骤4 完成 C 段 22 处**实测频次排序 + 冷热分组**并全部处理：冷路径 8 处
   （142/152/818/826/832/845/1148/1173）+ 只读渲染 3 处（124/129/841）+ 热路径 2 处（984/1000）
   + 收尾 7 处（评分写路径 6 处 `967/1009/1469/1488/1489/1499` + `1039`）；
@@ -23,7 +25,7 @@
   **判断更正（2026-11-08）**：曾把 984/1000 归为「必须等索引机制才能迁」属判断失误——
   否掉索引只说明不需要新增索引，与「两处能否 fail-loud 化」是两件独立的事。
   调用点 88（第三批 `stateKeysScoped` 改委托后 89 → 88，S 类 4 处）。`js/**` 变更后 SW 已递增
-  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46` → `v47`。
+  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46` → `v47` → `v48`。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -39,6 +41,52 @@
 - **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(scope): B 段补完——指示键白名单 + HashRemap 签名迁移（B 6/6）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `js/utils/storage.js`
+  - 新增 `Storage.getScopedIndicator(key, bankId[, defaultValue])`：唯一允许在启动期读取
+    `user:reviewMeta:*` / `user:reviewRev:*` 指示键的入口；仍强制「键归属 == 传入 bankId」，
+    非白名单键或归属不一致抛 `TypeError`；不要求水合（水合决策本身必须能读指示键）。
+  - 抽出私有 `_freshValue(key, defaultValue)` 作为 `getFresh` 与 `getScopedIndicator` 的
+    **单一读取实现**；`getFresh` 仍先过 `_assertStrictReadable`，语义不变。
+- `js/data/local-adapter.js`
+  - `convertMetaLayouts`（B5，约 1207 行）：`Storage.getFresh` → `Storage.getScopedIndicator`。
+  - `remapUserData` 两处 `QB.HashRemap.remapList(...)` 补第 4 参数 `bankId`（B6）。
+- `js/utils/hash-remap.js`（B6）：`remapList(storageKey, mapping, mergeFn, bankId)` 签名改为
+  **必传 bankId**，读取改 `Storage.getScopedFresh(storageKey, bankId, null)`；未水合库 fail-loud。
+- `js/modules/migrate.js`：两条迁移链各 wrong/favorite 共 4 处补 `bankId`。
+- `scripts/idb.test.mjs`：新增「C 步骤4 B 段补完」段 **19 项断言**（白名单正/负例、
+  `convertMetaLayouts` 等价、`remapList` 未水合负例与已水合合并等价、6 处传参静态护栏）。
+- `scripts/backup-hydration.test.mjs`：调用点冻结口径纳入 `getScopedIndicator`（local-adapter
+  仍 49 / 合计仍 88，覆盖更严，非放宽）。
+- 文档：`docs/ARCHITECTURE.md` §4.22（B 6/6 + 新入口）、`docs/STORAGE.md`（B5/B6 小节）、
+  `docs/modules/utils.md`（`remapList` 新签名）、`docs/TESTING.md`（395/5906）、
+  `docs/BENCH.md`（首屏包体）、`docs/DEVELOPMENT.md`；`sw.js` `CACHE` v47 → v48。
+
+**验证数据（2026-11-08）**
+- 红：以 `89e01e4` 代码副本 + 本批新测试实跑 → **386 通过 / 9 失败 / exit 1**
+  （`getScopedIndicator` 缺失时旧实现路径真实失败；用 `callOf` 包裹避免整文件崩掉）。
+- 绿：`node scripts/idb.test.mjs` → **395 通过 / 0 失败 / exit 0**（断言 **376 → 395**，+19，只增不减）；
+  `backup-hydration.test.mjs` → **52 通过 / 0 失败 / exit 0**。
+- 独立负例：`remapList(wrongKey, ..., 'B')` 未水合抛 `NotHydratedError{bankId:'B'}`；
+  `getScopedIndicator(reviewMeta, 'B')` 在未水合 B 仍可读（启动期语义），跨库键/non-meta 键抛 `TypeError`。
+- 等水合后等价：`convertMetaLayouts(B)` 的 v3 `skipped` 与 v4 防护读数不变；`remapList` 合并计数
+  2+1=3、键改写为新 hash 与迁移前一致。
+- 性能门禁：`npm run bench` → `grade` 比值 **2.75 ≤ 2.90**、`gradeMany` **4.89 ≤ 5.35**、
+  heapUsed 增量 **+5.08 MB ≤ 40.00 MB**。
+- 首屏包体：387.6 → **388.4 KB gzip / 1095.6 KB raw**（+0.8 KB gzip，新增白名单入口与测试代码；
+  `scripts/docs-baseline.json` 同步刷新，非阈值放宽）。
+- 三道门禁：`npm run verify:fast` **exit 0**（37 运行项 / 5906 断言）、`npm run bench` **exit 0**、
+  `node scripts/docs-check.mjs --static` **exit 0**（全部一致）。
+
+**遗留 TODO / 风险**
+- `getScopedIndicator` 仅限指示键；误用于普通业务键会抛 `TypeError`（调用方需自行归类）。
+- `remapList` 为破坏性签名变更（仓内 6 处调用已全部更新，未跟踪外部调用方不在本仓范围）。
+- 真实浏览器启动期 v3/v4 判定与跨标签未实测（本轮为 Node + 内存 IDB）。
 
 ### feat(scope): C 步骤4 收尾——评分写路径 6 处 + removeHash 迁 scoped（22/22）
 

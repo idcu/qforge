@@ -446,8 +446,9 @@ switchBank(nextId) = 快照 {bankId, view}
 
 - **状态**：**步骤1（API + 契约测试）已完成**；**步骤2（A 段 20 处前置核对）已完成**
   （2026-11-08）：**20/20 已有 `ensureAll` 或等价全量前置，0 处需补**；**步骤3 已完成**
-  （2026-11-08）：B 段 6 处中 **4/6 已迁移**（`legacyReviewMap` 953、`convertLegacy` 1054、
-  `remap` 1095/1098），剩余 2 处（`convertMetaLayouts` 1198、`hash-remap.js:32`）未迁；
+  （2026-11-08）：B 段 6 处全部处理：`legacyReviewMap` 953、`convertLegacy` 1054、
+  `remap` 1095/1098 已迁；`convertMetaLayouts` 1198 改走新增指示键白名单
+  `Storage.getScopedIndicator`；`hash-remap.js:32` 签名新增 `bankId` 并改走 `getScopedFresh`（**6/6**）；
   **步骤4 已完成**（2026-11-08）：C 段 22 处已按实测频次分冷热，**22/22 全部处理完毕**——
   冷路径 8 处（142/152/818/826/832/845/1148+1173）+ 只读渲染 3 处（124/129/841）
   + 第三批热路径 2 处（984/1000）+ 收尾热路径 7 处（评分写路径 6 处 + `removeHash`）
@@ -459,7 +460,9 @@ switchBank(nextId) = 快照 {bankId, view}
   「新增调用点/计数漂移」，**不能拦「已有调用点归类错误」**。
 - **步骤1 已实现（默认行为不变）**：
   `Storage.getScoped(key, bankId[, default])` / `getScopedFresh(key, bankId[, default])` /
-  `keysScoped(bankId)`；未水合抛 `QB.NotHydratedError`（`name` / `code='STORAGE_NOT_HYDRATED'`
+  `keysScoped(bankId)`；B5 专用 `getScopedIndicator(key, bankId[, default])` 只放行
+  `reviewMeta`/`reviewRev` 两枚「分阶段水合下本就可见」的指示键（不要求水合，其它键 TypeError）；
+  未水合抛 `QB.NotHydratedError`（`name` / `code='STORAGE_NOT_HYDRATED'`
   / `bankId` / `key` / `hint`）；`bankId=null` 仅全局键，键归属不一致或无法解析时 `TypeError`；
   `keysScoped` 返回全局键 + 目标库逻辑键并合并 `_pending`（对 `keys()` 物化缓存做前缀过滤，
   不建库索引）。`Storage.__strictReads` **默认关闭**：关闭时 `get/getFresh/keys` 逐字保持旧语义；
@@ -471,8 +474,10 @@ switchBank(nextId) = 快照 {bankId, view}
   backup 7 处由导出/自动备份/恢复三个 `ensureAll` 入口保护，`applyBackup` 唯一例外读的是
   全局偏好键（无需全量）；migrate 12 处在 `run` 锁内 `ensureAll` 之后，或 `fromVersion<6`/LS
   目标天然全量视图；`local-adapter.bankIds`（1 处）由全局 `banks` 清单补全库 id。
-  **未水合库的 v3 清单判定仍属 B 段**（`local-adapter.js:1198`，旧基线 1185），本步不改，缺口未修复。
-- **步骤3 已迁移（4/6）**：`convertLegacy` 的 per-hash 读取与 `remap` 的两次状态读取改用
+  **未水合库的 v3 清单判定**（`local-adapter.js:1198`，旧基线 1185）由 B5 补完：改用
+  `getScopedIndicator(K.reviewMeta(bankId), bankId, null)`，语义保持（v3 未水合库仍上报 skipped、
+  v4 不误报），且非指示键/归属不一致一律 TypeError，不成为绕过水合的通用后门。
+- **步骤3 已迁移（6/6）**：`convertLegacy` 的 per-hash 读取与 `remap` 的两次状态读取改用
   `Storage.getScopedFresh(key, bankId, null)`；两函数的枚举前置改用新增公共抽象
   `ReviewStore.stateKeysScoped(bankId)`（内部 `Storage.keysScoped`），未水合在枚举阶段即抛
   `NotHydratedError`，不再“残缺视图枚举为空 → 静默返回 0/静默迁移”。`legacyReviewMap`（953）
@@ -483,9 +488,16 @@ switchBank(nextId) = 快照 {bankId, view}
   `app.js:284` toast + `app.js:287` 状态栏（`render()` 返回 false，无 unhandled rejection）、
   迁移 `app.js:1797` toast、备份恢复 `backup.js:831` toast、改题保存
   `question-editor.js:602/713` errBox。
+  **B5/B6 补完（2026-11-08）**：B6 `QB.HashRemap.remapList(storageKey, mapping, mergeFn, bankId)`
+  签名新增 `bankId`（公共 API 变更），读取改 `getScopedFresh(storageKey, bankId, null)`；调用方
+  `migrate.js` 4 处与 `local-adapter.remapUserData` 2 处全部显式传库；`remapUserData` 先调
+  `ReviewStore.remap`，未水合会先在作用域读取处抛错，故 `remapList` 无独立上游落点，
+  但作为**独立 API** 直接调用可构造负例（未水合抛 `NotHydratedError{key=wrong:<B>}`）。
+  B5 无有效行为负例（语义保持），以静态断言 + `convertMetaLayouts` 行为等价用例取证。
+  红 **exit 1 / 9 项失败 / 386 通过** → 绿 **395 通过 / 0 失败 / exit 0**（断言 376 → 395，+19）。
 - **6 步灰度（当前进度 4/6，步骤5–6 未实施）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
-  `ensureAll` 职责（**已完成，0 处需补**）；③ B 类 6 处迁移到 `getScoped`（**已完成 4/6**：
-  1054/1095/1098/953 已迁；1198/hash-remap:32 未迁）；④ C 类 22 处按模块迁移
+  `ensureAll` 职责（**已完成，0 处需补**）；③ B 类 6 处迁移到作用域 API（**已完成 6/6**：
+  1054/1095/1098/953 已迁；1198 走 `getScopedIndicator`；hash-remap:32 签名加 `bankId` 后迁）；④ C 类 22 处按模块迁移
   （**已完成 22/22**：冷路径 `142/152/818/826/832/845/1148/1173` + 只读渲染 `124/129/841`
   + 热路径 `984/1000` + 收尾 `967/1011/1039/1471/1490/1491/1501`（行号为收尾前基线）已迁；
   `1541/1542` 无有效行为负例留档不迁）；⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 是否开启由下一阶段实测决定。

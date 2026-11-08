@@ -20,7 +20,7 @@
 | `utils/result-policy.js` | `QB.ResultPolicy.kind/isDecided/isWrong` | **判分结果语义唯一入口**：`empty/pending/partial/correct/wrong`；材料题“全半对”按 `partial` 优先，计分/答题卡/结果页/SRS 评分统一使用，禁止各处 if-else |
 | `utils/question-id.js` | `QB.makeContentHash`/`QB.makeQuestionKey`/`QB.isCurrentHash`/`QB.hashVersionOf`/`QB.isLegacyHash` | v3 去重键（前缀 `3:` + FNV-1a 64 位 16 hex；题型+题干+选项+答案，材料题含材料与子问题）；`hashVersionOf` 识别 v3/v2（`2:`+8hex）/v1（裸 8hex），供迁移与双读去重；普通题与材料题子问题共用模块内语义归一件 |
 | `utils/annotation.js` | `QB.Annotation` | **C012 题目批注归一唯一实现（纯本地）**：`normalize`（CRLF→LF、trim、`MAX_LENGTH`=5000 截断）、`present`（非空判定）；上限取自 `CONFIG.LIMITS.ANNOTATION_MAX_LENGTH`。本地适配器、导入器、导出器、编辑器、练习反馈、分享页共用；`contentHash` 不覆盖该字段 |
-| `utils/hash-remap.js` | `QB.HashRemap` | contentHash 重映射唯一实现：`remapList`（错题/收藏条目数组按映射换键、合并重复并保留最大计数/最早时间）、`mergeWrong`/`mergeFav`（同键合并规则）；`migrate.js` 与 backup 跨版本恢复共用，禁止各自复制 |
+| `utils/hash-remap.js` | `QB.HashRemap` | contentHash 重映射唯一实现：`remapList(storageKey, mapping, mergeFn, bankId)`（错题/收藏条目数组按映射换键、合并重复并保留最大计数/最早时间；读取走 `Storage.getScopedFresh`，未水合抛 `NotHydratedError`，`bankId` 必传）、`mergeWrong`/`mergeFav`（同键合并规则）；`migrate.js` 与 backup 跨版本恢复共用，禁止各自复制 |
 | `utils/crc32.js` | `QB.Crc32` | CRC32（IEEE/zlib）唯一实现，供 ZipWriter 写校验值、ZipReader 解包校验共用 |
 | `utils/zip-reader.js` | `QB.ZipReader`/`QB.decodeUtf8` | 原生 ZIP 读取（EOCD→中央目录→本地头）+ `DecompressionStream('deflate-raw')`；支持 method 0/8；**条目数/单条/总解压字节上限 + CRC 校验**（防 zip bomb/损坏包） |
 | `utils/zip-writer.js` | `QB.ZipWriter` | 原生 ZIP 打包（stored method=0 + `QB.Crc32`），与 ZipReader 对称；xlsx/docx/qbk/qfbk 写出共用 |

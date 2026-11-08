@@ -485,6 +485,31 @@
     },
 
     /**
+     * 分阶段水合下「本就可见」的指示键读取（C 步骤4，B5 专用）。
+     * `reviewMeta`/`reviewRev` 在非当前库也保留在同步视图中（见 ARCHITECTURE §4.21），
+     * 启动期的 `convertMetaLayouts` 需要据此判断未水合库是否仍带 v3 清单。
+     * 与 `getScoped*` 的差别：**不要求库水合**；但只放行两枚指示键白名单，
+     * 其它库作用域键一律 TypeError——不得成为绕过作用域读取的通用后门。
+     * @param {string} key 仅允许 `user:reviewMeta:*` / `user:reviewRev:*`
+     * @param {string} bankId 键归属库（必须一致）
+     * @param {*} defaultValue
+     */
+    getScopedIndicator(key, bankId, defaultValue) {
+      const id = bankId == null ? '' : String(bankId);
+      const owner = bankOfKey(key);
+      if (owner === null || owner === '' || owner !== id) {
+        throw new TypeError('Storage.getScopedIndicator：键归属题库 ' + owner + '，与传入 bankId=' + id + ' 不一致');
+      }
+      const k = String(key);
+      const metaPrefix = String(QB.KEYS.reviewMeta(''));
+      const revPrefix = String(QB.KEYS.reviewRev(''));
+      if (k.indexOf(metaPrefix) !== 0 && k.indexOf(revPrefix) !== 0) {
+        throw new TypeError('Storage.getScopedIndicator：仅允许 reviewMeta/reviewRev 指示键，拒绝 ' + key);
+      }
+      return this._freshValue(k, defaultValue);
+    },
+
+    /**
      * 作用域键视图（C 步骤1）：bankId=null 仅全局键；指定库返回全局键 + 该库逻辑键。
      * 目标库未水合抛 NotHydratedError；结果由 `keys()` 同一物化缓存过滤而来（含 `_pending`）。
      */
@@ -1214,6 +1239,16 @@
      */
     getFresh(key, defaultValue) {
       this._assertStrictReadable(key);
+      return this._freshValue(key, defaultValue);
+    },
+
+    /**
+     * `getFresh` 的读取主体（不含严格守卫）。仅供 `getScopedIndicator` 在
+     * 已确认「指示键可见」语义后复用，避免为白名单再复制一套读取逻辑。
+     * @param {string} key
+     * @param {*} defaultValue
+     */
+    _freshValue(key, defaultValue) {
       if (this._pending.has(key)) {
         const pendingValue = this._cache.get(key);
         return pendingValue === undefined ? defaultValue : pendingValue;

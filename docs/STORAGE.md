@@ -252,7 +252,8 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 
 #### C 步骤3 前半：B 段重映射 3/6 迁移（2026-11-08）
 
-> 后续：本轮（步骤3 后半）已把 B1 一并迁移，B 段现为 **4/6**；下表 B1 状态与“剩余”说明已同步更新。
+> 后续：步骤3 后半已把 B1 一并迁移（4/6）；C 步骤4 补完已把 B5/B6 迁移（**6/6**），见下方
+> 「C 步骤4 B 段补完」小节。
 
 - 结论：B 段 6 处中已迁 **3/6**（`convertLegacy` 的 per-hash 读取 + `remap` 的两次状态读取），
   当时剩余 **3 处**：`legacyReviewMap`（`local-adapter.js:953`，旧基线 945）、
@@ -267,8 +268,8 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | B3 | `local-adapter.js:1095` | `local-adapter.js:1108` | `remap` 读旧状态 → `getScopedFresh` | **已迁** | 改题重映射 → `question-editor.js:602/713` `errBox.textContent = '保存失败：' + ex.message`；迁移 → `app.js:1797` toast |
   | B4 | `local-adapter.js:1098` | `local-adapter.js:1111` | `remap` 读目标状态 → `getScopedFresh` | **已迁** | 同 B3（同一函数、同一 try/catch） |
   | B1 | `local-adapter.js:945` | `local-adapter.js:953` | `legacyReviewMap` 旧整表 `getFresh` → `getScopedFresh` | **已迁（步骤3 后半）** | 建库/进入新库路径由调用方 `ensureBank` 前置（见下节）；兜底 `app.js:284` `UI.toast('界面刷新失败：' + msg, 'err')` + `app.js:287` 状态栏 |
-  | B5 | `local-adapter.js:1185` | `local-adapter.js:1198` | `convertMetaLayouts` 未水合 v3 判定 | 未迁（用户明确暂缓） | 见下 |
-  | B6 | `js/utils/hash-remap.js:32` | 同 | `remapList` 读错题/收藏 | 未迁（留待下一批） | 见下 |
+  | B5 | `local-adapter.js:1185` | `local-adapter.js:1207` | `convertMetaLayouts` 未水合 v3 判定 → `getScopedIndicator` | **已迁（步骤4 补完）** | 语义保持：v3 未水合仍上报 skipped、v4 不误报；非指示键 TypeError |
+  | B6 | `js/utils/hash-remap.js:32` | 同 | `remapList` 读错题/收藏 → `getScopedFresh` | **已迁（步骤4 补完）** | 签名新增 `bankId`；编辑器 errBox / 迁移 toast 兜底；未水合抛 `NotHydratedError` |
 
 - 本轮同时把两个函数的**枚举前置**换成 `ReviewStore.stateKeysScoped(bankId)`
   （内部 `Storage.keysScoped`）：未水合时在读取 per-hash 前就抛错，不再按残缺视图
@@ -278,19 +279,17 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 - **红/绿实测**（`node scripts/idb.test.mjs`，日志 `.analysis/architecture-audit/C3-red-bseg.log` / `C3-green-bseg.log`）：
   红 **238 通过 / 8 失败 / exit 1**（`remap` 静默 0、`convertLegacy` 按残缺视图转换并用 last=5000
   的旧整表覆盖 last=9000 的新状态）；绿 **246 通过 / 0 失败 / exit 0**（断言 226 → **246**，+20）。
-- **剩余 2 处为什么暂不迁**：
-  - B5 `convertMetaLayouts`（1198）：用户明确要求本轮不动其未水合 v3 判定（启动稳态用全局
-    `banks` 清单补全并显式跳过未水合库，属“静默跳过”策略）。
-  - B6 `hash-remap.js:32`：本身有编辑器 errBox 与迁移 toast 兜底（不是 `catch {}` 吞掉），
-    但 `remapUserData` 先调 `ReviewStore.remap`，本批迁移后未水合会先在此抛错并中断，
-    `remapList` 的守卫已不是有效落点；为控制改动面留到下一批与其签名/归属改造一起做
-    （**不谎称它为不安全**）。
+- **步骤3 当时暂缓的 2 处（现已由步骤4 补完，见下节）**：
+  - B5 `convertMetaLayouts`（1198）：当时为保留启动期“未水合 v3 判定”，本轮已用
+    `Storage.getScopedIndicator`（指示键白名单）迁移，**语义不变**。
+  - B6 `hash-remap.js:32`：当时因 `remapUserData` 先调 `ReviewStore.remap`、未水合会先抛错而暂缓；
+    现补齐 `bankId` 参数并改走 `getScopedFresh`，作为独立 API 可直接构造未水合负例。
 - 静态冻结口径同步：`getScoped/getScopedFresh/keysScoped` 纳入调用点清单，合计 88 → **89**
   （`local-adapter.js` 49 → 50），`backup-hydration.test.mjs` 断言数保持不变（52）。
 
 #### C 步骤3 后半：建库/进入新库 ensureBank 前置 + legacyReviewMap 4/6 迁移（2026-11-08）
 
-- 结论：B 段 **4/6 已迁移**；剩余 **2 处**（B5 `convertMetaLayouts:1198`、B6 `hash-remap.js:32`）。
+- 结论：B 段当时 **4/6 已迁移**（后续步骤4 已补完至 **6/6**，见下节）。
   本步把「新建空库后直接渲染」路径缺的 `ensureBank` 前置补在**调用方**，而不是塞进
   `readMap`/`legacyReviewMap` 内部当兜底。
 
@@ -340,7 +339,7 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   S3 6→**0**、S4 1→**0**、S5 1→**0**；全场景中位合计 **122.3ms → 9.4ms**。Node 50k 门禁：
   首次构建 15.08–17.38ms（≤40ms）、写已存在键后 0.11–0.12ms（≤2ms）。契约等价性 17/17（diff=0）。
 
-#### C 步骤4：C 段 22 处频次排序 + 冷热分组 + 分批迁移 13/22（2026-11-08）
+#### C 步骤4：C 段 22 处频次排序 + 冷热分组 + 分批迁移 22/22（2026-11-08）
 
 - **测量口径（实测，非代码位置推断）**：`.analysis/architecture-audit/c4-frequency.mjs`（未跟踪）——
   真实数据层 `createHarness` + 内存 IDB（300 题/库 × A/B 两库，A 已水合、B 未水合），
@@ -528,3 +527,27 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   不谎称已迁。若未来 `reviews.save` 调整读取顺序，需重新评估。
 - **待决策**：无（C 步骤4 已收口）。步骤5（CI 默认 strict）与步骤6（生产 strict go/no-go）
   进入下一阶段。
+
+#### C 步骤4 B 段补完：B5 指示键白名单 + B6 HashRemap 签名（6/6，2026-11-08）
+
+- **B5 `convertMetaLayouts`（`local-adapter.js:1207`）**：原 `Storage.getFresh(K.reviewMeta)`
+  在未水合库上读的是“分阶段水合下本就可见”的指示键，直接改成 `getScopedFresh` 会让 v3 未水合库
+  永远被当作待整理并每轮启动触发全量补载。故新增公共抽象
+  `Storage.getScopedIndicator(key, bankId[, default])`：不要求库水合，但**只放行
+  `user:reviewMeta:*` / `user:reviewRev:*` 白名单**，非指示键或归属不一致一律 `TypeError`，
+  不成为绕过作用域的通用后门；读取主体复用 `getFresh` 抽出的 `_freshValue`（避免复制读取逻辑）。
+- **B6 `QB.HashRemap.remapList(storageKey, mapping, mergeFn, bankId)`**：**公共 API 签名变更**
+  （第 4 参数必传），读取改 `getScopedFresh(storageKey, bankId, null)`。调用方
+  `migrate.js` 4 处（HMR/迁移两条链）与 `local-adapter.remapUserData` 2 处全部显式传库；
+  未水合直接抛 `NotHydratedError`。影响范围：仓库内 6 处调用全部已同步；外部若直接调用
+  `QB.HashRemap.remapList` 需补 `bankId`，缺失会因键归属不一致抛 `TypeError`（fail-loud，不静默）。
+- **负例**：B6 作为独立 API 可直接构造（未水合抛 `NotHydratedError{key=user:wrong:<B>}`；
+  旧实现静默返回 0）。B5 **无有效行为负例**（语义保持），以静态断言
+  `Storage.getScopedIndicator(K.reviewMeta(bankId), bankId, null)` + 行为等价用例
+  （v3 未水合仍 skipped、v4 不误报）取证；API 层正/负例（未水合可读/非白名单 TypeError）双覆盖。
+- **红/绿（`node scripts/idb.test.mjs`）**：红 **386 通过 / 9 失败 / exit 1** → 绿
+  **395 通过 / 0 失败 / exit 0**（断言 **376 → 395**，+19，只增不减）。
+- **静态调用点**：合计仍 **88**（两处旧入口 → 作用域入口同类替换；`getScopedIndicator`
+  仅白名单调用点，仍计入旧入口扫描口径）。
+- **性能**：本步不在评分热路径，`npm run bench` 通过（`gradeMany` 4.86–4.87 ≤ 5.35，
+  `grade` 2.71–2.74 ≤ 2.90），无回退。

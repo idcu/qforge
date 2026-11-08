@@ -22,14 +22,16 @@
   /**
    * 重写存储键下的 [{questionKey, ...}] 列表的 questionKey。
    * 只在实际发生映射时写盘；同新键冲突按 mergeFn 合并。
+   * C 步骤4 B6：读取走作用域入口，未水合库直接抛 NotHydratedError（调用方需先 ensureBank）。
    * @param {string} storageKey 逻辑键（不含前缀）
    * @param {Map<string,string>} mapping oldHash → newHash
    * @param {Function} mergeFn (existing, incoming) => merged
+   * @param {string} bankId storageKey 的归属库（必传；与键归属不一致会抛 TypeError）
    * @returns {number} 重映射的条目数
    */
-  function remapList(storageKey, mapping, mergeFn) {
+  function remapList(storageKey, mapping, mergeFn, bankId) {
     if (!mapping || !mapping.size) return 0;
-    const list = QB.Storage.get(storageKey, null);
+    const list = QB.Storage.getScopedFresh(storageKey, bankId, null);
     if (!Array.isArray(list)) return 0;
     const byKey = new Map();
     let changed = false;

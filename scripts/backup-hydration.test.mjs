@@ -140,7 +140,7 @@ function scanStorageCalls() {
     });
   })(path.join(ROOT, 'js'));
 
-  const re = /\bStorage\.(keys|get|getFresh|keysScoped|getScoped|getScopedFresh)\s*\(/g;
+  const re = /\bStorage\.(keys|get|getFresh|keysScoped|getScoped|getScopedFresh|getScopedIndicator)\s*\(/g;
   const perFile = {};
   let total = 0;
   files.forEach((file) => {
@@ -205,6 +205,8 @@ async function main() {
   // 冻结口径（作用域读取同样要求前置水合，新增点必须先归类）。
   // C 步骤4 第三批：`stateKeysScoped` 改为委托 `stateKeys`（单一实现），旧重复的 `keysScoped`
   // 调用合并为 1 处，local-adapter 50 → 49、合计 89 → 88（不是放宽，是去重）。
+  // B 段补完：`convertMetaLayouts` 的读取改走白名单入口 `getScopedIndicator`，该入口同样要求
+  // 键归属 == 目标库，必须纳入冻结口径；纳入后 local-adapter 仍为 49、合计仍为 88（覆盖更严，非放宽）。
   const EXPECTED_SITES = {
     'js/app.js': 2,
     'js/data/db.js': 1,

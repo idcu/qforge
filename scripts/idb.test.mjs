@@ -1860,6 +1860,99 @@ section('C 步骤4 收尾：评分写路径 6 处 + removeHash（22/22）');
   eq(Object.keys(cMap).length, 2, '前置 gradeMany：两题状态均落盘');
 }
 
+section('C 步骤4 B 段补完：convertMetaLayouts 指示键 + HashRemap（B5/B6）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const NOW = Date.UTC(2027, 1, 1);
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll();
+  const A = await Q1.DB.banks.create({ name: 'B5当前库' });
+  const B = await Q1.DB.banks.create({ name: 'B5未水合库' });
+  const C = await Q1.DB.banks.create({ name: 'B5未水合v4库' });
+  const mkQ = (tag) => [{ type: 'single', question: tag, options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' }];
+  await Q1.DB.questions.insertMany(A.id, mkQ('B5A题'), { dedupe: false });
+  await Q1.DB.questions.insertMany(B.id, mkQ('B5B题'), { dedupe: false });
+  await Q1.DB.questions.insertMany(C.id, mkQ('B5C题'), { dedupe: false });
+  const aHash = (await Q1.DB.questions.list(A.id, {})).items[0].contentHash;
+  const bHash = (await Q1.DB.questions.list(B.id, {})).items[0].contentHash;
+  await Q1.DB.reviews.record(A.id, { [aHash]: { last: NOW - 1, due: NOW + 1, stability: 5, difficulty: 4 } }, []);
+  await Q1.DB.reviews.record(B.id, { [bHash]: { last: NOW - 1, due: NOW + 1, stability: 5, difficulty: 4 } }, []);
+  // B 保留 v3 清单（未水合时应被识别为待整理）；C 为 v4 紧凑标记（不应误报）
+  Q1.Storage.setSync(Q1.KEYS.reviewMeta(B.id), { v: 3, keys: [bHash] });
+  Q1.Storage.setSync(Q1.KEYS.wrong(B.id), [{ questionKey: bHash, wrongCount: 2, lastAt: NOW }]);
+  Q1.Storage.setSync(Q1.KEYS.favorite(B.id), [{ questionKey: bHash, addedAt: NOW }]);
+  Q1.Storage.setSync(Q1.KEYS.wrong(A.id), [
+    { questionKey: 'oldA', wrongCount: 2, lastAt: NOW },
+    { questionKey: aHash, wrongCount: 1, lastAt: NOW - 100 }
+  ]);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S2 = Q2.Storage;
+  const errOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const callOf = (fn) => { try { return { value: fn(), error: null }; } catch (e) { return { value: null, error: e }; } };
+  eq(S2.isBankHydrated(B.id), false, '前置：B 未水合但物理数据存在');
+  eq(S2.isBankHydrated(C.id), false, '前置：C 未水合');
+
+  // 指示键白名单：未水合可见；通用作用域读取仍 fail-loud
+  const indCall = callOf(() => S2.getScopedIndicator(Q2.KEYS.reviewMeta(B.id), B.id, null));
+  ok(!indCall.error && indCall.value && indCall.value.v === 3,
+    'B5：未水合库的 reviewMeta 指示键可读（保留 v3 待整理判定）',
+    '（实测 ' + (indCall.error ? indCall.error.name : JSON.stringify(indCall.value)) + '）');
+  const genMeta = errOf(() => S2.getScoped(Q2.KEYS.reviewMeta(B.id), B.id, null));
+  ok(genMeta && genMeta.name === 'NotHydratedError', 'B5：通用 getScoped 对同一指示键仍抛 NotHydratedError');
+  const notIndicator = errOf(() => S2.getScopedIndicator(Q2.KEYS.wrong(B.id), B.id, null));
+  ok(notIndicator && notIndicator instanceof TypeError && /仅允许/.test(notIndicator.message),
+    'B5：非指示键走 getScopedIndicator 必须 TypeError（禁止成为通用后门）');
+  const wrongBank = errOf(() => S2.getScopedIndicator(Q2.KEYS.reviewMeta(B.id), A.id, null));
+  ok(wrongBank && wrongBank instanceof TypeError && /不一致/.test(wrongBank.message),
+    'B5：指示键归属库不一致必须 TypeError');
+
+  // 行为等价（无有效行为负例：语义保持，静态+调用链取证）
+  const conv = Q2.ReviewStore.convertMetaLayouts();
+  ok(conv.skipped.indexOf(B.id) >= 0, 'B5 等价：未水合 v3 库仍上报 skipped（不静默、不水合）');
+  ok(conv.skipped.indexOf(C.id) < 0, 'B5 等价：未水合 v4 库不误报 skipped');
+  ok(conv.migrated >= 0 && conv.banks >= 3, 'B5 等价：候选库计数不变（含空库/未水合库）');
+  const laSrcB = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  ok(laSrcB.indexOf('Storage.getScopedIndicator(K.reviewMeta(bankId), bankId, null)') >= 0,
+    'B5 静态：convertMetaLayouts 的 reviewMeta 读取改走 getScopedIndicator');
+
+  // HashRemap：未水合直接抛（独立负例）；调用方必须传 bankId
+  const hrSrc = fs.readFileSync(path.join(ROOT, 'js/utils/hash-remap.js'), 'utf8');
+  ok(hrSrc.indexOf('const list = QB.Storage.getScopedFresh(storageKey, bankId, null);') >= 0,
+    'B6 静态：remapList 读取改走 getScopedFresh');
+  ok(hrSrc.indexOf('function remapList(storageKey, mapping, mergeFn, bankId)') >= 0,
+    'B6 静态：remapList 签名新增 bankId');
+  const miSrc = fs.readFileSync(path.join(ROOT, 'js/modules/migrate.js'), 'utf8');
+  eq((miSrc.match(/QB\.HashRemap\.remapList\([^\n]*bankId\);/g) || []).length, 4,
+    'B6 前置：migrate 4 处调用均传 bankId');
+  eq((laSrcB.match(/QB\.HashRemap\.remapList\([^\n]*bankId\);/g) || []).length, 2,
+    'B6 前置：local-adapter 2 处调用均传 bankId（且前有 ReviewStore.remap 守卫）');
+
+  const nRemap = errOf(() => Q2.HashRemap.remapList(Q2.KEYS.wrong(B.id), new Map([['x', 'y']]), Q2.HashRemap.mergeWrong, B.id));
+  ok(nRemap && nRemap.name === 'NotHydratedError' && nRemap.key === Q2.KEYS.wrong(B.id),
+    'B6 红→绿：未水合库 remapList 必须抛 NotHydratedError（旧实现静默返回 0）',
+    '（实测 ' + (nRemap ? nRemap.name + ' key=' + nRemap.key : '未抛错') + '）');
+
+  // 已水合等价：键重写 + 冲突合并规则不变
+  const oneMap = new Map([['oldA', aHash]]);
+  const moved = Q2.HashRemap.remapList(Q2.KEYS.wrong(A.id), oneMap, Q2.HashRemap.mergeWrong, A.id);
+  eq(moved, 2, 'B6 等价：已水合 remapList 返回条目数（2 条参与）');
+  const mergedWrong = Q2.Storage.get(Q2.KEYS.wrong(A.id), []);
+  eq(mergedWrong.length, 1, 'B6 等价：同新键冲突合并为 1 条');
+  eq(mergedWrong[0].questionKey, aHash, 'B6 等价：键改写为新 hash');
+  eq(mergedWrong[0].wrongCount, 3, 'B6 等价：错题次数相加（2+1）');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

@@ -1204,7 +1204,8 @@
           // 分阶段水合（Phase 0 批次2）：非当前库的复习状态不可见。只有仍带 v3 历史清单
           // （真的需要逐条校验/压缩）才计入 skipped 并上报；已是新布局/无清单的库无需水合，
           // 静默忽略——否则每次启动都会把「无需转换」也报成未整理。
-          const raw = Storage.getFresh(K.reviewMeta(bankId), null);
+          // C 步骤4 B5：指示键在分阶段水合下本就可见，用白名单 API 读取（非通用作用域读取）
+          const raw = Storage.getScopedIndicator(K.reviewMeta(bankId), bankId, null);
           if (raw && raw.v === 3 && Array.isArray(raw.keys)) out.skipped.push(bankId);
           return;
         }
@@ -1442,8 +1443,8 @@
     if (!oldHash || !newHash || oldHash === newHash) return 0;
     const mapping = new Map([[oldHash, newHash]]);
     const st = ReviewStore.remap(bankId, mapping);
-    QB.HashRemap.remapList(K.wrong(bankId), mapping, QB.HashRemap.mergeWrong);
-    QB.HashRemap.remapList(K.favorite(bankId), mapping, QB.HashRemap.mergeFav);
+    QB.HashRemap.remapList(K.wrong(bankId), mapping, QB.HashRemap.mergeWrong, bankId);
+    QB.HashRemap.remapList(K.favorite(bankId), mapping, QB.HashRemap.mergeFav, bankId);
     const log = RevlogStore.remap(mapping);
     return st + log;
   }
