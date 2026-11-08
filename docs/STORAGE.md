@@ -170,8 +170,8 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | --- | --- | --- | --- |
   | `js/app.js` | 2 | G | `meta:theme` 等全局键，启动作用域恒包含 |
   | `js/data/db.js` | 1 | G | `meta:currentBank` 全局键 |
-  | `js/data/local-adapter.js` | 49 | G 13 / C 32 / A 4 | G：`banks`/`history`/`session`/权重/级联全局；C：题目分片、复习 per-hash、错题/收藏，调用方均为当前库或已 ensure 的按库入口；A：`backup.export`(ensureAll)、`cascadeDelete`(banks.remove 已 ensureBank)、`convertMetaLayouts`(doRun ensureAll；未水合库显式 `skipped`)、`bankIds`(同左) |
-  | `js/modules/backup.js` | 10 | A 8 / G 2 | `readAllData`/`collectRawData`/`applyData`/图片 GC 由上述 ensureAll 入口调用；`metaMigrationBackup` 为运行期全局键 |
+  | `js/data/local-adapter.js` | 49 | G 21 / C 22 / B 5 / A 1 | G：`banks`/`history`/`session`/权重/级联全局及 revlog 分段（21）；C：题目分片、复习 per-hash、错题/收藏、commit/rev 版本（22）；B：哈希重映射与 `convertMetaLayouts` 未水合判定（5，调用方为迁移或已 ensure 的按库入口）；A：`bankIds` 全库枚举（1，调用方 `convertMetaLayouts`/备份折叠） |
+  | `js/modules/backup.js` | 10 | A 7 / G 3 | `readAllData`/`collectRawData`/`applyData`/`applyBackup` 共 7 处由 ensureAll 入口调用；`metaMigrationBackup` 3 处为运行期全局键 |
   | `js/modules/migrate.js` | 19 | A 12 / G 7 | `doRun` 锁内 `ensureAll`；仅 LS 目标（`idbUsable=false`）的 snapshot/restore 在 LS 全量视图；schema/lock/revlog 为全局键 |
   | `js/modules/package.js` | 1 | G | `meta:pkgHistory` 全局键 |
   | `js/modules/start-prefs.js` | 2 | G | `meta:startPrefs` 全局键 |
