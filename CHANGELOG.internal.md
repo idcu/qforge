@@ -11,20 +11,19 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–3 已实施；步骤 4 部分实施（已迁 13/22，2026-11-08，见下方最新记录）；
-  步骤 5–6 未实施**。
+- **状态**：**步骤 1–4 已实施（C 段 22/22 收口）；步骤 5–6 未实施**（2026-11-08）。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
   步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
   新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
-  步骤4 完成 C 段 22 处**实测频次排序 + 冷热分组**，已迁 **13/22**：冷路径 8 处
-  （142/152/818/826/832/845/1148/1173）+ 只读渲染 3 处（124/129/841）+ 热路径 2 处（984/1000）；
-  剩余热路径 7 处未改（评分写路径 6 处 `967/1009/1469/1488/1489/1499` + `1039`；
-  `1541/1542` 暂缓，未水合时已被更早的 S 段读取拦截，无独立负例）。
+  步骤4 完成 C 段 22 处**实测频次排序 + 冷热分组**并全部处理：冷路径 8 处
+  （142/152/818/826/832/845/1148/1173）+ 只读渲染 3 处（124/129/841）+ 热路径 2 处（984/1000）
+  + 收尾 7 处（评分写路径 6 处 `967/1009/1469/1488/1489/1499` + `1039`）；
+  `1541/1542` 复核后**留档不迁**（未水合时已被更早的 S 段读取拦截，无独立负例）。
   「按库键索引」提案已评估、不实施（readMap 300 次/0.498ms，首屏 1.318ms，收益不可测）。
   **判断更正（2026-11-08）**：曾把 984/1000 归为「必须等索引机制才能迁」属判断失误——
   否掉索引只说明不需要新增索引，与「两处能否 fail-loud 化」是两件独立的事。
   调用点 88（第三批 `stateKeysScoped` 改委托后 89 → 88，S 类 4 处）。`js/**` 变更后 SW 已递增
-  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46`。
+  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46` → `v47`。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -40,6 +39,45 @@
 - **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(scope): C 步骤4 收尾——评分写路径 6 处 + removeHash 迁 scoped（22/22）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `js/data/local-adapter.js`
+  - `ReviewStore.meta`（967）：`Storage.get` → `Storage.getScoped`（缓存态不变）；
+  - `ReviewStore.get`（1009）：`Storage.getFresh` → `Storage.getScopedFresh`；
+  - `ReviewStore.removeHash`（1039）：`Storage.getFresh` → `Storage.getScopedFresh`；
+  - `reviewRevOf`（1469）与 `commitReview` 的 `prevLegacy`（1488）/touched（1499）：
+    `Storage.getFresh` → `Storage.getScopedFresh`；`prevMeta`（1489）：`Storage.get` → `Storage.getScoped`。
+- `js/modules/srs-store.js`：新增私有 `ensureScorable(bankId)`，本地后端（`DB.backend === 'local'`）
+  下 `await Storage.ensureBank(bankId)`，并在 `grade` / `gradeMany` 入口前置；api 后端不做本地水合。
+- `scripts/idb.test.mjs`：新增「C 步骤4 收尾」段（27 项断言：7 处静态护栏 + 4 处独立负例
+  + 2 项运行时探针 + 等价性 + grade/gradeMany 自动水合负例）。
+- `docs/ARCHITECTURE.md` §4.22、`docs/STORAGE.md` C 步骤4 表与清单同步为 22/22；
+  `sw.js` `CACHE` v46 → v47，`scripts/sw-baseline.json` 刷新。
+
+**验证数据（2026-11-08）**
+- `node scripts/idb.test.mjs`：红 **exit 1 / 17 项失败** → 绿 **376 通过 / 0 失败 / exit 0**；
+  断言 349 → **376**（+27，只增不减）。
+- 独立负例：`meta(B)` 旧实现返回 `{v:4}`；`get/removeHash/record(B)` 旧实现首个抛错点错位
+  （`key=user:review:<B>`，迁移后分别为 `reviewState:<B>:<h>` / `reviewRev:<B>`）。
+- `prevLegacy/prevMeta/touched` 无有效行为负例（被 `reviewRevOf` 前置拦截）；已水合探针
+  旧 `directFresh=9 / directGet=2`、`scopedFresh=1` → 新 `directFresh=0 / directGet=0`、
+  `scopedFresh=4（同键只读一次）/ scoped≥2`。
+- 写前置：旧 `grade(B)` 抛 `NotHydratedError` → 新自动水合并真实落盘；`gradeMany(C)` 两题落盘；
+  `record(A)` 返回 `saved=1`、`readMap` 状态值不变。
+- 性能门禁：迁移后首测 `gradeMany` **5.44 > 5.35 失败**；三处等价优化后
+  `gradeMany` **4.86–4.87 ≤ 5.35**（p50 0.2688–0.2710 ms / 标定 54.9–55.5 µs）、
+  `grade` **2.71–2.74 ≤ 2.90**；heapUsed 增量 **+5.04~5.07 MB ≤ 40.00 MB**。
+  优化内容：`bankOfKey` 有界归属缓存（1024 条）、`_hydratedBanks=null` 快路径、
+  `commitReview` 同键本轮只读一次（`touched` own 状态复用，own 缺失才回退 `ReviewStore.get`）。
+- 三道门禁：`npm run verify:fast` **exit 0**、`npm run bench` **exit 0**、`node scripts/docs-check.mjs --static` **exit 0**。
+
+**遗留 TODO / 风险**
+- `1541/1542` 留档不迁（无独立负例）；真实浏览器热路径 P95 未测（本轮仅 Node + 内存 IDB）。
+- 步骤5（CI 默认 `__strictReads`）与步骤6（生产 strict go/no-go）未实施。
 
 ### feat(storage): C 步骤4 第三批 stateKeys/readMap 迁 scoped（13/22）
 

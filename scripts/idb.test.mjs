@@ -1709,6 +1709,157 @@ section('C 步骤4 第三批：stateKeys 984 / readMap per-hash 1000（13/22）'
     '静态：默认 get/keys 语义未改（__strictReads 仍默认 false）');
 }
 
+section('C 步骤4 收尾：评分写路径 6 处 + removeHash（22/22）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const NOW = Date.UTC(2027, 0, 1);
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll();
+  const A = await Q1.DB.banks.create({ name: 'C4F当前库' });
+  const B = await Q1.DB.banks.create({ name: 'C4F未水合库' });
+  const C = await Q1.DB.banks.create({ name: 'C4F未水合批库' });
+  const mk = (tag) => [0, 1].map((i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk('收尾A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk('收尾B'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(C.id, mk('收尾C'), { dedupe: false, mode: 'overwrite' });
+  const aItems = (await Q1.DB.questions.list(A.id, {})).items;
+  const bItems = (await Q1.DB.questions.list(B.id, {})).items;
+  const cItems = (await Q1.DB.questions.list(C.id, {})).items;
+  const aHash = aItems[0].contentHash;
+  const bHash = bItems[0].contentHash;
+  await Q1.DB.reviews.record(A.id, {
+    [aHash]: { last: NOW - 3 * 86400000, due: NOW + 86400000, stability: 5, difficulty: 4, reps: 1 }
+  }, []);
+  await Q1.DB.reviews.record(B.id, {
+    [bHash]: { last: NOW - 3 * 86400000, due: NOW + 86400000, stability: 5, difficulty: 4, reps: 1 }
+  }, []);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  // H2（真实启动视图）：只水合当前库 A；B/C 未水合但物理数据仍在
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S2 = Q2.Storage;
+  const errOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const attemptAsync = async (fn) => { try { return { value: await fn(), error: null }; } catch (e) { return { value: null, error: e }; } };
+  const isNotHydrated = (e, bankId) => !!e && e.name === 'NotHydratedError' &&
+    e.code === 'STORAGE_NOT_HYDRATED' && !!e.bankId && (!bankId || e.bankId === bankId);
+
+  eq(S2.isBankHydrated(A.id), true, '前置：当前库 A 已水合');
+  eq(S2.isBankHydrated(B.id), false, '前置：B 未水合但物理数据存在');
+  eq(S2.isBankHydrated(C.id), false, '前置：C 未水合但物理数据存在');
+
+  // 静态护栏：7 处热路径全部改走作用域入口
+  const laSrcF = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const has = (s) => laSrcF.indexOf(s) >= 0;
+  ok(has('const m = Storage.getScoped(K.reviewMeta(bankId), bankId, null);'),
+    '静态：meta 改走 getScoped');
+  ok(has('const own = Storage.getScopedFresh(reviewStateKey(bankId, hash), bankId, null);'),
+    '静态：评分读状态改走 getScopedFresh（get 入口，readMap 复用同函数）');
+  ok(has('return Number(Storage.getScopedFresh(K.reviewRev(bankId), bankId, 0)) || 0;'),
+    '静态：reviewRevOf 改走 getScopedFresh');
+  ok(has('const prevLegacy = Storage.getScopedFresh(K.review(bankId), bankId, null);'),
+    '静态：commitReview prevLegacy 改走 getScopedFresh');
+  ok(has('const prevMeta = Storage.getScoped(K.reviewMeta(bankId), bankId, null);'),
+    '静态：commitReview prevMeta 改走 getScoped');
+  ok(has('prev = Storage.getScopedFresh(key, bankId, null);'),
+    '静态：commitReview touched 改走 getScopedFresh');
+  ok(has('if (Storage.getScopedFresh(stateKey, bankId, null) != null) { Storage.remove(stateKey); changed = true; }'),
+    '静态：removeHash 改走 getScopedFresh');
+
+  // 独立负例：meta / get / removeHash / record（reviewRev 首读点）
+  const nMeta = errOf(() => Q2.ReviewStore.meta(B.id));
+  ok(isNotHydrated(nMeta, B.id) && nMeta.key === Q2.KEYS.reviewMeta(B.id),
+    '红→绿 meta：未水合库读库标记必须抛 NotHydratedError（旧行为返回 {v:4} 并放行后续写入）',
+    '（实测 ' + (nMeta ? nMeta.name + ' key=' + nMeta.key : '未抛错') + '）');
+
+  const nGet = errOf(() => Q2.ReviewStore.get(B.id, bHash));
+  ok(isNotHydrated(nGet, B.id) && nGet.key === Q2.KEYS.reviewState(B.id, bHash),
+    '红→绿 get：未水合库读单题状态必须抛 NotHydratedError（旧行为先返回 null 再由 legacy 抛错）',
+    '（实测 ' + (nGet ? nGet.name + ' key=' + nGet.key : '未抛错') + '）');
+
+  const nRemove = errOf(() => Q2.ReviewStore.removeHash(B.id, bHash));
+  ok(isNotHydrated(nRemove, B.id) && nRemove.key === Q2.KEYS.reviewState(B.id, bHash),
+    '红→绿 removeHash：未水合库删除必须先撞单题状态守卫（旧行为先读宽松 getFresh）',
+    '（实测 ' + (nRemove ? nRemove.name + ' key=' + nRemove.key : '未抛错') + '）');
+
+  const nRecord = errOf(() => Q2.DB.reviews.record(B.id, { [bHash]: { last: 1, due: 2, stability: 1, difficulty: 1 } }, []));
+  ok(isNotHydrated(nRecord, B.id) && nRecord.key === Q2.KEYS.reviewRev(B.id),
+    '红→绿 record：评分写路径首个读取点 reviewRevOf 必须 fail-loud（旧行为返回 0 后继续半写）',
+    '（实测 ' + (nRecord ? nRecord.name + ' key=' + nRecord.key : '未抛错') + '）');
+
+  // 已水合等价性 + 运行时探针（prevLegacy / prevMeta / touched 的独立负例被 reviewRevOf 前置拦截）
+  const calls = { directFresh: 0, directGet: 0, scopedFresh: 0, scoped: 0 };
+  let inScoped = 0;
+  const origFresh = S2.getFresh;
+  const origGet = S2.get;
+  const origScopedFresh = S2.getScopedFresh;
+  const origScoped = S2.getScoped;
+  // 只统计本库作用域键的宽松读取；评分日志（全局键）等其余 loose 读取不计入
+  const isBankKey = (k) => String(k).indexOf(A.id) >= 0;
+  S2.getFresh = function (...a) { if (!inScoped && isBankKey(a[0])) calls.directFresh++; return origFresh.apply(S2, a); };
+  S2.get = function (...a) { if (!inScoped && isBankKey(a[0])) calls.directGet++; return origGet.apply(S2, a); };
+  S2.getScopedFresh = function (...a) {
+    calls.scopedFresh++;
+    inScoped++;
+    try { return origScopedFresh.apply(S2, a); } finally { inScoped--; }
+  };
+  S2.getScoped = function (...a) {
+    calls.scoped++;
+    inScoped++;
+    try { return origScoped.apply(S2, a); } finally { inScoped--; }
+  };
+  const recA = Q2.DB.reviews.record(A.id, { [aHash]: { last: NOW + 100, due: NOW + 200, stability: 6, difficulty: 4 } },
+    [{ t: NOW + 100, h: aHash, r: 3, b: A.id }]);
+  S2.getFresh = origFresh;
+  S2.get = origGet;
+  S2.getScopedFresh = origScopedFresh;
+  S2.getScoped = origScoped;
+  const recMap = Q2.ReviewStore.readMap(A.id);
+  eq(recMap[aHash].stability, 6, '等价：已水合评分写入值不变（stability=6）');
+  eq(recA && recA.saved, 1, '等价：已水合增量评分写入仍返回 saved=1');
+  eq(calls.directFresh, 0,
+    '探针：4 处 getFresh 读取（reviewRev/prevLegacy/touched/读状态）全部改走作用域 API',
+    '（实测 directFresh=' + calls.directFresh + '）');
+  eq(calls.directGet, 0,
+    '探针：2 处 get 读取（prevMeta/put-meta）全部改走作用域 API',
+    '（实测 directGet=' + calls.directGet + '）');
+  eq(calls.scopedFresh, 4, '探针：同一键本轮只读一次（reviewRev/prevLegacy/touched/count-legacy，无重复 get）',
+    '（实测 scopedFresh=' + calls.scopedFresh + '）');
+  ok(calls.scoped >= 2, '探针：scoped 覆盖 prevMeta/put-meta',
+    '（实测 scoped=' + calls.scoped + '）');
+
+  // 写前置：SRSStore.grade / gradeMany 在未水合库上自动 ensureBank，不再半写
+  const gOne = await attemptAsync(() => Q2.SRSStore.grade(B.id, bItems[1], 3, NOW + 1000));
+  ok(!gOne.error, '红→绿 前置 grade：未水合库评分自动水合后成功',
+    '（实测 ' + (gOne.error ? gOne.error.name + ' key=' + gOne.error.key : 'success') + '）');
+  eq(S2.isBankHydrated(B.id), true, '前置 grade：评分后该库已水合');
+  ok(gOne.value && gOne.value.stability > 0 && gOne.value.due > NOW,
+    '前置 grade：写入状态有效（stability>0，due 在未来）');
+  ok(S2.getScopedFresh(Q2.KEYS.reviewState(B.id, bItems[1].contentHash), B.id, null) != null,
+    '前置 grade：状态真实落盘（不是只写同步视图）');
+
+  const gMany = await attemptAsync(() => Q2.SRSStore.gradeMany(C.id, [
+    { question: cItems[0], rating: 2 },
+    { question: cItems[1], rating: 3 }
+  ], NOW + 2000));
+  ok(!gMany.error, '红→绿 前置 gradeMany：未水合库批量评分自动水合后成功',
+    '（实测 ' + (gMany.error ? gMany.error.name + ' key=' + gMany.error.key : 'success') + '）');
+  eq(S2.isBankHydrated(C.id), true, '前置 gradeMany：批量评分后该库已水合');
+  const cMap = Q2.ReviewStore.readMap(C.id);
+  eq(Object.keys(cMap).length, 2, '前置 gradeMany：两题状态均落盘');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

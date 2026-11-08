@@ -358,34 +358,35 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | 3 | `local-adapter.js:984` | `ReviewStore.stateKeys` | 首屏渲染 / 统计页 / 切库 / 备份恢复 | 6 | 0.250 | 热 | **已迁（4c）** |
   | 4 | `local-adapter.js:129` | `QuestionShards.shardOf` | 首屏渲染（冷帧）/ 切库 / 导入导出 | 2 | 0.004 | 热 | **已迁（4b）** |
   | 5 | `local-adapter.js:841` | `progress.favoriteList` | 首屏渲染（每帧） | 1 | 0.007 | 热 | **已迁（4b）** |
-  | 6 | `local-adapter.js:1009` | `ReviewStore.get` | 答题收卷（逐题评分；批量 100 题 × 2） | 200 | 0.239 | 热 | 不改 |
-  | 7 | `local-adapter.js:1499` | `commitReview` touched `getFresh` | 答题收卷（逐 touched 键） | 105 | 0.149 | 热 | 不改 |
-  | 8 | `local-adapter.js:967` | `ReviewStore.meta` | 答题收卷（逐题 put） | 100 | 0.044 | 热 | 不改 |
+  | 6 | `local-adapter.js:1009` | `ReviewStore.get` | 答题收卷（逐题评分；批量 100 题 × 2） | 200 | 0.239 | 热 | **已迁（4收尾）** |
+  | 7 | `local-adapter.js:1499` | `commitReview` touched `getFresh` | 答题收卷（逐 touched 键） | 105 | 0.149 | 热 | **已迁（4收尾）** |
+  | 8 | `local-adapter.js:967` | `ReviewStore.meta` | 答题收卷（逐题 put） | 100 | 0.044 | 热 | **已迁（4收尾）** |
   | 9 | `local-adapter.js:1148` | `convertMetaLayout` 首次读 | 启动迁移（v3→v4） | 4 | 0.004 | 冷 | **已迁** |
-  | 10 | `local-adapter.js:1542` | `reviews.save` `prevLegacy` | 导入导出（备份恢复） | 3 | 0.003 | 冷 | 暂缓（见下） |
+  | 10 | `local-adapter.js:1542` | `reviews.save` `prevLegacy` | 导入导出（备份恢复） | 3 | 0.003 | 冷 | 留档不迁（见下） |
   | 11 | `local-adapter.js:152` | `QuestionShards.legacyOf` | 旧布局首次打开 / 迁移 | 2 | 0.001 | 冷 | **已迁** |
   | 12 | `local-adapter.js:845` | `progress.favoriteToggle` | 收藏夹（用户点按） | 2 | 0.001 | 冷 | **已迁** |
-  | 13 | `local-adapter.js:1039` | `ReviewStore.removeHash` | 改题重映射 / 收卷删除 | 2 | 0.002 | 热（写循环） | 不改 |
+  | 13 | `local-adapter.js:1039` | `ReviewStore.removeHash` | 改题重映射 / 收卷删除 | 2 | 0.002 | 热（写循环） | **已迁（4收尾）** |
   | 14 | `local-adapter.js:1173` | `convertMetaLayout` 写后校验读 | 启动迁移（v3→v4） | 1 | 0.001 | 冷 | **已迁** |
-  | 15 | `local-adapter.js:1469` | `reviewRevOf` | 答题收卷（每次提交 1 次） | 1 | 0.002 | 热（写路径） | 不改 |
-  | 16 | `local-adapter.js:1488` | `commitReview` `prevLegacy` | 答题收卷（每次提交 1 次） | 1 | 0.001 | 热（写路径） | 不改 |
-  | 17 | `local-adapter.js:1489` | `commitReview` `prevMeta` | 答题收卷（每次提交 1 次） | 1 | 0.001 | 热（写路径） | 不改 |
+  | 15 | `local-adapter.js:1469` | `reviewRevOf` | 答题收卷（每次提交 1 次） | 1 | 0.002 | 热（写路径） | **已迁（4收尾）** |
+  | 16 | `local-adapter.js:1488` | `commitReview` `prevLegacy` | 答题收卷（每次提交 1 次） | 1 | 0.001 | 热（写路径） | **已迁（4收尾）** |
+  | 17 | `local-adapter.js:1489` | `commitReview` `prevMeta` | 答题收卷（每次提交 1 次） | 1 | 0.001 | 热（写路径） | **已迁（4收尾）** |
   | 18 | `local-adapter.js:142` | `QuestionShards.indexesOf` | 维护（compact/clear）/ 导入导出 | 1 | 0.003 | 冷 | **已迁** |
   | 19 | `local-adapter.js:818` | `progress.wrongList` | 错题本 | 1 | 0.001 | 冷 | **已迁** |
   | 20 | `local-adapter.js:826` | `progress.wrongAddMany` | 答题收卷（交卷批量加入错题） | 1 | 0.001 | 冷 | **已迁** |
   | 21 | `local-adapter.js:832` | `progress.wrongRemove` | 错题本（用户移除） | 1 | 0.001 | 冷 | **已迁** |
-  | 22 | `local-adapter.js:1541` | `reviews.save` `prevMeta` | 导入导出（备份恢复） | 1 | 0.001 | 冷 | 暂缓（见下） |
+  | 22 | `local-adapter.js:1541` | `reviews.save` `prevMeta` | 导入导出（备份恢复） | 1 | 0.001 | 冷 | 留档不迁（见下） |
 
   - 每操作总耗时（ms，迁移前）：home-cold **1.318** / home-warm **1.515** / stats **1.820** /
     submit-batch-100 **2.684** / switch-B **2.600** / import-100 **3.523** / restore-save **2.458** /
     convert-v3 **2.383** / backup-export **5.641**（该路径 **0 处 C 段读取**，耗时来自全量导出本身）。
   - **改归说明**：`152 legacyOf` 主要服务于旧单 blob 布局与迁移，但其调用点是 `readAll`
     （渲染读的兼容回退）；仍按 C 段处理（作用域键 `questions:<bank>`），已在“冷路径”迁移，
-    等价位仅限**已水合**库。`1039`/`1541`/`1542` 虽属冷路径语义，但未水合时
-    已被更早的 S 段作用域读取拦截（`ReviewStore.get` → `legacyReviewMap`；`reviews.save` → `readMap`
-    → `legacyReviewMap`），**构造不出独立的“读到空”负例**，本轮不改，不谎称已迁。
+    等价位仅限**已水合**库。`1039` 已在收尾批迁移（直接调用 `removeHash` 可独立构造负例：
+    旧实现先返回宽松 `getFresh=null` 再由 `legacyReviewMap` 抛错，迁移后首个抛错点即单题状态键）。
+    `1541`/`1542` 未水合时已被更早的 `reviews.save` → `readMap` → `legacyReviewMap` 拦截，
+    **构造不出独立的“读到空”负例**，留档不迁，不谎称已迁。
 
-- **已迁清单（13 处，X/22 = 13/22）**
+- **已迁清单（20 处；C 段 22/22 处理完毕 = 20 迁移 + 2 留档）**
 
   | 调用点 | 迁移前 | 迁移后 | 未水合负例（迁移前真实行为） |
   | --- | --- | --- | --- |
@@ -402,9 +403,18 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | **841** | `Storage.get(K.favorite)` | `getScoped(K.favorite(bankId), bankId, [])` | 返回 `[]`，伪装“无收藏” |
   | **984** | `Storage.keys()` | `keysScoped(bankId)` | 返回 `[]`，伪装“无复习状态”（热路径） |
   | **1000** | `Storage.getFresh(K.reviewState)` | `getScopedFresh(K.reviewState(bankId,h), bankId, null)` | 上游 legacy 先拦截；per-hash 旧实现静默跳过（热路径，探针取证） |
+  | **967** | `Storage.get(K.reviewMeta)` | `getScoped(K.reviewMeta(bankId), bankId, null)` | 返回 `{v:4}`，伪装“已初始化”并放行后续半写 |
+  | **1009** | `Storage.getFresh(K.reviewState)` | `getScopedFresh(K.reviewState(bankId,h), bankId, null)` | 先返回 `null`，再由 legacy 抛错（首个抛错点错位） |
+  | **1039** | `Storage.getFresh(stateKey)` | `getScopedFresh(stateKey, bankId, null)` | 先宽松读 `null` 再由 legacy 抛错；迁移后首个抛错点即单题状态键 |
+  | **1469** | `Storage.getFresh(K.reviewRev)` | `getScopedFresh(K.reviewRev(bankId), bankId, 0)` | 返回 `0` 后继续提交（版本号假递增 + 半写） |
+  | **1488** | `Storage.getFresh(K.review)` | `getScopedFresh(K.review(bankId), bankId, null)` | 被 1469 前置拦截，探针取证 |
+  | **1489** | `Storage.get(K.reviewMeta)` | `getScoped(K.reviewMeta(bankId), bankId, null)` | 被 1469 前置拦截，探针取证 |
+  | **1499** | `Storage.getFresh(touched stateKey)` | `getScopedFresh(key, bankId, null)` | 被 1469 前置拦截，探针取证 |
 
   后半 3 处刻意用**缓存态** `getScoped`（对应原 `Storage.get`），不改缓存语义，只把
   “键不在视图 → 默认值”改为 `NotHydratedError`；迁移理由是 **fail-loud**，不是更快。
+  收尾批的 `meta`/`prevMeta` 同样保持缓存态；`get`/`removeHash`/`reviewRevOf`/`prevLegacy`/`touched`
+  保持 `Fresh` 语义（与原调用一致）。
 
 - **红→绿（`node scripts/idb.test.mjs`，日志 `C4-step4-red.log` / `C4-step4-green.log` /
   `C4-step4b-red.log` / `C4-step4b-green.log`）**：
@@ -477,7 +487,7 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   - **影响面（重要）**：`stateKeys` 是 `readMap`/`count`/`writeMarker`/`put`/`reviewKeySetOf`/
     `removeHash`/`clear` 的公共底座，迁移后**写入路径也继承 fail-loud**。生产写调用方
     （单题评分、交卷、改题重映射、备份恢复）必须在写前对目标库 `ensureBank`；
-    当前这些调用方尚未全部补齐（见下方剩余 6 处写路径前置清单）。
+    收尾批已在 `SRSStore.grade/gradeMany` 收敛前置（见下节）。
 
 - **「按库键索引 `_keysByBank`」提案：已评估、不实施（2026-11-08）**
   - 实测数据：`readMap` per-hash 单操作峰值 **300 次 / 0.498ms**（平均 **1.6µs/次**）；
@@ -485,23 +495,36 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   - 结论：在该量级上引入常驻索引（每库一份键集合）+ 一组失效点（写入/删除/迁移/跨标签/
     备份恢复/清理），**收益不可测、维护面显著增加**，故不实施；从待办清单移除，不保留“待做”状态。
   - 热路径迁移的正当理由统一为 **未水合时必须 fail-loud，而不是更快**。
-- **热路径（7 处剩余，本轮只出数据）与成本/风险（未实施）**
-  - `967`/`1009`/`1499`/`1469`/`1488`/`1489`（评分/收卷写路径，逐题触发）：迁移前提是所有
-    写调用方（单题评分、交卷、改题、备份恢复）先 `ensureBank`；建议与提交批量化一起做。
-    `984`/`1000` 已于第三批迁移（fail-loud 理由，见上），**不再列为待迁**。
-  - `1039`（`removeHash` 写循环）：已由 `ReviewStore.get` 前置拦截，迁移收益低。
-- **剩余 6 处写路径的 `ensureBank` 前置清单（下一批输入）**
-
-  | 调用点 | 所属函数 | 写调用方 | 现状 |
-  | --- | --- | --- | --- |
-  | 967 | `ReviewStore.meta`（`put` 内） | 练习逐题 `SRSStore.grade` / 考试 `gradeMany` / 结果页自评 | `app.js` 启动与切库已水合；新建库路径已 `ensureBank`，**未逐入口复核** |
-  | 1009 | `ReviewStore.get` | 同上（评分前读旧状态） | 同上 |
-  | 1469 | `reviewRevOf` | `commitReview`（评分提交） | 同上 |
-  | 1488 | `commitReview` `prevLegacy` | 同上 | 同上 |
-  | 1489 | `commitReview` `prevMeta` | 同上 | 同上 |
-  | 1499 | `commitReview` touched `getFresh` | 同上 + 改题重映射 | 同上 |
-
-  结论：6 处均在“评分提交”同一链路，前置点宜收敛到 `SRSStore.grade/gradeMany` 与
-  `commitReview` 唯一入口，避免逐调用方重复 `ensureBank`；本轮不改，留待下一批。
-- **待决策**：评分写路径（6 处）是否随下一轮提交批量化一起迁；`1541/1542` 是否需要在
-  `readMap` 之外独立防护（当前依赖上游 S 段读取拦截）。
+- **收尾批（热路径 7 处：评分写路径 6 处 + removeHash，13/22 → 22/22）**
+  - 迁移内容：`ReviewStore.meta` 改 `getScoped`；`ReviewStore.get`、`reviewRevOf`、
+    `commitReview` 的 `prevLegacy`/touched、`removeHash` 改 `getScopedFresh`；
+    `commitReview` 的 `prevMeta` 改 `getScoped`（缓存态与原 `get` 一致）。
+  - **写前置**：新增私有 `SRSStore.ensureScorable(bankId)`，仅本地后端（`DB.backend === 'local'`）
+    调用 `Storage.ensureBank(bankId)`，并在 `grade` / `gradeMany` 入口 await；
+    api 后端不做本地水合。`commitReview` 本身因首读点 `reviewRevOf` 作用域化而天然 fail-loud，
+    不再逐调用方重复 `ensureBank`。
+  - **独立负例（可直接触达的 4 处）**：`meta(B)` 旧实现返回 `{v:4}`（未抛错）；
+    `get(B,h)` / `removeHash(B,h)` 旧实现首个抛错点是上游 `legacyReviewMap`（`key=user:review:<B>`）；
+    `reviews.record(B)` 旧实现首个抛错点同样错位（reviewRev 返回 0 后继续）。
+    迁移后四处首个抛错点分别为 `reviewMeta:<B>` / `reviewState:<B>:<h>`（get、removeHash）/
+    `reviewRev:<B>`。
+  - **无有效行为负例（3 处，探针取证）**：`prevLegacy`/`prevMeta`/`touched` 在未水合库上
+    均被更早的 `reviewRevOf` 拦截，无法独立触达；已水合 `record(A)` 运行时探针：
+    旧实现 `directFresh=9 / directGet=2`、`scopedFresh=1 / scoped=0`；
+    迁移后 `directFresh=0 / directGet=0`、`scopedFresh=4（同键只读一次）/ scoped≥2`。
+  - **热路径成本回收（等价优化）**：`bankOfKey` 有界归属缓存（1024 条）、`_hydratedBanks=null`
+    快路径（`getScoped`/`keysScoped`）、`commitReview` 同键本轮只读一次（`touched` own 状态复用，
+    own 缺失才回退 `ReviewStore.get` 保留 legacy 迁移语义）。`gradeMany` 比值 5.44（失败）
+    → **4.86–4.87 ≤ 5.35**（p50 0.2688–0.2710 ms），`grade` **2.71–2.74 ≤ 2.90**。
+  - **红→绿（`node scripts/idb.test.mjs`）**：红 **exit 1，17 项失败**（4 处行为负例 + 6 处静态护栏
+    + 2 项探针 + 4 处前置行为/水合断言 + 1 处返回值断言）→ 绿 **376 通过 / 0 失败 / exit 0**；
+    断言 **349 → 376**（+27，只增不减）。
+  - **写前置负例**：旧实现 `grade(B)` 抛 `NotHydratedError`（`readMap`/legacy 链），迁移后
+    `grade(B)` 自动水合并真实落盘（`stability>0`、`due` 在未来、`getScopedFresh` 读回非空）；
+    `gradeMany(C)` 两题状态均落盘。已水合等价：`record(A)` 返回 `saved=1`、`readMap` 状态值不变。
+  - **静态调用点**：合计仍 **88**（旧入口 → 作用域入口同类替换，无新增读取点）。
+- **留档不迁（1541/1542）**：`reviews.save` 的 `prevMeta`/`prevLegacy` 在未水合库上已被
+  更早的 `readMap`（S 段作用域读取）抛错拦截，无法构造独立负例；按既有口径保留原读取，
+  不谎称已迁。若未来 `reviews.save` 调整读取顺序，需重新评估。
+- **待决策**：无（C 步骤4 已收口）。步骤5（CI 默认 strict）与步骤6（生产 strict go/no-go）
+  进入下一阶段。

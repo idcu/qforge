@@ -965,7 +965,8 @@
 
     /** 布局标记/旧清单（诊断用）；v4 标记不含 keys，读取路径不依赖它 */
     meta(bankId) {
-      const m = Storage.get(K.reviewMeta(bankId), null);
+      // C 步骤4 收尾：读取走作用域入口；未水合库不再返回 null 伪装「无标记」而放行半写
+      const m = Storage.getScoped(K.reviewMeta(bankId), bankId, null);
       if (!m || typeof m !== 'object') return null;
       if (m.v === REVIEW_LAYOUT_VERSION) return m;
       return (m.v === 3 && Array.isArray(m.keys)) ? m : null;
@@ -1009,7 +1010,8 @@
 
     /** 单题状态（O(1)；退化为旧整表命中） */
     get(bankId, hash) {
-      const own = Storage.getFresh(reviewStateKey(bankId, hash), null);
+      // C 步骤4 收尾：单题状态走作用域入口（未水合必抛，不先返回 null 再穿过 legacy）
+      const own = Storage.getScopedFresh(reviewStateKey(bankId, hash), bankId, null);
       if (own && typeof own === 'object') return own;
       return legacyReviewMap(bankId)[hash] || null;
     },
@@ -1039,7 +1041,8 @@
       const cached = reviewKeySets.get(bankId);
       if (cached) cached.set.delete(hash);
       const stateKey = reviewStateKey(bankId, hash);
-      if (Storage.getFresh(stateKey, null) != null) { Storage.remove(stateKey); changed = true; }
+      // C 步骤4 收尾：删除前读取走作用域入口（未水合必抛，避免在残缺视图上静默删空）
+      if (Storage.getScopedFresh(stateKey, bankId, null) != null) { Storage.remove(stateKey); changed = true; }
       const legacy = legacyReviewMap(bankId);
       if (Object.prototype.hasOwnProperty.call(legacy, hash)) {
         delete legacy[hash];
@@ -1469,7 +1472,8 @@
 
   /** 本地复习版本号（服务端 review_rev 的本地对应物；仅同步元数据，不进备份） */
   function reviewRevOf(bankId) {
-    return Number(Storage.getFresh(K.reviewRev(bankId), 0)) || 0;
+    // C 步骤4 收尾：版本号读取走作用域入口（提交入口因此天然 fail-loud）
+    return Number(Storage.getScopedFresh(K.reviewRev(bankId), bankId, 0)) || 0;
   }
   function bumpReviewRev(bankId) {
     const next = reviewRevOf(bankId) + 1;
@@ -1488,8 +1492,9 @@
     const prevRev = reviewRevOf(bankId);
     const incoming = delta || {};
     const touched = new Map(); // stateKey -> 旧值（null=不存在）
-    const prevLegacy = Storage.getFresh(K.review(bankId), null);
-    const prevMeta = Storage.get(K.reviewMeta(bankId), null);
+    // C 步骤4 收尾：提交快照读取走作用域入口（与 reviewRevOf 同一 fail-loud 口径）
+    const prevLegacy = Storage.getScopedFresh(K.review(bankId), bankId, null);
+    const prevMeta = Storage.getScoped(K.reviewMeta(bankId), bankId, null);
     let logRollback = null;
     try {
       Object.keys(incoming).forEach((hash) => {
@@ -1499,8 +1504,14 @@
           return;
         }
         const key = reviewStateKey(bankId, hash);
-        if (!touched.has(key)) touched.set(key, Storage.getFresh(key, null));
-        const existing = ReviewStore.get(bankId, hash);
+        let prev = touched.get(key);
+        if (!touched.has(key)) {
+          prev = Storage.getScopedFresh(key, bankId, null);
+          touched.set(key, prev);
+        }
+        // 同一键本轮只读一次：own 状态已读到时直接复用；own 缺失（仅 legacy 视图有值）
+        // 才回退 ReviewStore.get，保留旧布局迁移语义。
+        const existing = prev != null ? prev : ReviewStore.get(bankId, hash);
         const merged = existing ? QB.ReviewMerge.mergeMaps({ s: st }, { s: existing }).s : st;
         ReviewStore.put(bankId, hash, merged);
       });

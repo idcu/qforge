@@ -442,16 +442,16 @@ switchBank(nextId) = 快照 {bankId, view}
   首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`。
   **首屏用户可见最大长任务 83 ms（中位 54 ms）属于本次改造未覆盖的既有成本，不代表「启动阻塞已消除」。**
 
-### 4.22 作用域读取 API（C 步骤1–3 已完成；步骤4 进行中 13/22；步骤5–6 未实施）
+### 4.22 作用域读取 API（C 步骤1–4 已完成（22/22）；步骤5–6 未实施）
 
 - **状态**：**步骤1（API + 契约测试）已完成**；**步骤2（A 段 20 处前置核对）已完成**
   （2026-11-08）：**20/20 已有 `ensureAll` 或等价全量前置，0 处需补**；**步骤3 已完成**
   （2026-11-08）：B 段 6 处中 **4/6 已迁移**（`legacyReviewMap` 953、`convertLegacy` 1054、
   `remap` 1095/1098），剩余 2 处（`convertMetaLayouts` 1198、`hash-remap.js:32`）未迁；
-  **步骤4 进行中**（2026-11-08）：C 段 22 处已按实测频次分冷热，**已迁 13 处（13/22）**——
+  **步骤4 已完成**（2026-11-08）：C 段 22 处已按实测频次分冷热，**22/22 全部处理完毕**——
   冷路径 8 处（142/152/818/826/832/845/1148+1173）+ 只读渲染 3 处（124/129/841）
-  + 第三批热路径 2 处（984/1000）；
-  剩余热路径 **7 处**只出数据不改（评分写路径 6 处 + `1039`；`1541/1542` 暂缓）。
+  + 第三批热路径 2 处（984/1000）+ 收尾热路径 7 处（评分写路径 6 处 + `removeHash`）
+  + `1541/1542` 经复核**无有效行为负例、留档不迁**（未水合已被 `readMap` 的 S 段读取先拦截）。
   步骤5–6（CI 默认严格、生产 strict）**未实施**。
   完整提案（未跟踪、不随仓库发布）：`.analysis/architecture-audit/scoped-read-api-proposal.md`。
 - **问题**：`Storage.get/keys` 是同步契约，分阶段水合只覆盖启动作用域；未水合库读取静默返回
@@ -483,11 +483,12 @@ switchBank(nextId) = 快照 {bankId, view}
   `app.js:284` toast + `app.js:287` 状态栏（`render()` 返回 false，无 unhandled rejection）、
   迁移 `app.js:1797` toast、备份恢复 `backup.js:831` toast、改题保存
   `question-editor.js:602/713` errBox。
-- **6 步灰度（当前进度 3/6，步骤4 进行中）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
+- **6 步灰度（当前进度 4/6，步骤5–6 未实施）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
   `ensureAll` 职责（**已完成，0 处需补**）；③ B 类 6 处迁移到 `getScoped`（**已完成 4/6**：
   1054/1095/1098/953 已迁；1198/hash-remap:32 未迁）；④ C 类 22 处按模块迁移
-  （**进行中 13/22**：冷路径 `142/152/818/826/832/845/1148/1173` + 只读渲染 `124/129/841`
-  + 热路径 `984/1000` 已迁；剩余热路径 7 处未动）；⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 是否开启由下一阶段实测决定。
+  （**已完成 22/22**：冷路径 `142/152/818/826/832/845/1148/1173` + 只读渲染 `124/129/841`
+  + 热路径 `984/1000` + 收尾 `967/1011/1039/1471/1490/1491/1501`（行号为收尾前基线）已迁；
+  `1541/1542` 无有效行为负例留档不迁）；⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 是否开启由下一阶段实测决定。
 - **为何唯一覆盖两类风险**：O1 让新增调用点在未水合时立即失败；`__strictReads` 让既有调用点
   的归类错误在测试/CI 暴露。O2（`withBank` 门面）引入生命周期与门面过期读错库；O3（严格/宽松
   双入口）默认仍宽松、覆盖不了既有归类；O4（`keys()` 按作用域）语义变化最大，全量误判会复现
@@ -550,12 +551,31 @@ switchBank(nextId) = 快照 {bankId, view}
   `app-boot.test.mjs` 新增 2 场景（断言 **128 → 136**，+8）。C 段进度 **13/22**；
   影响面：`stateKeys` 为 `readMap`/`count`/`writeMarker`/`put`/`reviewKeySetOf`/`removeHash`/`clear`
   共用底座，写入路径随之 fail-loud，剩余 6 处评分写路径需先补 `ensureBank`（见 STORAGE.md 清单）。
+- **步骤4 收尾实测（2026-11-08，热路径 7 处，13/22 → 22/22）**：评分写路径 6 处
+  （`ReviewStore.meta` / `ReviewStore.get` / `reviewRevOf` / `commitReview` 的 prevLegacy·prevMeta·touched）
+  + `removeHash` 全部改走 `getScoped` / `getScopedFresh`；`SRSStore.grade` / `gradeMany` 在本地后端
+  写前新增 `ensureScorable`（`Storage.ensureBank(bankId)`）前置，避免「未水合读到空状态 → 半写」。
+  `idb.test.mjs` 红 **exit 1，17 项失败**（旧实现 `meta(B)` 返回 `{v:4}` 放行、`get/removeHash/record`
+  首个抛错点仍是 legacy、探针 `directFresh=9 / directGet=2`、`grade(B)` 抛 `NotHydratedError`）
+  → 绿 **376 通过 / 0 失败（exit 0）**；断言 **349 → 376**（+27）。等价性：已水合
+  `record(A)` 返回值 `saved=1`、`readMap` 状态值不变；探针 `directFresh=0 / directGet=0`、
+  `scopedFresh=4（同键只读一次）/ scoped≥2`；`grade(B)` 自动水合并真实落盘，`gradeMany(C)` 两题状态均落盘。
+  **热路径成本回收**（迁移后 benchmark 首测 `gradeMany` 5.44 > 5.35 门禁，故做三处等价优化）：
+  ① `bankOfKey` 增加有界归属缓存（1024 条，键归属由键文本唯一决定）；② `getScoped`/`keysScoped`
+  在 `_hydratedBanks=null`（LS/全量视图）跳过水合判定快路径；③ `commitReview` 同一键本轮只读一次
+  （`touched` 读到的 own 状态直接复用为 `existing`，仅 own 缺失时回退 `ReviewStore.get` 保留 legacy
+  迁移语义）。实测 `gradeMany` 比值 **5.44 → 4.86–4.87**（p50 0.2688–0.2710 ms / 标定
+  54.9–55.5 µs，≤5.35），`grade` **2.71–2.74 ≤ 2.90**。
+  `1541/1542`（`reviews.save` 的 prevMeta/prevLegacy）**无有效行为负例**：未水合在更早的
+  `readMap`（S 段作用域读取）即抛错，无法单独触达，按既有口径留档不迁（静态调用链证据）。
+  静态调用点合计仍 **88**（旧入口 → 作用域入口同类替换，未新增读取点）。
 - **「按库键索引 `_keysByBank`」：已评估、不实施（2026-11-08）**：`readMap` 单操作峰值
   **300 次 / 0.498ms**（平均 **1.6µs/次**），首屏冷启动整体 **1.318ms**；该量级下索引收益
   不可测，却新增常驻内存与一组失效点。索引方案从待办移除；热路径迁移理由统一为
   **未水合必须 fail-loud，而不是更快**。
 - **未验证项**：生产 strict 的全局键白名单与跨标签行为；浏览器真机 `keysScoped` 成本；
-  迁移 A 段的行为级负例（v6 物理 per-hash 夹具未构造）；热路径 **7 处**迁移后的真实浏览器 P95。
+  迁移 A 段的行为级负例（v6 物理 per-hash 夹具未构造）；热路径 7 处迁移后的真实浏览器 P95
+  （本轮仍只有 Node + 内存 IDB 数据）。
 
 ## 5. 公共抽象与影响范围
 

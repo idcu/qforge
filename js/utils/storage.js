@@ -35,6 +35,12 @@
     'user:reviewRev:', 'user:reviewChunk:', 'meta:hashMap:'
   ];
 
+  // 键归属解析是每条作用域读取的必经前缀扫描；评分批量读同一批键会重复解析。
+  // 归属由键文本唯一决定、不随会话变化，故做有界缓存（不改变语义，只省重复扫描）。
+  const OWNER_CACHE_MAX = 1024;
+  const OWNER_NONE = '\u0000';
+  const ownerCache = new Map();
+
   /**
    * 键归属解析（唯一实现）：返回 bankId；null 表示全局键/无法识别的自定义键。
    * 不能把「无法识别」当作某个库——作用域读取宁可不放行，也不能读错库。
@@ -43,14 +49,20 @@
    */
   function bankOfKey(key) {
     const k = String(key);
+    const hit = ownerCache.get(k);
+    if (hit !== undefined) return hit === OWNER_NONE ? null : hit;
+    let owner = null;
     for (let i = 0; i < BANK_SCOPED_PREFIXES.length; i += 1) {
       const p = BANK_SCOPED_PREFIXES[i];
       if (k.indexOf(p) !== 0) continue;
       const rest = k.slice(p.length);
       const cut = rest.indexOf(':');
-      return cut < 0 ? rest : rest.slice(0, cut);
+      owner = cut < 0 ? rest : rest.slice(0, cut);
+      break;
     }
-    return null;
+    if (ownerCache.size >= OWNER_CACHE_MAX) ownerCache.clear();
+    ownerCache.set(k, owner === null ? OWNER_NONE : owner);
+    return owner;
   }
 
   /**
@@ -455,7 +467,9 @@
         if (owner !== id) {
           throw new TypeError('Storage.getScoped：键归属题库 ' + owner + '，与传入 bankId=' + id + ' 不一致');
         }
-        if (!this.isBankHydrated(id)) {
+        // 快路径：LS / 全量视图（_hydratedBanks=null）不存在“未水合”，跳过判定；
+        // 分阶段水合（非 null）才逐个校验，语义与 isBankHydrated 完全一致。
+        if (this._hydratedBanks !== null && !this.isBankHydrated(id)) {
           throw new NotHydratedError(id, key, 'getScoped/getScopedFresh 要求目标库已水合');
         }
       }
@@ -476,7 +490,7 @@
      */
     keysScoped(bankId) {
       const id = bankId == null ? null : String(bankId);
-      if (id !== null && !this.isBankHydrated(id)) {
+      if (id !== null && this._hydratedBanks !== null && !this.isBankHydrated(id)) {
         throw new NotHydratedError(id, null, 'keysScoped 要求目标库已水合：先 await Storage.ensureBank(bankId)');
       }
       const all = this._keysRawCached();

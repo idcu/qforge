@@ -124,8 +124,23 @@
     return await stateFor(bankId, keyFor(q));
   }
 
+  /**
+   * C 步骤4 收尾：评分写入前置。本地后端下确保目标库已水合，避免在残缺同步视图里
+   * 「读到空状态 → 半写」；api 后端由服务端保证，不做本地水合。
+   */
+  function ensureScorable(bankId) {
+    if (!QB.DB || QB.DB.backend !== 'local') return null;
+    const S = QB.Storage;
+    if (!S || typeof S.ensureBank !== 'function') return null;
+    // 热路径快分支：已水合/LS 不进入异步，避免每次评分产生额外 microtask
+    if (S.isBankHydrated(bankId)) return null;
+    return S.ensureBank(bankId);
+  }
+
   /** 应用一次评分，返回新状态并落盘（同时写 revlog 供参数优化） */
   async function grade(bankId, q, rating, now) {
+    const pre = ensureScorable(bankId);
+    if (pre) await pre;
     const ts = now == null ? Date.now() : now;
     const k = keyFor(q);
     const fr = fsrsRating(rating);
@@ -145,6 +160,8 @@
   /** 批量应用：[{question, rating}]（应用层 0–3）；整批只解析一次 sched、只读一次状态表 */
   async function gradeMany(bankId, entries, now) {
     if (!entries || !entries.length) return;
+    const pre = ensureScorable(bankId);
+    if (pre) await pre;
     const ts = now == null ? Date.now() : now;
     const keys = entries.map((e) => keyFor(e.question));
     const [stateMap, w, sched] = await Promise.all([
