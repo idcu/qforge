@@ -950,7 +950,10 @@
   }
 
   function legacyReviewMap(bankId) {
-    const m = Storage.getFresh(K.review(bankId), null);
+    // 作用域读取（C 步骤3）：未水合库直接抛 NotHydratedError，不返回伪造的空 Map。
+    // 前置由调用方负责：建库/进入新库（app.js bank-create / import-sample / bank-delete /
+    // maybeResume）先 await Storage.ensureBank(bankId)，启动路径由 initStore 按当前库水合。
+    const m = Storage.getScopedFresh(K.review(bankId), bankId, null);
     return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
   }
 

@@ -202,7 +202,7 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | --- | --- | --- | --- |
   | `js/app.js` | 2 | G | `meta:theme` 等全局键，启动作用域恒包含 |
   | `js/data/db.js` | 1 | G | `meta:currentBank` 全局键 |
-  | `js/data/local-adapter.js` | 50 | G 21 / C 22 / B 2 / A 1 / S 4 | G：`banks`/`history`/`session`/权重/级联全局及 revlog 分段（21）；C：题目分片、复习 per-hash、错题/收藏、commit/rev 版本（22）；B：旧入口剩余 2（`legacyReviewMap` 945、`convertMetaLayouts` 1185）；A：`bankIds` 全库枚举（1）；S：C 步骤3 已迁移的作用域读取 4（`convertLegacy`/`remap` 共 3 处 `getScopedFresh` + `stateKeysScoped` 1 处 `keysScoped`） |
+  | `js/data/local-adapter.js` | 50 | G 21 / C 22 / B 1 / A 1 / S 5 | G：`banks`/`history`/`session`/权重/级联全局及 revlog 分段（21）；C：题目分片、复习 per-hash、错题/收藏、commit/rev 版本（22）；B：旧入口剩余 1（`convertMetaLayouts` 1198）；A：`bankIds` 全库枚举（1）；S：C 步骤3 已迁移的作用域读取 5（`legacyReviewMap`/`convertLegacy`/`remap` 共 4 处 `getScopedFresh` + `stateKeysScoped` 1 处 `keysScoped`） |
   | `js/modules/backup.js` | 10 | A 7 / G 3 | `readAllData`/`collectRawData`/`applyData`/`applyBackup` 共 7 处由 ensureAll 入口调用；`metaMigrationBackup` 3 处为运行期全局键 |
   | `js/modules/migrate.js` | 19 | A 12 / G 7 | `doRun` 锁内 `ensureAll`；仅 LS 目标（`idbUsable=false`）的 snapshot/restore 在 LS 全量视图；schema/lock/revlog 为全局键 |
   | `js/modules/package.js` | 1 | G | `meta:pkgHistory` 全局键 |
@@ -252,9 +252,12 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 
 #### C 步骤3 前半：B 段重映射 3/6 迁移（2026-11-08）
 
+> 后续：本轮（步骤3 后半）已把 B1 一并迁移，B 段现为 **4/6**；下表 B1 状态与“剩余”说明已同步更新。
+
 - 结论：B 段 6 处中已迁 **3/6**（`convertLegacy` 的 per-hash 读取 + `remap` 的两次状态读取），
-  剩余 **3 处**：`legacyReviewMap`（`local-adapter.js:953`，旧基线 945）、
-  `convertMetaLayouts`（`local-adapter.js:1198`，旧基线 1185）、`hash-remap.js:32`。
+  当时剩余 **3 处**：`legacyReviewMap`（`local-adapter.js:953`，旧基线 945）、
+  `convertMetaLayouts`（`local-adapter.js:1198`，旧基线 1185）、`hash-remap.js:32`
+  （其中 `legacyReviewMap` 已由步骤3 后半迁走，见下节）。
 - 选题规则（本轮只选“上游有可见兜底”的 3 处）：调用链上游必须能把 `NotHydratedError`
   变成用户可理解的反馈（toast / 表单错误态），而不是未处理 rejection 或白屏。
 
@@ -263,7 +266,7 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | B2 | `local-adapter.js:1054` | `local-adapter.js:1067` | `convertLegacy` per-hash `getFresh` → `getScopedFresh` | **已迁** | 迁移失败 → `app.js:1797` `UI.toast('当前环境不支持本地新版存储…')` 并回退兼容模式；备份恢复 → `backup.js:831` `toast('恢复失败：'+e.message,'err')` |
   | B3 | `local-adapter.js:1095` | `local-adapter.js:1108` | `remap` 读旧状态 → `getScopedFresh` | **已迁** | 改题重映射 → `question-editor.js:602/713` `errBox.textContent = '保存失败：' + ex.message`；迁移 → `app.js:1797` toast |
   | B4 | `local-adapter.js:1098` | `local-adapter.js:1111` | `remap` 读目标状态 → `getScopedFresh` | **已迁** | 同 B3（同一函数、同一 try/catch） |
-  | B1 | `local-adapter.js:945` | `local-adapter.js:953` | `legacyReviewMap` 旧整表 `getFresh` | 未迁（不安全） | 见下“剩余 3 处” |
+  | B1 | `local-adapter.js:945` | `local-adapter.js:953` | `legacyReviewMap` 旧整表 `getFresh` → `getScopedFresh` | **已迁（步骤3 后半）** | 建库/进入新库路径由调用方 `ensureBank` 前置（见下节）；兜底 `app.js:284` `UI.toast('界面刷新失败：' + msg, 'err')` + `app.js:287` 状态栏 |
   | B5 | `local-adapter.js:1185` | `local-adapter.js:1198` | `convertMetaLayouts` 未水合 v3 判定 | 未迁（用户明确暂缓） | 见下 |
   | B6 | `js/utils/hash-remap.js:32` | 同 | `remapList` 读错题/收藏 | 未迁（留待下一批） | 见下 |
 
@@ -275,12 +278,7 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 - **红/绿实测**（`node scripts/idb.test.mjs`，日志 `.analysis/architecture-audit/C3-red-bseg.log` / `C3-green-bseg.log`）：
   红 **238 通过 / 8 失败 / exit 1**（`remap` 静默 0、`convertLegacy` 按残缺视图转换并用 last=5000
   的旧整表覆盖 last=9000 的新状态）；绿 **246 通过 / 0 失败 / exit 0**（断言 226 → **246**，+20）。
-- **剩余 3 处为什么暂不迁**：
-  - B1 `legacyReviewMap`（953）：`readMap` 的调用方包含“新建空库后直接渲染”路径
-    （`app.js:719–728` 设置 `State.bankId` 后 `render` → `loadBankData` 的 `SRSStore.readMap`
-    `app.js:188`），该库从未 `ensureBank`；渲染顶层虽能 toast（`app.js` 的 `render()` catch），
-    但首屏会变成“界面刷新失败”。**缺的是“建库/进入新库前 ensureBank”这一前置，而不是 catch**，
-    所以归入不安全组，需与调用方修复一起做。
+- **剩余 2 处为什么暂不迁**：
   - B5 `convertMetaLayouts`（1198）：用户明确要求本轮不动其未水合 v3 判定（启动稳态用全局
     `banks` 清单补全并显式跳过未水合库，属“静默跳过”策略）。
   - B6 `hash-remap.js:32`：本身有编辑器 errBox 与迁移 toast 兜底（不是 `catch {}` 吞掉），
@@ -289,6 +287,38 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
     （**不谎称它为不安全**）。
 - 静态冻结口径同步：`getScoped/getScopedFresh/keysScoped` 纳入调用点清单，合计 88 → **89**
   （`local-adapter.js` 49 → 50），`backup-hydration.test.mjs` 断言数保持不变（52）。
+
+#### C 步骤3 后半：建库/进入新库 ensureBank 前置 + legacyReviewMap 4/6 迁移（2026-11-08）
+
+- 结论：B 段 **4/6 已迁移**；剩余 **2 处**（B5 `convertMetaLayouts:1198`、B6 `hash-remap.js:32`）。
+  本步把「新建空库后直接渲染」路径缺的 `ensureBank` 前置补在**调用方**，而不是塞进
+  `readMap`/`legacyReviewMap` 内部当兜底。
+
+- 前置归属（当前行号）：
+
+  | 入口 | 文件:行 | 前置位置 | 触发场景 |
+  | --- | --- | --- | --- |
+  | 建库 | `app.js:724` | `await QB.Storage.ensureBank(bank.id)`，早于 `State.bankId` 赋值与 `render` | 新建空库后直接渲染 |
+  | 导入示例 | `app.js:810` | 同上，早于 `BankManager.importSample` 写入 | 新建示例库 |
+  | 删库后落到新当前库 | `app.js:750` | `State.bankId = await getCurrentBankId()` 后立即 ensure | 删除当前库 |
+  | 恢复未完成练习 | `app.js:1628` | `State.bankId = s.bankId` 后立即 ensure | 恢复到保存时的库 |
+
+- **读取迁移**：`legacyReviewMap`（`local-adapter.js:953`）由 `Storage.getFresh(K.review(bankId), null)`
+  改为 `Storage.getScopedFresh(K.review(bankId), bankId, null)`；未水合抛 `NotHydratedError`，
+  不再返回空 Map 让上层把“未水合”误判成“无复习状态”。
+- **兜底证明**：若未来仍有调用方漏 ensure，`render()` 顶层 catch 把
+  `NotHydratedError` 转成可见反馈——`app.js:284` `UI.toast('界面刷新失败：' + msg, 'err')` +
+  `app.js:287` 状态栏，且 `render()` 捕获后返回 `false`；建库/切库 handler 均 `return render()`，
+  不产生 unhandled rejection（`scripts/app-boot.test.mjs` 的“渲染错误策略”4 项覆盖）。
+- **红/绿实测**（`node scripts/idb.test.mjs`，日志 `.analysis/architecture-audit/C4-red-ensurebank.log`
+  / `C4-green-ensurebank.log`）：红 **260 通过 / 8 失败 / exit 1**（新建库直接渲染实测
+  `题目=0、复习状态=0`，`readMap`/`legacyMap` 未抛错，4 处 `ensureBank` 静态前置缺失）；
+  绿 **268 通过 / 0 失败 / exit 0**（断言 246 → **268**，+22）。
+- **新库场景实测（绿侧同一负例）**：`ensureBank` 后 题目 **2** / 复习状态 **2** /
+  待复习 **2**（due 已到期）/ 错题 **1** / 收藏 **1**，不再是 0/0。
+- **测试夹具注意**：Node 内存 IDB 无 `IDBKeyRange`，`txGetAllSplit` 回退到 `txGetAll`；
+  当前库若**没有任何物理键**会退化为全量视图。因此夹具给当前库 A 写入 1 题，并在全量播种后
+  手工收窄 `_hydratedBanks`（等价真实启动作用域）。多库播种统一先 `ensureAll`（真实启动只水合当前库）。
 
 - **逻辑键视图缓存**：`Storage.keys()` 由 `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制，
   同一修订只物化一次（首次 `_buildKeys()`），版本不一致时整体重建；每次返回 `slice()`，

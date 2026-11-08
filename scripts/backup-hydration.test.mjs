@@ -251,6 +251,7 @@ async function main() {
   const Q1 = H1.QB;
   Q1.Store.writeMarker('idb');
   await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种 4 库：真实启动只水合当前库，测试直接拉全量
   Q1.DB.init();
   const tSeed = Date.now();
   const banks = [];

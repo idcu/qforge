@@ -11,11 +11,12 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–3 前半已实施（2026-11-08，见下方最新记录）；步骤 3 后半 + 4–6 未实施**。
+- **状态**：**步骤 1–3 已实施（2026-11-08，见下方最新记录）；步骤 4–6 未实施**。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
-  步骤3 前半迁 B 段 3/6（`convertLegacy` 1054、`remap` 1095/1098），新增作用域枚举
-  `ReviewStore.stateKeysScoped`；调用点 88 → 89（S 类 4 处）。
-  `js/**` 步骤1 与步骤3 各改一次，SW 已递增 `qforge-v40` → `v41` → `v42`。
+  步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
+  新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
+  调用点 89（S 类 5 处）。`js/**` 步骤1/步骤3 两次变更，SW 已递增
+  `qforge-v40` → `v41` → `v42` → `v43`。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -25,12 +26,48 @@
   「既有归类错误」两类风险的方案；O2 门面有生命周期风险、O3 默认仍宽松、O4 语义变化最大。
 - **6 步灰度**：① API + 六类契约测试；② A 20 处 `ensureAll` 职责标注；③ B 6 处迁 `getScoped`；
   ④ C 22 处按模块迁移；⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 由下一阶段实测决定。
-- **影响面**：88 hit / 9 文件 / 87 行（G 40 / C 22 / B 6 / A 20）；同步签名不变；新增 3 个方法
+- **影响面**：89 hit / 9 文件（G 40 / C 22 / B 2 / A 20 / S 5）；同步签名不变；新增 3 个方法
   与 1 个错误类型。
 - **已实测（步骤1）**：`keysScoped` 50k/IDB 两次实跑中位 **8.03 / 10.66 ms**（提案估 3–4ms，差异如实记录，未进门禁）。
 - **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(storage): 建库/进入新库补 ensureBank 前置并迁移 legacyReviewMap（B 段 4/6）
+
+**Commit Hash**：`（本次实现提交，hash 见随后的 docs 回填）`
+
+**核心改动**
+- `js/data/local-adapter.js`：`legacyReviewMap`（953）由宽松 `Storage.getFresh` 改为
+  `Storage.getScopedFresh(K.review(bankId), bankId, null)`；未水合抛 `NotHydratedError`，
+  不再返回空 Map 让上层误判成“无复习状态”。
+- `js/app.js`：调用方补前置（不塞进 `readMap`/`legacyReviewMap` 内部）——
+  `bank-create`（724）、`import-sample`（810）、`bank-delete` 落到新当前库（750）、
+  `maybeResume` 恢复练习进入库（1628）均 `await QB.Storage.ensureBank(...)`。
+- 测试：`scripts/idb.test.mjs` 新增「B 段前置：建库/进入新库 ensureBank」22 项；
+  多库播种统一下沉为 `ensureAll` + 手工收窄 `_hydratedBanks`（不改变既有断言语义）。
+- 文档：`docs/STORAGE.md`（B 段 4/6、前置归属表）、`docs/ARCHITECTURE.md` §4.22（4/6、剩余 2 处）、
+  `docs/TESTING.md`（idb 268 / 合计 5759）、`docs/BENCH.md`（首屏 386.5 KB / 1090.4 KB）、
+  `docs/DEVELOPMENT.md`（SW v43）。
+
+**验证数据**
+- 红：`node scripts/idb.test.mjs` → **260 通过 / 8 失败 / exit 1**。真实失败：
+  「新建空库后直接渲染」实测 `题目=0、复习状态=0`；`readMap`/`legacyMap` 未水合仍返回空 Map；
+  4 处调用方 `ensureBank` 静态前置缺失。
+- 绿：`node scripts/idb.test.mjs` → **268 通过 / 0 失败 / exit 0**；断言 **246 → 268（+22）**。
+  同一负例 `ensureBank` 后：题目 **2** / 复习状态 **2** / 待复习 **2** / 错题 **1** / 收藏 **1**。
+- 门禁：`npm run verify:fast` → **exit 0**（37 套件 / **5759** 断言 / 基线一致）；
+  `npm run bench` → **exit 0**（66 项门禁，heapUsed 增量 **5.02 MB ≤ 40 MB**）；
+  `node scripts/docs-check.mjs --static` → **exit 0**（首屏 386.5 KB gzip / 1090.4 KB raw 与基线一致）。
+- SW：`qforge-v42` → **`qforge-v43`**，`scripts/sw-baseline.json` 已重算。
+
+**遗留 TODO / 风险**
+- B 段剩余 2 处：`convertMetaLayouts:1198`（用户明确本轮不动）、`hash-remap.js:32`
+  （需与签名/归属改造一起做）。
+- 写路径 `reviews.record`/`reviews.save` 经 `ReviewStore.get` 继承严格读取：真实应用只对
+  当前（已水合）库写入；测试夹具已先 `ensureAll`。未来若出现跨库后台写，必须先 `ensureBank`。
+- 真实浏览器 IDB 严格路径未实测：Node 内存 IDB 无 `IDBKeyRange`，`txGetAllSplit` 回退
+  `txGetAll`；当前库无物理键时会退化为全量视图，夹具已给当前库写 1 题规避该假象。
 
 ### feat(storage): B 段重映射读取迁移到 getScopedFresh（C 步骤3 前半，3/6）
 

@@ -442,12 +442,12 @@ switchBank(nextId) = 快照 {bankId, view}
   首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`。
   **首屏用户可见最大长任务 83 ms（中位 54 ms）属于本次改造未覆盖的既有成本，不代表「启动阻塞已消除」。**
 
-### 4.22 作用域读取 API（C 步骤1–3前半 已完成；步骤3后半 + 4–6 未实施）
+### 4.22 作用域读取 API（C 步骤1–3 已完成；步骤4–6 未实施）
 
 - **状态**：**步骤1（API + 契约测试）已完成**；**步骤2（A 段 20 处前置核对）已完成**
-  （2026-11-08）：**20/20 已有 `ensureAll` 或等价全量前置，0 处需补**；**步骤3 前半已完成**
-  （2026-11-08）：B 段 6 处中 **3/6 已迁移**（`convertLegacy` 1054、`remap` 1095/1098），
-  剩余 3 处（`legacyReviewMap`、`convertMetaLayouts`、`hash-remap.js:32`）未迁；步骤3后半、
+  （2026-11-08）：**20/20 已有 `ensureAll` 或等价全量前置，0 处需补**；**步骤3 已完成**
+  （2026-11-08）：B 段 6 处中 **4/6 已迁移**（`legacyReviewMap` 953、`convertLegacy` 1054、
+  `remap` 1095/1098），剩余 2 处（`convertMetaLayouts` 1198、`hash-remap.js:32`）未迁；
   步骤4–6（C 迁移、CI 默认严格、生产 strict）**未实施**。完整提案（未跟踪、不随仓库发布）：
   `.analysis/architecture-audit/scoped-read-api-proposal.md`。
 - **问题**：`Storage.get/keys` 是同步契约，分阶段水合只覆盖启动作用域；未水合库读取静默返回
@@ -461,28 +461,33 @@ switchBank(nextId) = 快照 {bankId, view}
   不建库索引）。`Storage.__strictReads` **默认关闭**：关闭时 `get/getFresh/keys` 逐字保持旧语义；
   开启后旧入口命中未水合库同样抛错、部分视图下 `keys()` 抛错（`ensureAll` 后放行）。
 - **步骤1 未做**：88 处旧调用点一处未改；未把 `__strictReads` 设为 CI 默认；生产 strict 未评估。
-  **步骤3 前半起**：3 处 B 段读取迁到 `getScopedFresh`，并新增 1 处 `keysScoped`（作用域枚举），
-  调用点清单 88 → **89**（S 类 4 处），旧入口语义仍逐字不变。
+  **步骤3 起**：4 处 B 段读取迁到 `getScopedFresh`，并新增 1 处 `keysScoped`（作用域枚举），
+  调用点清单 88 → **89**（S 类 5 处），旧入口语义仍逐字不变。
 - **步骤2 已核对（0 处需补）**：A 段 20 处逐处表见 [STORAGE.md](STORAGE.md)「C 步骤2」小节。
   backup 7 处由导出/自动备份/恢复三个 `ensureAll` 入口保护，`applyBackup` 唯一例外读的是
   全局偏好键（无需全量）；migrate 12 处在 `run` 锁内 `ensureAll` 之后，或 `fromVersion<6`/LS
   目标天然全量视图；`local-adapter.bankIds`（1 处）由全局 `banks` 清单补全库 id。
   **未水合库的 v3 清单判定仍属 B 段**（`local-adapter.js:1198`，旧基线 1185），本步不改，缺口未修复。
-- **步骤3 前半已迁移（3/6）**：`convertLegacy` 的 per-hash 读取与 `remap` 的两次状态读取改用
+- **步骤3 已迁移（4/6）**：`convertLegacy` 的 per-hash 读取与 `remap` 的两次状态读取改用
   `Storage.getScopedFresh(key, bankId, null)`；两函数的枚举前置改用新增公共抽象
   `ReviewStore.stateKeysScoped(bankId)`（内部 `Storage.keysScoped`），未水合在枚举阶段即抛
-  `NotHydratedError`，不再“残缺视图枚举为空 → 静默返回 0/静默迁移”。宽松 `stateKeys` 保留给
-  C 段热路径（`readMap`/`count`），语义不变。兜底链路：迁移 `app.js:1797` toast、
-  备份恢复 `backup.js:831` toast、改题保存 `question-editor.js:602/713` errBox。
+  `NotHydratedError`，不再“残缺视图枚举为空 → 静默返回 0/静默迁移”。`legacyReviewMap`（953）
+  同样改 `getScopedFresh`，未水合直接抛；其前置由**调用方**补齐：建库 `app.js:724`、
+  导入示例 `app.js:810`、删库落到新当前库 `app.js:750`、恢复练习 `app.js:1628` 均
+  `await Storage.ensureBank(...)`，不把 ensure 塞进 `readMap`/`legacyReviewMap` 内部。
+  宽松 `stateKeys` 保留给 C 段热路径（`readMap`/`count`），语义不变。兜底链路：渲染顶层
+  `app.js:284` toast + `app.js:287` 状态栏（`render()` 返回 false，无 unhandled rejection）、
+  迁移 `app.js:1797` toast、备份恢复 `backup.js:831` toast、改题保存
+  `question-editor.js:602/713` errBox。
 - **6 步灰度（当前进度 3/6）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
-  `ensureAll` 职责（**已完成，0 处需补**）；③ B 类 6 处迁移到 `getScoped`（**前半完成 3/6**：
-  1054/1095/1098 已迁；945/1198/hash-remap:32 未迁）；④ C 类 22 处按模块迁移；
+  `ensureAll` 职责（**已完成，0 处需补**）；③ B 类 6 处迁移到 `getScoped`（**已完成 4/6**：
+  1054/1095/1098/953 已迁；1198/hash-remap:32 未迁）；④ C 类 22 处按模块迁移；
   ⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 是否开启由下一阶段实测决定。
 - **为何唯一覆盖两类风险**：O1 让新增调用点在未水合时立即失败；`__strictReads` 让既有调用点
   的归类错误在测试/CI 暴露。O2（`withBank` 门面）引入生命周期与门面过期读错库；O3（严格/宽松
   双入口）默认仍宽松、覆盖不了既有归类；O4（`keys()` 按作用域）语义变化最大，全量误判会复现
   批次 2 的 P1 红例。
-- **影响面**：调用点基线 **89 hit / 9 文件**，分类 **G 40 / C 22 / B 3 / A 20 / S 4**；
+- **影响面**：调用点基线 **89 hit / 9 文件**，分类 **G 40 / C 22 / B 2 / A 20 / S 5**；
   `get/getFresh/keys` 同步签名不变；新增 3 个方法与 1 个错误类型（公共抽象）；
   `ReviewStore.stateKeysScoped` 为步骤3 新增（与 `stateKeys` 共享 `stateKeysOf` 过滤）。
 - **实测（2026-11-08）**：`idb.test.mjs` 红 **208 通过 / 18 失败（exit 1）** → 绿 **226 通过 /
@@ -498,6 +503,12 @@ switchBank(nextId) = 快照 {bankId, view}
   `remap` 静默返回 0、`convertLegacy` 用 last=5000 旧整表覆盖 last=9000 的 per-hash 状态；
   绿例验证未水合不产生写入、水合后 `convertLegacy` 以 per-hash 为准并删旧整表。
   静态调用点 88 → **89**（含 4 处作用域读取），`backup-hydration` 断言保持 52。
+- **步骤3 后半实测（2026-11-08）**：`idb.test.mjs` 红 **260 通过 / 8 失败（exit 1）**
+  → 绿 **268 通过 / 0 失败（exit 0）**；断言 **246 → 268**（+22）。红例真实失败：
+  「新建空库后直接渲染」实测 `题目=0、复习状态=0`，`readMap`/`legacyMap` 未水合仍返回空 Map，
+  以及 4 处调用方 `ensureBank` 静态前置缺失。绿例同一负例：`ensureBank` 后
+  题目 **2** / 复习状态 **2** / 待复习 **2** / 错题 **1** / 收藏 **1**，并在 `readMap` 水合后正常返回。
+  静态调用点仍 **89**（`getFresh` → `getScopedFresh` 同类计数不变），`backup-hydration` 断言 52。
 - **未验证项**：生产 strict 的全局键白名单与跨标签行为；浏览器真机 `keysScoped` 成本；
   迁移 A 段的行为级负例（v6 物理 per-hash 夹具未构造）。
 

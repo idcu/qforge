@@ -664,6 +664,7 @@ section('备份 fail-loud：全量导出前 ensureAll + 主导出按钮失败可
   QB.DB.init();
   QB.Store.writeMarker('idb');
   await QB.Storage.initStore();
+  await QB.Storage.ensureAll(); // 播种跨库写（真实启动只水合当前库，测试直接拉全量）
   QB.Storage.setSync(QB.KEYS.metaSchema, 7);
   const S = QB.Storage;
   const q = (n) => ({
@@ -683,6 +684,7 @@ section('备份 fail-loud：全量导出前 ensureAll + 主导出按钮失败可
   const removed = S.keys().filter((k) => k.indexOf(bankB.id) >= 0);
   removed.forEach((k) => S._cache.delete(k));
   Array.from(S._chunkStates.keys()).forEach((k) => { if (k.indexOf(bankB.id) >= 0) S._chunkStates.delete(k); });
+  S._hydratedBanks = new Set([bankA.id]); // 全量播种后收窄为部分视图（等价真实启动作用域）
   S._invalidateKeys();
   eq(S.keys().filter((k) => k.indexOf(bankB.id) >= 0).length, 0,
     '前置：库B在同步视图中不可见（模拟未水合，移除 ' + removed.length + ' 个键）');
@@ -735,6 +737,7 @@ section('迁移 fail-loud：未水合库显式跳过 + 真实错误中止（Phas
   QB.DB.init();
   QB.Store.writeMarker('idb');
   await QB.Storage.initStore();
+  await QB.Storage.ensureAll(); // 播种跨库写（真实启动只水合当前库，测试直接拉全量）
   QB.Storage.setSync(QB.KEYS.metaSchema, 7);
   const S = QB.Storage;
   const q = (n) => ({
@@ -763,6 +766,7 @@ section('迁移 fail-loud：未水合库显式跳过 + 真实错误中止（Phas
     if (k.indexOf('user:review:' + bankB.id + ':') === 0) S._pending.delete(k);
   });
   if (S._hydratedBanks) S._hydratedBanks.delete(bankB.id);
+  else S._hydratedBanks = new Set([bankA.id]); // 全量播种后收窄为部分视图（等价真实启动作用域）
   S._invalidateKeys();
   ok(S.isBankHydrated(bankA.id) === true && S.isBankHydrated(bankB.id) === false,
     '前置：A 已水合、B 未水合');
@@ -846,6 +850,7 @@ section('分阶段水合：启动只水合当前库 + ensureBank（Phase 0 批�
   Q1.DB.init();
   Q1.Store.writeMarker('idb');
   await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种跨库写（真实启动只水合当前库，测试直接拉全量）
   const A = await Q1.DB.banks.create({ name: '当前库A' });
   const B = await Q1.DB.banks.create({ name: '其它库B' });
   const C = await Q1.DB.banks.create({ name: '未水合库C' });
@@ -921,6 +926,7 @@ section('分阶段水合：删除非当前库按库水合后再级联清理（Ph
   Q1.DB.init();
   Q1.Store.writeMarker('idb');
   await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种跨库写（真实启动只水合当前库，测试直接拉全量）
   const A = await Q1.DB.banks.create({ name: '当前库A' });
   const C = await Q1.DB.banks.create({ name: '待删库C' });
   const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
@@ -962,6 +968,7 @@ section('作用域读取 API + 严格守卫（C 步骤1：API + 契约测试，�
   Q1.DB.init();
   Q1.Store.writeMarker('idb');
   await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种跨库写（真实启动只水合当前库，测试直接拉全量）
   const A = await Q1.DB.banks.create({ name: '作用域库A' });
   const B = await Q1.DB.banks.create({ name: '作用域库B' });
   const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
@@ -1068,6 +1075,7 @@ section('B 段迁移（C 步骤3 前半：哈希重映射 3 处）');
   Q1.DB.init();
   Q1.Store.writeMarker('idb');
   await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种跨库写（真实启动只水合当前库，测试直接拉全量）
   const A = await Q1.DB.banks.create({ name: '重映射库A' });
   const B = await Q1.DB.banks.create({ name: '重映射库B' });
   const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
@@ -1158,6 +1166,124 @@ section('B 段迁移（C 步骤3 前半：哈希重映射 3 处）');
      S.getFresh(bState, 'SENTINEL') === 'SENTINEL', '水合后 remap 写入新键并删除旧键');
   ok(errorOf(() => Q2.ReviewStore.remap(A.id, new Map([[aHash, 'n' + aHash]]))) === null,
     'remap 已水合库不抛错（保持同步签名与正常路径）');
+}
+
+section('B 段前置：建库/进入新库 ensureBank（C 步骤3 后半：legacyReviewMap 4/6）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  // H1（全量会话）：建当前库 A + 新库 C；C 写 2 题 / 2 条已到期状态 / 1 错题 / 1 收藏
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种跨库写：测试直接拉全量（真实启动按需水合）
+  const A = await Q1.DB.banks.create({ name: '进入库A' });
+  const C = await Q1.DB.banks.create({ name: '进入新库C' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(1, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(C.id, mk(2, 'C'), { dedupe: false, mode: 'overwrite' });
+  const cItems = (await Q1.DB.questions.list(C.id, {})).items;
+  const cHash1 = cItems[0].contentHash;
+  const cHash2 = cItems[1].contentHash;
+  await Q1.DB.reviews.record(C.id, {
+    [cHash1]: { last: 900, due: 1000, s: 1, d: 1 },
+    [cHash2]: { last: 901, due: 1001, s: 1, d: 1 }
+  }, []);
+  await Q1.WrongBook.add(C.id, cItems[0]);
+  await Q1.Favorites.toggle(C.id, cItems[1]);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  // H2（部分视图）：当前库 A 已水合，新库 C 从未水合
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const errorOf2 = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const attemptAsync = async (fn) => {
+    try { return { value: await fn() }; } catch (e) { return { error: e }; }
+  };
+  const cLegacy = Q2.KEYS.review(C.id);
+  const cState1 = Q2.KEYS.reviewState(C.id, cHash1);
+
+  eq(S.isBankHydrated(C.id), false, '前置：新建库 C 从未水合（当前库为 A）');
+  ok(S.keys().indexOf(cState1) < 0, '前置：C 的复习状态键不在同步视图');
+
+  // 负例：模拟「建库成功后直接渲染」的读取序列（loadBankData：count → readMap）
+  const before = await attemptAsync(async () => ({
+    total: await Q2.DB.questions.count(C.id),
+    map: await Q2.SRSStore.readMap(C.id)
+  }));
+  const complete = !!before.value && before.value.total === 2 &&
+    Object.keys(before.value.map).length === 2;
+  const refused = !!before.error && before.error.name === 'NotHydratedError';
+  ok(complete || refused,
+    '建库后直接渲染：读取结果完整，或明确抛 NotHydratedError（不得静默 0/0 残缺视图）',
+    '（实测 ' + (before.error
+      ? '抛 ' + before.error.name
+      : '题目=' + before.value.total + '，复习状态=' + Object.keys(before.value.map).length) + '）');
+
+  // 迁移目标：legacyReviewMap 必须按作用域读取，未水合即抛（不再返回残缺 Map）
+  const eReadMap = errorOf2(() => Q2.ReviewStore.readMap(C.id));
+  ok(!!eReadMap && eReadMap.name === 'NotHydratedError',
+    'readMap 未水合库抛 NotHydratedError（红：旧行为返回空 Map）',
+    '（实测 ' + (eReadMap ? eReadMap.name : '未抛错（返回残缺 Map）') + '）');
+  const eLegacy = errorOf2(() => Q2.ReviewStore.legacyMap(C.id));
+  ok(!!eLegacy && eLegacy.name === 'NotHydratedError',
+    'legacyMap 作用域读取未水合库抛 NotHydratedError');
+  const eScoped = errorOf2(() => S.getScopedFresh(cLegacy, C.id, null));
+  ok(!!eScoped && eScoped.name === 'NotHydratedError',
+    'getScopedFresh 未水合库抛 NotHydratedError（前置机制成立）');
+
+  // 静态：ensureBank 归属调用方（建库/示例库/删库后进入新当前库/恢复练习进入库），
+  // 且不得塞进 readMap/legacyReviewMap 内部当兜底
+  const appSrc2 = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+  const laSrc2 = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const ensureNear = (marker, span) => {
+    const i = appSrc2.indexOf(marker);
+    return i >= 0 && appSrc2.slice(i, i + (span || 420)).indexOf('QB.Storage.ensureBank(') >= 0;
+  };
+  ok(ensureNear("case 'bank-create'"), 'bank-create 建库成功后先 ensureBank 再渲染（app.js:719-728）');
+  ok(ensureNear("case 'import-sample'"), 'import-sample 新建示例库后先 ensureBank 再渲染（app.js:801-809）');
+  ok(ensureNear("case 'bank-delete'"), 'bank-delete 删除后进入新当前库前 ensureBank（app.js:740-751）');
+  ok(ensureNear('State.bankId = s.bankId;'), '恢复未完成练习进入库前 ensureBank（app.js:1626-1629）');
+  const legacyFnSrc = laSrc2.slice(laSrc2.indexOf('function legacyReviewMap'),
+    laSrc2.indexOf('const ReviewStore = {'));
+  const legacyFnCode = legacyFnSrc.replace(/\/\/[^\n]*/g, '');
+  ok(legacyFnCode.indexOf('Storage.getScopedFresh(') >= 0 && legacyFnCode.indexOf('ensureBank') < 0,
+    'legacyReviewMap 走作用域读取，且不内嵌 ensureBank 兜底');
+
+  // 兜底：即便未来调用方漏 ensure，渲染顶层 catch 把 NotHydratedError 转成可见反馈
+  ok(appSrc2.indexOf("UI.toast('界面刷新失败：' + msg, 'err')") >= 0 &&
+     appSrc2.indexOf("st.textContent = '界面刷新失败：' + msg") >= 0,
+    '兜底：render 顶层 catch 同时 toast + 状态栏（app.js:284/287）');
+  ok(/async function render\(\)/.test(appSrc2) && appSrc2.indexOf('      return false;') >= 0,
+    '兜底：render 捕获后返回 false（不产生 unhandled rejection，app.js:273-290）');
+
+  // 绿：补前置后同一序列完整（题目 2 / 待复习 2 / 错题 1 / 收藏 1，不是 0/0）
+  await S.ensureBank(C.id);
+  ok(S.isBankHydrated(C.id), 'ensureBank 后 C 已水合');
+  const totalAfter = await Q2.DB.questions.count(C.id);
+  const mapAfter = await Q2.SRSStore.readMap(C.id);
+  const now = Date.now();
+  const due = Object.keys(mapAfter).filter((h) => mapAfter[h] && mapAfter[h].due <= now).length;
+  eq(totalAfter, 2, '新库进入后题目数 = 2');
+  eq(Object.keys(mapAfter).length, 2, '新库进入后复习状态 = 2 条');
+  eq(due, 2, '新库进入后待复习 = 2（due 已到期）');
+  const wrong = await Q2.DB.progress.wrongList(C.id);
+  const fav = await Q2.DB.progress.favoriteList(C.id);
+  eq(wrong.length, 1, '新库进入后错题 = 1');
+  eq(fav.length, 1, '新库进入后收藏 = 1');
+  const st1 = S.getScopedFresh(cState1, C.id, null);
+  ok(!!st1 && st1.due === 1000, 'ensureBank 后作用域读取返回真实状态（不是残缺 Map）');
+  eq(errorOf2(() => Q2.ReviewStore.readMap(C.id)), null, '水合后 readMap 正常返回（不再抛错）');
+  eq(S.getFresh(cLegacy, 'SENTINEL'), 'SENTINEL', 'C 无旧整表键：合并视图不受影响');
 }
 
 /* ============================================================ */

@@ -719,6 +719,9 @@
       case 'bank-create': {
         const bank = await QB.BankManager.create();
         if (bank) {
+          // 分阶段水合：新建库在本次会话内从未水合，必须先补前置再渲染，
+          // 否则 loadBankData 的复习状态视图读到 0/0（见 Storage.getScoped*）。
+          await QB.Storage.ensureBank(bank.id);
           State.bankId = bank.id;
           await QB.DB.setCurrentBankId(bank.id);
           State.view = 'home';
@@ -743,6 +746,8 @@
           const done = await QB.BankManager.remove(bank);
           if (done) {
             State.bankId = await QB.DB.getCurrentBankId();
+            // 删除当前库后会自动落到另一库：该库本次会话可能从未水合，进入前补前置。
+            if (State.bankId) await QB.Storage.ensureBank(State.bankId);
             State.view = 'banks';
             invalidateBanks();
             invalidateReviewLog();
@@ -800,6 +805,9 @@
       }
       case 'import-sample': {
         const bank = await QB.DB.banks.create({ name: QB.SAMPLE.name, description: QB.SAMPLE.description, category: '示例' });
+        // 新库必须先水合再写入/渲染（与 bank-create 同一前置归属）。
+        // 注意：importSample 内部走 insertMany 写路径，未水合库的写语义不完整。
+        await QB.Storage.ensureBank(bank.id);
         await QB.BankManager.importSample(bank.id);
         State.bankId = bank.id;
         await QB.DB.setCurrentBankId(bank.id);
@@ -1616,6 +1624,8 @@
     }
 
     State.bankId = s.bankId;
+    // 恢复练习会进入保存时的题库：该库可能不是启动时水合的当前库，读复习状态前补前置。
+    await QB.Storage.ensureBank(s.bankId);
     await QB.DB.setCurrentBankId(s.bankId);
     const engine = new QB.QuizEngine();
     engine.restore(s);
