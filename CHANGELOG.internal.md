@@ -9,6 +9,42 @@
 
 ## 最新记录
 
+### fix(app): 切库事务化（Phase 0 批次1-5）
+
+**Commit Hash**：`c7aaecf`
+
+**核心改动**
+- `js/app.js` 新增 `switchBank(nextId)`：`Storage.ensureAll()`（目标库数据先可见）→
+  `DB.setCurrentBankId` → 更新 `State.bankId/view` 并失效 revlog → `render()`；
+  任一步失败进入 catch：`State` 回滚快照、`DB.setCurrentBankId(prev)` 回退（回退失败经
+  `notifyBackgroundError` 可见）、toast「切换题库失败：<message>（已保留原题库）」、
+  重新 `render()` 恢复原视图。
+- `bank-select` / `bank-open` 两个 action 与顶栏 `#bank-switch` change 监听统一改调 `switchBank`，
+  删除三处重复的「改 State → 持久化 → 渲染」流程。
+- 公共抽象：`switchBank` 仅 `app.js` 内部使用，不新增 `QB` 导出面，无跨模块调用方受影响；
+  对外可见行为变化：切库失败一律保留原库并提示（原为「bankId 已切、状态栏仍旧库」）。
+- 文档：`docs/ARCHITECTURE.md` 新增 §4.20；`docs/user-guide.md` 切库行为；
+  `docs/TESTING.md` app-boot 108→**116**、合计 5603→**5611**；`docs/BENCH.md` 首屏同步。
+- SW：`qforge-v38` → `qforge-v39`，`sw-baseline` 重算（93 files / `2b0b9da77d13…`）。
+
+**验证数据（红→绿，`node scripts/app-boot.test.mjs`）**
+- 红（旧实现 + 仅加负例 1.7）：**114 通过 / 2 失败，exit 1**。实测失败：
+  `bankId` 停在注入后的新库（`bank_mw78e7fztsm4uz`）而持久化仍为原库；无「切换题库失败」提示，
+  仅 catch-all「操作失败：注入：切库持久化失败」。
+- 绿（`switchBank` 修复）：**116 通过 / 0 失败，exit 0**。实测：`State.bankId` 回滚原库、
+  `DB.getCurrentBankId()` 仍为原库、状态栏为「库A」且不含「库B」、失败 toast 可见、
+  `rejections` 新增 **0**；恢复持久化实现后正常切库生效、状态栏跟随「库B」。
+- 门禁实跑退出码：`verify:fast` → **exit 0**（36 套件 / 5611 断言 / 66 门禁）；
+  `bench --assert` → **exit 0**；`docs-check --static` → **exit 0**（全部一致）。
+
+**遗留 TODO / 风险**
+- `bank-create`（新建后落到新库）仍走原有代码，未纳入本事务；其失败同样是「新建成功但未切换」，
+  批次 2 视需要复用 `switchBank`（需先 `invalidateBanks`）。
+- 回退持久化失败时当前库标记可能与内存不一致（已知风险，已通过去重提示暴露，不静默）；
+  批次 2 的 `ensureBank` 改造会重新审视该路径。
+- 切换成功路径新增一次 `ensureAll()`（LS 模式直接返回，IDB 模式为一次 `readAll`）；
+  批次 2 换成按库 `ensureBank(id)` 后成本回落到目标库作用域。
+
 ### fix(app): render 顶层错误统一出口（Phase 0 批次1-4）
 
 **Commit Hash**：`5439579`
