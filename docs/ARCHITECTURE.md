@@ -442,6 +442,31 @@ switchBank(nextId) = 快照 {bankId, view}
   首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`。
   **首屏用户可见最大长任务 83 ms（中位 54 ms）属于本次改造未覆盖的既有成本，不代表「启动阻塞已消除」。**
 
+### 4.22 作用域读取 API（立项，未实施）
+
+- **状态**：**已立项、未实施**（2026-11-08）。完整提案（未跟踪、不随仓库发布）：
+  `.analysis/architecture-audit/scoped-read-api-proposal.md`。本节只登记决策与灰度路径，
+  **不代表代码已实现**，本轮无 `js/**`、`sw.js`、`contracts/`、测试改动。
+- **问题**：`Storage.get/keys` 是同步契约，分阶段水合只覆盖启动作用域；未水合库读取静默返回
+  `undefined`/`defaultValue`（见 §4.21 与 [STORAGE.md](STORAGE.md) 结论 b）。现有静态护栏只能拦
+  「新增调用点/计数漂移」，**不能拦「已有调用点归类错误」**。
+- **推荐方案（O1 + 测试期严格守卫）**：新增 `Storage.getScoped(bankId, key[, default])` /
+  `getScopedFresh` / `keysScoped(bankId)`；未水合读取抛 `NotHydratedError{bankId,key,hint}`；
+  `bankId=null` 仅表示全局键；`keysScoped` 返回全局键 + 该库逻辑键并合并 `_pending`，不触发
+  全量键重建；另设 `Storage.__strictReads`（仅测试/CI 默认开启）对旧入口做严格守卫，
+  生产默认宽松留待下一阶段实测决定。
+- **6 步灰度**：① 加 API + 六类契约测试；② A 类 20 处全量路径标注 `ensureAll` 职责；
+  ③ B 类 6 处迁移到 `getScoped`；④ C 类 22 处按模块迁移；⑤ CI 默认开 `__strictReads`；
+  ⑥ 生产 strict 是否开启由下一阶段实测决定。
+- **为何唯一覆盖两类风险**：O1 让新增调用点在未水合时立即失败；`__strictReads` 让既有调用点
+  的归类错误在测试/CI 暴露。O2（`withBank` 门面）引入生命周期与门面过期读错库；O3（严格/宽松
+  双入口）默认仍宽松、覆盖不了既有归类；O4（`keys()` 按作用域）语义变化最大，全量误判会复现
+  批次 2 的 P1 红例。
+- **影响面**：调用点基线 **88 hit / 9 文件 / 87 行**，分类 **G 40 / C 22 / B 6 / A 20**；
+  `get/getFresh/keys` 同步签名不变；新增 3 个方法与 1 个错误类型（公共抽象）；可与旧入口灰度并存。
+- **未验证项**：`keysScoped` 在 50k 数据下的过滤成本（提案估 3–4ms）需立项后实测；生产 strict
+  的全局键白名单与跨标签行为未验证。
+
 ## 5. 公共抽象与影响范围
 
 | 抽象 | 职责 | 复用方 |

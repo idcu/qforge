@@ -7,6 +7,25 @@
 ---
 
 
+## 待办与立项（未实施）
+
+### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
+
+- **状态**：**已立项、未实施**（2026-11-08）。本轮只登记决策，无 `js/**`、`sw.js`、
+  `contracts/`、测试改动；SW 版本不变（`qforge-v40`）。
+- **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
+  仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
+- **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
+  （`docs/STORAGE.md` 结论 b）；静态护栏只覆盖调用点数量，不覆盖既有归类错误。
+- **推荐与理由**：O1 显式作用域入口（`getScoped` / `getScopedFresh` / `keysScoped`，未水合抛
+  `NotHydratedError`）+ 测试期 `Storage.__strictReads`。它是唯一同时覆盖「新增调用点」与
+  「既有归类错误」两类风险的方案；O2 门面有生命周期风险、O3 默认仍宽松、O4 语义变化最大。
+- **6 步灰度**：① API + 六类契约测试；② A 20 处 `ensureAll` 职责标注；③ B 6 处迁 `getScoped`；
+  ④ C 22 处按模块迁移；⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 由下一阶段实测决定。
+- **影响面**：88 hit / 9 文件 / 87 行（G 40 / C 22 / B 6 / A 20）；同步签名不变；新增 3 个方法
+  与 1 个错误类型。
+- **待实测**：`keysScoped` 50k 过滤成本（提案估 3–4ms）、生产 strict 全局键白名单与跨标签行为。
+
 ## 最新记录
 
 ### test(backup): 三条备份路径完整性验收 + 未水合读取语义 + 调用点静态护栏
