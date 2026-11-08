@@ -442,9 +442,10 @@ switchBank(nextId) = 快照 {bankId, view}
   首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`。
   **首屏用户可见最大长任务 83 ms（中位 54 ms）属于本次改造未覆盖的既有成本，不代表「启动阻塞已消除」。**
 
-### 4.22 作用域读取 API（C 步骤1 已完成；步骤2–6 未实施）
+### 4.22 作用域读取 API（C 步骤1–2 已完成；步骤3–6 未实施）
 
-- **状态**：**步骤1（API + 契约测试）已完成**（2026-11-08）；步骤2–6（既有调用点迁移、
+- **状态**：**步骤1（API + 契约测试）已完成**；**步骤2（A 段 20 处前置核对）已完成**
+  （2026-11-08）：**20/20 已有 `ensureAll` 或等价全量前置，0 处需补**；步骤3–6（B/C 迁移、
   CI 默认严格、生产 strict）**未实施**。完整提案（未跟踪、不随仓库发布）：
   `.analysis/architecture-audit/scoped-read-api-proposal.md`。
 - **问题**：`Storage.get/keys` 是同步契约，分阶段水合只覆盖启动作用域；未水合库读取静默返回
@@ -458,9 +459,14 @@ switchBank(nextId) = 快照 {bankId, view}
   不建库索引）。`Storage.__strictReads` **默认关闭**：关闭时 `get/getFresh/keys` 逐字保持旧语义；
   开启后旧入口命中未水合库同样抛错、部分视图下 `keys()` 抛错（`ensureAll` 后放行）。
 - **步骤1 未做**：88 处既有调用点一处未改；未把 `__strictReads` 设为 CI 默认；生产 strict 未评估。
-- **6 步灰度（当前进度 1/6）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径标注
-  `ensureAll` 职责；③ B 类 6 处迁移到 `getScoped`；④ C 类 22 处按模块迁移；⑤ CI 默认开
-  `__strictReads`；⑥ 生产 strict 是否开启由下一阶段实测决定。
+- **步骤2 已核对（0 处需补）**：A 段 20 处逐处表见 [STORAGE.md](STORAGE.md)「C 步骤2」小节。
+  backup 7 处由导出/自动备份/恢复三个 `ensureAll` 入口保护，`applyBackup` 唯一例外读的是
+  全局偏好键（无需全量）；migrate 12 处在 `run` 锁内 `ensureAll` 之后，或 `fromVersion<6`/LS
+  目标天然全量视图；`local-adapter.bankIds`（1 处）由全局 `banks` 清单补全库 id。
+  **未水合库的 v3 清单判定仍属 B 段**（`local-adapter.js:1185`），本步不改，缺口未修复。
+- **6 步灰度（当前进度 2/6）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
+  `ensureAll` 职责（**已完成，0 处需补**）；③ B 类 6 处迁移到 `getScoped`；④ C 类 22 处按模块迁移；
+  ⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 是否开启由下一阶段实测决定。
 - **为何唯一覆盖两类风险**：O1 让新增调用点在未水合时立即失败；`__strictReads` 让既有调用点
   的归类错误在测试/CI 暴露。O2（`withBank` 门面）引入生命周期与门面过期读错库；O3（严格/宽松
   双入口）默认仍宽松、覆盖不了既有归类；O4（`keys()` 按作用域）语义变化最大，全量误判会复现
@@ -471,7 +477,12 @@ switchBank(nextId) = 快照 {bankId, view}
   0 失败（exit 0）**；`keysScoped` 50k（Node 内存 IDB，bench 观测行**未进门禁**）
   两次实跑 P50 **8.03 / 10.66 ms**（min 7.24–7.55 / max 9.97–11.81），返回 **50,361** 键
   （高于提案估算 3–4ms，如实记录）。
-- **未验证项**：生产 strict 的全局键白名单与跨标签行为；浏览器真机 `keysScoped` 成本。
+- **步骤2 实测（2026-11-08）**：备份前置去掉（`QFORGE_HYDRATION_RED=1`，`ensureAll` no-op）
+  **通过 35 / 失败 14（exit 1）** → 正常 **通过 52 / 失败 0（exit 0）**；
+  `backup-hydration.test.mjs` 断言 **43 → 52**（+9 静态/运行时护栏）。迁移 12 处**无有效行为负例**
+  （静态护栏 + 调用链证据，未伪造红例）。88 调用点计数不变。
+- **未验证项**：生产 strict 的全局键白名单与跨标签行为；浏览器真机 `keysScoped` 成本；
+  迁移 A 段的行为级负例（v6 物理 per-hash 夹具未构造）。
 
 ## 5. 公共抽象与影响范围
 

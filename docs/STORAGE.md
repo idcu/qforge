@@ -211,7 +211,42 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | `js/utils/hash-remap.js` | 1 | B | `remapList` 仅由迁移（ensureAll 后）与题目改题（当前库）调用 |
 
   类别：**G** 全局键（启动作用域恒含，安全）｜**C** 当前库键（`init`/`switchBank` 已保证）｜
-  **B** 按库键（caller 负责，已核对调用方）｜**A** 全量/跨库（必须前置 ensure，已对照 9 处）。
+  **B** 按库键（caller 负责，已核对调用方）｜**A** 全量/跨库（必须前置 ensure，**步骤2 已逐处核对 20 处，0 处需补**，见下表）。
+
+#### C 步骤2：A 段 20 处前置逐处核对（2026-11-08）
+
+- 结论：**20 处全部已有 `ensureAll()` 或等价全量前置，0 处需补**；`js/**` 0 改动，88 调用点计数不变。
+- 逐处表（行号为改造前基线 `89bd3cf`；`前置` 列为实际生效的保障）：
+
+  | # | 文件:行 | 读取 | 前置（实际生效） | 结论 / 原因 |
+  | --- | --- | --- | --- | --- |
+  | A1 | `js/modules/backup.js:128` | `keys()` | `buildBackup`→`DB.backup.export`→`local-adapter.js:1594` `ensureAll` | 已有前置，无需补 |
+  | A2 | `js/modules/backup.js:128` | `get(k)` | 同上 + `readAllData` 已含该键 | 已有前置，无需补 |
+  | A3 | `js/modules/backup.js:326` | `keys()` | `saveAutoBackup`→`backup.js:408` `ensureAll` | 已有前置，无需补 |
+  | A4 | `js/modules/backup.js:329` | `get(k)` | 同上 | 已有前置，无需补 |
+  | A5 | `js/modules/backup.js:533` | `keys()` | `applyData`→`backup.js:525` `ensureAll` | 已有前置，无需补 |
+  | A6 | `js/modules/backup.js:534` | `get(k)` | 同上 | 已有前置，无需补 |
+  | A7 | `js/modules/backup.js:584` | `get(k)` | 读 `LOCAL_ONLY_META_KEYS`（`metaDav`/`metaTheme`/`metaCurrentBank`/`metaSchema`/`metaStartPrefs`），全为全局键 | **无需全量**：全局键在部分视图中恒可见；随后 `applyData` 仍 ensureAll |
+  | A8 | `js/modules/migrate.js:94` | `keys()` | `run`→`migrate.js:728` `ensureAll`（IDB）；LS 目标本身是全量视图 | 已有前置，无需补 |
+  | A9 | `js/modules/migrate.js:101` | `get(k)` | 同上 | 已有前置，无需补 |
+  | A10 | `js/modules/migrate.js:111` | `keys()` | `restoreAll` 仅在 `idbUsable=false` 时调用（`snap=null` 时提前返回），LS 全量视图 | **等价前置**（LS 视图），无需补 |
+  | A11 | `js/modules/migrate.js:239` | `keys()` | `migrateV2ToV3`，`run` 内 `ensureAll` 之后（或 LS 全量视图） | 已有前置，无需补 |
+  | A12 | `js/modules/migrate.js:244` | `get(k)` | 同上 | 已有前置，无需补 |
+  | A13 | `js/modules/migrate.js:281` | `getFresh(k)` | `upgradeBank`，调用方 `run` 内 `ensureAll`（或 LS 全量视图） | 已有前置，无需补 |
+  | A14 | `js/modules/migrate.js:475` | `keys()` | `migrateV5ToV6` 只在 `fromVersion<6` 运行，此时数据仍在 LS（全量视图） | **等价前置**（LS 视图），无需补 |
+  | A15 | `js/modules/migrate.js:486` | `get(k)` | 同上（源键均在 LS 全量视图） | **等价前置**（LS 视图），无需补 |
+  | A16 | `js/modules/migrate.js:503` | `get(k)` | `migrateV6ToV7` 只在 IDB 目标运行，`run`→`ensureAll` 之后 | 已有前置，无需补 |
+  | A17 | `js/modules/migrate.js:524` | `get(k)` | 同上（校验阶段） | 已有前置，无需补 |
+  | A18 | `js/modules/migrate.js:547` | `keys()` | 同上（枚举阶段，`ensureAll` 已合并全部库记录） | 已有前置，无需补 |
+  | A19 | `js/modules/migrate.js:633` | `get(k)` | 同上（删除阶段 dirty 合并） | 已有前置，无需补 |
+  | A20 | `js/data/local-adapter.js:1073` | `keys()` | `bankIds` 的三个调用方：`migrateV4ToV5`/`ensureLayout` 在 `ensureAll` 后；启动稳态 `convertMetaLayouts` 用全局 `banks` 清单补全库 id 并显式跳过未水合库 | **等价前置**（全局 `banks` 补全），无需补；未水合库的 v3 清单判定属 B 段（`local-adapter.js:1185`，已知缺口，步骤 3/4 处理） |
+
+- **红/绿证据**：备份 7 处（A1–A7 中的 6 处状态读取）由 `QFORGE_HYDRATION_RED=1`（`ensureAll` 置 no-op）
+  实际打红：**通过 35 / 失败 14，exit 1**（导出、自动备份、恢复三条路径均缺库）；正常模式
+  **通过 52 / 失败 0，exit 0**。A7 为全局键，另有静态护栏断言。
+- **迁移 12 处（A8–A19）**：只有静态护栏（`run` 内 `ensureAll` 早于 `migrate*` 入口）与调用链证据，
+  **无有效行为负例**（构造 v6 物理 per-hash 夹具成本高，非极端时序）——**未伪造红例**。
+- 静态调用点计数不变：合计 **88**；`backup-hydration.test.mjs` 断言 43 → **52**（+9，只增不减）。
 
 - **逻辑键视图缓存**：`Storage.keys()` 由 `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制，
   同一修订只物化一次（首次 `_buildKeys()`），版本不一致时整体重建；每次返回 `slice()`，

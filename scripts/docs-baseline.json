@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-08T09:26:10.894Z",
+  "generatedAt": "2026-11-08T10:02:31.589Z",
   "runItems": 37,
   "suiteFiles": 36,
-  "totalAssertions": 5708,
+  "totalAssertions": 5717,
   "gateCount": 66,
   "counts": {
     "smoke-test.mjs": 731,
@@ -11,7 +11,7 @@
     "api-backend.test.mjs": 320,
     "app-boot.test.mjs": 116,
     "assets.test.mjs": 182,
-    "backup-hydration.test.mjs": 43,
+    "backup-hydration.test.mjs": 52,
     "backup.test.mjs": 151,
     "blueprint.test.mjs": 18,
     "contract.test.mjs": 98,

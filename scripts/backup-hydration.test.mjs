@@ -216,6 +216,31 @@ async function main() {
   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
   A.eq(scan.total, 88, '可执行调用点合计 88（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
 
+  // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
+  A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');
+  const srcOf = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  const at = (s, sub) => s.indexOf(sub);
+  const laSrc = srcOf('js/data/local-adapter.js');
+  const bkSrc = srcOf('js/modules/backup.js');
+  const mgSrc = srcOf('js/modules/migrate.js');
+
+  A.ok(at(laSrc, 'await QB.Storage.ensureAll()') < at(laSrc, 'backupPort().readAllData()'),
+    'A1/A2 readAllData：数据层 backup.export 先 ensureAll 再读（备份 7 处之 1/2）');
+  A.ok(at(bkSrc, 'await QB.Storage.ensureAll()') < at(bkSrc, 'const items = collectRawData()'),
+    'A3/A4 collectRawData：saveAutoBackup 先 ensureAll 再采集原始键');
+  const applySlice = bkSrc.slice(at(bkSrc, 'async function applyData'), at(bkSrc, 'async function applyBackup'));
+  A.ok(at(applySlice, 'await QB.Storage.ensureAll()') < at(applySlice, 'const oldKeys = QB.Storage.keys()'),
+    'A5/A6 applyData：ensureAll 早于旧键快照（replace 才能删到载荷外库）');
+  const localOnly = /const LOCAL_ONLY_META_KEYS = \[([\s\S]*?)\];/.exec(bkSrc);
+  A.ok(!!localOnly && /metaDav/.test(localOnly[1]) && !/review|questions:|wrong|favorite/i.test(localOnly[1]),
+    'A7 applyBackup：读取的 LOCAL_ONLY_META_KEYS 全为全局偏好键（无库作用域键，无需水合）');
+  const runSlice = mgSrc.slice(at(mgSrc, 'function run(opts)'), at(mgSrc, 'QB.Migration = {'));
+  A.ok(at(runSlice, 'await QB.Storage.ensureAll()') > 0 &&
+       at(runSlice, 'await QB.Storage.ensureAll()') < at(runSlice, 'await migrateV1ToV2()'),
+    'A8–A19 迁移：run 内 ensureAll 早于全部 migrate* 入口');
+  A.ok(/idbUsable && QB\.Storage\.mode === 'idb'/.test(runSlice),
+    'A8–A19 迁移：ensureAll 仅 IDB 目标；LS 目标本身是全量视图（等价前置）');
+
   const idb = createMemoryIDB();
   const raw = new Map();
 
@@ -321,6 +346,13 @@ async function main() {
   A.ok(fState && typeof fState === 'object', 'ensureBank(F) 后同一业务键可读到状态');
   A.ok(Q3.Storage.keys().includes(Q3.KEYS.reviewState(bankF.id, bankF.hash)), 'ensureBank(F) 后键进入视图');
   A.eq(Q3.Storage.isBankHydrated(bankE.id), false, 'E 仍未水合（保留给恢复残留断言）');
+  const metaBankIds = Q3.Storage.get(Q3.KEYS.banks, []).map((b) => b.id);
+  A.ok(!Q3.Storage.keys().includes(Q3.KEYS.reviewState(banks[1].id, banks[1].hash)),
+    'A20 前置证据：未水合库B的复习状态键不在同步视图（跨库状态读取必须全量前置）');
+  A.ok(Q3.ReviewStore.bankIds().includes(banks[1].id),
+    'A20 bankIds 仍枚举到未水合库B（全局 banks/清单补全，未丢库）');
+  A.ok(Q3.ReviewStore.convertMetaLayouts().banks >= metaBankIds.length,
+    'A20 convertMetaLayouts 经全局 banks 清单补全，库数覆盖全部种子库（' + metaBankIds.length + '）');
 
   A.section('路径3：恢复快照（applyData replace → ensureAll → oldKeys 快照）');
   const t3 = Date.now();

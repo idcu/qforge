@@ -11,9 +11,9 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1 已实施（2026-11-08，见下方最新记录）；步骤 2–6 未实施**。
-  只新增 API + 契约测试，默认行为不变；88 处既有调用点 0 改动；
-  SW 因 `js/utils/storage.js` 变更按既有门禁递增 `qforge-v40` → `qforge-v41`（摘要基线同 commit 重算）。
+- **状态**：**步骤 1–2 已实施（2026-11-08，见下方最新记录）；步骤 3–6 未实施**。
+  步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
+  88 处既有调用点 0 改动；`js/**` 仅步骤1 改过，SW 已递增 `qforge-v40` → `qforge-v41`。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -26,9 +26,50 @@
 - **影响面**：88 hit / 9 文件 / 87 行（G 40 / C 22 / B 6 / A 20）；同步签名不变；新增 3 个方法
   与 1 个错误类型。
 - **已实测（步骤1）**：`keysScoped` 50k/IDB 两次实跑中位 **8.03 / 10.66 ms**（提案估 3–4ms，差异如实记录，未进门禁）。
-- **待实测（步骤2–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
+- **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### test(storage): 核对 A 段 20 处跨库读取前置（C 步骤2，0 处需补）
+
+**Commit Hash**：`待回填（本提交）`
+
+**核心结论**
+- A 段（全量跨库）**20 处逐处核对**：backup 7（`backup.js:128×2 / 326 / 329 / 533 / 534 / 584`）、
+  migrate 12（`migrate.js:94 / 101 / 111 / 239 / 244 / 281 / 475 / 486 / 503 / 524 / 547 / 633`）、
+  local-adapter 1（`local-adapter.js:1073` `bankIds`）。
+- **20/20 已有 `ensureAll()` 或等价全量前置，0 处需补**；`js/**` **0 改动**，无 SW 换代。
+  逐处表与原因见 `docs/STORAGE.md`「C 步骤2：A 段 20 处前置逐处核对」。
+- 等价前置的两种情况：① `migrateV5ToV6`（A14/A15）在 `fromVersion<6` 时数据仍在 LS，本身是全量视图；
+  ② `applyBackup`（A7）读的是 `LOCAL_ONLY_META_KEYS` 全局偏好键，部分视图中恒可见。
+- `bankIds`（A20）启动稳态由全局 `banks` 清单补全库 id，未丢库；**未水合库的 v3 清单判定属 B 段
+  （`local-adapter.js:1185`），本步不改，缺口未修复**。
+
+**验证数据（本机实跑）**
+- 备份前置去掉（`QFORGE_HYDRATION_RED=1`，`ensureAll` 置 no-op）→ **通过 35 / 失败 14，exit 1**
+  （导出、自动备份、恢复三条路径均缺库；失败项见 `.analysis/architecture-audit/` 日志）。
+- 正常模式 → **通过 52 / 失败 0，exit 0**；`backup-hydration.test.mjs` 断言 **43 → 52**
+  （+9：6 项 A 段前置静态护栏 + 3 项 `bankIds` 运行时证据）。
+- **迁移 12 处（A8–A19）无有效行为负例**：构造 v6 物理 per-hash 夹具成本高、非极端时序；
+  仅以静态护栏（`run` 内 `ensureAll` 早于 `migrate*`）与调用链证据为准，**未伪造红例**。
+- 静态调用点计数不变：**88 hit / 9 文件**（G 40 / C 22 / B 6 / A 20），护栏阈值未改。
+
+**文档同步（同提交）**
+- `docs/STORAGE.md`：A 类别行更新为「步骤2 已逐处核对 20 处，0 处需补」；新增逐处表与红/绿证据。
+- `docs/ARCHITECTURE.md` §4.22：状态改为「步骤1–2 已完成；步骤3–6 未实施」，灰度进度 **2/6**。
+- `docs/TESTING.md`：`backup-hydration.test.mjs` **43 → 52**；合计 **5708 → 5717**（37 运行项）。
+- `scripts/docs-baseline.json` 随实测刷新。
+
+**公共抽象（新增/调整，影响范围）**
+- 新增 2 个测试期辅助（仅 `scripts/backup-hydration.test.mjs` 内）：`srcOf(rel)` 源码读取、
+  `at(s, sub)` 子串定位；作用于 A 段前置静态护栏，**不进入运行时公共命名空间**。
+- 复用既有 `QB.ReviewStore.bankIds` / `convertMetaLayouts` / `Storage.keys` 与 `QFORGE_HYDRATION_RED`
+  夹具，未新增生产代码抽象；无调用方受影响。
+
+**遗留 TODO / 风险**
+- 迁移 A 段（12 处）仍缺行为级负例（v6 物理 per-hash 夹具未构造）。
+- B 段未水合 v3 清单判定（`local-adapter.js:1185`）仍可能静默延后，属步骤 3/4。
+- 默认路径仍宽松，88 处旧调用点未迁移（缺口未修复，严格入口仅在步骤1 提供）。
 
 ### feat(storage): 作用域读取 API（C 步骤1，默认行为不变）
 
