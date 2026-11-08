@@ -27,6 +27,8 @@
   `docs/TESTING.md`（37 运行项 / 5,680 断言）、`scripts/test-order.mjs`、`docs-baseline.json`。
 - **公共抽象**：无生产代码新增/改动；测试复用 `createHarness`/`createMemoryIDB`/`QB.KEYS`/
   `Storage.ensureAll|ensureBank|isBankHydrated`，计数函数仅测试内私有。
+- **口径修正**：`29c3485`（`docs/STORAGE.md` 逐类归属计数按实测函数分布对齐：
+  local-adapter G21/C22/B5/A1、backup A7/G3；总数仍 88 不变）。
 
 **验证数据（红→绿）**
 - 红（`QFORGE_HYDRATION_RED=1`，仅测试进程把 `ensureAll` 置 no-op，未改生产文件）：
