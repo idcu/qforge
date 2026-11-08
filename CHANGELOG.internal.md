@@ -9,6 +9,37 @@
 
 ## 最新记录
 
+### fix(migrate): 未水合库显式跳过、真实转换错误中止（Phase 0 批次1-2）
+
+**Commit Hash**：`f7f0514`
+
+**核心改动**
+- `js/data/local-adapter.js::convertMetaLayouts()`：返回结构新增 `skipped`；候选库集合 = `ReviewStore.bankIds()`
+  ∪ `banks` 元数据；未水合库显式记入 `skipped` 并跳过；移除逐库 `try/catch`，真实转换错误**上抛中止**。
+- `js/utils/storage.js`：新增 `_hydratedBanks` / `isBankHydrated(bankId)`；`adoptStore()` 由 records 推导
+  （复习块键、逻辑状态键、`reviewMeta`/`reviewRev`、`banks` 元数据中的空库），`ensureAll()` 后置为全量；
+  会话内新写入库按可见标记/块判为已水合。公共抽象：新增查询方法，records 结构不变。
+- `js/modules/migrate.js`：快速路径与 `doRun()` 不再 catch 降级（`reviewMeta` 原样带回）；
+  `js/app.js` 启动后 `skipped/failed` 非空 → 提示「复习索引未完整整理：跳过 N 个未水合库、失败 M 个」。
+- 文档：`docs/STORAGE.md`、`docs/DATABASE.md`、`docs/ARCHITECTURE.md`、`docs/modules/data.md`。
+- SW：`qforge-v35` → `qforge-v36`，`sw-baseline` 重算（93 files / `af746b62e635…`）。
+- 基线：断言 5585→**5594**（idb 162→**167**、app-boot 100→**104**）；首屏 378.2/1065.2→**379.6/1069.1 KB**。
+
+**验证数据（红→绿）**
+- 红（stash 修复、仅留负例）：`node scripts/idb.test.mjs` **163 通过 / 4 失败，exit 1**；实测：未水合库
+  无 `skipped` 痕迹、候选 `banks=1`、注入转换错误被吞返回 partial、`Migration.run` 结果无 `skipped`。
+  `node scripts/app-boot.test.mjs` **102 通过 / 2 失败，exit 1**（`reviewMeta` 有跳过/失败时 0 条提示）。
+- 绿（恢复修复）：idb **167 通过 / 0 失败，exit 0**（`skipped=[迁移库B]`、`banks=2`、注入错误原样上抛、
+  run 结果携带 skipped）；app-boot **104 通过 / 0 失败，exit 0**（提示含「复习索引未完整整理」
+  「跳过 1 个未水合库」、`booted=true`、未处理 rejection=0）。
+- 门禁实跑退出码：`verify:fast` → **exit 0**（36 套件 / 5594 断言 / 66 门禁）；
+  `bench --assert` → **exit 0**；`docs-check --static` → **exit 0**。
+
+**遗留 TODO / 风险**
+- `isBankHydrated` 当前依赖 `adoptStore` 记录推导（全量水合下恒真）；批次 2 需由 Store 作用域显式提供
+  `hydratedBanks`，并把空库判定收敛到一次按库计数，避免误跳过/误提示。
+- 真实转换错误现在会中断迁移（走启动兜底）；批次 2 需要验证中断后的重入与锁释放路径。
+
 ### feat(storage): 全量导出前置 ensureAll 并让备份失败可见（Phase 0 批次1-1）
 
 **Commit Hash**：`47c803c`
