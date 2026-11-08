@@ -285,6 +285,37 @@ section('迁移结果可见：跳过/失败的复习索引整理有明确提示'
 }
 
 /* ============================================================
+ * 1.6 渲染顶层错误策略：未 await 的 render 不得只留 unhandled rejection
+ * ============================================================ */
+section('渲染顶层错误策略：fire-and-forget 调用有用户可见提示');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  const origBanks = QB.UIRenderer.renderBanks;
+  QB.UIRenderer.renderBanks = () => { throw new Error('注入：渲染失败'); };
+  const before = rejections.length;
+  QB.App.render(); // 模拟 9 个未 await 调用点：不 catch、不 await
+  await tick(8);
+  QB.UIRenderer.renderBanks = origBanks;
+  eq(rejections.length, before, '未 await 的 render 不产生 unhandled rejection（实测新增 '
+    + (rejections.length - before) + ' 次）');
+  ok(toastsText(env).indexOf('界面刷新失败：注入：渲染失败') >= 0,
+    '渲染失败有统一错误提示（实测：' + (toastsText(env) || '无提示') + '）');
+  ok(String(env.dom.document.getElementById('status-text').textContent || '').indexOf('界面刷新失败') >= 0,
+    '状态栏标记渲染错误态');
+  rejections.length = before; // 本次注入的 rejection 只用于本用例，不污染后续断言
+  const n1 = env.toasts.filter((t) => t.message.indexOf('界面刷新失败') >= 0).length;
+  QB.UIRenderer.renderBanks = () => { throw new Error('注入：渲染失败'); };
+  QB.App.render();
+  await tick(8);
+  QB.UIRenderer.renderBanks = origBanks;
+  rejections.length = before; // 同上：注入的第二条 rejection 不污染后续用例
+  eq(env.toasts.filter((t) => t.message.indexOf('界面刷新失败') >= 0).length, n1,
+    '同一错误再次触发不重复刷屏（' + n1 + ' 条）');
+  env.restore();
+}
+
+/* ============================================================
  * 2. R-18 迁移等待：状态栏显示阶段 + 已等待秒数
  * ============================================================ */
 section('R-18 迁移等待：状态栏显示阶段与已等待秒数，切换后清理');

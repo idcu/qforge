@@ -213,6 +213,11 @@ render() → seq = ++renderSeq（模块级计数器）
 
 - 只保护「写 DOM」这一步：过期渲染可以继续做只读计算，但不会覆盖更新视图。
 - 判定依据是**发起顺序**而不是完成顺序；同步段（检查到写入之间无 await）保证同一时刻只有一个写入者。
+- **顶层错误策略（Phase 0 批次1-4）**：`render()` 是唯一错误出口，内部 `renderView()` 抛错不再逸出——
+  统一 `console.error` + `UI.toast('界面刷新失败：<message>')`（同错误去重，成功后清空标记）+
+  状态栏错误态 + `State.lastRenderError`，并返回 `false`；`boot()` 依据返回值抛错进入既有错误页。
+  因此所有「fire-and-forget」调用点（不 await、不 catch）都不会再留下 unhandled rejection。
+  后台增强失败（评分落盘、成绩落盘、历史面板加载）经 `notifyBackgroundError(prefix,e)` 走同一去重口径。
 - 未实机验证：真实浏览器慢 IO（大库读盘）下的视觉闪烁是否完全消除；Node 用例只覆盖「慢分支后切换视图」这一确定性时序。
 
 ### 4.10 可选契约与能力检测（R-06）

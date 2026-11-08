@@ -225,7 +225,43 @@
 
   /* ---------------- 渲染分发 ---------------- */
 
+  let backgroundErrorMsg = '';
+  /** 后台增强信息/落盘失败的统一可见出口（同错误去重）：不再静默吞掉同步抛错 */
+  function notifyBackgroundError(prefix, e) {
+    const msg = (e && e.message) || String(e);
+    if (typeof console !== 'undefined' && console.error) console.error('[' + prefix + ']', e);
+    const key = prefix + '|' + msg;
+    if (key === backgroundErrorMsg) return;
+    backgroundErrorMsg = key;
+    UI.toast(prefix + '：' + msg, 'err');
+  }
+
+  let renderErrorMsg = '';
+  /**
+   * 渲染顶层错误策略（唯一入口）：任何视图渲染失败都提示一次（同错误去重）并返回 false，
+   * 从根上消除未 await 调用点的 unhandled rejection；成功渲染后清空去重标记。
+   * 失败不会留下半更新界面：所有 DOM 写入集中在 renderView 末尾，中途失败不改 DOM。
+   */
   async function render() {
+    try {
+      await renderView();
+      renderErrorMsg = '';
+      return true;
+    } catch (e) {
+      const msg = (e && e.message) || String(e);
+      State.lastRenderError = { message: msg, ts: Date.now() };
+      if (typeof console !== 'undefined' && console.error) console.error('[render] 界面刷新失败：', e);
+      if (msg !== renderErrorMsg) {
+        renderErrorMsg = msg;
+        UI.toast('界面刷新失败：' + msg, 'err');
+      }
+      const st = document.getElementById('status-text');
+      if (st) st.textContent = '界面刷新失败：' + msg;
+      return false;
+    }
+  }
+
+  async function renderView() {
     const seq = ++renderSeq;
     const active = document.activeElement;
     const wasSearch = !!(active && active.getAttribute && active.getAttribute('data-action') === 'search-input');
@@ -434,7 +470,7 @@
     if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
     try {
       await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
-    } catch (e) { /* Storage.onError 已提示；不阻断答题 UI */ }
+    } catch (e) { notifyBackgroundError('保存复习进度失败', e); }
     return entry;
   }
 
@@ -478,7 +514,7 @@
     invalidateReviewLog();
     if (srsEntries.length) {
       try { await QB.SRSStore.gradeMany(State.bankId, srsEntries); }
-      catch (e) { /* Storage.onError 已提示；成绩与历史不受影响 */ }
+      catch (e) { notifyBackgroundError('保存成绩失败', e); }
     }
     const score = engine.getScore();
     const durationMs = Date.now() - (State.quizMeta.startTs || engine.startedAt || Date.now());
@@ -615,7 +651,7 @@
         State.quizMeta.revlogByHash = byHash;
         render();
       })
-      .catch(() => { /* 历史面板是增强信息，载入失败不影响答题 */ });
+      .catch((e) => { notifyBackgroundError('加载复习历史失败', e); });
   }
 
   /** 今日复习：按题库限额排 learning → 到期 → 新题（不再一次性灌全库） */
@@ -1822,7 +1858,7 @@
     State.banksLoaded = true;
     State.bankId = await QB.DB.getCurrentBankId();
     State.view = State.bankId ? 'home' : 'banks';
-    await render();
+    if (!(await render())) throw new Error('首屏渲染失败');
     await maybeResume();
     await handleShareHash();
     registerSW();
