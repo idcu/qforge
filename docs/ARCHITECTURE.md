@@ -434,10 +434,13 @@ switchBank(nextId) = 快照 {bankId, view}
   boot 提示后经 `requestIdleCallback`（兜底 800ms）做一次 `ensureAll → convertMetaLayouts`，
   `failed/anomalies` 或异常经 `notifyBackgroundError('复习索引后台整理失败')` 可见。
 - **契约**：`Storage.get/keys` 仍为同步签名；未水合库默认不可见（返回 `undefined`/不在 `keys()`），
-  调用方按上面的清单显式补齐——这是本批次声明的语义边界。
+  调用方按上面的清单显式补齐——这是本批次声明的语义边界。未水合读取的失败语义为 **(b)
+  返回 `undefined`/`defaultValue`，不抛错**；可执行护栏见 `scripts/backup-hydration.test.mjs`
+  （未水合读断言 + `Storage.keys|get|getFresh` 调用点逐文件冻结，新增即红）。
 - **验收（2026-11-08，Chromium 158.0.8127.18，50k/4 库，每轮新 page、light 埋点、gap=0）**：
   `init` P50 **60.1 ms**（基线 161.6，降幅 **62.8%**）、P95 **64.8 ms**、最大 **78.1 ms**（40 轮，无 >200）；
-  首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`；最大长任务 **83 ms**。
+  首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`。
+  **首屏用户可见最大长任务 83 ms（中位 54 ms）属于本次改造未覆盖的既有成本，不代表「启动阻塞已消除」。**
 
 ## 5. 公共抽象与影响范围
 

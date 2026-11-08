@@ -29,6 +29,7 @@ export const ORDER = [
   'storage.test.mjs',
   'idb.test.mjs',
   'backup.test.mjs',
+  'backup-hydration.test.mjs',
   'migrate.test.mjs',
   'importers-anki.test.mjs',
   'importers-quizlet.test.mjs',

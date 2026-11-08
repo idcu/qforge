@@ -150,7 +150,37 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   `_logicalKeyVisible` 同构），避免「刚写入的键要等 flush 才出现」。
 - **全量操作清单（必须前置 `ensureAll`）**：备份导出 / 自动备份 / 恢复 `applyData` /
   schema 迁移 / 图片 GC。**按库操作清单（前置 `ensureBank`）**：切库 / 导出题库 / 导入题目 /
-  删除题库级联。两者失败都必须中止并提示，禁止以部分视图继续。
+  删除题库级联。两者失败都必须中止并提示，禁止以部分视图继续。已补齐入口共 9 处：
+  `LocalAdapter.backup.export`、`Backup.saveAutoBackup`、`Backup.applyData`、图片 GC
+  （`globallyReferencedAssetIds`）、`Migration.doRun`（锁内，失败释放锁并中止）、
+  `Exporters.collect`、`DataIO.commitImport`、`banks.remove` 级联、`App.switchBank`。
+- **未水合库读取语义（结论 b，Phase 0 收尾实测）**：`Storage.get(key[, default])` /
+  `getFresh(key[, default])` 对未水合库的业务键**不抛 `NotHydratedError`，而是返回
+  `undefined`/`defaultValue`**；`keys()` 同样不包含该库键。这是同步契约的既有语义（保持
+  `keys/get` 同步签名不变）。**可接受的前提**：任何可能触达非当前库的入口必须按上方清单
+  前置 `ensureAll/ensureBank`；读写路径不得凭「读不到 = 没有数据」继续改写。
+  **遗留风险（待修，未扩大改造）**：语义本身仍是静默空；新增跨库调用点若忘记前置 ensure，
+  只会表现为空数据。因此以**可执行护栏**兜底：`scripts/backup-hydration.test.mjs`
+  ① 断言未水合库 `get/getFresh` 返回 defaultValue、`ensureBank` 后同一键可见；
+  ② 去注释/字符串后冻结 `Storage.keys|get|getFresh` 可执行调用点（88 处 / 9 文件，
+  逐文件计数），新增或漂移即失败，必须归类并前置 ensure 后同步本表。
+- **调用点逐类归属（复核口径：去注释/字符串后的可执行调用，2026-11-08 实测 88 处）**：
+
+  | 文件 | 调用点 | 类别 | 保障方式 |
+  | --- | --- | --- | --- |
+  | `js/app.js` | 2 | G | `meta:theme` 等全局键，启动作用域恒包含 |
+  | `js/data/db.js` | 1 | G | `meta:currentBank` 全局键 |
+  | `js/data/local-adapter.js` | 49 | G 13 / C 32 / A 4 | G：`banks`/`history`/`session`/权重/级联全局；C：题目分片、复习 per-hash、错题/收藏，调用方均为当前库或已 ensure 的按库入口；A：`backup.export`(ensureAll)、`cascadeDelete`(banks.remove 已 ensureBank)、`convertMetaLayouts`(doRun ensureAll；未水合库显式 `skipped`)、`bankIds`(同左) |
+  | `js/modules/backup.js` | 10 | A 8 / G 2 | `readAllData`/`collectRawData`/`applyData`/图片 GC 由上述 ensureAll 入口调用；`metaMigrationBackup` 为运行期全局键 |
+  | `js/modules/migrate.js` | 19 | A 12 / G 7 | `doRun` 锁内 `ensureAll`；仅 LS 目标（`idbUsable=false`）的 snapshot/restore 在 LS 全量视图；schema/lock/revlog 为全局键 |
+  | `js/modules/package.js` | 1 | G | `meta:pkgHistory` 全局键 |
+  | `js/modules/start-prefs.js` | 2 | G | `meta:startPrefs` 全局键 |
+  | `js/modules/sync-dav.js` | 3 | G | `meta:dav` 配置；上传/下载载荷经 `Backup`（已 ensureAll） |
+  | `js/utils/hash-remap.js` | 1 | B | `remapList` 仅由迁移（ensureAll 后）与题目改题（当前库）调用 |
+
+  类别：**G** 全局键（启动作用域恒含，安全）｜**C** 当前库键（`init`/`switchBank` 已保证）｜
+  **B** 按库键（caller 负责，已核对调用方）｜**A** 全量/跨库（必须前置 ensure，已对照 9 处）。
+
 - **逻辑键视图缓存**：`Storage.keys()` 由 `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制，
   同一修订只物化一次（首次 `_buildKeys()`），版本不一致时整体重建；每次返回 `slice()`，
   调用方修改返回值不会污染缓存。

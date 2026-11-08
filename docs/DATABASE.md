@@ -111,6 +111,12 @@ IDB 模式下启动**只水合当前库**，作用域单一来源是 `Store.read
 > 迁移（schema < 7）在锁内先 `ensureAll`：否则 v6→v7 只转换当前库，其它库的 per-hash 复习键
 > 会残留、schema 却被置为 7（静默数据缺口）。
 
+**备份/恢复三条路径的覆盖结论**（`scripts/backup-hydration.test.mjs`，50k/4 库实测，2026-11-08）：
+`Backup.buildBackup()` 与 `saveAutoBackup()+readAutoBackup()` 均覆盖 4 库（50,000 条复习状态
+按记录计数 + 256 个题目键按键计数，逐库 12,500/64）；`applyData(data,'replace')` 以
+`ensureAll → oldKeys` 快照覆盖全部库，载荷外未水合库（题目分片 + 复习块）被物理删除。
+红例（`QFORGE_HYDRATION_RED=1`）退化为 12,500 + 64 且残留载荷外库。
+
 ## 6. 容量与性能参考（实测）
 
 Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样 10 次取中位数）：
