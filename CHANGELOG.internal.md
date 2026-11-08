@@ -38,7 +38,7 @@
 
 ### feat(storage): C 步骤4 实测频次排序 + 冷热分组，冷路径 8 处迁 scoped 读取（8/22）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`1e7e028`
 
 **核心改动**
 - `js/data/local-adapter.js`：8 处冷路径读取迁到作用域入口（签名不变）——
