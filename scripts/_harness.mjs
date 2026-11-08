@@ -197,5 +197,10 @@ export async function createHarness(qbDir, opts) {
 
   MODULES.forEach(load);
 
+  // C 步骤5：测试/CI 默认开启严格读取，让「既有调用点归类错误」在未水合库上真实暴露。
+  // 生产默认仍由 js/utils/storage.js 的 `__strictReads: false` 决定（步骤6 另行评估）；
+  // 需要验证「宽松契约本身」的用例显式设 QFORGE_STRICT_READS=0（或局部改回 false）。
+  if (process.env.QFORGE_STRICT_READS !== '0') window.QB.Storage.__strictReads = true;
+
   return { QB: window.QB, window, modules: MODULES, controls: controls };
 }

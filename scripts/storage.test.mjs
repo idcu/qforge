@@ -201,6 +201,7 @@ section('C1 keys 精准失效（IDB）：tombstone / 物理块 / 跨标签 value
     mode: 'idb',
     records: new Map([
       ['c1-misc', { v: 1 }],
+      [Q2.KEYS.banks, [{ id: bank }]], // 严格模式的全量视图判定依赖 banks 清单（与真实水合一致）
       [chunkKey, { h1: { last: 1 } }]
     ])
   });

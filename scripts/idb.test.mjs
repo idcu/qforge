@@ -687,7 +687,7 @@ section('备份 fail-loud：全量导出前 ensureAll + 主导出按钮失败可
   Array.from(S._chunkStates.keys()).forEach((k) => { if (k.indexOf(bankB.id) >= 0) S._chunkStates.delete(k); });
   S._hydratedBanks = new Set([bankA.id]); // 全量播种后收窄为部分视图（等价真实启动作用域）
   S._invalidateKeys();
-  eq(S.keys().filter((k) => k.indexOf(bankB.id) >= 0).length, 0,
+  eq(S.keysScoped(bankA.id).filter((k) => k.indexOf(bankB.id) >= 0).length, 0,
     '前置：库B在同步视图中不可见（模拟未水合，移除 ' + removed.length + ' 个键）');
 
   const bk = await QB.Backup.buildBackup();
@@ -771,7 +771,7 @@ section('迁移 fail-loud：未水合库显式跳过 + 真实错误中止（Phas
   S._invalidateKeys();
   ok(S.isBankHydrated(bankA.id) === true && S.isBankHydrated(bankB.id) === false,
     '前置：A 已水合、B 未水合');
-  eq(S.keys().filter((k) => k.indexOf('user:review:' + bankB.id + ':') === 0).length, 0,
+  eq(S.keysScoped(bankA.id).filter((k) => k.indexOf('user:review:' + bankB.id + ':') === 0).length, 0,
     '前置：库B复习状态在同步视图不可见（模拟未水合）');
 
   const out = QB.ReviewStore.convertMetaLayouts();
@@ -894,22 +894,22 @@ section('分阶段水合：启动只水合当前库 + ensureBank（Phase 0 批�
   ok(!!lB.error && lB.error.code === 'STORAGE_NOT_HYDRATED',
     '非当前库题目不水合：读 fail-loud（实测 ' +
     (lB.error ? lB.error.code : '返回 ' + lB.value.items.length + ' 条') + '）');
-  eq(S.keys().filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length, 1,
-    '当前库复习键可见（实测 ' + S.keys().filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length + '）');
-  ok(S.keys().indexOf('user:review:' + B.id + ':' + bItems[0].contentHash) < 0,
+  eq(S.keysScoped(A.id).filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length, 1,
+    '当前库复习键可见（实测 ' + S.keysScoped(A.id).filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length + '）');
+  ok(S.keysScoped(A.id).indexOf('user:review:' + B.id + ':' + bItems[0].contentHash) < 0,
     '非当前库复习键不可见（不会为全量键视图付出启动成本）');
   ok(S.isBankHydrated(A.id) === true && S.isBankHydrated(B.id) === false,
     'isBankHydrated 按库判定');
-  // P2：keys() 必须合并 _pending，否则未落盘新键不可见
+  // P2：keysScoped() 必须合并 _pending，否则未落盘新键不可见
   S.set('user:probePending', { v: 1 });
-  ok(S.keys().indexOf('user:probePending') >= 0, 'keys() 合并未落盘 _pending');
+  ok(S.keysScoped(A.id).indexOf('user:probePending') >= 0, 'keysScoped() 合并未落盘 _pending（全局键）');
   ok(typeof S.ensureBank === 'function', 'Storage.ensureBank 已实现');
   if (typeof S.ensureBank === 'function') await S.ensureBank(B.id);
   ok(S.isBankHydrated(B.id), 'ensureBank 后 B 已水合（实测 ' + S.isBankHydrated(B.id) + '）');
   eq((await Q2.DB.questions.list(B.id, {})).items.length, 7, 'ensureBank 后 B 题目可见');
-  ok(S.keys().indexOf('user:review:' + B.id + ':' + bItems[0].contentHash) >= 0,
+  ok(S.keysScoped(B.id).indexOf('user:review:' + B.id + ':' + bItems[0].contentHash) >= 0,
     'ensureBank 后 B 复习键可见');
-  eq(S.keys().filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length, 1,
+  eq(S.keysScoped(A.id).filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length, 1,
     'ensureBank 不影响已水合库的可见性');
 
   // 全量操作（备份）必须自己 ensureAll：库C 从未按库水合，仍要被覆盖
@@ -1009,8 +1009,10 @@ section('作用域读取 API + 严格守卫（C 步骤1：API + 契约测试，�
   const bKey = Q2.KEYS.reviewState(B.id, bHash);
   const errorOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
 
-  // 默认路径逐字不变（严格守卫默认关闭）
-  eq(S.__strictReads, false, '严格守卫默认关闭（__strictReads=false）');
+  // 默认路径逐字不变（严格守卫在 CI/测试 harness 中默认开启；本段验证宽松契约本身，局部关闭）
+  eq(S.__strictReads, true, 'CI/测试默认开启严格读取（harness 覆盖 __strictReads）');
+  S.__strictReads = false;
+  eq(S.__strictReads, false, '局部关闭后验证宽松契约（__strictReads=false）');
   eq(S.get(bKey, 'SENTINEL'), 'SENTINEL', '默认关闭：未水合库 get 仍返回 defaultValue（逐字不变）');
   eq(S.getFresh(bKey, 'SENTINEL'), 'SENTINEL', '默认关闭：未水合库 getFresh 仍返回 defaultValue（逐字不变）');
   ok(S.keys().indexOf(bKey) < 0, '默认关闭：keys() 仍不含未水合库键（逐字不变）');
@@ -1117,7 +1119,7 @@ section('B 段迁移（C 步骤3 前半：哈希重映射 3 处）');
 
   // 前置：B 未水合，旧整表与 per-hash 状态键均不在同步视图
   eq(S.isBankHydrated(B.id), false, '前置：库 B 未水合');
-  ok(S.keys().indexOf(bLegacy) < 0 && S.keys().indexOf(bState) < 0,
+  ok(S.keysScoped(A.id).indexOf(bLegacy) < 0 && S.keysScoped(A.id).indexOf(bState) < 0,
     '前置：B 的复习键在部分视图中不可见');
 
   // 红①：remap（1095/1098）未水合时枚举为空 → 旧行为静默返回 0，掩盖“整库重映射未执行”
@@ -1226,7 +1228,7 @@ section('B 段前置：建库/进入新库 ensureBank（C 步骤3 后半：legac
   const cState1 = Q2.KEYS.reviewState(C.id, cHash1);
 
   eq(S.isBankHydrated(C.id), false, '前置：新建库 C 从未水合（当前库为 A）');
-  ok(S.keys().indexOf(cState1) < 0, '前置：C 的复习状态键不在同步视图');
+  ok(S.keysScoped(A.id).indexOf(cState1) < 0, '前置：C 的复习状态键不在同步视图');
 
   // 负例：模拟「建库成功后直接渲染」的读取序列（loadBankData：count → readMap）
   const before = await attemptAsync(async () => ({
@@ -1350,7 +1352,9 @@ section('C 步骤4 冷路径：8 处作用域读取（818/826/832/845/142/152/11
 
   eq(S.isBankHydrated(B.id), false, '前置：负数库 B 未水合');
   eq(S.isBankHydrated(E.id), false, '前置：等价库 E 未水合');
-  ok(S.getFresh(Q2.KEYS.wrong(B.id), 'SENTINEL') === 'SENTINEL',
+  // C 步骤5：严格模式下旧 `getFresh` 对未水合库直接抛错，前置改用作用域枚举断言（同语义且更强：
+  // 不仅确认读不到，还确认键不在同步视图），不关闭严格守卫。
+  ok(S.keysScoped(A.id).indexOf(Q2.KEYS.wrong(B.id)) < 0,
     '前置：B 的错题键不在同步视图');
 
   // 等价性先行（避免负数调用污染状态）：同一已水合场景，迁移前后结果逐项相同。
@@ -1484,7 +1488,7 @@ section('C 步骤4 后半：3 处只读渲染路径（124 metaOf / 129 shardOf /
 
   eq(S.isBankHydrated(A.id), true, '前置：当前库 A 已水合');
   eq(S.isBankHydrated(B.id), false, '前置：B 未水合但物理数据存在');
-  ok(S.getFresh(Q2.KEYS.questionsMeta(B.id), 'SENTINEL') === 'SENTINEL',
+  ok(S.keysScoped(A.id).indexOf(Q2.KEYS.questionsMeta(B.id)) < 0,
     '前置：B 的分片清单键不在同步视图（旧实现因此读到 null/[]）');
 
   // 等价性先行：已水合场景（迁移前后结果必须逐项相同）
@@ -1665,7 +1669,10 @@ section('C 步骤4 第三批：stateKeys 984 / readMap per-hash 1000（13/22）'
   eq(fc.days[0].overdue, 1, '统计页 forecast：今天逾期 1 条');
 
   // 备份导出：复习记录条数（foldLayout 后按库折叠为单表）
-  const backup = Q2.Backup.readAllData();
+  // C 步骤5：全量出口必须走 `DB.backup.export()`（内部 ensureAll）；直接调 `QB.Backup.readAllData`
+  // 在部分视图上调用全局 keys() 正是严格模式要拦住的归类错误，故改为生产同路径（同语义改写）。
+  const backupPayload = await Q2.DB.backup.export();
+  const backup = backupPayload.data;
   const folded = backup[Q2.KEYS.review(A.id)] || {};
   eq(Object.keys(folded).length, 4, '备份导出：A 库复习记录 4 条（3 per-hash + 1 旧整表）');
   eq(folded[h[3]].stability, 8, '备份导出：旧整表条目值不变');

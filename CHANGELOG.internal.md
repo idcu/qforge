@@ -11,7 +11,7 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–4 已实施（C 段 22/22 + B 段 6/6 收口）；步骤 5–6 未实施**（2026-11-08）。
+- **状态**：**步骤 1–5 已实施（C 段 22/22 + B 段 6/6 + CI 严格守卫）；步骤 6 未实施**（2026-11-08）。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
   步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
   新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
@@ -24,8 +24,10 @@
   「按库键索引」提案已评估、不实施（readMap 300 次/0.498ms，首屏 1.318ms，收益不可测）。
   **判断更正（2026-11-08）**：曾把 984/1000 归为「必须等索引机制才能迁」属判断失误——
   否掉索引只说明不需要新增索引，与「两处能否 fail-loud 化」是两件独立的事。
-  调用点 88（第三批 `stateKeysScoped` 改委托后 89 → 88，S 类 4 处）。`js/**` 变更后 SW 已递增
-  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46` → `v47` → `v48`。
+  调用点 90（步骤5 `bankIds` 兜底枚举 +2；S 类 27 处）。`js/**` 变更后 SW 已递增
+  `qforge-v40` → `v41` → `v42` → `v43` → `v44` → `v45` → `v46` → `v47` → `v48` → `v49`。
+  步骤5：测试/CI harness 默认 `__strictReads=true`，两处真实归类错误（`bankIds`、`ensureLayout`）
+  修到绿，全套 5907/5907。
 - **提案来源**：`.analysis/architecture-audit/scoped-read-api-proposal.md`（未跟踪、不随仓库提交）。
   仓库内登记见 `docs/ARCHITECTURE.md` §4.22。
 - **问题**：同步 `get/keys` + 分阶段水合 → 未水合库静默返回 `undefined`/`defaultValue`
@@ -34,13 +36,52 @@
   `NotHydratedError`）+ 测试期 `Storage.__strictReads`。它是唯一同时覆盖「新增调用点」与
   「既有归类错误」两类风险的方案；O2 门面有生命周期风险、O3 默认仍宽松、O4 语义变化最大。
 - **6 步灰度**：① API + 六类契约测试；② A 20 处 `ensureAll` 职责标注；③ B 6 处迁 `getScoped`；
-  ④ C 22 处按模块迁移；⑤ CI 默认开 `__strictReads`；⑥ 生产 strict 由下一阶段实测决定。
-- **影响面**：88 hit / 9 文件（G 40 / C 22 / B 2 / A 20 / S 4）；同步签名不变；新增 3 个方法
+  ④ C 22 处按模块迁移；⑤ CI 默认开 `__strictReads`（**已完成**）；⑥ 生产 strict 由下一阶段实测决定（**未实施**）。
+- **影响面**：90 hit / 9 文件（G 41 / C 0 / B 2 / A 20 / S 27）；同步签名不变；新增 4 个方法
   与 1 个错误类型；`stateKeysScoped` 自第三批起为 `stateKeys` 的委托别名（单一实现）。
 - **已实测（步骤1）**：`keysScoped` 50k/IDB 两次实跑中位 **8.03 / 10.66 ms**（提案估 3–4ms，差异如实记录，未进门禁）。
 - **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
 
 ## 最新记录
+
+### feat(scope): C 步骤5——测试/CI 默认开启严格读取（红→绿，5907/5907）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- `scripts/_harness.mjs`：`createHarness` 加载完全部模块后默认 `Storage.__strictReads = true`
+  （`QFORGE_STRICT_READS=0` 可关闭；需要验证宽松契约的段落显式局部关闭）。生产默认不变。
+- `js/data/local-adapter.js`：`ReviewStore.bankIds()` 改为严格感知——
+  `try { Storage.keys() }` 仅在 `STORAGE_NOT_HYDRATED` 时回退到「`banks` 元数据候选 +
+  已水合库 `keysScoped(id)`」，不再在部分视图下静默漏库。
+- `js/modules/migrate.js`：`ensureLayout()` 只转换 `isBankHydrated` 为真的库，避免对不可见库
+  做半途状态键转换（未水合库等下次启动收敛）。
+- 测试侧（均为同语义改写/语义更强，见提交正文）：`idb.test.mjs` 3 处「未水合读不到」前置改
+  `keysScoped` 断言、`QB.Backup.readAllData()` 改 `await DB.backup.export()`（生产全量出口）、
+  显式断言 harness 默认严格；`storage.test` adoptStore 夹具补 `banks` 清单；
+  `backup-hydration.test.mjs` 冻结清单 local-adapter 49→51、合计 88→90（新增点逐类登记）。
+- 文档：`docs/STORAGE.md`（新增「C 步骤5」小节、调用点口径 90、逐类归属重算
+  S27/G41/A20/B2）、`docs/ARCHITECTURE.md` §4.22（5/6 进度）、`docs/TESTING.md`（396/5907）、
+  `docs/BENCH.md`（388.7 KB gzip）、`docs/DEVELOPMENT.md`；`sw.js` `CACHE` v48 → v49。
+
+**验证数据（2026-11-08）**
+- 红：`HEAD 307250b` 代码副本 + 本批 harness/测试跑 `node scripts/test-all.mjs` →
+  **exit 1，运行项 37 / 失败 1 / 断言 5511**（失败项 2：`idb.test.mjs exit=1` +
+  断言合计 5511 ≠ 基线 5906）。首个失败为 `NotHydratedError`（严格模式 `keys()` 要求全量水合），
+  栈顶 `Storage.keys` ← `ReviewStore.bankIds` ← `convertMetaLayouts`（idb.test.mjs:777）。
+  逐项放行后另见 `storage.test` exit 1（夹具缺 `banks`，fail-closed 正确）、
+  `backup-hydration` exit 1（冻结计数 51/90）。
+- 绿：`node scripts/test-all.mjs` → **exit 0，5907 通过 / 0 失败 / 37 运行项**；
+  `idb.test.mjs` **396 通过 / 0 失败**（断言 395 → 396，+1）；`backup-hydration` **52 通过**。
+- 三道门禁：`npm run verify:fast` **exit 0**；`npm run bench` **exit 0**
+  （`grade` 2.66–2.67 ≤ 2.90、`gradeMany` 4.75–4.90 ≤ 5.35、heapUsed +5.03–5.08 MB ≤ 40 MB、
+  `keys()` 首次构建 16.47–21.79 ms ≤ 40 ms）；`node scripts/docs-check.mjs --static` **exit 0**。
+- 首屏包体：388.4 → **388.7 KB gzip / 1096.9 KB raw**（基线同步刷新，非阈值放宽）。
+
+**遗留 TODO / 风险**
+- 严格守卫仅 IDB 模式生效；`keys()` 严格判定依赖 `banks` 清单，缺失时 fail-closed。
+- `RevlogStore.clear` 仍用全局 `keys()`（只处理全局 `user:revlog:*`，全量视图才调用）。
+- 生产是否开启 strict 留待 C 步骤6 实测裁定。
 
 ### feat(scope): B 段补完——指示键白名单 + HashRemap 签名迁移（B 6/6）
 

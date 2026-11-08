@@ -207,10 +207,14 @@ async function main() {
   // 调用合并为 1 处，local-adapter 50 → 49、合计 89 → 88（不是放宽，是去重）。
   // B 段补完：`convertMetaLayouts` 的读取改走白名单入口 `getScopedIndicator`，该入口同样要求
   // 键归属 == 目标库，必须纳入冻结口径；纳入后 local-adapter 仍为 49、合计仍为 88（覆盖更严，非放宽）。
+  // C 步骤5：`ReviewStore.bankIds` 由「全局 keys()」改为「严格感知的全局 keys() +
+  // 按库 keysScoped(id) 兜底」，新增 2 个调用点（local-adapter 49 → 51、合计 88 → 90）。
+  // 归类结论（均为已前置/已收窄）：`Storage.keys()` 处于 try/catch，仅在全量视图成立时使用；
+  // 命中 STORAGE_NOT_HYDRATED 才回退，且回退只对 isBankHydrated(id) 为真的库调用 keysScoped(id)。
   const EXPECTED_SITES = {
     'js/app.js': 2,
     'js/data/db.js': 1,
-    'js/data/local-adapter.js': 49,
+    'js/data/local-adapter.js': 51,
     'js/modules/backup.js': 10,
     'js/modules/migrate.js': 19,
     'js/modules/package.js': 1,
@@ -219,7 +223,7 @@ async function main() {
     'js/utils/hash-remap.js': 1
   };
   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
-  A.eq(scan.total, 88, '可执行调用点合计 88（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
+  A.eq(scan.total, 90, '可执行调用点合计 90（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
 
   // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
   A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');
@@ -273,7 +277,7 @@ async function main() {
   Q2.DB.init();
   const info2 = await Q2.Storage.initStore();
   A.eq(info2 && info2.scopeBank, banks[0].id, 'H2 scopeBank = 库A');
-  const keysBefore = Q2.Storage.keys();
+  const keysBefore = Q2.Storage.keysScoped(banks[0].id);
   A.eq(countReviewLogicalKeys(keysBefore), Q_PER_BANK, '启动后复习键（逻辑键计数）= 12,500（仅当前库）');
   A.eq(countReviewLogicalKeys(keysBefore, banks[1].id), 0, '库B 复习键不可见（未水合）');
   A.eq(countQuestionKeys(keysBefore), 64, '启动后题目键 = 64（仅当前库）');
@@ -340,6 +344,8 @@ async function main() {
   if (RED) Q3.Storage.ensureAll = async () => ({ mode: 'noop', records: 0 });
 
   A.eq(Q3.Storage.isBankHydrated(bankF.id), false, 'F 未水合');
+  // 本段验证「宽松契约本身」（生产默认 __strictReads=false 的结论 b），故局部关闭 CI 严格守卫
+  Q3.Storage.__strictReads = false;
   A.eq(Q3.Storage.get(Q3.KEYS.reviewState(bankF.id, bankF.hash), 'SENTINEL'), 'SENTINEL',
     'Storage.get 读未水合库 → 返回 defaultValue（结论 b，不抛错）');
   A.eq(Q3.Storage.getFresh(Q3.KEYS.reviewState(bankF.id, bankF.hash), 'SENTINEL'), 'SENTINEL',
@@ -359,6 +365,7 @@ async function main() {
     'A20 bankIds 仍枚举到未水合库B（全局 banks/清单补全，未丢库）');
   A.ok(Q3.ReviewStore.convertMetaLayouts().banks >= metaBankIds.length,
     'A20 convertMetaLayouts 经全局 banks 清单补全，库数覆盖全部种子库（' + metaBankIds.length + '）');
+  Q3.Storage.__strictReads = true; // 恢复 CI 严格守卫，路径3 在全量视图上继续受严格约束
 
   A.section('路径3：恢复快照（applyData replace → ensureAll → oldKeys 快照）');
   const t3 = Date.now();

@@ -433,7 +433,11 @@
    * @returns {{banks:number, converted:number, revlog:boolean}}
    */
   function ensureLayout() {
-    const ids = QB.ReviewStore.bankIds();
+    // C 步骤5：bankIds 在分阶段水合下会带回「仅有 banks 元数据」的未水合库候选；
+    // 对未水合库做状态键枚举会 fail-loud，因此只转换已水合库（其余等下次启动/水合后收敛）。
+    const ids = QB.ReviewStore.bankIds().filter((id) => (
+      typeof QB.Storage.isBankHydrated !== 'function' || QB.Storage.isBankHydrated(id)
+    ));
     let converted = 0;
     ids.forEach((id) => { converted += QB.ReviewStore.convertLegacy(id).converted; });
     const revlogConverted = QB.RevlogStore.convertLegacy();

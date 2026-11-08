@@ -1089,15 +1089,38 @@
       return { converted: converted, kept: known.size };
     },
 
-    /** 数据中出现的全部复习状态键所属题库（迁移/备份折叠用；旧整表键优先） */
+    /**
+     * 数据中出现的全部复习状态键所属题库（迁移/备份折叠用；旧整表键优先）。
+     * C 步骤5：分阶段水合下不再用全局 `keys()`（严格模式会因「无法确认全量视图」报错，
+     * 宽松模式则静默漏掉未水合库——两者都不对）。改为「全局 banks 清单 ∪ 已水合库枚举」：
+     * 未水合库只从元数据得到候选（其复习键本就不可见），由调用方按 isBankHydrated 决定跳过。
+     */
     bankIds() {
       const ids = new Set();
-      Storage.keys().forEach((k) => {
-        if (k.indexOf('user:reviewMeta:') === 0) { ids.add(k.slice('user:reviewMeta:'.length)); return; }
-        if (k.indexOf(K.review('')) !== 0) return;
-        const rest = k.slice(K.review('').length);
-        const cut = rest.indexOf(':');
-        ids.add(cut < 0 ? rest : rest.slice(0, cut));
+      const collect = (keys) => {
+        keys.forEach((k) => {
+          if (k.indexOf('user:reviewMeta:') === 0) { ids.add(k.slice('user:reviewMeta:'.length)); return; }
+          if (k.indexOf(K.review('')) !== 0) return;
+          const rest = k.slice(K.review('').length);
+          const cut = rest.indexOf(':');
+          ids.add(cut < 0 ? rest : rest.slice(0, cut));
+        });
+      };
+      let visible = null;
+      try {
+        visible = Storage.keys();
+      } catch (e) {
+        if (!e || e.code !== 'STORAGE_NOT_HYDRATED') throw e;
+      }
+      if (visible) {
+        collect(visible);
+        return Array.from(ids).filter(Boolean);
+      }
+      const banks = Storage.get(QB.KEYS.banks, []);
+      if (Array.isArray(banks)) banks.forEach((b) => { if (b && b.id) ids.add(String(b.id)); });
+      ids.forEach((id) => {
+        if (typeof Storage.isBankHydrated === 'function' && !Storage.isBankHydrated(id)) return;
+        collect(Storage.keysScoped(id));
       });
       return Array.from(ids).filter(Boolean);
     },

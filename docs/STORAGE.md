@@ -158,7 +158,8 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   **(a) 默认行为（仍未修复）**：`Storage.get(key[, default])` / `getFresh(key[, default])`
   对未水合库的业务键**不抛 `NotHydratedError`，仍返回 `undefined`/`defaultValue`**；
   `keys()` 同样不包含该库键。`Storage.__strictReads` 默认 `false`，因此现有 88 处调用点
-  走的是同一条宽松路径——**缺口本身没有消失**。
+  走的是同一条宽松路径——**缺口本身没有消失**。（C 步骤5 后：测试/CI harness 默认开启严格守卫，
+  生产默认仍为 `false`，见下方「C 步骤5」小节。）
   **(b) 为什么默认不改成抛错**：同步读取无法等待异步水合，直接抛同步错会破坏 88 处同步
   调用契约；引入异步读取或全局阻塞水合都会违背 Phase 0 的启动性能判据。因此严格语义只能
   由**显式入口**提供，不能强加给旧入口。
@@ -191,29 +192,31 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   `get/getFresh` 返回 defaultValue、`ensureBank` 后同一键可见；② 去注释/字符串后冻结
   `Storage.keys|get|getFresh` 可执行调用点，**能拦「新增调用点 / 计数漂移」**，但**不能拦
   「已有调用点归类错误」**——归类仍需按下方归属表人工复核（G/C/B/A 四类）。
-- **调用点计量口径（2026-11-08 实测）**：可执行调用 **88 hit / 9 文件**；源码 **87 行**
+- **调用点计量口径（C 步骤5 实测）**：可执行调用 **90 hit / 9 文件**；源码 **89 行**
   （`js/modules/backup.js:128` 一行同时含 `keys()` 与 `get()` 两次调用）。逐文件：
-  app 2、db 1、local-adapter 49、backup 10、migrate 19、package 1、start-prefs 2、
-  sync-dav 3、hash-remap 1。早期转述的 **85** 未留扫描脚本/口径，无法逐一复现；本轮固定以
-  可执行 hit=88 冻结，差异 3 处不做猜测性归因，复盘中请以上述逐文件计数为准。
-- **调用点逐类归属（复核口径同上，G/C/B/A 合计 88）**：
+  app 2、db 1、local-adapter 51、backup 10、migrate 19、package 1、start-prefs 2、
+  sync-dav 3、hash-remap 1（C 步骤4 为 88 / local-adapter 49；C 步骤5 把 `ReviewStore.bankIds`
+  的兜底枚举显式写入，新增 `keys()`+`keysScoped()` 两个点，故 90）。
+  早期转述的 **85** 未留扫描脚本/口径，无法逐一复现；本轮固定以可执行 hit=90 冻结，
+  差异 3 处不做猜测性归因，复盘中请以上述逐文件计数为准。
+- **调用点逐类归属（复核口径同上，G/C/B/A/S 合计 90）**：
 
   | 文件 | 调用点 | 类别 | 保障方式 |
   | --- | --- | --- | --- |
   | `js/app.js` | 2 | G | `meta:theme` 等全局键，启动作用域恒包含 |
   | `js/data/db.js` | 1 | G | `meta:currentBank` 全局键 |
-  | `js/data/local-adapter.js` | 49 | G 21 / C 22 / B 1 / A 1 / S 4 | G：`banks`/`history`/`session`/权重/级联全局及 revlog 分段（21）；C：题目分片、复习 per-hash、错题/收藏、commit/rev 版本（22，含 984/1000 已迁）；B：旧入口剩余 1（`convertMetaLayouts` 1198）；A：`bankIds` 全库枚举（1）；S：`legacyReviewMap`/`convertLegacy`/`remap` 共 4 处 `getScopedFresh`（`stateKeysScoped` 改为委托 `stateKeys` 后不再单独计数，故 50 → 49、合计 89 → 88） |
+  | `js/data/local-adapter.js` | 51 | S 26 / G 22 / A 1 / B 2 | S 26：`getScoped` 5 + `getScopedFresh` 17 + `getScopedIndicator` 1 + `keysScoped` 3（未水合必抛）；G 22：`banks`/`history`/`session`/权重/`metaCurrentBank` 及全局 revlog 分段（含 `RevlogStore.clear` 的全局键枚举）；A 1：`bankIds` 的 `keys()` 置于 try/catch，严格模式下命中 `STORAGE_NOT_HYDRATED` 才回退到 `banks` 元数据 + 已水合库 `keysScoped`；B 2：`reviews.save` 的 `prevMeta`/`prevLegacy`（**留档不迁**，见 C 步骤4） |
   | `js/modules/backup.js` | 10 | A 7 / G 3 | `readAllData`/`collectRawData`/`applyData`/`applyBackup` 共 7 处由 ensureAll 入口调用；`metaMigrationBackup` 3 处为运行期全局键 |
   | `js/modules/migrate.js` | 19 | A 12 / G 7 | `doRun` 锁内 `ensureAll`；仅 LS 目标（`idbUsable=false`）的 snapshot/restore 在 LS 全量视图；schema/lock/revlog 为全局键 |
   | `js/modules/package.js` | 1 | G | `meta:pkgHistory` 全局键 |
   | `js/modules/start-prefs.js` | 2 | G | `meta:startPrefs` 全局键 |
   | `js/modules/sync-dav.js` | 3 | G | `meta:dav` 配置；上传/下载载荷经 `Backup`（已 ensureAll） |
-  | `js/utils/hash-remap.js` | 1 | B | `remapList` 仅由迁移（ensureAll 后）与题目改题（当前库）调用 |
+  | `js/utils/hash-remap.js` | 1 | S | `remapList` 改 `getScopedFresh(storageKey, bankId, null)`（C 步骤4 B6；调用方为迁移（ensureAll 后）与题目改题（当前库）） |
 
   类别：**G** 全局键（启动作用域恒含，安全）｜**C** 当前库键（`init`/`switchBank` 已保证）｜
   **B** 按库键（caller 负责，已核对调用方）｜**A** 全量/跨库（必须前置 ensure，**步骤2 已逐处核对 20 处，0 处需补**，见下表）｜
-  **S** 作用域读取 API（`getScoped`/`getScopedFresh`/`keysScoped`，未水合必抛 `NotHydratedError`）——
-  静态冻结口径自 C 步骤3 起把 S 类一并计入（合计 89）。
+  **S** 作用域读取 API（`getScoped`/`getScopedFresh`/`keysScoped`/`getScopedIndicator`，未水合必抛 `NotHydratedError`）——
+  静态冻结口径自 C 步骤3 起把 S 类一并计入（C 步骤5 后合计 90：S 27 / G 41 / A 20 / B 2）。
 
 #### C 步骤2：A 段 20 处前置逐处核对（2026-11-08）
 
@@ -551,3 +554,48 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   仅白名单调用点，仍计入旧入口扫描口径）。
 - **性能**：本步不在评分热路径，`npm run bench` 通过（`gradeMany` 4.86–4.87 ≤ 5.35，
   `grade` 2.71–2.74 ≤ 2.90），无回退。
+
+#### C 步骤5：测试/CI 默认开启严格读取（已完成，2026-11-08）
+
+- **门禁变更**：`scripts/_harness.mjs::createHarness` 在所有 Node 套件加载完全部模块后，
+  默认设置 `QB.Storage.__strictReads = true`；需要验证「宽松契约本身」的段落显式
+  `Storage.__strictReads = false`（或设 `QFORGE_STRICT_READS=0`），用完恢复 `true`。
+  生产默认仍由 `js/utils/storage.js` 的 `__strictReads: false` 决定（步骤6 单独评估）。
+- **先红（真实归类错误暴露）**：以 `HEAD 307250b` 的代码副本 + 本批 harness/测试跑
+  `node scripts/test-all.mjs` → **exit 1**，`idb.test.mjs` 首个失败为
+  `NotHydratedError: 题库未水合：bank=... key=null；严格模式 keys() 要求全量水合`
+  栈顶 `Storage.keys` ← `ReviewStore.bankIds` ← `ReviewStore.convertMetaLayouts`。
+  继续逐项放行后依次暴露：
+  1. **产品代码**：`ReviewStore.bankIds()` 用全局 `keys()` 枚举库 id —— 部分视图下静默漏库
+     （宽松）/直接抛错（严格），两个结果都不对。
+  2. **产品代码**：`Migration.ensureLayout()` 依赖 `bankIds()` 的结果，未水合库参与状态键转换会
+     在枚举阶段 fail-loud，中断迁移。
+  3. **测试侧归类错误**：`idb.test.mjs` 用 `getFresh/get` 断言「未水合库读不到」的前置（3 处）、
+     直接调用 `QB.Backup.readAllData()` 在部分视图取全量（1 处）、`storage.test` 的 adoptStore
+     夹具缺 `banks` 清单（严格模式无法确认全量视图，fail-closed 正确生效）。
+- **修法（均为语义更强的改写，不放宽断言）**：
+  - `ReviewStore.bankIds()`：先 `try { Storage.keys() }`，仅在 **`STORAGE_NOT_HYDRATED`** 时回退；
+    回退路径从 `banks` 元数据取候选库，并只对 `isBankHydrated(id)` 为真的库做 `keysScoped(id)`
+    枚举。全局视图成立时行为逐字不变（**同语义改写**）；部分视图下不再静默漏库（**语义更强**）。
+  - `Migration.ensureLayout()`：对 `bankIds()` 结果按 `isBankHydrated` 过滤，只转换已水合库；
+    其余库等下次启动/水合后收敛（**语义更强**：不再对不可见库做半途转换）。
+  - 测试侧全部改为作用域断言或生产同路径：`getFresh(...) === 'SENTINEL'` → `keysScoped(A)`
+    不含该键（**语义更强**：同时断言键不在同步视图）；`QB.Backup.readAllData()` →
+    `await DB.backup.export()`（**同语义改写**，走生产全量出口的 `ensureAll`）；
+    `storage.test` 夹具补 `KB.KEYS.banks`（**语义更强**：夹具与真实水合状态一致）。
+  - 静态冻结口径：`local-adapter` 49 → **51**、合计 88 → **90**（新增 2 个点均为
+    `bankIds` 的显式兜底枚举，已在归属表逐类登记；**不是为过门禁而放宽计数**）。
+- **红→绿实测**：
+  - 红：`test-all` **exit 1**（运行项 37 / 失败 1 / 断言 5511，失败项 2：`idb.test.mjs exit=1`
+    + 「断言合计 5511 ≠ 基线 5906」——idb 段落在 `bankIds` 处中断，后续断言未执行）；
+    逐项修复过程中另见 `storage.test` exit 1、`backup-hydration` exit 1（冻结计数 51 / 90）。
+  - 绿：`node scripts/test-all.mjs` **exit 0**，**5907 通过 / 0 失败 / 37 运行项**；
+    `idb.test.mjs` **396 通过 / 0 失败**（断言 395 → 396，+1，只增不减）；
+    `backup-hydration.test.mjs` **52 通过 / 0 失败**（冻结清单更新为 51 / 90）。
+- **三道门禁（本步提交前实跑）**：`npm run verify:fast` **exit 0**（5907 断言 / 37 项）、
+  `npm run bench` **exit 0**（两次实跑：`grade` 比值 2.66–2.67 ≤ 2.90、`gradeMany` 4.75–4.90 ≤ 5.35、
+  heapUsed +5.03–5.08 MB ≤ 40 MB、`keys()` 首次构建 16.47–21.79 ms ≤ 40 ms）、
+  `node scripts/docs-check.mjs --static` **exit 0**。
+- **遗留风险**：严格守卫仅在 IDB 模式生效（LS 无「未水合」概念，`_isIdb()` 短路）；
+  `keys()` 严格判定依赖 `banks` 清单存在，清单缺失时 fail-closed（测试夹具已覆盖）；
+  `RevlogStore.clear` 仍用全局 `keys()`（只处理全局 `user:revlog:*`，全量视图才被调用）。
