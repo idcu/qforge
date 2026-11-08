@@ -46,7 +46,7 @@
 
 ### feat(scope): C 步骤5——测试/CI 默认开启严格读取（红→绿，5907/5907）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`9e8df2a`
 
 **核心改动**
 - `scripts/_harness.mjs`：`createHarness` 加载完全部模块后默认 `Storage.__strictReads = true`
