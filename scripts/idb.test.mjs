@@ -751,14 +751,22 @@ section('迁移 fail-loud：未水合库显式跳过 + 真实错误中止（Phas
   S.setSync(QB.KEYS.reviewMeta(bankB.id), { v: 3, keys: [itemB.contentHash] });
   await S.flush();
 
-  // 模拟分阶段水合：库B 物理存在，但同步视图与已水合集合都不含它
-  const removed = S.keys().filter((k) => k.indexOf(bankB.id) >= 0);
-  removed.forEach((k) => S._cache.delete(k));
+  // 模拟分阶段水合：只把当前库 A 的复习状态留在同步视图；库B 物理存在但状态不可见。
+  // 注意保留库里的小标记（reviewMeta/reviewRev）——真实启动作用域下非当前库的标记可见、
+  // 状态块不可见，迁移正是靠该标记判定「这个库还需要转换」。
   Array.from(S._chunkStates.keys()).forEach((k) => { if (k.indexOf(bankB.id) >= 0) S._chunkStates.delete(k); });
+  Array.from(S._cache.keys()).forEach((k) => {
+    if (k.indexOf('user:review:' + bankB.id + ':') === 0) S._cache.delete(k);
+  });
+  Array.from(S._pending.keys()).forEach((k) => {
+    if (k.indexOf('user:review:' + bankB.id + ':') === 0) S._pending.delete(k);
+  });
   if (S._hydratedBanks) S._hydratedBanks.delete(bankB.id);
   S._invalidateKeys();
-  eq(S.keys().filter((k) => k.indexOf(bankB.id) >= 0).length, 0,
-    '前置：库B在同步视图不可见（模拟未水合，移除 ' + removed.length + ' 个键）');
+  ok(S.isBankHydrated(bankA.id) === true && S.isBankHydrated(bankB.id) === false,
+    '前置：A 已水合、B 未水合');
+  eq(S.keys().filter((k) => k.indexOf('user:review:' + bankB.id + ':') === 0).length, 0,
+    '前置：库B复习状态在同步视图不可见（模拟未水合）');
 
   const out = QB.ReviewStore.convertMetaLayouts();
   ok(Array.isArray(out.skipped) && out.skipped.indexOf(bankB.id) >= 0,
@@ -826,6 +834,122 @@ section('跨标签 fail-loud：读失败保留缓存并通知（Phase 0 批次1-
   off();
   eq(S.get('theme'), 'dark', 'LS 解析失败保留本地值（不被当作删除）');
   ok(errs.length === 1, 'LS 解析失败经 onError 可观测（实测 ' + errs.length + ' 次）');
+}
+
+section('分阶段水合：启动只水合当前库 + ensureBank（Phase 0 批次2）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  const A = await Q1.DB.banks.create({ name: '当前库A' });
+  const B = await Q1.DB.banks.create({ name: '其它库B' });
+  const C = await Q1.DB.banks.create({ name: '未水合库C' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(5, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk(7, 'B'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(C.id, mk(3, 'C'), { dedupe: false, mode: 'overwrite' });
+  const aItems = (await Q1.DB.questions.list(A.id, {})).items;
+  const bItems = (await Q1.DB.questions.list(B.id, {})).items;
+  const cItems = (await Q1.DB.questions.list(C.id, {})).items;
+  await Q1.DB.reviews.record(A.id,
+    { [aItems[0].contentHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: aItems[0].contentHash, b: A.id, r: 3, t: 1000 }]);
+  await Q1.DB.reviews.record(B.id,
+    { [bItems[0].contentHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: bItems[0].contentHash, b: B.id, r: 3, t: 1000 }]);
+  await Q1.DB.reviews.record(C.id,
+    { [cItems[0].contentHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: cItems[0].contentHash, b: C.id, r: 3, t: 1000 }]);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  // 模拟新开页面：同一 IDB + 同一 LocalStorage（各自独立内存缓存，等价浏览器新标签）
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  const info = await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const scope = (Q2.Store.lastInit && Q2.Store.lastInit.scopeBank) || '';
+  eq(info.mode, 'idb', '新页面按 IDB 启动');
+  eq(scope, A.id, '启动水合作用域=当前库（实测 ' + (scope || '未记录') + '）');
+  eq((await Q2.DB.questions.list(A.id, {})).items.length, 5, '当前库题目首屏可见');
+  eq((await Q2.DB.questions.list(B.id, {})).items.length, 0, '非当前库题目不水合（等切库）');
+  eq(S.keys().filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length, 1,
+    '当前库复习键可见（实测 ' + S.keys().filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length + '）');
+  ok(S.keys().indexOf('user:review:' + B.id + ':' + bItems[0].contentHash) < 0,
+    '非当前库复习键不可见（不会为全量键视图付出启动成本）');
+  ok(S.isBankHydrated(A.id) === true && S.isBankHydrated(B.id) === false,
+    'isBankHydrated 按库判定');
+  // P2：keys() 必须合并 _pending，否则未落盘新键不可见
+  S.set('user:probePending', { v: 1 });
+  ok(S.keys().indexOf('user:probePending') >= 0, 'keys() 合并未落盘 _pending');
+  ok(typeof S.ensureBank === 'function', 'Storage.ensureBank 已实现');
+  if (typeof S.ensureBank === 'function') await S.ensureBank(B.id);
+  ok(S.isBankHydrated(B.id), 'ensureBank 后 B 已水合（实测 ' + S.isBankHydrated(B.id) + '）');
+  eq((await Q2.DB.questions.list(B.id, {})).items.length, 7, 'ensureBank 后 B 题目可见');
+  ok(S.keys().indexOf('user:review:' + B.id + ':' + bItems[0].contentHash) >= 0,
+    'ensureBank 后 B 复习键可见');
+  eq(S.keys().filter((k) => k.indexOf('user:review:' + A.id + ':') === 0).length, 1,
+    'ensureBank 不影响已水合库的可见性');
+
+  // 全量操作（备份）必须自己 ensureAll：库C 从未按库水合，仍要被覆盖
+  ok(!S.isBankHydrated(C.id), '前置：库C 仍未水合');
+  eq((await Q2.DB.questions.list(C.id, {})).items.length, 0, '前置：库C 题目在同步视图不可见');
+  const bk = await Q2.Backup.buildBackup();
+  const cShards = Object.keys(bk.data).filter((k) => k.indexOf(Q2.KEYS.questions(C.id) + ':') === 0);
+  ok(cShards.length >= 1, '备份覆盖未水合库C的题目分片（实测 ' + cShards.length + ' 个分片键）');
+  const cTable = bk.data[Q2.KEYS.review(C.id)];
+  ok(!!(cTable && Object.keys(cTable).length >= 1), '备份覆盖未水合库C的复习状态（折叠整表）');
+  ok(S.isBankHydrated(C.id), '备份的 ensureAll 后库C 已水合');
+  eq((await Q2.DB.questions.list(C.id, {})).items.length, 3, '备份后库C 题目可见');
+}
+
+section('分阶段水合：删除非当前库按库水合后再级联清理（Phase 0 批次2）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  const A = await Q1.DB.banks.create({ name: '当前库A' });
+  const C = await Q1.DB.banks.create({ name: '待删库C' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(2, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(C.id, mk(3, 'C'), { dedupe: false, mode: 'overwrite' });
+  const cItems = (await Q1.DB.questions.list(C.id, {})).items;
+  await Q1.DB.reviews.record(C.id,
+    { [cItems[0].contentHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: cItems[0].contentHash, b: C.id, r: 3, t: 1000 }]);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  ok(!S.isBankHydrated(C.id), '前置：待删库C 未水合');
+  eq((await Q2.DB.questions.list(C.id, {})).items.length, 0, '前置：待删库C 题目不可见');
+  await Q2.DB.banks.remove(C.id, { cascade: true });
+  await S.flush();
+  eq(await Q2.Store.get(Q2.KEYS.questionsMeta(C.id)), undefined,
+    '删除非当前库：题目清单已从 IDB 物理删除（实测 ' + JSON.stringify(await Q2.Store.get(Q2.KEYS.questionsMeta(C.id))) + '）');
+  eq(await Q2.Store.get(Q2.KEYS.questionShard(C.id, 0)), undefined, '删除非当前库：题目分片已从 IDB 物理删除');
+  ok(await Q2.Store.get(Q2.KEYS.reviewChunkOfHash(C.id, cItems[0].contentHash)) === undefined,
+    '删除非当前库：复习块已从 IDB 物理删除');
+  eq((await Q2.DB.questions.list(A.id, {})).items.length, 2, '删除非当前库不影响当前库数据');
 }
 
 /* ============================================================ */

@@ -227,12 +227,12 @@
    * 切库唯一实现（Phase 0 批次1-5，事务化）：先把目标库数据变为可见，再持久化与切状态，
    * 最后渲染。任一步失败都把 State/持久化/视图整体回滚到原库——不允许出现
    * 「bankId 已切、计数半更新、状态栏仍旧库」的中间态。
-   * 批次 2 分阶段水合落地后，把 ensureAll 换成按库 ensureBank(id)，其余流程不变。
+   * 分阶段水合（Phase 0 批次2）：切库前只 `ensureBank(nextId)`，不再全量水合。
    */
   async function switchBank(nextId) {
     const prev = { bankId: State.bankId, view: State.view };
     try {
-      await QB.Storage.ensureAll();
+      if (nextId) await QB.Storage.ensureBank(nextId); // 只水合目标库（分阶段水合主路径）
       await QB.DB.setCurrentBankId(nextId);
       State.bankId = nextId || null;
       State.view = State.bankId ? 'home' : 'banks';
@@ -1808,6 +1808,25 @@
         UI.toast('复习索引未完整整理：跳过 ' + skipped + ' 个未水合库、失败 ' + failed
           + ' 个（数据未受影响，稍后自动重试）', 'err');
       }
+    }
+    // 分阶段水合（Phase 0 批次2）：启动只水合当前库，其它库的旧清单整理延后到首屏空闲。
+    // 这里补一次「全量可见 → 再转换」，让上面提示的「稍后自动重试」真正兑现；失败必须可见。
+    if (runRes && runRes.reviewMeta && Array.isArray(runRes.reviewMeta.skipped) &&
+        runRes.reviewMeta.skipped.length && QB.Storage.mode === 'idb') {
+      const retry = async () => {
+        try {
+          await QB.Storage.ensureAll();
+          const again = QB.ReviewStore.convertMetaLayouts();
+          if (again.failed || (again.anomalies && again.anomalies.length)) {
+            notifyBackgroundError('复习索引后台整理失败',
+              new Error('失败 ' + again.failed + ' 个、异常 ' + again.anomalies.length + ' 个'));
+          }
+        } catch (e) {
+          notifyBackgroundError('复习索引后台整理失败', e);
+        }
+      };
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(() => { retry(); }, { timeout: 5000 });
+      else setTimeout(() => { retry(); }, 800);
     }
     // F2：另一标签持锁迁移，或它已在本次启动期间完成切换（本标签仍停在 LS），都要等待/切换。
     // 本标签不写 LocalStorage（会被迁移后的清理当旧数据删除），期间写入进内存队列，切换后补写 IDB。

@@ -9,6 +9,61 @@
 
 ## 最新记录
 
+### perf(hydration): 启动分阶段水合（Phase 0 批次2）
+
+**Commit Hash**：`（待回填，见紧随其后的 docs(arch) 提交）`
+
+**核心改动**
+- `js/data/store.js`：`readScopeBank()` 单事务读 IDB 的 `banks` + `meta:currentBank`（合法当前库优先、
+  否则第一库，口径同 `DB.getCurrentBankId`）；`init()` 只水合当前库并暴露 `lastInit.scopeBank`；
+  `readAll(fromIdb, strict, {bank})` / `readBank(bankId)` 作用域读；`txGetAll/txGetAllSplit` 作用域库取
+  全部键、其它库仅 `reviewMeta`/`reviewRev`；Node 无 `IDBKeyRange` 降级路径同步支持作用域。
+- `js/utils/storage.js`：抽出 `_mergePhysicalRecords()` 供 `ensureAll`/`ensureBank` 共用（跳过在途
+  `_pending/_ops`，块状态按逻辑键判定）；新增 `ensureBank(bankId)`；`isBankHydrated` 改为只认复习块/
+  逻辑复习键（移除 `reviewMeta/reviewRev`/banks 元数据规则）；`_hydratedBanks===null` 表示全量视图；
+  `keys()` 合并 `_pending`（未落盘新键立即可见）。
+- 全量操作前置 `ensureAll`：`Backup.saveAutoBackup`、`Backup.applyData`（恢复）、图片 GC、
+  `Migration.doRun`（锁内，失败释放锁并中止）；按库操作前置 `ensureBank`：`switchBank`（替换原
+  `ensureAll`）、`Exporters.collect`、`DataIO.commitImport`、`banks.remove` 级联。
+- `convertMetaLayouts` 未水合分支只对 v3 清单（`reviewMeta={v:3,keys:[...]}`）计入 `skipped`；
+  boot 提示后经 `requestIdleCallback`（兜底 800ms）后台补整理（`ensureAll → convertMetaLayouts`），
+  `failed/anomalies` 或异常经 `notifyBackgroundError('复习索引后台整理失败')` 可见。
+- 公共抽象与影响范围：`Storage.ensureAll/ensureBank/_mergePhysicalRecords`、`Store.readBank/
+  readAll(getAll) 作用域参数/readScopeBank/lastInit.scopeBank`。**影响范围**：`Storage.keys()/get()`
+  同步签名不变，但启动后默认只覆盖当前库——任何「读全量键/跨库数据」的新调用方必须先
+  `ensureAll`（全量）或 `ensureBank(id)`（按库）；本提交已把现有 9 处全量/按库路径全部补齐。
+- 文档：`docs/ARCHITECTURE.md` 新增 §4.21 与 §5 抽象表；`docs/DATABASE.md` 新增 §5.1 作用域表；
+  `docs/STORAGE.md` 更新 `isBankHydrated` 口径与补齐入口；`docs/BENCH.md` 新增 §4 验收数据；
+  `docs/TESTING.md` idb 172→**198**、合计 5611→**5637**；`docs/DEVELOPMENT.md` SW 版本。
+- SW：`qforge-v39` → `qforge-v40`，`sw-baseline` 重算（digest `fccf2bbb3e4d…`）。
+
+**验证数据（红→绿）**
+- 红（新增「分阶段水合」段，stash 4 个业务文件）：`node scripts/idb.test.mjs` → **178 通过 / 8 失败，exit 1**。
+  实测：`lastInit.scopeBank` 缺失、非当前库题目/复习键仍可见、`keys()` 未合并 `_pending`、无 `ensureBank`。
+- 红（删非当前库级联单项：去掉 `banks.remove` 的 `ensureBank`）→ **196 通过 / 2 失败，exit 1**。
+  实测：题目清单被删，但 `questions:<C>:1` 分片与 `user:reviewChunk:<C>:xx` 块仍留在 IDB（孤儿）。
+- 绿：`node scripts/idb.test.mjs` → **198 通过 / 0 失败，exit 0**；`node scripts/app-boot.test.mjs` → **116 通过 / 0 失败，exit 0**。
+- 迁移守卫：浏览器实测 v6→v7 迁移块数必须 == 库数×256（4×256=1024），否则直接抛错；本轮通过。
+- 性能（Chromium 158.0.8127.18，headless；50k 题/4 库/1281 记录；每轮新建 page、light 埋点、
+  同轮单页面、gap=0；两批各 20 轮）：合并 **n=40**，init **P50 60.1 ms / P95 64.8 ms / 最大 78.1 ms /
+  >200 共 0 轮**；同口径基线 161.6 / 177.4 / 203.3 / 1 轮 → P50 降幅 **62.8%**（门槛 ≤90 且 ≥40%：PASS），
+  P95 ≤200：PASS。`getAllMax` P50 35.8 / P95 38.8 / max 44.1 ms（基线 max 166.2）。
+- 最大长任务：独立一批 20 轮（light + 被动 `PerformanceObserver('longtask')`）→ **83 ms**
+  （中位 54 ms，每轮 1 个，均落在 init 结束后的首屏渲染窗口；20/20 < 200 ms）。该批 init P50 58.7 / P95 64.0。
+- 首屏逐项（快照）：首页 `total=12500`、`dueReview=200`、queue 六项与基线逐字相同；菜单 9 项文案相同；
+  统计页「已学 12500/12500」「未来 7 天 12500/0/0/0/0/0/0」「概览全 0」逐字相同。
+  真实 UI 切库（`#bank-switch` change → `switchBank` → `ensureBank`）：`total=12500 / dueReview=200`（基线同）。
+- 门禁实跑退出码：见下方「门禁」小节（以实跑为准）。
+
+**遗留 TODO / 风险**
+- `Storage.keys()` 启动后只含当前库（`total=12572`，基线 50264）——本批次的声明边界，已写入
+  `docs/DATABASE.md §5.1`；新增跨库读路径必须自行前置补齐。
+- 后台补整理只在 boot 且 IDB 模式触发；长期不重启的会话里非当前库保持 `skipped`，切换时由
+  `ensureBank` 补齐（不阻塞首屏，但首屏提示会保留）。
+- 迁移路径多一次 `ensureAll` 全量读（一次性成本，未计入首屏 P50）。
+- `data-io` 的合并预检已按库水合；若未来出现「跨库批量导入」需复查预检口径。
+- `bank-create` 仍未纳入 `switchBank` 事务（批次1-5 遗留）；新建库本身为空，暂不触发懒加载缺口。
+
 ### fix(app): 切库事务化（Phase 0 批次1-5）
 
 **Commit Hash**：`c7aaecf`

@@ -215,6 +215,12 @@
       showImportFailure(result, returnFocusTo);
       return null;
     }
+    // 分阶段水合（Phase 0 批次2）：导入是整库读写（合并预检读库内已有题、写入重排分片），
+    // 先确保目标库可见；否则对非当前库的合并预检会基于空视图给出错误结论。
+    if (bank && bank.id && QB.Storage && QB.Storage.mode === 'idb' &&
+        typeof QB.Storage.isBankHydrated === 'function' && !QB.Storage.isBankHydrated(bank.id)) {
+      await QB.Storage.ensureBank(bank.id);
+    }
     // C026：单库批注总量预检（先于容量预检，避免被「存储空间不足」抢先、掩盖真正原因）。
     // 超限一律拒绝写入并给出可读处理方式，不静默截断/丢弃批注。
     const annotationCheck = QB.Annotation && QB.Annotation.checkTotal

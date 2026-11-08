@@ -92,6 +92,25 @@ users 1 ──<（wrong_questions / favorites / attempts / sessions）   # 多�
 4. 校验：比对 `banks`/`questions` 行数与 `content_hash` 集合。
 5. 前端 `config.js` 切 `DATA_BACKEND='api'`。
 
+## 5.1 首屏水合作用域（Phase 0 批次2）
+
+IDB 模式下启动**只水合当前库**，作用域单一来源是 `Store.readScopeBank()`：单事务读 `kv` 的
+`banks` 与 `meta:currentBank`（当前库合法 → 用它；否则第一库），记入 `Store.lastInit.scopeBank`。
+
+| 记录类别 | 启动可见性 |
+|---|---|
+| `banks`、`meta:currentBank`、引导标记（`meta:storageBackend` 等） | ✅ 全局键，必读 |
+| 当前库 `user:reviewChunk:<bank>:` 块、`questions:<bank>:` 分片与 meta、`wrong:/favorite:/history:<bank>` | ✅ 全量读 |
+| 其它库 `reviewMeta:<bank>` / `reviewRev:<bank>` | ✅ 仅这两枚小标记（迁移提示用） |
+| 其它库复习块 / 题目分片 / 按库小键 | ❌ 默认不可见，按需补齐 |
+
+补齐入口：全量操作前 `Storage.ensureAll()`（备份导出/自动备份/恢复/迁移/图片 GC）；
+按库操作前 `Storage.ensureBank(bankId)`（切库/导出题库/导入题目/删库级联）。
+`Storage.keys()/get()` 签名不变，但未补齐库默认返回「不可见」——这是本批次声明的语义边界。
+
+> 迁移（schema < 7）在锁内先 `ensureAll`：否则 v6→v7 只转换当前库，其它库的 per-hash 复习键
+> 会残留、schema 却被置为 7（静默数据缺口）。
+
 ## 6. 容量与性能参考（实测）
 
 Node v24.14.0，`scripts/bench.mjs`（`--expose-gc`）2026-10-19 实跑（采样 10 次取中位数）：

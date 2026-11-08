@@ -500,12 +500,54 @@
     return req;
   }
 
-  function txGetAll() {
-    return runTx('readonly', (store, tx, box) => { bind(store, 'getAll', undefined, box); });
+  /**
+   * 启动作用域库（分阶段水合）：读 IDB 里的 `banks` 与 `meta:currentBank`，按
+   * `DB.getCurrentBankId` 的口径（当前库合法 → 用它；否则第一库；无库 → null）。
+   * 单事务两个小记录，实测成本远低于一次全量读；失败返回 null → 调用方退回全量读。
+   * @returns {Promise<string|null>}
+   */
+  async function readScopeBank() {
+    try {
+      let banksValue = null;
+      let current = null;
+      await runTx('readonly', (store) => {
+        const rb = store.get(QB.KEYS.banks);
+        rb.onsuccess = () => { banksValue = rb.result ? rb.result.value : null; };
+        const rc = store.get(QB.KEYS.metaCurrentBank);
+        rc.onsuccess = () => { current = rc.result ? rc.result.value : null; };
+      });
+      const ids = Array.isArray(banksValue)
+        ? banksValue.map((b) => (b && typeof b.id === 'string' ? b.id : null)).filter(Boolean)
+        : [];
+      if (!ids.length) return null;
+      return (typeof current === 'string' && ids.indexOf(current) >= 0) ? current : ids[0];
+    } catch (_) {
+      return null;
+    }
   }
 
   /**
-   * 分批读全部物理记录（启动水合唯一入口）。
+   * 单事务整库读取（Node 无 IDBKeyRange / 区间读失败时的降级路径）。
+   * `opts.bank`：分阶段水合作用域——只保留全局键、该库全部键，以及**其它库的小体积
+   * 复习布局标记**（`reviewMeta`/`reviewRev`，供迁移判定是否需要水合）；其它库的
+   * 题库分片与复习块一律丢弃（否则会退化成全量读）。
+   */
+  async function txGetAll(opts) {
+    const recs = await runTx('readonly', (store, tx, box) => { bind(store, 'getAll', undefined, box); });
+    const want = opts && typeof opts.bank === 'string' ? opts.bank : null;
+    if (!want) return recs;
+    const banks = new Set();
+    recs.forEach((r) => { const t = tagOf(r.key); if (t.bank) banks.add(t.bank); });
+    if (!banks.has(want)) return recs; // 作用域库不存在（脏 meta）→ 退回全量，保证不丢数据
+    return recs.filter((r) => {
+      const t = tagOf(r.key);
+      if (!t.bank || t.bank === want) return true;
+      return t.kind === 'reviewMeta' || t.kind === 'reviewRev';
+    });
+  }
+
+  /**
+   * 分批读物理记录（启动水合唯一入口）。
    * 单次整库 `getAll` 把 10MB 状态一次性反序列化，真机实测 272–327ms；因此按
    * 「库 × kind」拆成 8 个**主键前缀区间**请求，每请求只承载一个库的一类数据。
    * 真机同轮对比（同一 50k 库）：
@@ -516,10 +558,14 @@
    * 关键路径只依赖 1 个小记录 `banks`：拿到库清单立刻并发发 8 个区间读；
    * `getAllKeys`（1281 键，实测 6.7ms）与 rest 小键补读**并行**进行，不挡大块读。
    * 依赖键完整性而非索引：索引未覆盖的记录按物理键逐条补读。
+   * `opts.bank`（分阶段水合，Phase 0 批次2）：只发该库的块/分片区间读；其它库仅在
+   * rest 里保留小体积 reviewMeta/reviewRev（迁移判定用），不读题库分片与复习块。
+   * @param {{bank?:string}} [opts]
    * @returns {Promise<Array<Object>>} 物理记录（顺序不保证）
    */
-  async function txGetAllSplit() {
-    if (typeof IDBKeyRange === 'undefined') return txGetAll(); // Node 内存 IDB 无 key range
+  async function txGetAllSplit(opts) {
+    if (typeof IDBKeyRange === 'undefined') return txGetAll(opts); // Node 内存 IDB 无 key range
+    const want = opts && typeof opts.bank === 'string' ? opts.bank : null;
     const banks = [];
     let keysTask;
     let banksValue;
@@ -527,7 +573,7 @@
       banksValue = await runTx('readonly', (store, tx, box) => {
         bind(store, 'get', QB.KEYS.banks, box, (r) => (r ? r.value : null));
       });
-    } catch (_) { return txGetAll(); }
+    } catch (_) { return txGetAll(opts); }
     if (Array.isArray(banksValue)) {
       banksValue.forEach((b) => { if (b && typeof b.id === 'string' && banks.indexOf(b.id) < 0) banks.push(b.id); });
     }
@@ -536,12 +582,14 @@
       .catch(() => null);
     if (!banks.length) { // 无 banks 记录时从物理键回推库清单（降级路径，才需要等键清单）
       const keys = await keysTask;
-      if (!Array.isArray(keys)) return txGetAll();
+      if (!Array.isArray(keys)) return txGetAll(opts);
       keys.forEach((k) => { const p = tagOf(k); if (p.bank && banks.indexOf(p.bank) < 0) banks.push(p.bank); });
-      if (!banks.length) return txGetAll();
+      if (!banks.length) return txGetAll(opts);
     }
+    // 作用域库不在清单里（脏 meta）→ 退回全量，保证不丢数据
+    const targets = (want && banks.indexOf(want) >= 0) ? [want] : banks;
     const jobs = [];
-    banks.forEach((bank) => {
+    targets.forEach((bank) => {
       jobs.push([REVIEW_CHUNK_PREFIX + bank + ':', REVIEW_CHUNK_PREFIX + bank + ':\uffff']);
       jobs.push([QUESTION_PREFIX + bank + ':', QUESTION_PREFIX + bank + ':\uffff']);
     });
@@ -550,11 +598,14 @@
       if (!Array.isArray(keys)) return;
       const rest = keys.filter((k) => {
         if (isBootstrap(k)) return false;
-        for (let i = 0; i < banks.length; i++) {
-          if (k.indexOf(REVIEW_CHUNK_PREFIX + banks[i] + ':') === 0) return false;
-          if (k.indexOf(QUESTION_PREFIX + banks[i] + ':') === 0) return false;
+        const t = tagOf(k);
+        // 分阶段水合：其它库只保留小体积复习布局标记（其余一律不读，避免退化成全量）
+        if (want && t.bank && t.bank !== want) {
+          return t.kind === 'reviewMeta' || t.kind === 'reviewRev';
         }
-        return true;
+        // 块/题库分片已由 jobs 区间读覆盖，rest 不再逐键补读（含未作用域的其它库）
+        return t.kind !== 'reviewChunk' && t.kind !== 'questionShard' &&
+          t.kind !== 'questionsMeta' && t.kind !== 'questionsLegacy';
       });
       if (!rest.length) return;
       return runTx('readonly', (store, tx) => {
@@ -572,7 +623,7 @@
         }))),
         restTask
       ]).then((r) => r[0]);
-    } catch (_) { return txGetAll(); }
+    } catch (_) { return txGetAll(opts); }
     const out = [];
     parts.forEach((recs) => {
       if (!recs) return;
@@ -861,8 +912,12 @@
           return Store.enterFallback('idb-unavailable', det.reason, false);
         }
         let records;
+        // 分阶段水合（Phase 0 批次2）：启动只水合当前库；其它库靠 Storage.ensureBank / ensureAll。
+        // 当前库从 IDB 的 banks + meta:currentBank 读取（口径同 DB.getCurrentBankId）；
+        // 读不到/无库 → 传 null，readAll 退回全量，保证不丢数据。
+        const scopeBank = await readScopeBank();
         try {
-          records = await Store.readAll(true, true);
+          records = await Store.readAll(true, true, scopeBank ? { bank: scopeBank } : undefined);
         } catch (e) {
           // IDB 打开成功但读取失败（配额/损坏/事务异常）→ 安全回落 LS，不白屏
           const detail = ((e && e.name) || 'error') + ':' + ((e && e.message) || e);
@@ -891,7 +946,10 @@
           }
         }
         Store.mode = 'idb';
-        Store.lastInit = { mode: 'idb', available: true, records: records, cleanup: cleanup };
+        Store.lastInit = {
+          mode: 'idb', available: true, records: records, cleanup: cleanup,
+          scopeBank: (typeof scopeBank === 'string' && scopeBank) || null
+        };
         return Store.lastInit;
       }
       Store.mode = 'ls';
@@ -902,15 +960,16 @@
       return Store.lastInit;
     },
 
-    /** 启动水合：全部业务键 + LocalStorage 引导标记（fromIdb 强制读 IndexedDB 侧；strict 时读失败抛出） */
-    async readAll(fromIdb, strict) {
+    /** 启动水合：全部业务键 + LocalStorage 引导标记（fromIdb 强制读 IndexedDB 侧；strict 时读失败抛出）
+     *  `opts.bank`：分阶段水合作用域（只水合该库；见 txGetAllSplit / txGetAll）。 */
+    async readAll(fromIdb, strict, opts) {
       if (!(fromIdb || Store.mode === 'idb')) {
         const map = new Map();
         lsKeys().forEach((k) => { map.set(k, lsGet(k)); });
         return map;
       }
       try {
-        const recs = await txGetAllSplit();
+        const recs = await txGetAllSplit(opts);
         // 复习状态块**不在启动时展开**成 50k 逻辑键：块键 → 状态对象直接进 Map，
         // 由 `Storage.adoptStore` 建二级缓存（get/keys 仍同步，语义不变）。
         // 真机打点：展开本身计算仅 ~20ms，但 50k Map + 50k 字符串在刚反序列化 10MB 的堆上
@@ -933,6 +992,18 @@
         lsKeys().forEach((k) => { map.set(k, lsGet(k)); });
         return map;
       }
+    },
+
+    /**
+     * 按库水合（分阶段水合唯一入口）：读取该库全部物理键 + 全局键（strict，读失败抛出）。
+     * 与启动水合同形状（复习块已拆成状态对象），供 `Storage.ensureBank` 直接合并。
+     * @param {string} bankId
+     * @returns {Promise<Map<string,*>>}
+     */
+    async readBank(bankId) {
+      const id = String(bankId || '');
+      if (!id) throw new Error('Store.readBank：缺少 bankId');
+      return Store.readAll(true, true, { bank: id });
     },
 
     /**

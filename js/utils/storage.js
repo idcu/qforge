@@ -208,6 +208,33 @@
     },
 
     /**
+     * 把物理记录合并回同步视图（`ensureAll` / `ensureBank` 共用，避免复制粘贴）。
+     * 在途写入/删除以本标签为准，不覆盖（极少数与 await 并发的写入）。
+     * @param {Map<string,*>} records
+     */
+    _mergePhysicalRecords(records) {
+      const S = QB.Store;
+      records.forEach((v, k) => {
+        if (this._pending.has(k) || this._ops.has(k)) return;
+        if (S && S.isReviewChunkKey && S.isReviewChunkKey(k)) {
+          const states = (v && typeof v === 'object' && v.s && typeof v.s === 'object') ? v.s
+            : (v && typeof v === 'object' ? v : null);
+          if (!states) return;
+          const parts = S.reviewChunkParts ? S.reviewChunkParts(k) : null;
+          const cur = this._chunkStates.get(k) || {};
+          Object.keys(states).forEach((h) => {
+            const logical = parts ? QB.KEYS.reviewState(parts.bank, h) : null;
+            if (logical && (this._pending.has(logical) || this._ops.has(logical))) return;
+            cur[h] = states[h];
+          });
+          this._chunkStates.set(k, cur);
+          return;
+        }
+        this._cache.set(k, v);
+      });
+    },
+
+    /**
      * 全量可见性保障（**唯一实现**）：备份/迁移等「必须看到全部物理数据」的路径前置调用。
      * 同步视图只保证「已水合的库」可见；本方法把持久层全部记录合并回 `_cache/_chunkStates`，
      * 使 `keys()/get()` 覆盖全部物理键。既有同步签名不变（本方法自身异步）。
@@ -227,25 +254,7 @@
       if (!records || typeof records.forEach !== 'function') {
         throw new Error('Storage.ensureAll：QB.Store.readAll 返回值无效');
       }
-      records.forEach((v, k) => {
-        // 在途写入/删除以本标签为准，避免重读覆盖（极少数与 await 并发的写入）
-        if (this._pending.has(k) || this._ops.has(k)) return;
-        if (S.isReviewChunkKey && S.isReviewChunkKey(k)) {
-          const states = (v && typeof v === 'object' && v.s && typeof v.s === 'object') ? v.s
-            : (v && typeof v === 'object' ? v : null);
-          if (!states) return;
-          const parts = S.reviewChunkParts ? S.reviewChunkParts(k) : null;
-          const cur = this._chunkStates.get(k) || {};
-          Object.keys(states).forEach((h) => {
-            const logical = parts ? QB.KEYS.reviewState(parts.bank, h) : null;
-            if (logical && (this._pending.has(logical) || this._ops.has(logical))) return;
-            cur[h] = states[h];
-          });
-          this._chunkStates.set(k, cur);
-          return;
-        }
-        this._cache.set(k, v);
-      });
+      this._mergePhysicalRecords(records);
       // ensureAll 后同步视图覆盖全部物理记录（等价于全量水合）
       this._hydratedBanks = null;
       this._invalidateKeys();
@@ -253,9 +262,37 @@
     },
 
     /**
-     * 从全量 records 推导「已水合的库」（adoptStore 专用）。
-     * 覆盖：复习块键所属库、逻辑状态键（含旧整表）、reviewMeta/reviewRev 键所属库；
-     * 另把 `banks` 元数据里没有任何复习物理键的库视为已水合（其转换本就是空操作）。
+     * 按库可见性保障（分阶段水合主路径，Phase 0 批次2）：把目标库的物理记录合并回同步视图。
+     * 与 `ensureAll` 共享合并逻辑；已水合库/全量视图下直接返回（不重复读盘）。
+     * 失败即 reject（备份在写前由调用方决定是否中止，切库由 `switchBank` 回滚）。
+     * @param {string} bankId
+     * @returns {Promise<{mode:string, records:number, bank:string}>}
+     */
+    async ensureBank(bankId) {
+      const id = String(bankId || '');
+      if (!id) throw new Error('Storage.ensureBank：缺少 bankId');
+      if (!this._isIdb()) return { mode: 'ls', records: 0, bank: id };
+      if (!this._hydratedBanks || this.isBankHydrated(id)) {
+        return { mode: 'idb', records: 0, bank: id };
+      }
+      const S = QB.Store;
+      if (!S || typeof S.readBank !== 'function') throw new Error('Storage.ensureBank：QB.Store.readBank 不可用');
+      if (this._pending.size || this._ops.size) await this.flush();
+      const records = await S.readBank(id);
+      if (!records || typeof records.forEach !== 'function') {
+        throw new Error('Storage.ensureBank：QB.Store.readBank 返回值无效');
+      }
+      this._mergePhysicalRecords(records);
+      this._hydratedBanks.add(id);
+      this._invalidateKeys();
+      return { mode: 'idb', records: records.size, bank: id };
+    },
+
+    /**
+     * 从物理 records 推导「复习状态完整可见的库」（adoptStore 专用）。
+     * 只认**承载复习状态的键**：复习块键、`user:review:<bank>:<hash>` 逻辑键、旧整表键；
+     * 不把 `banks` 元数据或 reviewMeta/reviewRev 标记当作已水合——分阶段水合下这些标记
+     * 对非当前库可见，但状态块不可见，误判会让迁移在空视图上做转换。
      * @param {Map<string,*>} records
      */
     _markHydratedFromRecords(records) {
@@ -272,17 +309,13 @@
           if (p) set.add(p.bank);
           return;
         }
-        if (k.indexOf('user:reviewMeta:') === 0) { set.add(k.slice('user:reviewMeta:'.length)); return; }
-        if (k.indexOf('user:reviewRev:') === 0) { set.add(k.slice('user:reviewRev:'.length)); return; }
         if (k.indexOf('user:review:') === 0) addBankOf('user:review:', k);
       });
-      const banks = records.get(QB.KEYS.banks);
-      if (Array.isArray(banks)) banks.forEach((b) => { if (b && b.id) set.add(String(b.id)); });
       this._hydratedBanks = set;
     },
 
     /**
-     * 某库的复习数据是否已水合（同步视图可见）。
+     * 某库的复习状态是否已水合（同步视图可见）。
      * 未水合库的转换/枚举必须显式跳过并上报，**不得**当作「没有数据」静默处理。
      * @param {string} bankId
      * @returns {boolean} LS 模式恒 true；`_hydratedBanks=null`（全量视图）恒 true
@@ -292,10 +325,13 @@
       if (!this._hydratedBanks) return true;
       const id = String(bankId);
       if (this._hydratedBanks.has(id)) return true;
-      // 本标签会话内新建/写入的库：标记键或块已在可见视图里（否则会把刚写的库误判为未水合）
-      if (this._cache.has(QB.KEYS.reviewMeta(id) || '') || this._cache.has(QB.KEYS.reviewRev(id) || '')) return true;
+      // 本标签会话内新建/写入的库：复习状态键已在可见视图里（物理块或逻辑状态键）。
+      // 注意不能用 reviewMeta/reviewRev 判定——分阶段水合下非当前库的这两个小标记本就可见。
       const chunkPrefix = 'user:reviewChunk:' + id + ':';
       for (const k of this._chunkStates.keys()) { if (k.indexOf(chunkPrefix) === 0) return true; }
+      const statePrefix = 'user:review:' + id + ':';
+      for (const k of this._cache.keys()) { if (k.indexOf(statePrefix) === 0) return true; }
+      for (const k of this._pending.keys()) { if (k.indexOf(statePrefix) === 0) return true; }
       return false;
     },
 

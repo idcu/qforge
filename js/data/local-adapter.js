@@ -425,7 +425,14 @@
       const list = (await banks.list()).filter((b) => b.id !== id);
       Storage.setSync(K.banks, list);
       invalidateSchedCache(id); // C019：删库后丢弃该库调度缓存
-      if (cascade) cascadeDelete(id); // 级联清理由唯一入口负责（见下方 cascadeDelete）
+      if (cascade) {
+        // 分阶段水合（Phase 0 批次2）：级联删除按库枚举键（分片/复习状态），先确保该库可见；
+        // 否则删除非当前库只会清掉元数据，题目与复习状态成为孤儿（占用空间且不随库删除）。
+        if (Storage.mode === 'idb' && typeof Storage.isBankHydrated === 'function' && !Storage.isBankHydrated(id)) {
+          await Storage.ensureBank(id);
+        }
+        cascadeDelete(id); // 级联清理由唯一入口负责（见下方 cascadeDelete）
+      }
     }
   };
 
@@ -1172,7 +1179,11 @@
       ids.forEach((bankId) => {
         out.banks++;
         if (typeof Storage.isBankHydrated === 'function' && !Storage.isBankHydrated(bankId)) {
-          out.skipped.push(bankId);
+          // 分阶段水合（Phase 0 批次2）：非当前库的复习状态不可见。只有仍带 v3 历史清单
+          // （真的需要逐条校验/压缩）才计入 skipped 并上报；已是新布局/无清单的库无需水合，
+          // 静默忽略——否则每次启动都会把「无需转换」也报成未整理。
+          const raw = Storage.getFresh(K.reviewMeta(bankId), null);
+          if (raw && raw.v === 3 && Array.isArray(raw.keys)) out.skipped.push(bankId);
           return;
         }
         const r = ReviewStore.convertMetaLayout(bankId);

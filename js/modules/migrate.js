@@ -722,6 +722,18 @@
         throw e;
       }
 
+      // 分阶段水合（Phase 0 批次2）：迁移按逻辑键全量枚举（v6→v7 建块/校验、v4→v5 逐库遍历），
+      // 必须先补齐全部物理记录；否则只看到当前库，会出现「只迁移一个库」的静默数据缺口。
+      if (idbUsable && QB.Storage.mode === 'idb') {
+        try { await QB.Storage.ensureAll(); }
+        catch (e) {
+          releaseLock(owner);
+          const err = new Error('迁移已中止：全量水合失败（' + ((e && e.message) || e) + '）');
+          err.cause = e;
+          throw err;
+        }
+      }
+
       // 迁移写入缓冲：仅 LS → IDB 迁移（fromVersion < 6）需要「业务键只进内存」。
       // v6→v7 已在 IDB 内改写布局，不需要缓冲：正常写入直接按新布局落盘，
       // 且失败时不改写 LS，无需快照。

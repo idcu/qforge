@@ -522,6 +522,12 @@
   async function collect(kind, bank) {
     const def = KINDS[kind];
     if (!def) throw new Error('不支持的导出对象：' + kind);
+    // 分阶段水合（Phase 0 批次2）：导出按库物化键，先确保目标库可见
+    // （题库列表可导出任意库，非当前库默认不在同步视图里）。
+    if (bank && bank.id && QB.Storage && QB.Storage.mode === 'idb' &&
+        typeof QB.Storage.isBankHydrated === 'function' && !QB.Storage.isBankHydrated(bank.id)) {
+      await QB.Storage.ensureBank(bank.id);
+    }
     const entries = await def.collect(bank);
     return { kind: kind, bank: bank, entries: entries };
   }

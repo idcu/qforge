@@ -134,10 +134,23 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   不假成功）→ `Store.readAll(true, true)` 全量读（strict 读失败抛错）→ 把普通键合并进 `_cache`、
   块状态合并进 `_chunkStates`（跳过 `_pending/_ops` 中仍在途的键，避免覆盖本标签更新/删除）→
   失效键视图。读失败/落盘失败一律 reject，调用方必须提示用户，**不得退回部分视图**。
-- **已水合库判定（`Storage.isBankHydrated(bankId)`）**：IDB 模式下由 `adoptStore()` 的 records 推导
-  （复习块键/逻辑状态键/`reviewMeta`/`reviewRev` 所属库，`banks` 元数据中的空库视为已水合）；
-  本标签会话内新写入的库若可见标记/块也算已水合；LS 模式恒 true。未水合库的转换/枚举必须显式
-  跳过并上报，不得当作「没有数据」。
+- **已水合库判定（`Storage.isBankHydrated(bankId)`）**：**只认复习数据**（`_chunkStates` 里的
+  `user:reviewChunk:<bank>:` 块，或 `_cache/_pending` 里的 `user:review:<bank>:` 逻辑键）；
+  **不得用 `reviewMeta`/`reviewRev`**——分阶段水合下非当前库的这两枚小标记本就可见，会导致误判。
+  `_hydratedBanks === null` 表示全量视图（LS / 迁移完成 / `ensureAll` 之后）。LS 模式恒 true。
+  未水合库的转换/枚举必须显式跳过并上报，不得当作「没有数据」。
+- **按库水合（`Storage.ensureBank(bankId)`，批次2）**：切库/按库导出/按库导入/删库前置。
+  flush（有在途写时）→ `Store.readBank(id)` → `_mergePhysicalRecords()` → `_hydratedBanks.add(id)`
+  → 失效键视图；失败 reject，调用方不得退回部分视图。LS 模式直接返回 `{mode:'ls'}`。
+- **按库读取（`Store.readBank(bankId)`）** 等价 `readAll(true, true, {bank})`；`Store.readAll/getAll`
+  新增可选作用域参数：作用域库取全部键，其它库只保留 `reviewMeta`/`reviewRev`（否则退回全量）。
+  **启动作用域来源**：`Store.readScopeBank()` 单事务读 IDB 的 `banks` + `meta:currentBank`，
+  合法当前库优先、否则第一库；结果记在 `Store.lastInit.scopeBank`。
+- **`keys()` 合并 `_pending`**：未落盘的新键在同步视图里立即可见（`_buildKeys` 与
+  `_logicalKeyVisible` 同构），避免「刚写入的键要等 flush 才出现」。
+- **全量操作清单（必须前置 `ensureAll`）**：备份导出 / 自动备份 / 恢复 `applyData` /
+  schema 迁移 / 图片 GC。**按库操作清单（前置 `ensureBank`）**：切库 / 导出题库 / 导入题目 /
+  删除题库级联。两者失败都必须中止并提示，禁止以部分视图继续。
 - **逻辑键视图缓存**：`Storage.keys()` 由 `_keysCache` + `_keysRev`/`_keysRevCached` 版本号控制，
   同一修订只物化一次（首次 `_buildKeys()`），版本不一致时整体重建；每次返回 `slice()`，
   调用方修改返回值不会污染缓存。

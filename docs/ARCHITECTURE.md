@@ -412,11 +412,32 @@ switchBank(nextId) = 快照 {bankId, view}
 - **失败语义**：任一环节（数据可见性、持久化、渲染）失败都整体回滚，**不允许**出现
   `bankId` 已切、计数半更新、状态栏仍旧库的中间态；回退持久化失败时叠加同错误去重的
   「回退当前题库失败」提示，不掩盖原始错误。
-- **批次 2 衔接**：分阶段水合落地后把 `ensureAll()` 换成按库 `ensureBank(nextId)`，
-  事务边界与回滚逻辑不变。
+- **批次 2 衔接（已落地）**：数据可见性一步从 `ensureAll()` 换成按库 `ensureBank(nextId)`，
+  事务边界与回滚逻辑不变；全量操作（备份/迁移/恢复/图片 GC）仍必须 `ensureAll`。
 - **验证**：`scripts/app-boot.test.mjs` 1.7（7 项）——注入 `DB.setCurrentBankId` 首次抛错后
   `State.bankId` 与原库持久化值均保持、状态栏停留原库、失败提示可见、0 unhandled rejection；
   恢复后正常切库生效并跟随新库。
+
+### 4.21 分阶段水合（Phase 0 批次2）
+
+- **启动作用域**：`Store.init()` 先单事务读 `banks` + `meta:currentBank`（`readScopeBank()`；
+  当前库合法 → 用它，否则第一库），只水合该库的复习块/题目分片/按库小键；
+  其它库只保留 `reviewMeta`/`reviewRev` 两枚小标记（迁移提示可见）。作用域记入 `Store.lastInit.scopeBank`。
+- **不建全量键视图**：启动期不物化 5 万级逻辑键（实测 139.3 ms 会抵消收益）；
+  `keys()` 按需从已水合库的块/缓存物化，并合并 `_pending`。
+- **按库惰性物化**：`Storage.ensureBank(bankId)` 在切库/导出/导入/删库前补齐目标库；
+  `Storage.isBankHydrated(bankId)` 只认复习数据（块或逻辑复习键）。
+- **全量操作前置 `ensureAll`**：备份导出、自动备份、恢复、schema 迁移、图片 GC。
+  迁移若不全量水合，v6→v7 会只迁移当前库（静默数据缺口），因此 `doRun` 在锁内先
+  `ensureAll`，失败即释放锁并中止。
+- **迁移结果的后台整理**：启动快速路径 `convertMetaLayouts` 对仍未水合的库显式 `skipped`；
+  boot 提示后经 `requestIdleCallback`（兜底 800ms）做一次 `ensureAll → convertMetaLayouts`，
+  `failed/anomalies` 或异常经 `notifyBackgroundError('复习索引后台整理失败')` 可见。
+- **契约**：`Storage.get/keys` 仍为同步签名；未水合库默认不可见（返回 `undefined`/不在 `keys()`），
+  调用方按上面的清单显式补齐——这是本批次声明的语义边界。
+- **验收（2026-11-08，Chromium 158.0.8127.18，50k/4 库，每轮新 page、light 埋点、gap=0）**：
+  `init` P50 **60.1 ms**（基线 161.6，降幅 **62.8%**）、P95 **64.8 ms**、最大 **78.1 ms**（40 轮，无 >200）；
+  首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`；最大长任务 **83 ms**。
 
 ## 5. 公共抽象与影响范围
 
@@ -441,6 +462,10 @@ switchBank(nextId) = 快照 {bankId, view}
 | `QB.WrongBook.addMany(bankId, questions)` | **R-02 错题批量写唯一入口**：一次筛选 + 一次整表读改写；适配器无 `wrongAddMany` 时串行 `wrongAdd` 降级 | `app.js recordWrongs`、第三方适配器回退 |
 | `QB.CONFIG.LIMITS.IMPORT_MAX_BYTES` + `runImport` 前置预检（R-20） | **导入体积唯一口径**：File/Blob `size`、二进制快照 `arrayBuffer.byteLength`；超限返回统一失败结构，读取前拒绝 | 文件/拖拽/URL 导入入口（全部经 `runImport`） |
 | `reviews.patch(bankId, delta, logs)`（可选） | 增量提交：api 模式只上行本批改动键（PATCH，O(改动数)）；local 与 record 共用同一合并/回滚实现；适配器未实现时 `SRSStore` 回退 `record` | srs-store.grade/gradeMany |
+| `Storage.ensureAll()` / `Storage.ensureBank(bankId)` | **全量/按库可见性唯一实现（Phase 0 批次2）**；两者共用 `_mergePhysicalRecords`（跳过在途 `_pending/_ops`，块状态按逻辑键判定）；失败 reject 不退回部分视图 | 备份导出、自动备份、`applyData`、迁移、图片 GC；切库、导出、导入、删库级联 |
+| `Storage.isBankHydrated(bankId)` | 库作用域可见性判定：只认复习块/逻辑复习键，不用 `reviewMeta/reviewRev`（分阶段水合下那两枚标记本就可见） | `ensureBank` 早退、迁移 `skipped` 判定、删库前置 |
+| `Store.readBank(bankId)` / `Store.readAll(fromIdb, strict, {bank})` | 作用域读：`readBank` = 单库全键；`readAll` 作用域库取全部键、其它库仅 `reviewMeta/reviewRev`，作用域缺失退回全量 | `Storage.ensureBank` / `init` |
+| `Store.readScopeBank()` / `Store.lastInit.scopeBank` | 启动作用域唯一来源：单事务读 `banks` + `meta:currentBank`（合法当前库优先，否则第一库）；结果同时暴露给诊断/测试 | `Store.init`、`scripts/idb.test.mjs` |
 | `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | app.js 统计页缓存诊断结果与 **P-6 forecast 缓存**，避免每次 render 全量扫 revlog/复习状态 |
 | `QB.OPTIONAL_CONTRACTS` + `QB.hasCapability` + `QB.assertOptional`（R-06 / R-02） | 可选契约的**唯一判定入口**：`reviews[get,patch]`、`revlog[revision]`、`progress[wrongAddMany]` 可缺失；`DB.init` 校验「提供则必须是函数」；领域模块用 `hasCapability` 检测并走文档化降级 | `SRSStore`（get/patch 降级）、`WrongBook.addMany`（wrongAddMany 降级）、`app.js` 统计页（revision 降级）、第三方适配器合规判定 |
 | `questions.revision()` + `bumpRev()` | **整库题目读缓存失效唯一机制**：任意题目写路径（create/update/remove/insertMany/级联/备份恢复）同步 +1；`QB.DB.loadQuestions` 以 `(bankId, rev)` 判定命中 | local-adapter / api-adapter 的 `backup.import`（C016：恢复也 bumpRev）、`DB.loadQuestions`、Node 断言 |

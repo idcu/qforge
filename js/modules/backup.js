@@ -403,6 +403,9 @@
    */
   async function saveAutoBackup(info) {
     const startedAt = new Date().toISOString();
+    // 分阶段水合（Phase 0 批次2）：自动备份是全量导出，先补齐全部物理记录；
+    // 失败即中止（迁移据此不进入任何数据改写）。
+    if (QB.Storage && typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
     if (hasIdb()) {
       const items = collectRawData();
       const meta = autoMeta(info, startedAt, items.length);
@@ -517,6 +520,9 @@
   async function applyData(data, mode) {
     data = data || {};
     const m = mode === 'merge' ? 'merge' : 'replace';
+    // 分阶段水合（Phase 0 批次2）：恢复是整库改写（replace 还要删「载荷外旧键」），
+    // 先补齐全部物理记录，否则只清理当前库、其它库残留数据会与新载荷叠加。
+    if (QB.Storage && typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
 
     if (m === 'merge') {
       Object.keys(data).forEach((k) => QB.Storage.set(k, data[k]));
@@ -934,6 +940,9 @@
         };
         modal.querySelector('[data-bk="gc"]').onclick = async () => {
           try {
+            // 分阶段水合（Phase 0 批次2）：图片 GC 要扫描全部题库题目，先补齐全部物理记录，
+            // 否则其它库引用的图片会被误判为孤儿删除。
+            if (QB.Storage && typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
             const [referenced, all] = await Promise.all([globallyReferencedAssetIds(), QB.Assets.ids()]);
             const orphans = all.length - referenced.length;
             if (orphans <= 0) { QB.UIRenderer.toast('没有未引用的图片（共 ' + all.length + ' 张）'); return; }
