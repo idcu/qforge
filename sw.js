@@ -12,7 +12,7 @@
  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
  */
-const CACHE = 'qforge-v36';
+const CACHE = 'qforge-v37';
 // 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
 const CACHE_PREFIX = 'qforge-';
 const CORE = [

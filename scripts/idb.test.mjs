@@ -779,6 +779,55 @@ section('迁移 fail-loud：未水合库显式跳过 + 真实错误中止（Phas
     'Migration.run 结果携带 skipped（实测：' + JSON.stringify(res.reviewMeta && res.reviewMeta.skipped) + '）');
 }
 
+section('跨标签 fail-loud：读失败保留缓存并通知（Phase 0 批次1-3）');
+{
+  const idb = createMemoryIDB();
+  const H = await makeHarness({ indexedDB: idb });
+  const QB = H.QB;
+  QB.DB.init();
+  QB.Store.writeMarker('idb');
+  await QB.Storage.initStore();
+  const S = QB.Storage;
+  const bank = await QB.DB.banks.create({ name: '跨标签库' });
+  await QB.DB.questions.insertMany(bank.id, [{
+    type: 'single', question: '跨标签题',
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }], { dedupe: false, mode: 'overwrite' });
+  await S.flush();
+  const beforeBanks = JSON.stringify(S.get(QB.KEYS.banks));
+  const beforeKeys = S.keys().length;
+  const errs = [];
+  const off = S.onError((e) => errs.push(e));
+  const origRead = QB.Store.readLogicalMany;
+  QB.Store.readLogicalMany = async () => { throw new Error('注入：跨标签读取失败'); };
+  try {
+    await S._handleIdbExternal({ type: 'write', keys: [QB.KEYS.banks] });
+  } finally {
+    QB.Store.readLogicalMany = origRead;
+    off();
+  }
+  eq(JSON.stringify(S.get(QB.KEYS.banks)), beforeBanks,
+    '跨标签读失败保留 banks 缓存（不被当作删除）');
+  eq(S.keys().length, beforeKeys, '读失败不减少同步视图键数');
+  ok(errs.length === 1 && String(errs[0] && errs[0].message).indexOf('注入') >= 0,
+    '读失败经 Storage.onError 可观测（实测 ' + errs.length + ' 次）');
+}
+{
+  // LS 分支：对端值 JSON 解析失败同样不得当作删除
+  const H = await makeHarness();
+  const QB = H.QB;
+  QB.DB.init();
+  await QB.Storage.initStore();
+  const S = QB.Storage;
+  S.set('theme', 'dark'); // 防抖待写：值只在内存缓存里（尚未落 LS），读失败不得删缓存
+  const errs = [];
+  const off = S.onError((e) => errs.push(e));
+  S._handleExternalChange({ key: S.fullKeyOf('theme'), newValue: '{坏 JSON' });
+  off();
+  eq(S.get('theme'), 'dark', 'LS 解析失败保留本地值（不被当作删除）');
+  ok(errs.length === 1, 'LS 解析失败经 onError 可观测（实测 ' + errs.length + ' 次）');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

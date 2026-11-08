@@ -312,7 +312,7 @@
             return;
           }
           if (d.type === 'write' && Array.isArray(d.keys)) {
-            this._handleIdbExternal(d).catch(() => { /* 跨标签同步失败不打断本标签 */ });
+            this._handleIdbExternal(d).catch((e) => this._notifyError(e));
           }
         };
         if (typeof this._bc.unref === 'function') this._bc.unref();
@@ -589,8 +589,15 @@
       const keys = d.keys.filter((k) => !(QB.Store && QB.Store.isReviewChunkKey && QB.Store.isReviewChunkKey(k)));
       if (!keys.length) return;
       // 逻辑视图批量读：复习状态键会自动解析回所在物理块（不复刻分块规则）
-      let values = {};
-      try { values = await QB.Store.readLogicalMany(keys); } catch (_) { values = {}; }
+      let values;
+      try {
+        values = await QB.Store.readLogicalMany(keys);
+      } catch (e) {
+        // fail-loud：读失败 ≠ 删除。保留本地缓存并通知（下一笔写入/刷新可恢复），
+        // 绝不把读取异常当成「对端已删除」清空内存视图（P1-7 实测会静默丢 banks）。
+        this._notifyError(e);
+        return;
+      }
       // 复用已重读的 values[k]：按键比较「处理前后可见性」，只有键集合真的变化才失效
       let changed = false;
       keys.forEach((k) => {
@@ -943,7 +950,8 @@
             this._pending.delete(key);
           }
         } catch (e) {
-          this._cache.delete(key);
+          // fail-loud：解析失败 ≠ 删除。保留本地缓存并通知，避免把不可解析的对端值当作删除。
+          this._notifyError(e);
         }
       }
       // beforeVisible=null 表示视图已过期：下一次 keys() 必然重建，无需再推版本
