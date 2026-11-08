@@ -44,7 +44,7 @@
 
 ### feat(scope): B 段补完——指示键白名单 + HashRemap 签名迁移（B 6/6）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`f2e6bbf`
 
 **核心改动**
 - `js/utils/storage.js`
@@ -90,7 +90,7 @@
 
 ### feat(scope): C 步骤4 收尾——评分写路径 6 处 + removeHash 迁 scoped（22/22）
 
-**Commit Hash**：`（待回填）`
+**Commit Hash**：`89e01e4`
 
 **核心改动**
 - `js/data/local-adapter.js`
