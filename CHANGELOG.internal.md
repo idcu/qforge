@@ -43,7 +43,7 @@
 
 ### feat(storage): C 步骤4 第三批 stateKeys/readMap 迁 scoped（13/22）
 
-**Commit Hash**：`本轮提交（hash 回填见紧随其后的 docs 提交）`
+**Commit Hash**：`3da4982`
 
 **核心改动**
 - `js/data/local-adapter.js`
