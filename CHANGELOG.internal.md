@@ -35,7 +35,7 @@
 
 ### feat(storage): 建库/进入新库补 ensureBank 前置并迁移 legacyReviewMap（B 段 4/6）
 
-**Commit Hash**：`（本次实现提交，hash 见随后的 docs 回填）`
+**Commit Hash**：`ae7261a`
 
 **核心改动**
 - `js/data/local-adapter.js`：`legacyReviewMap`（953）由宽松 `Storage.getFresh` 改为
