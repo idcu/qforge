@@ -599,3 +599,54 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 - **遗留风险**：严格守卫仅在 IDB 模式生效（LS 无「未水合」概念，`_isIdb()` 短路）；
   `keys()` 严格判定依赖 `banks` 清单存在，清单缺失时 fail-closed（测试夹具已覆盖）；
   `RevlogStore.clear` 仍用全局 `keys()`（只处理全局 `user:revlog:*`，全量视图才被调用）。
+
+#### C 步骤6：生产是否开启 strict —— go/no-go 裁定 **no-go**（生产行为不变）
+
+**结论**：本轮**不**在生产开启 `Storage.__strictReads`（`js/utils/storage.js` 保持 `false`）。
+依据是「成本可接受，但存在一条可达的生产失败路径且当前无真实浏览器验证」，不是凭感觉。
+
+**实测 1：成本可忽略，不是阻碍因素**（`tmp/` 临时脚本，同进程交替 3 轮取最小值，
+部分视图 A 已水合 / B 未水合，20 万次/轮）：
+
+| 入口 | `__strictReads=false` | `=true` | Δ |
+|---|---|---|---|
+| `get(全局 meta:currentBank)` | 8.8 ns | 15.2 ns | **+6.4 ns** |
+| `getFresh(全局 revlog)` | 14.8 ns | 20.2 ns | **+5.5 ns** |
+| `get(全局 history，缺失走默认值)` | 24.1 ns | 31.2 ns | **+7.1 ns** |
+| `getScoped(A state)`（内部委托 `get`） | 32.0 ns | 49.4 ns | +17.4 ns |
+| `getScopedFresh(A state)`（内部委托 `getFresh`） | 33.7 ns | 53.4 ns | +19.6 ns |
+
+`grade/gradeMany` 热路径已全量走作用域入口（步骤4），严格标志不进入评分路径；
+`npm run bench` 在 harness 严格模式下 **exit 0**（`grade` 2.66–2.67、`gradeMany` 4.75–4.90）。
+
+**实测 2：测试面全绿（但只覆盖 Node + 内存 IDB）**：harness 默认严格后
+`test-all` **5907 / 5907 通过 / exit 0**。
+
+**实测 3：存在可达的生产失败路径（负例，实测复现）**
+
+- 场景：分阶段水合下 A 已水合、B 未水合（`banks` 清单含 A/B，revlog 段含 A/B 条目）。
+- `RevlogStore.removeBank('A')`：
+  - `strict=false` → `{ok:true, n:1}`（正常删除该库日志）；
+  - `strict=true` → `{ok:false, name:'NotHydratedError', code:'STORAGE_NOT_HYDRATED',
+    bankId:'B', message:'…严格模式 keys() 要求全量水合…'}`。
+- 调用链（全部为生产路径，非测试专属）：
+  `QB.DB.banks.remove(id)`（只 `ensureBank(id)`，其他库仍不可见）
+  → `cascadeDelete(id)` → `RevlogStore.removeBank(id)` → `RevlogStore.replaceAll`
+  → `RevlogStore.clear()` → `Storage.keys()`（严格模式要求全量视图，而该调用点只需要
+  全局 `user:revlog:*` 键）。
+- 根因：`keys()` 只有「全量视图」语义，缺少「只枚举全局键」的入口；`RevlogStore.clear`
+  与 `ReviewStore.bankIds` 这类「只关心全局键/按库键」的调用点被迫借用全量枚举。
+  `bankIds` 已在步骤5 用 try/catch + 回退兜住，`RevlogStore.clear` 没有（且它是同步调用，
+  无法等待 `ensureAll`）。
+
+**为什么本轮不就地修**：需要新增一个「全局键枚举」公共入口（如 `keysGlobal()`）并逐个核实
+所有全局枚举调用点（`RevlogStore.clear`、`bankIds`、备份全量），属于新增公共抽象 + 契约变化；
+且删库/启动/切库尚无真实浏览器实测，单靠 Node + 内存 IDB 不足以支撑生产开关。
+
+**重新评估的触发条件（全部满足再做 go）**：
+1. 引入并落地「全局键枚举」入口，`RevlogStore.clear` 等全局调用点迁移完成；
+2. 真实浏览器覆盖 启动 → 切库 → 删库级联 → 备份恢复 四条路径，严格模式下 0 未捕获错误；
+3. 有生产错误率数据（或至少一个版本观察期无 `STORAGE_NOT_HYDRATED` 相关报错）。
+
+**生产行为**：本步**未改**生产默认值；仅文档留档。测试/CI 侧的严格守卫（步骤5）保持开启，
+新代码一旦误用旧入口会先在 CI 变红。

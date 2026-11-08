@@ -11,7 +11,7 @@
 
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
-- **状态**：**步骤 1–5 已实施（C 段 22/22 + B 段 6/6 + CI 严格守卫）；步骤 6 未实施**（2026-11-08）。
+- **状态**：**步骤 1–5 已实施；步骤 6 已评估裁定 no-go（生产默认未改）**（2026-11-08）。
   步骤1 只新增 API + 契约测试，默认行为不变；步骤2 核对 A 段 20 处、**0 处需补**；
   步骤3 完成 B 段 **4/6**（`legacyReviewMap` 953 + `convertLegacy` 1054 + `remap` 1095/1098），
   新增作用域枚举 `ReviewStore.stateKeysScoped`；建库/进入新库的 `ensureBank` 前置归属调用方；
@@ -36,13 +36,43 @@
   `NotHydratedError`）+ 测试期 `Storage.__strictReads`。它是唯一同时覆盖「新增调用点」与
   「既有归类错误」两类风险的方案；O2 门面有生命周期风险、O3 默认仍宽松、O4 语义变化最大。
 - **6 步灰度**：① API + 六类契约测试；② A 20 处 `ensureAll` 职责标注；③ B 6 处迁 `getScoped`；
-  ④ C 22 处按模块迁移；⑤ CI 默认开 `__strictReads`（**已完成**）；⑥ 生产 strict 由下一阶段实测决定（**未实施**）。
+  ④ C 22 处按模块迁移；⑤ CI 默认开 `__strictReads`（**已完成**）；⑥ 生产 strict（**已评估：no-go**）。
 - **影响面**：90 hit / 9 文件（G 41 / C 0 / B 2 / A 20 / S 27）；同步签名不变；新增 4 个方法
   与 1 个错误类型；`stateKeysScoped` 自第三批起为 `stateKeys` 的委托别名（单一实现）。
 - **已实测（步骤1）**：`keysScoped` 50k/IDB 两次实跑中位 **8.03 / 10.66 ms**（提案估 3–4ms，差异如实记录，未进门禁）。
-- **待实测（步骤3–6）**：生产 strict 全局键白名单与跨标签行为、真实浏览器 IDB 严格模式。
+- **待实测（步骤6 后）**：生产 strict 已裁定 no-go，重评条件见 `docs/STORAGE.md`「C 步骤6」；
+  真实浏览器 IDB 严格模式的启动/切库/删库/恢复仍待覆盖。
 
 ## 最新记录
+
+### docs(scope): C 步骤6——生产 strict 评估裁定 no-go（不改生产行为）
+
+**Commit Hash**：`（待回填）`
+
+**核心改动**
+- 仅文档：`docs/STORAGE.md` 新增「C 步骤6」小节（成本实测表、测试面证据、可达失败负例、
+  不就地修的理由、重评触发条件）；`docs/ARCHITECTURE.md` §4.22 进度改为 6/6（5 实施 + 1 no-go）、
+  影响面更正为 90 hit（G41/C0/B2/A20/S27）。
+- **未改** `js/utils/storage.js` 的 `__strictReads: false`，生产行为逐字不变。
+
+**验证数据（2026-11-08）**
+- 成本（同进程交替 3 轮取最小值，部分视图，20 万次/轮）：`get` 全局键 8.8 → 15.2 ns（+6.4）、
+  `getFresh` 14.8 → 20.2 ns（+5.5）、`get` 缺失走默认值 24.1 → 31.2 ns（+7.1）；
+  `getScoped`/`getScopedFresh` 因内部委托 `get`/`getFresh` 观测 +17.4/+19.6 ns。
+  评分热路径已全走作用域入口，`bench` 在严格模式下 exit 0（`grade` 2.66–2.67、`gradeMany` 4.75–4.90）。
+- 测试面：harness 默认严格后 `test-all` **5907 / 5907 / exit 0**。
+- **可达失败负例**（实测）：部分视图 A 已水合 / B 未水合时 `RevlogStore.removeBank('A')` →
+  `strict=false` 返回 `{ok:true,n:1}`；`strict=true` 抛
+  `{name:'NotHydratedError', code:'STORAGE_NOT_HYDRATED', bankId:'B'}`。
+  生产调用链：`DB.banks.remove`（只 `ensureBank(id)`）→ `cascadeDelete` → `RevlogStore.removeBank`
+  → `replaceAll` → `clear()` → `Storage.keys()`（该点只需全局 `user:revlog:*`，却被迫要求全量视图）。
+- 三道门禁：`npm run verify:fast` **exit 0**、`npm run bench` **exit 0**、
+  `node scripts/docs-check.mjs --static` **exit 0**。
+
+**遗留 TODO / 风险**
+- 达成 go 的前置：① 新增「全局键枚举」公共入口并迁移 `RevlogStore.clear`（及 `bankIds`、
+  备份全量）；② 真实浏览器覆盖 启动 → 切库 → 删库级联 → 备份恢复；③ 生产错误率/观察期数据。
+- 测试/CI 侧严格守卫保持开启，后续误用旧入口会先在 CI 变红。
 
 ### feat(scope): C 步骤5——测试/CI 默认开启严格读取（红→绿，5907/5907）
 

@@ -442,7 +442,7 @@ switchBank(nextId) = 快照 {bankId, view}
   首屏数字逐项与基线相同；真实 UI 切库后 `total=12500 / dueReview=200`。
   **首屏用户可见最大长任务 83 ms（中位 54 ms）属于本次改造未覆盖的既有成本，不代表「启动阻塞已消除」。**
 
-### 4.22 作用域读取 API（C 步骤1–5 已完成（22/22 + B 6/6）；步骤6 未实施）
+### 4.22 作用域读取 API（C 步骤1–6 已走完：1–5 实施（22/22 + B 6/6）、6 裁定 no-go）
 
 - **状态**：**步骤1（API + 契约测试）已完成**；**步骤2（A 段 20 处前置核对）已完成**
   （2026-11-08）：**20/20 已有 `ensureAll` 或等价全量前置，0 处需补**；**步骤3 已完成**
@@ -455,7 +455,10 @@ switchBank(nextId) = 快照 {bankId, view}
   + `1541/1542` 经复核**无有效行为负例、留档不迁**（未水合已被 `readMap` 的 S 段读取先拦截）。
   步骤5（CI 默认严格）**已完成**（2026-11-08）：测试 harness 默认 `__strictReads=true`，
   两处真实归类错误已修（`ReviewStore.bankIds`、`Migration.ensureLayout`），全套 **5907/5907 通过**；
-  步骤6（生产 strict）**未实施**，见 [STORAGE.md](STORAGE.md)「C 步骤5」小节。
+  步骤6（生产 strict）**已评估，裁定 no-go**（2026-11-08）：成本可忽略（旧入口 +5.5–7.1 ns/次、
+  评分热路径不受影响），但实测存在可达生产失败路径——删库级联
+  `DB.banks.remove → cascadeDelete → RevlogStore.removeBank → replaceAll → clear → Storage.keys()`
+  在部分视图下抛 `NotHydratedError`；生产默认保持 `false`。详见 [STORAGE.md](STORAGE.md)「C 步骤6」小节。
   完整提案（未跟踪、不随仓库发布）：`.analysis/architecture-audit/scoped-read-api-proposal.md`。
 - **问题**：`Storage.get/keys` 是同步契约，分阶段水合只覆盖启动作用域；未水合库读取静默返回
   `undefined`/`defaultValue`（见 §4.21 与 [STORAGE.md](STORAGE.md) 结论 b）。现有静态护栏只能拦
@@ -497,20 +500,22 @@ switchBank(nextId) = 快照 {bankId, view}
   但作为**独立 API** 直接调用可构造负例（未水合抛 `NotHydratedError{key=wrong:<B>}`）。
   B5 无有效行为负例（语义保持），以静态断言 + `convertMetaLayouts` 行为等价用例取证。
   红 **exit 1 / 9 项失败 / 386 通过** → 绿 **395 通过 / 0 失败 / exit 0**（断言 376 → 395，+19）。
-- **6 步灰度（当前进度 5/6，步骤6 未实施）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
+- **6 步灰度（当前进度 6/6：5 实施 + 步骤6 裁定 no-go，生产行为不变）**：① 加 API + 契约测试（**已完成**）；② A 类 20 处全量路径核对
   `ensureAll` 职责（**已完成，0 处需补**）；③ B 类 6 处迁移到作用域 API（**已完成 6/6**：
   1054/1095/1098/953 已迁；1198 走 `getScopedIndicator`；hash-remap:32 签名加 `bankId` 后迁）；④ C 类 22 处按模块迁移
   （**已完成 22/22**：冷路径 `142/152/818/826/832/845/1148/1173` + 只读渲染 `124/129/841`
   + 热路径 `984/1000` + 收尾 `967/1011/1039/1471/1490/1491/1501`（行号为收尾前基线）已迁；
-  `1541/1542` 无有效行为负例留档不迁）；⑤ CI 默认开 `__strictReads`（**已完成**）；
-  ⑥ 生产 strict 是否开启由下一阶段实测决定（**未实施**）。
+  `1541/1542` 无有效行为负例留档不迁）；⑤ CI 默认开 `__strictReads`（**已完成**，红 exit 1 →
+  绿 5907/5907）；⑥ 生产 strict（**已完成评估：no-go**——实测删库级联
+  `cascadeDelete → RevlogStore.clear → Storage.keys()` 在部分视图抛 `NotHydratedError`，
+  成本仅 +5.5–7.1 ns/次；重评条件见 [STORAGE.md](STORAGE.md)「C 步骤6」）。
 - **为何唯一覆盖两类风险**：O1 让新增调用点在未水合时立即失败；`__strictReads` 让既有调用点
   的归类错误在测试/CI 暴露。O2（`withBank` 门面）引入生命周期与门面过期读错库；O3（严格/宽松
   双入口）默认仍宽松、覆盖不了既有归类；O4（`keys()` 按作用域）语义变化最大，全量误判会复现
   批次 2 的 P1 红例。
-- **影响面**：调用点基线 **88 hit / 9 文件**，分类 **G 40 / C 22 / B 2 / A 20 / S 4**
-  （第三批把 `stateKeysScoped` 改为委托 `stateKeys`，消除重复实现后 89 → 88）；
-  `get/getFresh/keys` 同步签名不变；新增 3 个方法与 1 个错误类型（公共抽象）；
+- **影响面**：调用点基线 **90 hit / 9 文件**，分类 **G 41 / C 0 / B 2 / A 20 / S 27**
+  （C 步骤5 把 `bankIds` 的显式兜底枚举计入，88 → 90；C 类 22 处已全部迁移，故 C 0）；
+  `get/getFresh/keys` 同步签名不变；新增 4 个方法与 1 个错误类型（公共抽象）；
   `ReviewStore.stateKeysScoped` 为步骤3 新增、**步骤4 第三批起为 `stateKeys` 的委托别名**
   （与 `stateKeys` 共享 `stateKeysOf` 过滤，单一实现）。
 - **实测（2026-11-08）**：`idb.test.mjs` 红 **208 通过 / 18 失败（exit 1）** → 绿 **226 通过 /
