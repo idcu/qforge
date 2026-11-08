@@ -11,7 +11,7 @@
 
 ### perf(hydration): 启动分阶段水合（Phase 0 批次2）
 
-**Commit Hash**：`（待回填，见紧随其后的 docs(arch) 提交）`
+**Commit Hash**：`dd97dba`
 
 **核心改动**
 - `js/data/store.js`：`readScopeBank()` 单事务读 IDB 的 `banks` + `meta:currentBank`（合法当前库优先、
