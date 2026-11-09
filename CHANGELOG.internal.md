@@ -50,7 +50,7 @@
 
 ### test(strict): 严格模式四路径回归固化进 CI（Node 内存 IDB 替身，零新增依赖）
 
-**Commit Hash**：`TBD（本条随测试提交，hash 由后续 docs(changelog) 回填）`
+**Commit Hash**：`81072fd`
 
 **核心改动**
 - `scripts/idb.test.mjs` +33 断言（408→441）：
