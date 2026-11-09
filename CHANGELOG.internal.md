@@ -50,7 +50,7 @@
 
 ### docs(storage): 回填 API 后端与 50k 多库删库真机数据（仅文档）
 
-**Commit Hash**：`TBD（本条随文档提交，hash 由后续 docs(changelog) 回填）`
+**Commit Hash**：`de13cac`
 
 **核心改动**
 - `docs/STORAGE.md`「C 步骤6」：删除「API 后端与 50k 题量级下的删库路径本轮未实测」等过时表述，
