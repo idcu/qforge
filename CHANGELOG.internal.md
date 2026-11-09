@@ -48,6 +48,37 @@
 
 ## 最新记录
 
+### docs(storage): 回填 API 后端与 50k 多库删库真机数据（仅文档）
+
+**Commit Hash**：`TBD（本条随文档提交，hash 由后续 docs(changelog) 回填）`
+
+**核心改动**
+- `docs/STORAGE.md`「C 步骤6」：删除「API 后端与 50k 题量级下的删库路径本轮未实测」等过时表述，
+  新增「C 步骤6 补充实测」小节：API 后端删库语义、50k 多库四组合、物理孤儿审计、
+  `currentBank` 链式收敛、`app-boot.test.mjs` 偶发早退 25 轮未复现。
+- `docs/ARCHITECTURE.md` §4.22：同步收尾结论与「6 步灰度」进度，去掉「API 后端/50k 未实测」。
+- 仅文档改动，无代码/测试/契约变更；数字全部来自
+  `.analysis/browser-acceptance/artifacts/*.json`（脚本未跟踪、不提交）。
+
+**验证数据（2026-11-09 真机）**
+- API 后端删库（真实 Chromium + `scripts/serve-api.mjs` 同源）：断言 **17，16 通过 / 1 失败**；
+  唯一失败为删库期 1 条 `GET /api/banks/<已删库>` 404（`getCurrentBankId()` 负向查询，
+  预期语义；另有断言探测自身 1 条、boot 期 2 条 `/api/session` 404，不计入该口径）。
+  A 题 30→0、A 日志 5→0、B 日志 3 保留、`currentBank` 收敛 B、0 `pageerror`、服务端 revlog
+  无孤儿；本地 revlog 键读写 0 → `RevlogStore.clear` 严格回退分支在该模式**不可达**。
+- 50k 多库删库（48000+1000+1000 题，真实 IndexedDB）：ns-logs 15/15 947ms（S1 681 / S2 682）、
+  strict-logs 17/17 995ms（687/693）、ns-nologs 15/15 974ms（682/681）、
+  strict-nologs 16/16 986ms（685/703）；四组合合计 **63/63**；物理孤儿 **0**
+  （0 含库 id 键 / 0 分段 / 0 旧整表 / 0 题目）；`currentBank` 大库→S1→S2→null；
+  0 控制台错误。严格+日志确认回退：`keys()` 1 次被拒 → 删 `user:revlog:0..10`（11 段）
+  + meta + 旧整表键，共 13 键。
+- `app-boot.test.mjs` 偶发早退：**25 轮单文件复跑未复现**（本次 20 轮 136/136、5327–5419ms；
+  此前 5 轮亦绿）；失败日志已被覆盖，不判定根因。
+
+**遗留 TODO / 风险**
+- 生产观察期错误率数据仍缺 → 步骤6 维持 no-go，生产 `__strictReads=false` 未改。
+- API 后端模式不覆盖 `RevlogStore.clear` 严格回退分支（日志走服务端，本地 `keys()` 0 次）。
+
 ### fix(storage): 删库级联在严格模式部分视图下不再撞全量 keys()
 
 **Commit Hash**：`4cc22da`
