@@ -52,6 +52,61 @@ function runNode(file, cwd) {
   });
 }
 
+/* ---------- 失败留证（只写未跟踪目录，不改判定） ---------- */
+// 目的：偶发失败不再因控制台滚动/日志被覆盖而无法回溯。
+// 约束：仅 node 内置模块；失败才落盘（成功不留文件）；数量与体积双上限，超出按 mtime 淘汰最旧。
+const FAIL_DIR = path.join(ROOT, '.analysis', 'test-failures');
+const FAIL_MAX_FILES = 20;
+const FAIL_MAX_BYTES = 5 * 1024 * 1024;
+
+/** 淘汰最旧日志，使「含本次」的文件数 ≤ MAX_FILES 且总体积 ≤ MAX_BYTES */
+function pruneFailures(keepPath) {
+  const keepName = path.basename(keepPath);
+  let entries;
+  try {
+    entries = fs.readdirSync(FAIL_DIR, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.log') && e.name !== keepName)
+      .map((e) => {
+        const p = path.join(FAIL_DIR, e.name);
+        const st = fs.statSync(p);
+        return { p, t: st.mtimeMs, s: st.size };
+      })
+      .sort((a, b) => a.t - b.t); // 最旧在前
+  } catch (_) { return; }
+  let count = entries.length + 1;
+  let bytes = entries.reduce((n, e) => n + e.s, 0) + fs.statSync(keepPath).size;
+  while ((count > FAIL_MAX_FILES || bytes > FAIL_MAX_BYTES) && entries.length) {
+    const victim = entries.shift();
+    try { fs.unlinkSync(victim.p); } catch (_) { /* 淘汰失败不影响判定 */ }
+    count -= 1;
+    bytes -= victim.s;
+  }
+}
+
+/** 仅在失败时调用；写盘异常只告警，不改变退出码与判定 */
+function persistFailure(file, status, output, reason) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const target = path.join(FAIL_DIR, stamp + '-' + path.basename(file) + '.log');
+  const header = [
+    'suite: ' + file,
+    'status: ' + status,
+    'reason: ' + reason,
+    'time: ' + new Date().toISOString(),
+    'node: ' + process.version,
+    'order: ' + file,
+    '---- raw output ----'
+  ].join('\n');
+  const body = header + '\n' + (output || '（无输出）') + '\n';
+  try {
+    fs.mkdirSync(FAIL_DIR, { recursive: true });
+    fs.writeFileSync(target, body, 'utf8');
+    pruneFailures(target);
+    console.log('  ↳ 失败原始输出已保留：' + path.relative(ROOT, target));
+  } catch (e) {
+    console.error('  ↳ 失败输出保留失败（不影响判定）：' + (e && e.message));
+  }
+}
+
 /* ---------- 自检：证明「通过: 0」会被拦下 ---------- */
 if (SELFTEST) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qforge-selftest-'));
@@ -86,13 +141,21 @@ const started = Date.now();
 ORDER.forEach((file, i) => {
   const full = path.join(__dirname, file);
   process.stdout.write('[' + (i + 1) + '/' + ORDER.length + '] ' + file + '\n');
-  if (!fs.existsSync(full)) { failed.push(file + '（缺失）'); return; }
+  if (!fs.existsSync(full)) {
+    failed.push(file + '（缺失）');
+    persistFailure(file, 'n/a', '（套件文件缺失）', '缺失');
+    return;
+  }
   const r = runNode(full);
   // 保留实时可读的完整输出：先子进程缓冲，再整段回放（避免 stdio:'inherit' 拿不到计数）
   if (r.stdout) process.stdout.write(r.stdout);
   if (r.stderr) process.stderr.write(r.stderr);
   const reason = classify(file, r.status, (r.stdout || '') + (r.stderr || ''), counts);
-  if (reason) { failed.push(file + '（' + reason + '）'); return; }
+  if (reason) {
+    failed.push(file + '（' + reason + '）');
+    persistFailure(file, r.status, (r.stdout || '') + (r.stderr || ''), reason);
+    return;
+  }
   total += parseCount(r.stdout || '');
 });
 

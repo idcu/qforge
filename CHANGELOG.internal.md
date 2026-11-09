@@ -48,6 +48,38 @@
 
 ## 最新记录
 
+### test(infra): 测试套件失败原始输出自动留证（零依赖，不改判定）
+
+**Commit Hash**：`TBD（本条随测试基建提交，hash 由后续 docs(changelog) 回填）`
+
+**核心改动**
+- `scripts/test-all.mjs`：新增 `persistFailure()` / `pruneFailures()`（仅 Node 内置模块）。
+  任一运行项被判失败（非 0 退出、解析不到「通过: N」、断言数 ≠ 基线、套件文件缺失）时，
+  把该套件**完整原始输出**（stdout + stderr，前置 suite/status/reason/time/node/order 头）
+  写入未跟踪目录 `.analysis/test-failures/<UTC 时间戳>-<套件名>.log`。
+- 只在失败时落盘；**上限 20 个 / 5 MiB**，超出按 mtime 淘汰最旧；写盘异常只告警，
+  **不改变判定、断言数、套件数与退出码**（`classify()`、`total`、`process.exit` 逻辑逐字未动）。
+- 零新增依赖；`--selftest` 路径不落盘（避免自检产生垃圾文件）。
+- **公共抽象：0 新增 / 0 调整**（两个私有函数仅存在于 `scripts/test-all.mjs`）。
+
+**验证数据（2026-11-09 实跑）**
+- 红（人为负例）：在 `scripts/references.test.mjs` 末尾临时追加 `process.exit(1)` →
+  `node scripts/test-all.mjs` **exit 1**，运行项 37 / 失败 1 / 断言 5936；
+  生成 `.analysis/test-failures/2026-11-09T01-04-36-565Z-references.test.mjs.log`（**1608 B**），
+  内容为 7 行头 + 该套件全部 20 条断言原始输出 + 注入行，`status: 1`、`reason: exit=1`。
+- 还原负例后再跑：**exit 0**，运行项 37 / 断言 5956，**未新增任何文件**（日志数保持 1，
+  即上一步人工产物，`LastWriteTime` 未变）；随后删除人工产物，确认成功运行零残留。
+- 淘汰上限：预置 24 个 dummy 日志 + 既有 1 个 = 25，再触发一次失败（写入新日志共 26）→
+  自动淘汰至 **20 个 / 5746 B**（≤ 20 个且 ≤ 5 MiB），符合预期。
+- 门禁（最终树）：`npm run verify:fast` exit 0（37 套件 / 5956 断言 / 44.9s）；
+  `npm run bench` exit 0（性能门禁全部通过）；`node scripts/docs-check.mjs --static` exit 0
+  （37 项 / 5956 断言 / 66 门禁 / 389.1 KB gzip）。
+
+**遗留 TODO / 风险**
+- 仅覆盖经 `scripts/test-all.mjs` 的运行路径；单独 `node scripts/<suite>.test.mjs` 直接失败时
+  日志仍在终端（未落盘），未纳入本次范围。
+- 真实浏览器/真机项（DOM 交互、浏览器配额、IDB 事务调度、API 后端删库）仍只能靠真机脚本覆盖。
+
 ### test(strict): 严格模式四路径回归固化进 CI（Node 内存 IDB 替身，零新增依赖）
 
 **Commit Hash**：`81072fd`

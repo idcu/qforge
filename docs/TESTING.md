@@ -23,6 +23,13 @@
 `node scripts/test-all.mjs --selftest` 注入一个「通过: 0 且 exit 0」的假套件并断言门禁拦下它
 （拦截 = exit 0，放行 = exit 1），用于证明这道闸真的会失败，而不是永远绿。
 
+**失败留证（2026-11-09）**：任一运行项被判失败（非 0 退出、解析不到计数、断言数 ≠ 基线、文件缺失）
+时，`scripts/test-all.mjs` 把该套件的**完整原始输出**（stdout + stderr，前置 suite/status/reason/
+time/node/order 头）写到未跟踪目录 `.analysis/test-failures/<UTC 时间戳>-<套件名>.log`，解决
+「偶发失败、日志被覆盖、无法回溯」。约束：只在失败时落盘（成功运行**不产生任何文件**）；数量与体积
+双上限 **20 个 / 5 MiB**，超出按 mtime 淘汰最旧；写盘失败只告警、**不改变判定与退出码**；仅用 Node
+内置模块，零新增依赖。该目录不随仓库提交。
+
 **断言原语（C024）**：37 个运行项（1 冒烟 + 36 套件）的 `ok/eq/deepEq/section/throws` 统一来自 `scripts/lib/assert.mjs`
 的 `createAssert({ failures, onPass })`。各套件**仍保留**自己的 `let pass = 0; const failures = []`，
 通过 `onPass` 回写计数、通过共享 `failures` 数组收集失败——所以「通过: N」的输出格式、基线计数与
