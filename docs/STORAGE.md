@@ -748,11 +748,18 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 - `scripts/backup-hydration.test.mjs` 路径3 新增 **4 断言**：50k/4 库恢复前置
   `__strictReads=true`、库B/E 未水合、部分视图 `keys()` 被严格守卫拒绝
   （50k 恢复必须依赖 `applyData` 内 `ensureAll`）。
+- **DOM 删库接线（2026-11-10，app-boot +10 断言）**：走真实 `QB.BankManager.remove`
+  确认入口——取消不删库；确认后级联清空题目、`State.bankId` 与持久化 `currentBank`
+  回落到现存库、状态栏跟随、成功 toast 可见、0 未处理 rejection。
+- **API 模式删库守卫（2026-11-10，api-backend +2 断言）**：`__strictReads=true` 下删库
+  不抛错、本地 `Storage.keys()` 调用 **0 次**（级联全在服务端，不回落本地 revlog 清理）。
 - **反证（逐项先红）**：还原 `RevlogStore.clear` 修复 → idb 套件 **3 失败**
   （`NotHydratedError` / A 孤儿日志 1 条 / `currentBank` 未清）；去掉 `removeBank`
   无日志早退 → 无日志删库 `keys()` 调用 **1 次**（断言红）；移除 `applyData` 的 `ensureAll`
   → 备份恢复抛 `NotHydratedError`（3 断言红）；`QFORGE_HYDRATION_RED=1` → 50k 恢复在
-  路径3 直接抛 `NotHydratedError`（exit 1）。
-- **仍仅真机覆盖**：真实 Chromium 的 DOM 交互（点击删库/切库、toast 与状态栏）、真实浏览器
-  配额与事务调度、API 后端（服务端日志路径，本地 `keys()` 0 次，`clear()` 严格回退分支不可达）。
+  路径3 直接抛 `NotHydratedError`（exit 1）；忽略删库确认 → app-boot **3 失败**；
+  API 删库误回落本地 `keys()` → api-backend **1 失败**。
+- **仍仅真机覆盖**：真实 Chromium 的渲染/布局与真实确认弹窗样式（删库/切库的 action
+  接线、toast 与状态栏文案已由 app-boot 垫片覆盖）、真实浏览器配额与 IDB 事务调度、
+  API 后端服务端日志持久化的真实磁盘行为（本地 `keys()` 0 次已由 api-backend 套件断言）。
   Node 替身不模拟真实 IDB 事务调度与浏览器配额，因此不能替代真机验收。

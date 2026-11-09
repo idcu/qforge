@@ -120,6 +120,8 @@ async function makeEnv(opts) {
 
   loadFile(window, 'js/modules/ui-renderer.js');
   loadFile(window, 'js/modules/dom-patch.js');
+  // 删库/新建题库走 QB.BankManager（真实确认弹窗与级联入口），运行时可替换 confirmDialog
+  loadFile(window, 'js/modules/bank-manager.js');
   // toast 走记录器：不创建节点、不起 2.6s 定时器，测试可断言提示文案
   QB.UIRenderer.toast = (m, t) => { stat.toasts.push({ message: m, type: t }); };
 
@@ -433,6 +435,50 @@ section('切库事务化：失败回滚原库，不留下半更新状态');
   await tick(20);
   eq(QB.App.State.bankId, b.id, '正常切库生效');
   ok(statusText().indexOf('库B') >= 0, '状态栏跟随新库：' + statusText());
+  env.restore();
+}
+
+/* ============================================================
+ * 1.8 删库 UI：确认后级联删除并回落到现存库；取消不删除
+ * ============================================================ */
+section('删库 UI：确认后级联删除并回落到现存库；取消不删除');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  const a = await QB.DB.banks.create({ name: '待删库A', description: '' });
+  const b = await QB.DB.banks.create({ name: '保留库B', description: '' });
+  await QB.DB.questions.insertMany(a.id, [{
+    type: 'single', question: '待删题', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }], { dedupe: false, mode: 'overwrite' });
+  await QB.DB.setCurrentBankId(a.id);
+  QB.App.State.bankId = a.id;
+  QB.App.State.view = 'home';
+  QB.App.State.banksLoaded = false;
+  await QB.App.render();
+  const statusText = () => String(env.dom.document.getElementById('status-text').textContent || '');
+  const origConfirm = QB.UIRenderer.confirmDialog;
+
+  // 取消：不删除、不提示成功
+  QB.UIRenderer.confirmDialog = async () => false;
+  await clickAction(env, 'bank-delete', { 'data-id': a.id });
+  await tick(20);
+  ok((await QB.DB.banks.list()).some((x) => x.id === a.id), '取消删除：库A 保留');
+  eq(await QB.DB.questions.count(a.id), 1, '取消删除：题目保留');
+  eq(toastsText(env).indexOf('题库已删除'), -1, '取消删除：无删除成功提示');
+
+  // 确认：级联删除当前库，currentBank 回落到现存库B
+  QB.UIRenderer.confirmDialog = async () => true;
+  await clickAction(env, 'bank-delete', { 'data-id': a.id });
+  await tick(20);
+  ok(!(await QB.DB.banks.list()).some((x) => x.id === a.id), '确认删除：库A 从清单移除');
+  eq(await QB.DB.questions.count(a.id), 0, '确认删除：题目级联清空');
+  eq(QB.App.State.bankId, b.id, '删除当前库后 State.bankId 回落到库B（实测：' + QB.App.State.bankId + '）');
+  eq(await QB.DB.getCurrentBankId(), b.id, '持久化 currentBank = 库B');
+  ok(statusText().indexOf('库B') >= 0, '状态栏跟随库B：' + statusText());
+  ok(toastsText(env).indexOf('题库已删除') >= 0, '删除成功提示可见');
+  eq(rejections.length, 0, '删库不产生未处理 rejection');
+
+  QB.UIRenderer.confirmDialog = origConfirm;
   env.restore();
 }
 

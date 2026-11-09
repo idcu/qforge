@@ -48,6 +48,47 @@
 
 ## 最新记录
 
+### test(strict): 补 DOM 删库与 API 删库严格守卫回归（剩余真机缺口）
+
+**Commit Hash**：`TBD（本条随测试提交，hash 由后续 docs(changelog) 回填）`
+
+**核心改动**
+- `scripts/app-boot.test.mjs` +10 断言（136→146）：新增「删库 UI」段落，加载真实
+  `QB.BankManager`，走 app.js `bank-delete` action 与确认入口——取消：库/题目保留、
+  无成功提示；确认：库A 从清单移除、题目级联清空、`State.bankId` 与持久化 `currentBank`
+  回落到库B、状态栏跟随、成功 toast、0 未处理 rejection。
+- `scripts/api-backend.test.mjs` +2 断言（320→322）：API 模式删库前开 `__strictReads=true`，
+  断言 `banks.remove` 不抛错且本地 `Storage.keys()` 调用 **0 次**（级联全在服务端，
+  不回落本地 revlog 清理）。
+- 断言 5956→5968；未改阈值/基线（`docs-baseline.json` 仅按新增断言上调）；生产
+  `__strictReads=false` 未改。**公共抽象：0 新增 / 0 调整。**
+
+**A. app-boot 偶发早退复跑（2026-11-10）**
+- 当前测试文件（146 断言）单文件连跑 **30 轮：30/30 exit 0、每轮 146/146、5623–5753ms、
+  合计 170.2s，0 次早退**；`.analysis/test-failures/` 无新增日志（失败才落盘）。
+- 叠加此前 25 轮（旧 136 断言版本）仍**未复现**；本轮换了测试文件，不能据此判定已修复，
+  如实记为未复现。
+
+**红（先证保护缺失必失败）**
+- 忽略删库确认（`if (false && !ok)`）→ app-boot **3 失败**（库A 未保留 / 题目 1→0 /
+  出现「题库已删除」）。
+- API 删库误回落本地 `keys()`（在 `banks.remove` 插入 `QB.Storage.keys()`）→
+  api-backend **1 失败**（`keys()` 实测 1 次，期望 0）。
+- 红证补丁均已还原，`js/**` 无 diff。
+
+**绿（最终树实测）**
+- `node scripts/app-boot.test.mjs`：**146/146，exit 0**。
+- `node scripts/api-backend.test.mjs`：**322/322，exit 0**。
+- 门禁（最终树实跑）：`npm run verify:fast` **exit 0**（37 套件 / 5968 断言 / 49.3s）；
+  `npm run bench` **exit 0**（`keys()` 首次 20.88ms ≤ 40ms、heapUsed +5.08MB ≤ 40MB、
+  性能门禁全部通过）；`node scripts/docs-check.mjs --static` **exit 0**
+  （37 项 / 5968 断言 / 66 门禁 / 389.1 KB gzip / 1098.0 KB raw）。
+
+**遗留 TODO / 风险**
+- 仅真机覆盖：真实 Chromium 渲染/布局与真实确认弹窗样式、真实浏览器配额与 IDB 事务调度、
+  API 后端服务端日志在真实磁盘上的持久化行为。
+- app-boot 为 LS 全量视图垫片，严格模式部分视图删库仍由 `idb.test` 的 IDB 用例覆盖。
+
 ### test(infra): 测试套件失败原始输出自动留证（零依赖，不改判定）
 
 **Commit Hash**：`a33bff5`

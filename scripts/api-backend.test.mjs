@@ -614,7 +614,19 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   await QB.DB.reviews.save(tmp.id, { x: { algo: 'fsrs' } });
   await QB.DB.revlog.append([{ t: 9, h: 'x', r: 3, b: tmp.id }]);
   await QB.DB.weights.write({ global: null, banks: { [tmp.id]: { w: QB.FSRS.DEFAULT_W } } });
-  await QB.DB.banks.remove(tmp.id);
+  // API 后端删库由服务端级联完成，不得回落到本地 revlog 清理（本地 keys() 0 次）
+  const prevStrict = QB.Storage.__strictReads;
+  QB.Storage.__strictReads = true;
+  const origKeys = QB.Storage.keys;
+  let localKeysCalls = 0;
+  QB.Storage.keys = function () { localKeysCalls++; return origKeys.apply(QB.Storage, arguments); };
+  let removeErr = null;
+  try { await QB.DB.banks.remove(tmp.id); } catch (e) { removeErr = e; }
+  QB.Storage.keys = origKeys;
+  QB.Storage.__strictReads = prevStrict;
+  ok(!removeErr, 'api：严格模式下删库不抛错（实测 ' +
+    (removeErr ? (removeErr.code || removeErr.message) : 'ok') + '）');
+  eq(localKeysCalls, 0, 'api：删库不触碰本地 keys()（实测 ' + localKeysCalls + ' 次）');
   ok(!(await QB.DB.banks.get(tmp.id)), 'api：级联删库（题库条目）');
   eq(await QB.DB.questions.count(tmp.id), 0, 'api：级联删库（题目）');
   eq((await QB.DB.progress.wrongList(tmp.id)).length, 0, 'api：级联删库（错题）');
