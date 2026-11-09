@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-08T23:37:09.429Z",
+  "generatedAt": "2026-11-09T00:55:13.868Z",
   "runItems": 37,
   "suiteFiles": 36,
-  "totalAssertions": 5919,
+  "totalAssertions": 5956,
   "gateCount": 66,
   "counts": {
     "smoke-test.mjs": 731,
@@ -11,7 +11,7 @@
     "api-backend.test.mjs": 320,
     "app-boot.test.mjs": 136,
     "assets.test.mjs": 182,
-    "backup-hydration.test.mjs": 52,
+    "backup-hydration.test.mjs": 56,
     "backup.test.mjs": 151,
     "blueprint.test.mjs": 18,
     "contract.test.mjs": 98,
@@ -20,7 +20,7 @@
     "exporter.test.mjs": 204,
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
-    "idb.test.mjs": 408,
+    "idb.test.mjs": 441,
     "import-commit.test.mjs": 57,
     "importers-anki.test.mjs": 148,
     "importers-quizlet.test.mjs": 75,

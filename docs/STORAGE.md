@@ -677,7 +677,8 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   抛 `NotHydratedError`、A 孤儿日志 1 条、持久化 `currentBank` 未清。
 
 **绿（修复后实测）**
-- 单测 `node scripts/idb.test.mjs`：**408/408 通过 / exit 0**；`test-all` **5919/5919 通过 / 37 项**。
+- 单测 `node scripts/idb.test.mjs`：**441/441 通过 / exit 0**（2026-11-09 严格模式回归固化后）；
+  `test-all` **5956/5956 通过 / 37 项**。
 - 真机 P3：删除成功（无失败 toast）、A 孤儿日志 **0** 条、A 题目清单已物理删除、
   `currentBank` 置空且 `getCurrentBankId()` 回落到现存 B 并完成水合、B 数据/日志保留、
   B 仍保持未水合（未因删库全量水合）；全程 **0 控制台/页面错误**，`NotHydratedError`
@@ -735,3 +736,23 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
 原「API 后端与大数据量未验证」已补测：API 后端 16/17（1 条为删库后负向查询的预期 404，
 已定性）、50k 多库删库四组合 **63/63** 断言全绿（947–995 ms、物理孤儿 0、`currentBank`
 链式收敛）。即：不再存在已知可达的删库失败路径，但缺少生产观察数据，尚不足以把默认值改为 `true`。
+
+**CI 回归固化（2026-11-09，Node + 内存 IDB 替身，零新增依赖）**：上述路径中可在 Node 替身
+复现的部分已转成自动回归，命令即 `node scripts/test-all.mjs`（`verify:fast` 内）：
+- `scripts/idb.test.mjs` 新增 **33 断言**：启动只水合当前库（`scopeBank`、全局键可读、
+  部分视图 `keys()` 被严格守卫拒绝、`keysScoped(A)` 不泄露未水合库B）；切库先 `ensureBank`
+  （未水合作用域读取 fail-loud、切后题目/复习状态可见、C 仍未水合 → `keys()` 仍拒、
+  `switchBank` 内 `ensureBank` 早于 `setCurrentBankId` 静态守卫）；删库（revlog 无日志）
+  `keys()` **0 次**且 `currentBank` 回落；备份恢复在部分视图先 `ensureAll`
+  （replace 清除载荷外未水合库 E 的分片、恢复后 `keys()` 可用）。
+- `scripts/backup-hydration.test.mjs` 路径3 新增 **4 断言**：50k/4 库恢复前置
+  `__strictReads=true`、库B/E 未水合、部分视图 `keys()` 被严格守卫拒绝
+  （50k 恢复必须依赖 `applyData` 内 `ensureAll`）。
+- **反证（逐项先红）**：还原 `RevlogStore.clear` 修复 → idb 套件 **3 失败**
+  （`NotHydratedError` / A 孤儿日志 1 条 / `currentBank` 未清）；去掉 `removeBank`
+  无日志早退 → 无日志删库 `keys()` 调用 **1 次**（断言红）；移除 `applyData` 的 `ensureAll`
+  → 备份恢复抛 `NotHydratedError`（3 断言红）；`QFORGE_HYDRATION_RED=1` → 50k 恢复在
+  路径3 直接抛 `NotHydratedError`（exit 1）。
+- **仍仅真机覆盖**：真实 Chromium 的 DOM 交互（点击删库/切库、toast 与状态栏）、真实浏览器
+  配额与事务调度、API 后端（服务端日志路径，本地 `keys()` 0 次，`clear()` 严格回退分支不可达）。
+  Node 替身不模拟真实 IDB 事务调度与浏览器配额，因此不能替代真机验收。

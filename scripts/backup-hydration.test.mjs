@@ -366,6 +366,13 @@ async function main() {
   A.ok(Q3.ReviewStore.convertMetaLayouts().banks >= metaBankIds.length,
     'A20 convertMetaLayouts 经全局 banks 清单补全，库数覆盖全部种子库（' + metaBankIds.length + '）');
   Q3.Storage.__strictReads = true; // 恢复 CI 严格守卫，路径3 在全量视图上继续受严格约束
+  A.eq(Q3.Storage.__strictReads, true, '路径3 前置：严格读取已开启（50k 恢复路径）');
+  A.eq(Q3.Storage.isBankHydrated(banks[1].id), false, '路径3 前置：库B 未水合（部分视图）');
+  A.eq(Q3.Storage.isBankHydrated(bankE.id), false, '路径3 前置：载荷外库E 未水合');
+  let pre3KeysErr = null;
+  try { Q3.Storage.keys(); } catch (e) { pre3KeysErr = e; }
+  A.ok(!!pre3KeysErr && pre3KeysErr.code === 'STORAGE_NOT_HYDRATED',
+    '路径3 前置：部分视图 keys() 被严格守卫拒绝（50k 恢复必须依赖 applyData 内 ensureAll）');
 
   A.section('路径3：恢复快照（applyData replace → ensureAll → oldKeys 快照）');
   const t3 = Date.now();

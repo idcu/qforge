@@ -1026,6 +1026,179 @@ section('分阶段水合：严格模式下删除「当前库含评分日志 + �
   eq(logsOf(B.id), 1, '库B 评分日志保留（实测 ' + logsOf(B.id) + '）');
 }
 
+section('严格模式回归：启动只水合当前库 + 切库按库补齐（防退化）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll(); // 播种跨库写（真实启动只水合当前库）
+  const A = await Q1.DB.banks.create({ name: '当前库A' });
+  const B = await Q1.DB.banks.create({ name: '切库目标B' });
+  const C = await Q1.DB.banks.create({ name: '保持未水合C' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(2, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk(2, 'B'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(C.id, mk(2, 'C'), { dedupe: false, mode: 'overwrite' });
+  const bHash = (await Q1.DB.questions.list(B.id, {})).items[0].contentHash;
+  await Q1.DB.reviews.record(B.id, { [bHash]: { due: 2000, s: 1, d: 1 } }, []);
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  const info = await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  ok(S.__strictReads === true, '前置：严格读取已开启（实测 ' + S.__strictReads + '）');
+  eq(info && info.scopeBank, A.id, '严格模式启动：水合作用域=当前库A');
+  eq((await Q2.DB.questions.list(A.id, {})).items.length, 2, '严格模式启动：当前库题目可读');
+  ok(S.get(Q2.KEYS.banks, []).length === 3, '严格模式启动：全局键（banks）可读');
+  ok(S.isBankHydrated(B.id) === false && S.isBankHydrated(C.id) === false, '启动后 B/C 未水合');
+  let bootKeysErr = null;
+  try { S.keys(); } catch (e) { bootKeysErr = e; }
+  ok(!!bootKeysErr && bootKeysErr.code === 'STORAGE_NOT_HYDRATED',
+    '严格模式启动：部分视图 keys() 被拒（实测 ' +
+    (bootKeysErr ? bootKeysErr.code : '未抛错') + '）');
+  ok(S.keysScoped(A.id).indexOf(Q2.KEYS.reviewState(B.id, bHash)) < 0,
+    '启动：keysScoped(A) 不泄露未水合库B的键');
+
+  // 切库保护：目标库未水合时同步读取必须 fail-loud（app.js switchBank 先 ensureBank 再切状态）
+  let preSwitchErr = null;
+  try { S.getScoped(Q2.KEYS.reviewState(B.id, bHash), B.id, null); } catch (e) { preSwitchErr = e; }
+  ok(!!preSwitchErr && preSwitchErr.code === 'STORAGE_NOT_HYDRATED',
+    '切库前置：目标库未水合时作用域读取 fail-loud（实测 ' +
+    (preSwitchErr ? preSwitchErr.code : '未抛错') + '）');
+  await S.ensureBank(B.id);
+  await Q2.DB.setCurrentBankId(B.id);
+  eq(await Q2.DB.getCurrentBankId(), B.id, '切库后 currentBank = B');
+  eq((await Q2.DB.questions.list(B.id, {})).items.length, 2, '切库后目标库题目可见');
+  ok(S.getScoped(Q2.KEYS.reviewState(B.id, bHash), B.id, null) !== null,
+    '切库后目标库复习状态可读（ensureBank 生效）');
+  ok(S.isBankHydrated(A.id) && S.isBankHydrated(B.id), '切库不卸载已水合库A');
+  let switchKeysErr = null;
+  try { S.keys(); } catch (e) { switchKeysErr = e; }
+  ok(!!switchKeysErr && switchKeysErr.code === 'STORAGE_NOT_HYDRATED',
+    '切库只水合目标库：C 仍未水合 → keys() 仍被拒（未退化为全量水合）');
+  // 静态守卫：切库唯一实现必须先 ensureBank 再持久化/切状态
+  const appSrc = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+  const swSlice = appSrc.slice(appSrc.indexOf('async function switchBank'), appSrc.indexOf('/* ---------------- 渲染分发'));
+  ok(swSlice.indexOf('await QB.Storage.ensureBank(nextId)') >= 0 &&
+     swSlice.indexOf('await QB.Storage.ensureBank(nextId)') < swSlice.indexOf('await QB.DB.setCurrentBankId(nextId)'),
+    '静态守卫：switchBank 内 ensureBank(nextId) 早于 setCurrentBankId');
+}
+
+section('严格模式回归：删库（revlog 无日志）不触发全量 keys()（防退化）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll();
+  const A = await Q1.DB.banks.create({ name: '待删库A' });
+  const B = await Q1.DB.banks.create({ name: '未水合库B' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(2, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk(2, 'B'), { dedupe: false, mode: 'overwrite' });
+  const bHash = (await Q1.DB.questions.list(B.id, {})).items[0].contentHash;
+  await Q1.DB.reviews.record(B.id, { [bHash]: { due: 2000, s: 1, d: 1 } },
+    [{ h: bHash, b: B.id, r: 3, t: 1000 }]);
+  // A 不写评分日志：removeBank 应在 replaceAll→clear 之前早退（后台无日志时不得借 keys() 探测）
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  ok(!S.isBankHydrated(B.id), '前置：库B 未水合（部分视图）');
+  eq(Q2.DB.revlog.list().filter((e) => e.b === A.id).length, 0, '前置：待删库A 无评分日志');
+  const logsB = Q2.DB.revlog.list().filter((e) => e.b === B.id).length;
+  eq(logsB, 1, '前置：库B 有 1 条评分日志（不得被连带删除）');
+  const origKeys = S.keys;
+  let keysCalls = 0;
+  S.keys = function () { keysCalls++; return origKeys.apply(S, arguments); };
+  let delErr = null;
+  try { await Q2.DB.banks.remove(A.id, { cascade: true }); } catch (e) { delErr = e; }
+  S.keys = origKeys;
+  ok(!delErr, '严格模式下删除无日志库不抛错（实测 ' + (delErr ? (delErr.name + '/' + delErr.code) : 'ok') + '）');
+  eq(keysCalls, 0, '无日志删库不调用 keys()（实测 ' + keysCalls + ' 次）');
+  await S.flush();
+  eq(await Q2.Store.get(Q2.KEYS.questionsMeta(A.id)), undefined, 'A 题目清单已物理删除');
+  eq(Q2.DB.revlog.list().filter((e) => e.b === B.id).length, 1, '库B 评分日志保留');
+  ok(!S.isBankHydrated(B.id), '删库后库B 仍保持未水合');
+  eq(await Q2.DB.getCurrentBankId(), B.id, 'currentBank 回落到现存库B');
+}
+
+section('严格模式回归：备份恢复在部分视图下先 ensureAll（防退化）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll();
+  const A = await Q1.DB.banks.create({ name: '备份库A' });
+  const B = await Q1.DB.banks.create({ name: '备份库B' });
+  const mk = (n, tag) => Array.from({ length: n }, (_, i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A.id, mk(3, 'A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B.id, mk(3, 'B'), { dedupe: false, mode: 'overwrite' });
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A.id);
+  await Q1.Storage.flush();
+  const backup = await Q1.Backup.buildBackup();
+  eq(Object.keys(backup.data).filter((k) => k.indexOf(Q1.KEYS.questionsMeta(B.id)) >= 0).length, 1,
+    '前置：备份载荷含未当前库B的题目清单');
+  // 载荷外库 E：恢复 replace 必须能删掉它（未水合时也要覆盖）
+  const E = await Q1.DB.banks.create({ name: '载荷外库E' });
+  await Q1.DB.questions.insertMany(E.id, mk(1, 'E'), { dedupe: false, mode: 'overwrite' });
+  await Q1.Storage.flush();
+  const eShard = Q1.KEYS.questionShard(E.id, 0);
+
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  ok(S.__strictReads === true && !S.isBankHydrated(B.id) && !S.isBankHydrated(E.id),
+    '前置：严格开启且 B/E 未水合（部分视图）');
+  let preKeysErr = null;
+  try { S.keys(); } catch (e) { preKeysErr = e; }
+  ok(!!preKeysErr && preKeysErr.code === 'STORAGE_NOT_HYDRATED',
+    '恢复前部分视图 keys() 被严格守卫拒绝（实测 ' +
+    (preKeysErr ? preKeysErr.code : '未抛错') + '）');
+  let applyErr = null;
+  let applied = null;
+  try { applied = await Q2.Backup.applyData(backup.data, 'replace'); } catch (e) { applyErr = e; }
+  ok(!applyErr, '严格模式部分视图下备份恢复不抛错（实测 ' +
+    (applyErr ? (applyErr.name + '/' + applyErr.code) : 'ok') + '）');
+  await S.flush();
+  ok(!!applied && applied.keys === Object.keys(backup.data).length,
+    '恢复写入键数 = 载荷键数（实测 ' + (applied && applied.keys) + '）');
+  eq(await Q2.Store.get(eShard), undefined, '恢复 replace 清除了载荷外未水合库E的分片');
+  ok(S.keys().length > 0, '恢复后 keys() 恢复可用（ensureAll 已补齐全量视图）');
+  eq((await Q2.DB.questions.list(A.id, {})).items.length, 3, '恢复后库A 题目数 3');
+  eq((await Q2.DB.questions.list(B.id, {})).items.length, 3, '恢复后库B 题目数 3');
+  ok(!(await Q2.DB.banks.list()).some((b) => b.id === E.id), '恢复后 banks 清单不含载荷外库E');
+}
+
 section('作用域读取 API + 严格守卫（C 步骤1：API + 契约测试，默认行为不变）');
 {
   const idb = createMemoryIDB();

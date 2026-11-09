@@ -48,6 +48,54 @@
 
 ## 最新记录
 
+### test(strict): 严格模式四路径回归固化进 CI（Node 内存 IDB 替身，零新增依赖）
+
+**Commit Hash**：`TBD（本条随测试提交，hash 由后续 docs(changelog) 回填）`
+
+**核心改动**
+- `scripts/idb.test.mjs` +33 断言（408→441）：
+  1) 严格模式启动：`__strictReads=true`、`scopeBank=当前库`、全局键可读、部分视图 `keys()`
+     抛 `STORAGE_NOT_HYDRATED`、`keysScoped(A)` 不泄露未水合库B；
+  2) 切库：未 `ensureBank` 前作用域读取 fail-loud；`ensureBank(B)` 后题目/复习状态可见、
+     A 不卸载、C 仍未水合 → `keys()` 仍被拒（未退化为全量水合）；`switchBank` 内
+     `ensureBank` 早于 `setCurrentBankId` 静态守卫；
+  3) 删库（revlog 无日志）：A 已水合、B 未水合时不抛错、`keys()` 调用 **0 次**、A 题目清单
+     物理删除、B 日志保留、`currentBank` 回落 B、B 保持未水合；
+  4) 备份恢复：部分视图下 `applyData(replace)` 先 `ensureAll`，清除载荷外未水合库E的分片、
+     恢复后 `keys()` 可用、A/B 各 3 题。
+- `scripts/backup-hydration.test.mjs` +4 断言（52→56）：50k/4 库路径3 前置严格
+  （`__strictReads=true`、B/E 未水合、部分视图 `keys()` 被拒），使既有 50k 恢复用例成为
+  显式严格模式回归。
+- 断言只增不减，未改阈值/基线（`docs-baseline.json` 仅随新增断言上调）；生产
+  `Storage.__strictReads=false` 未改。**公共抽象：0 新增 / 0 调整。**
+- 真机 Playwright 脚本仍留在 `.analysis/browser-acceptance/`（未跟踪、不提交）。
+
+**红（先证保护缺失必失败）**
+- `QFORGE_STRICT_READS=0` 跑 idb：**7 失败**（新用例 3 条：启动部分视图 `keys()` 未抛错、
+  切库后 C 未水合 `keys()` 未抛错、恢复前 `keys()` 未抛错；另 4 条为严格前置/既有 harness 守卫）。
+- 临时还原 `RevlogStore.clear` 修复：**3 失败**（`NotHydratedError` / A 孤儿日志 1 /
+  持久化 `currentBank` 未清）——证明 CI 能拦住「删库级联退化为依赖全量 `keys()`」。
+- 临时移除 `removeBank` 无日志早退：**1 失败**（`keys()` 实测 1 次，期望 0）。
+- 临时移除 `applyData` 的 `ensureAll`：**3 失败**（恢复抛 `NotHydratedError`、写入键数 null、
+  载荷外 E 分片残留）。
+- `QFORGE_HYDRATION_RED=1` 跑 backup-hydration：50k 路径3 抛 `NotHydratedError`，exit 1。
+
+**绿（最终树实测，2026-11-09）**
+- `node scripts/idb.test.mjs`：**441/441，exit 0**。
+- `node scripts/backup-hydration.test.mjs`：**56/56，exit 0**。
+- `npm run verify:fast`：**exit 0**（37 套件 / 5956 断言 / 44.6s）。
+- `npm run bench`：**exit 0**（heapUsed +5.08MB；`keys()` 首次 16.45ms；首页 50k P95 0.04ms；
+  单题 P95 0.00ms；智能组卷 P95 2.14ms；API PATCH P95 5.33ms；grade 比值 2.83≤2.90；
+  gradeMany 4.79≤5.35）。
+- `node scripts/docs-check.mjs --static`：**exit 0**（37 项 / 5956 断言 / 66 门禁，
+  389.1 KB gzip / 1098.0 KB raw）。
+
+**遗留 TODO / 风险**
+- 仅真机覆盖：真实 Chromium DOM 交互（点击删库/切库、toast/状态栏）、真实浏览器配额与 IDB
+  事务调度、API 后端删库（服务端日志，本地 `keys()` 0 次，`clear()` 严格回退分支不可达）。
+- Node 替身不模拟真实 IDB 事务调度与配额，不能替代真机验收；生产 strict 仍 no-go
+  （缺观察期错误率数据）。
+
 ### docs(storage): 回填 API 后端与 50k 多库删库真机数据（仅文档）
 
 **Commit Hash**：`de13cac`
