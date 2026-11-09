@@ -50,7 +50,7 @@
 
 ### test(infra): 测试套件失败原始输出自动留证（零依赖，不改判定）
 
-**Commit Hash**：`TBD（本条随测试基建提交，hash 由后续 docs(changelog) 回填）`
+**Commit Hash**：`a33bff5`
 
 **核心改动**
 - `scripts/test-all.mjs`：新增 `persistFailure()` / `pruneFailures()`（仅 Node 内置模块）。
