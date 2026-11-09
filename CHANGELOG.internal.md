@@ -50,7 +50,7 @@
 
 ### test(strict): 补 DOM 删库与 API 删库严格守卫回归（剩余真机缺口）
 
-**Commit Hash**：`TBD（本条随测试提交，hash 由后续 docs(changelog) 回填）`
+**Commit Hash**：`9d9afa4`
 
 **核心改动**
 - `scripts/app-boot.test.mjs` +10 断言（136→146）：新增「删库 UI」段落，加载真实
