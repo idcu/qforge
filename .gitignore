@@ -11,3 +11,7 @@
 .trae/
 .trae-html-share-packages/
 qforge-evaluation/
+
+# 分析产物与临时脚本（本地保留，不入库）
+2026-11-11/
+.analysis/
