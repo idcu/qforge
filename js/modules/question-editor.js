@@ -13,20 +13,40 @@
 
   /* ---------------- 数据操作（薄封装 Repo） ---------------- */
 
+  /**
+   * T10：IDB 模式下题目写是异步入队，编辑保存后必须确认落盘；
+   * 失败时 flush() reject，调用方（编辑器保存流程）可捕获并提示。
+   */
+  async function confirmPersisted() {
+    if (QB.Storage && typeof QB.Storage._isIdb === 'function' && QB.Storage._isIdb()) {
+      await QB.Storage.flush();
+    }
+  }
+
   async function create(bankId, question) {
-    return QB.DB.questions.create(bankId, question);
+    const res = await QB.DB.questions.create(bankId, question);
+    await confirmPersisted();
+    return res;
   }
   async function update(id, patch, opts) {
-    return QB.DB.questions.update(id, patch, opts);
+    const res = await QB.DB.questions.update(id, patch, opts);
+    await confirmPersisted();
+    return res;
   }
   async function remove(id) {
-    return QB.DB.questions.remove(id);
+    const res = await QB.DB.questions.remove(id);
+    await confirmPersisted();
+    return res;
   }
   async function insertMany(bankId, questions, options) {
-    return QB.DB.questions.insertMany(bankId, questions, options);
+    const res = await QB.DB.questions.insertMany(bankId, questions, options);
+    await confirmPersisted();
+    return res;
   }
   async function removeMany(ids) {
-    return QB.DB.questions.removeMany(ids);
+    const res = await QB.DB.questions.removeMany(ids);
+    await confirmPersisted();
+    return res;
   }
 
   /* ---------------- 图片插入（浏览器 DOM，不进 harness） ---------------- */

@@ -342,7 +342,8 @@ section('键盘：源码层禁止 tabindex 正数 / 自定义控件 Enter-Space 
 section('焦点管理：模态焦点进入/回位/Tab 循环/Esc 关闭（源码约定 + 真机行为另验）');
 {
   const uiSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8');
-  const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8')
+    + '\n' + fs.readFileSync(path.join(QB_DIR, 'js/modules/action-router.js'), 'utf8');
   const ioSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/data-io.js'), 'utf8');
   const exportSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/exporter.js'), 'utf8');
   ok(/function openModal\(html, onMount, onClose, returnFocusTo\)/.test(uiSrc) &&

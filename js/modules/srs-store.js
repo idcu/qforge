@@ -17,9 +17,21 @@
     return await QB.DB.reviews.list(bankId);
   }
 
+  /**
+   * T10：IDB 模式下评分写入是异步入队，必须显式确认落盘，
+   * 否则「已保存」可能只是内存幻觉；失败时 flush() reject，调用方可感知。
+   */
+  async function confirmPersisted() {
+    if (QB.Storage && typeof QB.Storage._isIdb === 'function' && QB.Storage._isIdb()) {
+      await QB.Storage.flush();
+    }
+  }
+
   /** 整表落盘（失败即抛，不假成功），经契约层 */
   async function writeMap(bankId, map) {
-    return await QB.DB.reviews.save(bankId, map);
+    const res = await QB.DB.reviews.save(bankId, map);
+    await confirmPersisted();
+    return res;
   }
 
   /**
@@ -28,14 +40,19 @@
    */
   async function commitGraded(bankId, delta, entries) {
     const repo = QB.DB.reviews;
-    if (QB.hasCapability(QB.DB, 'reviews', 'patch')) return await repo.patch(bankId, delta, entries);
-    // 旧第三方适配器：无 patch 时读整表、加上本批改动后整表提交（行为不变）
-    const map = await readMap(bankId);
-    Object.keys(delta || {}).forEach((k) => {
-      if (delta[k] === null) delete map[k];
-      else map[k] = delta[k];
-    });
-    return await repo.record(bankId, map, entries);
+    let res;
+    if (QB.hasCapability(QB.DB, 'reviews', 'patch')) res = await repo.patch(bankId, delta, entries);
+    else {
+      // 旧第三方适配器：无 patch 时读整表、加上本批改动后整表提交（行为不变）
+      const map = await readMap(bankId);
+      Object.keys(delta || {}).forEach((k) => {
+        if (delta[k] === null) delete map[k];
+        else map[k] = delta[k];
+      });
+      res = await repo.record(bankId, map, entries);
+    }
+    await confirmPersisted();
+    return res;
   }
 
   function keyFor(q) { return q.contentHash || QB.makeContentHash(q); }

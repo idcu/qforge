@@ -140,7 +140,8 @@ section('二进制快照分派（xlsx）');
 
 section('考试倒计时/刷新恢复关键接线（源码级回归）');
 {
-  const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8');
+  const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8')
+    + '\n' + fs.readFileSync(path.join(QB_DIR, 'js/modules/view-router.js'), 'utf8');
   const uiSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8');
   ok(appSrc.indexOf('timerText: State.timerText') >= 0, 'app.render 向答题区传入 timerText（真实浏览器曾因此不显示倒计时）');
   ok(appSrc.indexOf("document.getElementById('quiz-timer')") >= 0, 'updateStatus 每秒更新 #quiz-timer');

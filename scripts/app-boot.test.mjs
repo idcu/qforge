@@ -785,6 +785,25 @@ section('统计页 forecast 缓存（P-6）：同修订重复进入 0 次重算�
 }
 
 /* ============================================================
+ * T10：落盘失败可观测（订阅 + 去重）
+ * ============================================================ */
+section('T10：落盘失败有可见出口且同错误去重');
+{
+  const env = await makeEnv({});
+  const countWriteToasts = () => env.toasts.filter(
+    (t) => String(t.message).indexOf('本地写入失败：') === 0).length;
+  const before = countWriteToasts();
+  env.QB.Storage._notifyError(new Error('注入写失败'));
+  await tick(5);
+  eq(countWriteToasts(), before + 1, '写失败提示一次（实测 ' + (countWriteToasts() - before) + ' 次）');
+  ok(toastsText(env).indexOf('本地写入失败：注入写失败') >= 0, '复用后台错误提示文案（' + toastsText(env) + '）');
+  env.QB.Storage._notifyError(new Error('注入写失败'));
+  await tick(5);
+  eq(countWriteToasts(), before + 1, '同错误连续两次只提示一次（去重生效）');
+  env.restore();
+}
+
+/* ============================================================
  * 汇总
  * ============================================================ */
 if (rejections.length) {

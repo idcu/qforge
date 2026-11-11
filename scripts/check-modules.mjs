@@ -172,12 +172,19 @@ if (manifest) {
   tierStats = checked.stats;
 }
 
-/* 5. 入口最后 / 配置最先 */
+/* 5. 入口最后 / 配置最先
+   例外：清单里标了 loadAfterEntry: true 的「运行时路由」允许排在入口之后
+   （入口只在 ready 后调用它们；此类模块自身不得在加载时执行依赖入口的逻辑）。 */
 if (!localJs.includes(ENTRY)) problems.push(`找不到入口 ${ENTRY}`);
 else if (localJs[localJs.length - 1] !== ENTRY) {
+  const tailAllowed = new Set(((manifest && manifest.modules) || [])
+    .filter((m) => m.loadAfterEntry === true).map((m) => String(m.file)));
   const after = localJs.slice(localJs.indexOf(ENTRY) + 1);
-  const preview = after.slice(0, 3).join(', ') + (after.length > 3 ? ` 等 ${after.length} 个` : '');
-  problems.push(`${ENTRY} 不是最后一个 js 脚本，其后还有：${preview}`);
+  const unexpected = after.filter((f) => !tailAllowed.has(f));
+  if (unexpected.length) {
+    const preview = unexpected.slice(0, 3).join(', ') + (unexpected.length > 3 ? ` 等 ${unexpected.length} 个` : '');
+    problems.push(`${ENTRY} 不是最后一个 js 脚本，其后有未标 loadAfterEntry 的脚本：${preview}`);
+  }
 }
 const firstJs = localJs.find((s) => s !== SAMPLE);
 if (firstJs !== CONFIG) {

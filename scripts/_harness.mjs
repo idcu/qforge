@@ -89,7 +89,11 @@ const MODULES = [
   'js/modules/migrate.js',
   'js/modules/sync-dav.js',
   'js/modules/blueprint.js',
-  'js/modules/practice-builder.js'
+  'js/modules/practice-builder.js',
+  // 事件/视图路由：生产 index.html 排在 app.js 之后（运行时才被调用）；
+  // harness 先加载它们再单独加载 app.js，保证需要 app 的用例可用。
+  'js/modules/action-router.js',
+  'js/modules/view-router.js'
 ];
 
 /**
@@ -196,6 +200,20 @@ export async function createHarness(qbDir, opts) {
   }
 
   MODULES.forEach(load);
+
+  // 无 DOM 的测试环境不加载 ui-renderer.js，历史用例通过 QB.UIRenderer 桩驱动 UI。
+  // 桥接：UIPort 的默认实现动态转发到「当前」QB.UIRenderer（每次调用时取，支持整体替换/局部打桩）；
+  // 生产环境由 ui-renderer.js 注册真实实现覆盖本桥，不影响线上行为。
+  const uiBridge = {};
+  ['toast', 'openModal', 'closeModal', 'confirmDialog', 'renderImportChecksum'].forEach((name) => {
+    uiBridge[name] = function () {
+      const ui = window.QB.UIRenderer;
+      return ui && typeof ui[name] === 'function' ? ui[name].apply(ui, arguments) : undefined;
+    };
+  });
+  if (window.QB.UIPort && typeof window.QB.UIPort.register === 'function') {
+    window.QB.UIPort.register(uiBridge);
+  }
 
   // C 步骤5：测试/CI 默认开启严格读取，让「既有调用点归类错误」在未水合库上真实暴露。
   // 生产默认仍由 js/utils/storage.js 的 `__strictReads: false` 决定（步骤6 另行评估）；

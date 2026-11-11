@@ -1383,8 +1383,8 @@ section('B 段迁移（C 步骤3 前半：哈希重映射 3 处）');
   const laSrc = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
   ok(edSrc.indexOf("errBox.textContent = '保存失败：' + ex.message") >= 0,
     '兜底①：编辑器保存 catch 写入 errBox「保存失败：…」（question-editor.js:602/713）');
-  ok(bkSrc2.indexOf("QB.UIRenderer.toast('恢复失败：' + e.message, 'err')") >= 0,
-    '兜底②：备份恢复失败 toast（backup.js:831）');
+  ok(bkSrc2.indexOf("QB.UIPort.toast('恢复失败：' + e.message, 'err')") >= 0,
+    '兜底②：备份恢复失败 toast（backup.js:831，经 UIPort）');
   ok(appSrc.indexOf("UI.toast('当前环境不支持本地新版存储") >= 0,
     '兜底③：迁移失败 toast 并回退（app.js:1797）');
 
@@ -1485,7 +1485,8 @@ section('B 段前置：建库/进入新库 ensureBank（C 步骤3 后半：legac
 
   // 静态：ensureBank 归属调用方（建库/示例库/删库后进入新当前库/恢复练习进入库），
   // 且不得塞进 readMap/legacyReviewMap 内部当兜底
-  const appSrc2 = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+  const appSrc2 = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8')
+    + '\n' + fs.readFileSync(path.join(ROOT, 'js/modules/action-router.js'), 'utf8');
   const laSrc2 = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
   const ensureNear = (marker, span) => {
     const i = appSrc2.indexOf(marker);
@@ -2185,6 +2186,43 @@ section('C 步骤4 B 段补完：convertMetaLayouts 指示键 + HashRemap（B5/B
   eq(mergedWrong.length, 1, 'B6 等价：同新键冲突合并为 1 条');
   eq(mergedWrong[0].questionKey, aHash, 'B6 等价：键改写为新 hash');
   eq(mergedWrong[0].wrongCount, 3, 'B6 等价：错题次数相加（2+1）');
+}
+
+section('T10：IDB 写失败可由调用点捕获（评分/编辑保存）');
+{
+  const fail = { on: false };
+  const idb = createMemoryIDB({ failWrite: () => fail.on });
+  const { QB } = await makeHarness({ indexedDB: idb });
+  const S = QB.Storage;
+  await S.initStore();
+  await QB.Store.migrateToIdb(QB.Store.lsSource());
+  S.adoptStore({ mode: 'idb', records: await QB.Store.readAll(true) });
+
+  const errs = [];
+  const off = S.onWriteError((e) => errs.push(e));
+  fail.on = true;
+  let threw = null;
+  try { await QB.SRSStore.writeMap('t10bank', { h1: { due: 1, s: 1 } }); } catch (e) { threw = e; }
+  ok(!!threw, '评分整表写（writeMap）在 IDB 失败时 reject，不假成功',
+    '（实测 ' + (threw ? (threw.name || threw.message) : '未抛错') + '）');
+
+  // Storage 待写事务失败：既 reject，也广播给 onWriteError 订阅方
+  S.setSync('t10key', { v: 1 });
+  let threw2 = null;
+  try { await S.flush(); } catch (e) { threw2 = e; }
+  ok(!!threw2, 'Storage 待写事务失败时 flush reject');
+  ok(errs.length >= 1, 'onWriteError 订阅方收到失败（实测 ' + errs.length + ' 次）');
+  off();
+  fail.on = false;
+  await S.flush().catch(() => { /* 恢复后清理待写 */ });
+
+  const qeSrc = fs.readFileSync(path.join(ROOT, 'js/modules/question-editor.js'), 'utf8');
+  ok(qeSrc.indexOf('confirmPersisted') >= 0 && qeSrc.indexOf('await confirmPersisted()') >= 0,
+    '编辑保存路径写入后显式 await 落盘确认（question-editor）');
+  const appSrcT10 = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+  ok(appSrcT10.indexOf('onWriteError(function (e)') >= 0 &&
+     appSrcT10.indexOf("notifyBackgroundError('本地写入失败'") >= 0,
+    'app 启动订阅 onWriteError 并复用后台错误提示（去重在 notifyBackgroundError）');
 }
 
 /* ============================================================ */

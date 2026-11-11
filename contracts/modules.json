@@ -1046,17 +1046,10 @@
         "data.sample-data",
         "utils.helpers",
         "data.db",
-        "modules.ui-renderer"
+        "data.contracts"
       ],
       "keeps": [
         "QB.BankManager"
-      ],
-      "allowUpward": [
-        {
-          "id": "modules.ui-renderer",
-          "until": "2026-12-31",
-          "reason": "R-04：领域内嵌 UI，待 QB.UIPort 落地后移除"
-        }
       ]
     },
     {
@@ -1113,18 +1106,11 @@
         "importers.adapters",
         "importers.md-importer",
         "importers.registry",
-        "modules.ui-renderer",
+        "data.contracts",
         "modules.source"
       ],
       "keeps": [
         "QB.DataIO"
-      ],
-      "allowUpward": [
-        {
-          "id": "modules.ui-renderer",
-          "until": "2026-12-31",
-          "reason": "R-04：领域内嵌 UI，待 QB.UIPort 落地后移除"
-        }
       ]
     },
     {
@@ -1194,7 +1180,7 @@
         "modules.favorites",
         "modules.history",
         "modules.sched-settings",
-        "modules.ui-renderer",
+        "data.contracts",
         "modules.source",
         "modules.office-writer",
         "modules.share-page",
@@ -1202,13 +1188,6 @@
       ],
       "keeps": [
         "QB.Exporters"
-      ],
-      "allowUpward": [
-        {
-          "id": "modules.ui-renderer",
-          "until": "2026-12-31",
-          "reason": "R-04：领域内嵌 UI，待 QB.UIPort 落地后移除"
-        }
       ]
     },
     {
@@ -1230,18 +1209,10 @@
         "data.wire",
         "data.local-adapter",
         "data.db",
-        "modules.qbk",
-        "modules.ui-renderer"
+        "modules.qbk"
       ],
       "keeps": [
         "QB.Backup"
-      ],
-      "allowUpward": [
-        {
-          "id": "modules.ui-renderer",
-          "until": "2026-12-31",
-          "reason": "R-04：领域内嵌 UI，待 QB.UIPort 落地后移除"
-        }
       ]
     },
     {
@@ -1275,18 +1246,10 @@
         "utils.helpers",
         "utils.storage",
         "data.contracts",
-        "modules.ui-renderer",
         "modules.backup"
       ],
       "keeps": [
         "QB.SyncDAV"
-      ],
-      "allowUpward": [
-        {
-          "id": "modules.ui-renderer",
-          "until": "2026-12-31",
-          "reason": "R-04：领域内嵌 UI，待 QB.UIPort 落地后移除"
-        }
       ]
     },
     {
@@ -1365,6 +1328,36 @@
       ],
       "keeps": [
         "QB.App"
+      ]
+    },
+    {
+      "id": "modules.action-router",
+      "file": "js/modules/action-router.js",
+      "layer": "modules",
+      "tier": "L3",
+      "at": 87,
+      "loadAfterEntry": true,
+      "requires": [
+        "modules.ui-renderer",
+        "data.contracts"
+      ],
+      "keeps": [
+        "QB.AppActions"
+      ]
+    },
+    {
+      "id": "modules.view-router",
+      "file": "js/modules/view-router.js",
+      "layer": "modules",
+      "tier": "L3",
+      "at": 88,
+      "loadAfterEntry": true,
+      "requires": [
+        "modules.ui-renderer",
+        "data.contracts"
+      ],
+      "keeps": [
+        "QB.ViewRouter"
       ]
     }
   ]
