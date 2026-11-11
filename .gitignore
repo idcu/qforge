@@ -12,6 +12,9 @@
 .trae-html-share-packages/
 qforge-evaluation/
 
+# 真机门禁证据（scripts/e2e-browser.mjs、a11y-browser.mjs 生成，勿入库）
+.screenshots/
+
 # 分析产物与临时脚本（本地保留，不入库）
 2026-11-11/
 .analysis/
