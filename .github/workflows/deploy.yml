@@ -1,0 +1,103 @@
+# 淬题 qforge 发布流水线（无构建）
+#
+# 设计约束：
+#   - 仓库工作区永不被改写：版本化只发生在 $RUNNER_TEMP 的产物副本里；
+#   - `file://` 双击即用不受影响：查询串只出现在发布产物；
+#   - 打 tag 即部署，回滚 = workflow_dispatch 指定旧 tag（不重写历史）。
+#
+# 触发：
+#   - push tag v*        → 校验 + 生成产物 + 部署 GitHub Pages
+#   - pull_request       → dry-run：只生成产物并断言 ?v= 数量 / CACHE / 工作区干净
+#   - workflow_dispatch  → 手动部署或回滚到指定 tag
+name: deploy
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '要部署或回滚的 tag（例如 v1.0.1）'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 快速门禁（装配 / 依赖 / 文档 / 测试）
+        run: npm run verify:fast
+
+      - name: 发布一致性（版本 / CACHE / 脚本数）
+        run: node scripts/check-release.mjs
+
+      - name: 产物版本号
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v="${{ github.ref_name }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            v="${{ inputs.ref }}"
+          else
+            v="v0.0.0-dryrun"
+          fi
+          case "$v" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::版本号必须形如 v1.2.3（收到 $v）"; exit 1 ;;
+          esac
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+
+      - name: 生成产物（只写 $RUNNER_TEMP）
+        run: node scripts/build-staging.mjs --out "$RUNNER_TEMP/staging" --version "${{ steps.version.outputs.value }}" --assert
+
+      - name: 产物自检（脚本必须与实现同步）
+        run: node scripts/build-staging.mjs --selftest
+
+      - name: 工作区必须未被改写
+        shell: bash
+        run: |
+          set -euo pipefail
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "::error::发布流程改写了仓库文件："
+            echo "$dirty"
+            exit 1
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/staging
+
+  deploy:
+    # PR 只做 dry-run；tag push 与手动触发才真正部署
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
