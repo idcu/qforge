@@ -17,6 +17,18 @@
 > 加一行读数的前提：代码里有**唯一常量**可对。没有唯一常量（例如"首屏体积"），
 > 就不进这张表——那种数字属于 `scripts/docs-check.mjs` 的实测复算，不是声明。
 
+### 0.1 三个版本号各管一件事（不要当漂移互相拉平）
+
+仓库里有三个都叫「版本」的东西，语义不同，**不要求相等，也不要为了看起来整齐去同步**：
+
+| 版本号 | 唯一事实源 | 谁必须跟着走 | 谁不用管它 |
+| --- | --- | --- | --- |
+| **应用版本** | `package.json` 的 `version` 与 `QB.CONFIG.VERSION`（两处必须逐字相等） | 每次对外发版 +1；`check-release.mjs` 强制两处一致，并据此对账 `sw.js` 的 `CACHE` 与 `docs/release-ledger.json` | —— |
+| **ngm 工具链版本** | `.ngm-version` | 只在升级 ngm CLI / 重新 vendor 工具链时变；只要求是合法 semver | 不随应用发版；应用版本回退与它无关 |
+| **ngm 工程清单版本** | `ngm.json` 的 `version` | ngm 工程自身的清单演进（需要时才动） | 与应用版本无关，发版时**不要**顺手改；`check-ngm.mjs` 也不拿它与应用版本比对 |
+
+**门禁边界**（避免以后误加规则）：`check-release.mjs` 只比对「应用版本 ↔ `CONFIG.VERSION` ↔ 台账 / SW 缓存」，不读 `ngm.json` 与 `.ngm-version`；`check-ngm.mjs` 只比对「`ngm.json` ↔ `ngm.lock` ↔ `ngm.vendor` ↔ 适配层清单」，不比对任何版本号大小。两者互不引用，也不存在「三号一致」的判据。
+
 ## 1. 环境与运行
 
 - 仅需 **Node 18+**（用到 `DecompressionStream`/`CompressionStream` 等内置 API；CI 矩阵为 Node 20/24），**无 npm install、无第三方依赖**。
@@ -108,7 +120,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 
 **CSP 三处同步（`scripts/check-csp.mjs`，进 `verify:fast` 与 CI）：** 断言 `index.html` 的 CSP meta 与 `scripts/lib/security-headers.mjs` 的 `CSP` 逐字符一致，且 `NETWORK.CSP_CONNECT_ALLOWLIST`（`js/config.js`）的 origin 集合与两处 `connect-src` 的 origin 集合**双向相等**（多一个少一个都 exit 1）。`--selftest` 注入「白名单有、meta 无」「meta 有、白名单无」「两处策略不一致」「条目非 origin」等 6 例，证明判据有牙齿。**SW 缓存版本**由 `scripts/sw-runtime.test.mjs` 的 baseline 门禁守护（`scripts/sw-baseline.json` 记录 `CACHE` 名与摘要；改 `js/**`/`index.html` 不 bump 版本即红，`--mutate` 可复现该红）。
 
-**vendor 自检 `job`**（`node scripts/check-ngm.mjs`）：断言 `ngm.json` ↔ `ngm.lock` ↔ `ngm.vendor` 双向一致、源码中的 vendor 字面路径都能归到已登记模块、适配层清单（`contracts/adapters.json`）与保留名齐全。**清单文件缺失或非法一律 exit 1**——历史缺陷是整段校验包在 `if (project && lock)` 内，`ngm.json`/`ngm.lock` 缺失时连错误汇总都被跳过，进程静默 exit 0；`--selftest` 用三个临时根（逐次缺 `ngm.json` / `ngm.lock` / `ngm.mappings.json`）证明这道闸会失败。
+**vendor 自检 `job`**（`node scripts/check-ngm.mjs`）：断言 `ngm.json` ↔ `ngm.lock` ↔ `ngm.vendor` 双向一致、源码中的 vendor 字面路径都能归到已登记模块、适配层清单（`contracts/adapters.json`）与保留名齐全。**清单文件缺失或非法一律 exit 1**——历史缺陷是整段校验包在 `if (project && lock)` 内，`ngm.json`/`ngm.lock` 缺失时连错误汇总都被跳过，进程静默 exit 0；`--selftest` 用三个临时根（逐次缺 `ngm.json` / `ngm.lock` / `ngm.mappings.json`）证明这道闸会失败。**它不比对版本号**：不拿 `ngm.json` 的 `version` 与 `package.json` / `.ngm-version` 相比（边界见 §0.1）。
 
 **独立 `a11y` job**（`node scripts/a11y.test.mjs`，**103** 项断言）：与 `test-all` 内的同一命令并行存在，只提供无障碍的独立红绿信号，避免回归被其它套件噪声淹没。静态门禁自身带变异模式 `node scripts/a11y.test.mjs --mutate`（删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked`，预期 95 通过 / 8 失败、exit 1）；**该模式不得进 CI**（预期失败）。新增弹窗渲染器时，套件的「弹窗快照注册自检」会在未登记快照时转红。
 

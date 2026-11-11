@@ -14,6 +14,8 @@
 
 - [ ] `package.json` 的 `version` 与 `js/config.js` 的 `QB.CONFIG.VERSION` 完全相同。
 - [ ] `.ngm-version` 是 **ngm 工具链版本**，不随应用发布变化；只需保持合法 semver（应用版本回退与它无关）。
+- [ ] `ngm.json` 的 `version` 是 **ngm 工程清单版本**，与应用版本无关，发版时不要动它，也不要把它当成「版本漂移」。
+- [ ] 三个版本号的完整语义与门禁边界见 [DEVELOPMENT.md §0.1](DEVELOPMENT.md#01-三个版本号各管一件事不要当漂移互相拉平)：只有应用版本必须跟着发版走，另两个不用。
 
 ```powershell
 node scripts/check-release.mjs
