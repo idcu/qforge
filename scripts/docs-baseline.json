@@ -1,15 +1,15 @@
 {
-  "generatedAt": "2026-11-09T16:45:08.864Z",
-  "runItems": 37,
-  "suiteFiles": 36,
-  "totalAssertions": 5968,
+  "generatedAt": "2026-11-11T07:22:49.296Z",
+  "runItems": 38,
+  "suiteFiles": 37,
+  "totalAssertions": 6009,
   "gateCount": 66,
   "counts": {
-    "smoke-test.mjs": 731,
+    "smoke-test.mjs": 738,
     "a11y.test.mjs": 103,
     "annotation.test.mjs": 90,
     "api-backend.test.mjs": 322,
-    "app-boot.test.mjs": 146,
+    "app-boot.test.mjs": 149,
     "assets.test.mjs": 182,
     "backup-hydration.test.mjs": 56,
     "backup.test.mjs": 151,
@@ -20,7 +20,7 @@
     "exporter.test.mjs": 204,
     "fsrs-opt.test.mjs": 114,
     "fsrs.test.mjs": 136,
-    "idb.test.mjs": 441,
+    "idb.test.mjs": 446,
     "import-commit.test.mjs": 57,
     "importers-anki.test.mjs": 148,
     "importers-quizlet.test.mjs": 75,
@@ -37,16 +37,17 @@
     "source.test.mjs": 39,
     "srs.test.mjs": 63,
     "static-server.test.mjs": 29,
-    "storage.test.mjs": 108,
+    "storage.test.mjs": 109,
     "sw-runtime.test.mjs": 34,
     "sync-dav.test.mjs": 69,
+    "ui-port.test.mjs": 25,
     "ui-renderer.test.mjs": 218,
     "xml-lite.test.mjs": 39
   },
   "firstScreen": {
-    "scripts": 86,
-    "files": 94,
-    "rawKB": "1098.0",
-    "gzipKB": "389.1"
+    "scripts": 88,
+    "files": 96,
+    "rawKB": "1107.2",
+    "gzipKB": "394.3"
   }
 }

@@ -1,10 +1,10 @@
 # 竞品全维度对比（2026-11-02）
 
-> 本轮任务：以仓库既有 [COMPETITORS.md](COMPETITORS.md)（2026-10-14）与 [EVALUATION-2026-11-01.md](EVALUATION-2026-11-01.md) §6（2026-11-01）为基线，做**复核 + 补全 + 拉平矩阵**。
+> 本轮任务：以仓库既有 [COMPETITORS.md](COMPETITORS.md)（2026-10-14）与 [EVALUATION-2026-11-01.md](archive/EVALUATION-2026-11-01.md) §6（2026-11-01）为基线，做**复核 + 补全 + 拉平矩阵**。
 > 检索/核实日期：**2026-11-02**（Asia/Shanghai）。竞品信息来自官网、官方帮助中心、官方商店页与官方仓库；**未逐项登录实测**。价格、功能和版本会变动，引用时以来源页为准。
 > 证据标签：**【事实】**＝官方页面/仓库可直接核实；**【厂商宣称】**＝厂商自述但无独立验证；**【推断】**＝本文基于事实的判断；**【未核实】**＝未找到可核实来源，不做推测填充。
 > 范围：成熟 SRS（Anki、SuperMemo、Mnemosyne、RemNote、Brainscape）；大众/商业题库（Quizlet、墨墨背单词、百词斩、Kahoot、问卷星）；本地优先/可自建（Obsidian + Spaced Repetition 插件、Logseq、Anki 自建 Sync Server、Moodle）。
-> qforge 侧数据来自本仓库代码与 **2026-11-02 本机复跑**：24 个运行项 **3741/3741 断言通过、0 失败**；`bench --assert` **20 项检查全过（19 项耗时 + heapUsed ≤ 40MB）**，heapUsed 增量 **+2.70MB**。代码侧同日全量评估见 [EVALUATION-2026-11-02.md](EVALUATION-2026-11-02.md)（含新发现的 4 个正确性边界缺陷与 SRS 写放大 22.74ms/次），本报告只引用与竞品判断相关的部分。
+> qforge 侧数据来自本仓库代码与 **2026-11-02 本机复跑**：24 个运行项 **3741/3741 断言通过、0 失败**；`bench --assert` **20 项检查全过（19 项耗时 + heapUsed ≤ 40MB）**，heapUsed 增量 **+2.70MB**。代码侧同日全量评估见 [EVALUATION-2026-11-02.md](archive/EVALUATION-2026-11-02.md)（含新发现的 4 个正确性边界缺陷与 SRS 写放大 22.74ms/次），本报告只引用与竞品判断相关的部分。
 
 ---
 
@@ -24,7 +24,7 @@
 
 - **复核**：重新打开 Anki Deck Options、RemNote FSRS 帮助、Obsidian Spaced Repetition 插件仓库、Logseq Flashcards 文档；对旧报告中的 Anki/Quizlet 价格与默认算法结论逐条降级或改写。
 - **补全**：新增 SuperMemo、Mnemosyne、Brainscape、墨墨背单词、百词斩、Kahoot、问卷星、Obsidian 插件、Logseq、Anki 自建 Sync、Moodle 共 11 个对象；旧版只有 Anki/Quizlet/考试宝/粉笔等少量对象。
-- **拉平矩阵**：统一为 14 个维度、统一符号、统一“qforge 相对位置”列，便于与 [EVALUATION-2026-11-01.md](EVALUATION-2026-11-01.md) §6 交叉引用。
+- **拉平矩阵**：统一为 14 个维度、统一符号、统一“qforge 相对位置”列，便于与 [EVALUATION-2026-11-01.md](archive/EVALUATION-2026-11-01.md) §6 交叉引用。
 - **qforge 复跑**：`node scripts/test-all.mjs`（24 项 / 3741 断言 / 0 失败，27.9s）；`node --expose-gc scripts/bench.mjs --assert`（20 项检查全过，heapUsed +2.70MB，3000 题末态 16.87MB）。
 
 ### 1.2 证据分级规则
@@ -51,15 +51,15 @@
 | --- | --- | --- | --- |
 | qforge “6 种题型” | **7 种**：判断/单选/多选/不定项/填空/简答/**材料题（2–10 小问递归）** | **已过时** | [README.md](../README.md) 首段与功能清单 |
 | qforge “22 个运行项 / 3151 断言 / 1841 断言” | **24 个运行项 / 3741 断言 / 0 失败** | **已过时** | 2026-11-02 `test-all` 实测 |
-| qforge 首屏 “185.9 KB gzip / 522.8 KB raw / 61 文件” | README 记录 230.1KB/632.0KB/73 文件；**2026-11-02 独立实测 233.9KB gzip / 640.8KB raw / 75 文件（67 脚本）**，README 数字本身也已漂移 | **已过时（旧版和 README 都需更新）** | [EVALUATION-2026-11-02.md](EVALUATION-2026-11-02.md) §6.4 |
-| “材料题 M1 已落地，M3/M4 待做” | 材料题嵌套编辑器、逐小问自评、小问乱序、子问分值均已落地 | **已过时** | [EVALUATION-2026-11-01.md](EVALUATION-2026-11-01.md) §0.3 |
+| qforge 首屏 “185.9 KB gzip / 522.8 KB raw / 61 文件” | README 记录 230.1KB/632.0KB/73 文件；**2026-11-02 独立实测 233.9KB gzip / 640.8KB raw / 75 文件（67 脚本）**，README 数字本身也已漂移 | **已过时（旧版和 README 都需更新）** | [EVALUATION-2026-11-02.md](archive/EVALUATION-2026-11-02.md) §6.4 |
+| “材料题 M1 已落地，M3/M4 待做” | 材料题嵌套编辑器、逐小问自评、小问乱序、子问分值均已落地 | **已过时** | [EVALUATION-2026-11-01.md](archive/EVALUATION-2026-11-01.md) §0.3 |
 | “Anki FSRS 自 23.10 起可选，默认仍是 SM-2” | Anki 文档已提供 FSRS 选项；AnkiDroid changelog 明确 FSRS 6；**“新集合默认是否开启”未核实** | **需降级** | [Anki Deck Options](https://docs.ankiweb.net/deck-options.html)、[AnkiDroid Changelog](https://ankidroid.org/changelog.html) |
 | “qforge 是唯一 FSRS-6 产品”（隐含） | **不成立**：Anki 已支持 FSRS-6，RemNote 明确 FSRS v6；qforge 的“唯一”应限定为“FSRS-6 + 判分考试 + 零依赖本地” | **已过时/需改写** | [RemNote FSRS 帮助](https://help.remnote.com/en/articles/9124137-the-fsrs-spaced-repetition-algorithm) |
 | “Quizlet Plus 约 $35.99/年、Unlimited $44.99/年” | 旧数据来自第三方页面，官方 upgrade 页未直接核验；中国区 App Store 显示内购价 ¥68/¥298、教师 ¥233，**档位/周期未标注**；全球价**未核实** | **不可作为现行事实** | [Quizlet 中国区 App Store](https://apps.apple.com/cn/app/quizlet/id546473125) |
 | “Mnemosyne 是活跃开源 SRS” | 官网当前显示 hosting suspended；SourceForge 2.11 页面最后更新 2024-07 → **推断维护活跃度低** | **需改写** | [Mnemosyne 官网](https://mnemosyne-proj.org/)、[SourceForge](https://sourceforge.net/projects/mnemosyne-proj/) |
 | “SuperMemo = Windows 上的 SRS 鼻祖” | 补充：SM20 仅 Win10/11 桌面、5 种算法、SM20 US$68 / SM19 US$34 买断；移动端是课程 App | **不完整** | [SuperMemo 20 商店页](https://supermemo.store/products/supermemo-20-for-windows)、[算法说明](https://help.supermemo.org/wiki/SuperMemo_Algorithm) |
-| “考试宝/粉笔结论” | 本轮范围未包含，**未重新核验**；沿用 2026-11-01 记录，价格/功能可能变动 | **沿用但标注** | [EVALUATION-2026-11-01.md](EVALUATION-2026-11-01.md) §6.3 |
-| “错题/收藏不触库” | 已修正为“复用整库缓存，首次装载仍整库读” | **已修正** | [EVALUATION-2026-11-01.md](EVALUATION-2026-11-01.md) §0.3 |
+| “考试宝/粉笔结论” | 本轮范围未包含，**未重新核验**；沿用 2026-11-01 记录，价格/功能可能变动 | **沿用但标注** | [EVALUATION-2026-11-01.md](archive/EVALUATION-2026-11-01.md) §6.3 |
+| “错题/收藏不触库” | 已修正为“复用整库缓存，首次装载仍整库读” | **已修正** | [EVALUATION-2026-11-01.md](archive/EVALUATION-2026-11-01.md) §0.3 |
 
 **一句话**：旧版不是“错”，而是**对象少、数字旧、把 Anki/Quizlet 的时点结论写成了长期结论**。本报告保留旧文件作历史基线，新结论以本文件为准。
 
@@ -233,7 +233,7 @@
 | FSRS 优化器（4000 条/150 迭代） | **4210.73 ms** | Worker 隔离；热启动 1728.88ms |
 | heapUsed 增量 | **+2.70 MB** | 3000 题末态 16.87MB |
 
-**代码侧同日补测【事实，2026-11-02，bench 未覆盖】**：本地 SRS `record` 300 状态 0.14ms、3000 状态 1.59ms、3000+20k 日志 6.38ms、**20k+20k 日志 22.74ms/次、map 约 2.41MB/次**，超过 60fps 帧预算；11-01 基线为 18.41ms，同量级。依据 [EVALUATION-2026-11-02.md](EVALUATION-2026-11-02.md) §6.3、[EVALUATION-2026-11-01.md](EVALUATION-2026-11-01.md) §5.4。
+**代码侧同日补测【事实，2026-11-02，bench 未覆盖】**：本地 SRS `record` 300 状态 0.14ms、3000 状态 1.59ms、3000+20k 日志 6.38ms、**20k+20k 日志 22.74ms/次、map 约 2.41MB/次**，超过 60fps 帧预算；11-01 基线为 18.41ms，同量级。依据 [EVALUATION-2026-11-02.md](archive/EVALUATION-2026-11-02.md) §6.3、[EVALUATION-2026-11-01.md](archive/EVALUATION-2026-11-01.md) §5.4。
 
 | 对标 | 规模事实 | 判断 |
 | --- | --- | --- |
@@ -256,7 +256,7 @@
 
 ### 6.7 UI/UX、移动端与无障碍
 
-- **qforge【事实】**：响应式 + 深浅色 + 键盘快捷键 + 弹窗焦点闭环 + 选项语义 + `focus-visible` + `reduced-motion` + 安全区；但只有 560/1100 两档断点，无底部导航/原生推送/后台同步；`#view aria-live="polite"` 会朗读整视图。依据 [EVALUATION-2026-11-01.md](EVALUATION-2026-11-01.md) §5.6。
+- **qforge【事实】**：响应式 + 深浅色 + 键盘快捷键 + 弹窗焦点闭环 + 选项语义 + `focus-visible` + `reduced-motion` + 安全区；但只有 560/1100 两档断点，无底部导航/原生推送/后台同步；`#view aria-live="polite"` 会朗读整视图。依据 [EVALUATION-2026-11-01.md](archive/EVALUATION-2026-11-01.md) §5.6。
 - **Kahoot【事实】**：官方无障碍页声明读屏/朗读支持；**这是本轮唯一可明确核实的无障碍强项**。依据 [Kahoot Accessibility](https://kahoot.com/accessibility/)。
 - **其余【未核实】**：Anki/SuperMemo/Mnemosyne/RemNote/Brainscape/Quizlet/墨墨/百词斩/Obsidian/Logseq/Moodle 均未找到可核实的 WCAG/axe 结论；百词斩 App Store 显示开发者未声明辅助功能。依据 [百词斩 App Store](https://apps.apple.com/cn/app/id557545298)。
 - **判断**：qforge 的无障碍基线不差，但**没有验收门禁**；移动端是 PWA 而非原生，体验上落后商业 App。最低成本机会是 768px 断点 + 局部 live region + axe 人工检查清单。
@@ -452,8 +452,8 @@
 - [ARCHITECTURE.md](ARCHITECTURE.md)（分层、200/片、revision 缓存、DomPatch、ResultPolicy、CRC/ZIP）
 - [SRS.md](SRS.md)（FSRS-6、学习步骤、按库 preset、门控）
 - [API-CONTRACT.md](API-CONTRACT.md)（7 组 Repository、Bearer、409、offset/size）
-- [EVALUATION-2026-11-02.md](EVALUATION-2026-11-02.md)（2026-11-02 代码侧全量评估：SRS 22.74ms/次、首屏 233.9KB/640.8KB/75 文件、4 个正确性边界缺陷）
-- [EVALUATION-2026-11-01.md](EVALUATION-2026-11-01.md)（审计、性能、旧竞品矩阵）
+- [EVALUATION-2026-11-02.md](archive/EVALUATION-2026-11-02.md)（2026-11-02 代码侧全量评估：SRS 22.74ms/次、首屏 233.9KB/640.8KB/75 文件、4 个正确性边界缺陷）
+- [EVALUATION-2026-11-01.md](archive/EVALUATION-2026-11-01.md)（审计、性能、旧竞品矩阵）
 - [COMPETITORS.md](COMPETITORS.md)（2026-10-14 历史基线）
 - 本轮实测：`node scripts/test-all.mjs`（24 项/3741/0 失败，2026-11-02）；`node --expose-gc scripts/bench.mjs --assert`（20 项全过，heapUsed +2.70MB，2026-11-02）；SRS 写路径 22.74ms/次来自 EVALUATION-2026-11-02 §6.3（2026-11-02，独立补测；11-01 基线 18.41ms）。
 

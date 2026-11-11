@@ -228,7 +228,7 @@ scripts/  (29 文件, 7,314)      serve / serve-api / serve-webdav / bench / smo
 
 ### 4.1 【P0】分片删除后未重编号，题库"有计数无题目"（已复现）
 
-**位置**：[`js/data/local-adapter.js#L340-L368`](../js/data/local-adapter.js#L340-L368)（单题删除）、[`#L413-L448`](../js/data/local-adapter.js#L413-L448)（批量删除）。
+**位置**：[`js/data/local-adapter.js#L340-L368`](../../js/data/local-adapter.js#L340-L368)（单题删除）、[`#L413-L448`](../../js/data/local-adapter.js#L413-L448)（批量删除）。
 
 **机制**：删除后若某分片被清空，代码执行 `removeShard(bankId, i)` 并把 `sizes` 前进一位，但**后续分片的存储索引没有减一**。清单 `sizes` 是"第 i 个分片"的唯一定位依据，于是：
 
@@ -271,7 +271,7 @@ list() 实际返回 = 0
 
 ### 4.2 【P1】API 模式 content_hash 可能不重算（客户端 + 参考后端）
 
-**位置**：[`js/data/api-adapter.js#L222-L227`](../js/data/api-adapter.js#L222-L227)、[`scripts/serve-api.mjs#L175-L186`](../scripts/serve-api.mjs#L175-L186)。
+**位置**：[`js/data/api-adapter.js#L222-L227`](../../js/data/api-adapter.js#L222-L227)、[`scripts/serve-api.mjs#L175-L186`](../../scripts/serve-api.mjs#L175-L186)。
 
 - 客户端 `update(id, patch)` 用 `toWireQuestion(patch)`，当 patch 含 `type` 但缺少题干/选项/答案时会用残缺对象算 hash 并上报；
 - 参考后端 `questions.update` 直接 `Object.assign`，从不重算 hash。
@@ -280,25 +280,25 @@ list() 实际返回 = 0
 
 ### 4.3 【P1】api 模式 `countCache` 被筛选结果污染
 
-**位置**：[`js/data/api-adapter.js#L203-L213`](../js/data/api-adapter.js#L203-L213)。
+**位置**：[`js/data/api-adapter.js#L203-L213`](../../js/data/api-adapter.js#L203-L213)。
 
 `list()` 无论是否带筛选都写入 `countCache.set(bankId, r.total)`；随后 `count()` 命中缓存返回的是**筛选后的总数**。当前 UI 的 `list` 调用基本不带筛选，属于潜伏缺陷；一旦搜索/管理页走 API 筛选即触发"总数变小"。**修复**：仅无筛选条件时写 `countCache`，或缓存键包含筛选签名。
 
 ### 4.4 【P1】考试交卷确认弹窗把 `<br>` 显示成字面量
 
-**位置**：[`js/app.js#L604-L611`](../js/app.js#L604-L611) 传入 `lines.join('<br>')`；[`js/modules/ui-renderer.js#L894-L905`](../js/modules/ui-renderer.js#L894-L905) 对 message 做 `esc()`。
+**位置**：[`js/app.js#L604-L611`](../../js/app.js#L604-L611) 传入 `lines.join('<br>')`；[`js/modules/ui-renderer.js#L894-L905`](../../js/modules/ui-renderer.js#L894-L905) 对 message 做 `esc()`。
 
 用户会看到 `…；<br>· 材料题…` 这类原始标签。**修复**：`confirmDialog` 增加 `lines: string[]` 参数（逐行 `<div>` 渲染，仍转义），或增加显式的 `html: true` 选项但只允许内部可信片段；禁止直接把 HTML 交给会转义的接口。
 
 ### 4.5 【P1】api 模式下每次作答触发 3–4 个网络请求
 
-**位置**：[`js/app.js#L125-L153`](../js/app.js#L125-L153)（`loadBankData` 每次都 `banks.list + banks.get + questions.count`）、[`js/app.js#L176-L184`](../js/app.js#L176-L184)（每次渲染 `Favorites.has` → `favoriteList`）。
+**位置**：[`js/app.js#L125-L153`](../../js/app.js#L125-L153)（`loadBankData` 每次都 `banks.list + banks.get + questions.count`）、[`js/app.js#L176-L184`](../../js/app.js#L176-L184)（每次渲染 `Favorites.has` → `favoriteList`）。
 
 本地点一次选项 = 首次 4 次 REST（banks.list / banks.get / questions.count / favoriteList），之后每次 3 次（count 命中按库缓存）；弱网下答题手感明显变差。**修复**：把 `banks`、`count`、`favorites` 收敛到带修订号的视图级缓存（复用 `QB.DB.loadQuestions` 的失效思路），作答热路径只允许 0–1 次请求；或提供 `GET /api/banks/{id}/context` 聚合端点。
 
 ### 4.6 【P1】`historyAdd` 返回形状 local / api 不一致
 
-**位置**：[`js/data/local-adapter.js#L506-L511`](../js/data/local-adapter.js#L506-L511) 返回完整数组；[`js/data/api-adapter.js#L291-L294`](../js/data/api-adapter.js#L291-L294) 返回单条记录。
+**位置**：[`js/data/local-adapter.js#L506-L511`](../../js/data/local-adapter.js#L506-L511) 返回完整数组；[`js/data/api-adapter.js#L291-L294`](../../js/data/api-adapter.js#L291-L294) 返回单条记录。
 
 当前调用方未使用返回值，所以未爆雷；但契约层宣称"同签名同语义"，这是静默漂移。**修复**：统一返回单条（或统一返回 `{record, items}`），并加契约测试断言两边 `typeof/shape`。
 
@@ -306,13 +306,13 @@ list() 实际返回 = 0
 
 | 编号 | 位置 | 现象 | 修复 |
 | --- | --- | --- | --- |
-| 4.7a | [`ui-renderer.js#L438-L450`](../js/modules/ui-renderer.js#L438-L450)、[`quiz-engine.js#L74-L100`](../js/modules/quiz-engine.js#L74-L100) | 练习模式未作答的题被 `pending` 统计，结果页显示"○ N 道简答题…待自评"，实际是未作答 | 区分 `pendingSelfAssess` 与 `unanswered`；结果页分开展示 |
-| 4.7b | [`ui-renderer.js#L578-L585`](../js/modules/ui-renderer.js#L578-L585) | 收藏列表用 `esc(q.question)`，`x^{2}`、`![](asset:…)` 原样显示（错题本用的是 `plain()`） | 统一走 `plain()`；同时补 UI 断言 |
-| 4.7c | [`source.js#L92`](../js/modules/source.js#L92) | `'…HTTP ' + (res && res.status) || '无响应'` 优先级错误，永远走前半段，状态缺失时显示 `HTTP undefined` | 加括号：`… + (res && res.status ? res.status : '无响应')` |
+| 4.7a | [`ui-renderer.js#L438-L450`](../../js/modules/ui-renderer.js#L438-L450)、[`quiz-engine.js#L74-L100`](../../js/modules/quiz-engine.js#L74-L100) | 练习模式未作答的题被 `pending` 统计，结果页显示"○ N 道简答题…待自评"，实际是未作答 | 区分 `pendingSelfAssess` 与 `unanswered`；结果页分开展示 |
+| 4.7b | [`ui-renderer.js#L578-L585`](../../js/modules/ui-renderer.js#L578-L585) | 收藏列表用 `esc(q.question)`，`x^{2}`、`![](asset:…)` 原样显示（错题本用的是 `plain()`） | 统一走 `plain()`；同时补 UI 断言 |
+| 4.7c | [`source.js#L92`](../../js/modules/source.js#L92) | `'…HTTP ' + (res && res.status) || '无响应'` 优先级错误，永远走前半段，状态缺失时显示 `HTTP undefined` | 加括号：`… + (res && res.status ? res.status : '无响应')` |
 
 ### 4.8 【P2】32 位 contentHash 的碰撞风险
 
-**位置**：[`js/utils/question-id.js#L17-L25`](../js/utils/question-id.js#L17-L25)。
+**位置**：[`js/utils/question-id.js#L17-L25`](../../js/utils/question-id.js#L17-L25)。
 
 FNV-1a 32 位 + 语义载荷。按生日界估算：3,000 题碰撞概率 ≈ 0.1%，10,000 题 ≈ 1.2%。碰撞后果是**导入时静默丢题**（`seen.has(hash)` 判重）与用户数据错挂。
 
@@ -320,37 +320,37 @@ FNV-1a 32 位 + 语义载荷。按生日界估算：3,000 题碰撞概率 ≈ 0.
 
 ### 4.9 【P2】表格"材料"列触发全局块模式
 
-**位置**：[`js/importers/adapters.js#L468-L470`](../js/importers/adapters.js#L468-L470)、[`#L526-L538`](../js/importers/adapters.js#L526-L538)。
+**位置**：[`js/importers/adapters.js#L468-L470`](../../js/importers/adapters.js#L468-L470)、[`#L526-L538`](../../js/importers/adapters.js#L526-L538)。
 
 只要表头出现"材料/共享材料"列，整张表就按材料块状态机解析；第三方表格把"材料"当普通备注列时，每一行都会被当成材料题块首，产生"子问题不足 2 个"并改变题型。**建议**：改为"存在材料块首行（材料列非空且题型为材料题）才进入块模式"，或在表头命中但数据无材料文本时按普通表处理。
 
 ### 4.10 【P2】填空题答案分段数多于空位数时静默丢弃
 
-**位置**：[`js/importers/adapters.js#L213-L236`](../js/importers/adapters.js#L213-L236)。
+**位置**：[`js/importers/adapters.js#L213-L236`](../../js/importers/adapters.js#L213-L236)。
 
 `markerCount = 题干空位标记数 || 答案分段数 || 1`；题干只有 1 个 `____`、答案写成 `A；B；C` 时只保留 A。**建议**：两者不一致时取较大值并给警告，或按"答案分段数"优先并警告题干标记不足。
 
 ### 4.11 【P2】材料题在编辑器中"可打开但不可安全编辑"
 
-**位置**：[`js/modules/question-editor.js#L81-L84`](../js/modules/question-editor.js#L81-L84)。
+**位置**：[`js/modules/question-editor.js#L81-L84`](../../js/modules/question-editor.js#L81-L84)。
 
 `typeOptions` 过滤掉 `material`，但管理器列表允许对材料题点"编辑"：表单退回 essay 分支，保存会写入 `reference_answer`、清空 `options`（子问题保留），父题数据被部分改写。**建议**：材料题行禁用"编辑"并提示"M3 开放"，或实现嵌套编辑器（子问题复用现有 `answerSection`）。
 
 ### 4.12 【P2】复习没有"每日新卡/复习卡上限"，首日洪水
 
-**位置**：[`js/modules/srs-store.js#L99-L107`](../js/modules/srs-store.js#L99-L107)、[`js/app.js#L409-L414`](../js/app.js#L409-L414)。
+**位置**：[`js/modules/srs-store.js#L99-L107`](../../js/modules/srs-store.js#L99-L107)、[`js/app.js#L409-L414`](../../js/app.js#L409-L414)。
 
 `dueQuestions` 把未学题全部视为到期；`startReview` 直接 `beginQuiz(全部到期)`。3000 题新库首日点"今日复习"= 3000 题练习，既违背间隔重复的"每日可控负荷"，也造成长会话、误触退出成本高。**建议**：按题库保存调度选项（new/day、review/day、目标保留率、最大间隔、学习步骤），今日复习 = 到期复习（≤上限）+ 新卡（≤上限）+ 学习中队列；支持"再来一次"在会话内重排。
 
 ### 4.13 【P1/P2】参考后端无 CORS、无鉴权
 
-**位置**：[`scripts/serve-api.mjs#L13-L18`](../scripts/serve-api.mjs#L13-L18)、[`#L626-L638`](../scripts/serve-api.mjs#L626-L638)。
+**位置**：[`scripts/serve-api.mjs#L13-L18`](../../scripts/serve-api.mjs#L13-L18)、[`#L626-L638`](../../scripts/serve-api.mjs#L626-L638)。
 
 文档把"前端 8777 + 后端 8788"作为验收方式，但响应不带 `Access-Control-Allow-Origin`，浏览器会拦截跨源请求（Node 测试无 CORS，故 E2E 通过）。**修复**：参考后端增加可配置 CORS（默认仅本机来源），或在文档明确"必须由 serve-api 同源托管前端"；鉴权保持"明确标注、勿公网部署"。
 
 ### 4.14 【P1（工具侧）】静态服务路径穿越
 
-**位置**：[`scripts/lib/static-server.mjs#L28-L36`](../scripts/lib/static-server.mjs#L28-L36)。
+**位置**：[`scripts/lib/static-server.mjs#L28-L36`](../../scripts/lib/static-server.mjs#L28-L36)。
 
 `filePath.startsWith(root)` 未校验分隔符。本次实测：
 

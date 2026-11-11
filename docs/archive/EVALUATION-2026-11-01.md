@@ -314,7 +314,7 @@
 
 ### 4.1 P0-1：参考后端静态服务可直读数据目录（已复现）
 
-**位置**：[serve-api.mjs](../scripts/serve-api.mjs#L34-L34)（默认 `DATA_DIR = ROOT/.qforge-data`）、[serve-api.mjs](../scripts/serve-api.mjs#L838-L843)（静态回退）、[static-server.mjs](../scripts/lib/static-server.mjs#L34-L49)（只做路径越界守卫）。
+**位置**：[serve-api.mjs](../../scripts/serve-api.mjs#L34-L34)（默认 `DATA_DIR = ROOT/.qforge-data`）、[serve-api.mjs](../../scripts/serve-api.mjs#L838-L843)（静态回退）、[static-server.mjs](../../scripts/lib/static-server.mjs#L34-L49)（只做路径越界守卫）。
 
 **机制**：参考后端把数据落在工程根下的 `.qforge-data/`，而静态文件服务对 root 下任意文件放行；`API_TOKEN` 只保护 `/api/*`，不保护静态文件。任何能访问该端口的人可直接 GET：
 
@@ -347,7 +347,7 @@ GET /.qforge-audit-data/banks.json -> 200
 
 ### 4.2 P1-1：材料题“全部小问少选半分”被计为整题正确
 
-**位置**：[judge-answer.js](../js/utils/judge-answer.js#L156-L176)（聚合）、[quiz-engine.js](../js/modules/quiz-engine.js#L92-L102)（计分）、[srs-store.js](../js/modules/srs-store.js#L36-L40)（评分映射）、[ui-renderer.js](../js/modules/ui-renderer.js#L547-L548)（结果页标记）。
+**位置**：[judge-answer.js](../../js/utils/judge-answer.js#L156-L176)（聚合）、[quiz-engine.js](../../js/modules/quiz-engine.js#L92-L102)（计分）、[srs-store.js](../../js/modules/srs-store.js#L36-L40)（评分映射）、[ui-renderer.js](../../js/modules/ui-renderer.js#L547-L548)（结果页标记）。
 
 **机制**：`aggregateMaterial` 在“无硬错、仅有半对”时返回 `isCorrect=true, partial=true`。下游 `getScore` 先判断 `isCorrect===true` 就 `correct++`，`partial` 永不增加；`statusAt` 同样返回 `correct`；`ratingForResult` 先判断 `isCorrect` 返回 good；结果页 `mark` 先判断 `isCorrect` 显示 ✔ 正确。只有答题反馈的 `renderMaterialOverall` 会显示“含少选半对”。
 
@@ -371,7 +371,7 @@ rating: 2（应用层 good）
 
 ### 4.3 P1-2：新卡 learning steps 与 SRS.md 相反，测试固化实现
 
-**位置**：[fsrs.js](../js/modules/fsrs.js#L277-L289)（`reviewNew`）、[SRS.md](SRS.md#L50-L64)（规范）、[fsrs.test.mjs](../scripts/fsrs.test.mjs#L145-L160)（测试断言）、[user-guide.md](user-guide.md#L166)（用户文档）。
+**位置**：[fsrs.js](../../js/modules/fsrs.js#L277-L289)（`reviewNew`）、[SRS.md](../SRS.md#L50-L64)（规范）、[fsrs.test.mjs](../../scripts/fsrs.test.mjs#L145-L160)（测试断言）、[user-guide.md](../user-guide.md#L166)（用户文档）。
 
 **规范写法（SRS.md §4）**：
 
@@ -391,7 +391,7 @@ good  → 直接毕业（initStability(good) 排 2 天）
 easy  → 直接毕业
 ```
 
-**测试**：[fsrs.test.mjs](../scripts/fsrs.test.mjs#L145-L160) 明确断言“good/easy 新卡直接毕业”“新卡 hard → learning 步骤 1（10m）”。也就是说，**测试与文档冲突，测试站在实现一边**；这是“高覆盖但低规范约束”的典型。
+**测试**：[fsrs.test.mjs](../../scripts/fsrs.test.mjs#L145-L160) 明确断言“good/easy 新卡直接毕业”“新卡 hard → learning 步骤 1（10m）”。也就是说，**测试与文档冲突，测试站在实现一边**；这是“高覆盖但低规范约束”的典型。
 
 **影响**：用户若按 SRS.md 理解，会预期首答 good 进入 10 分钟学习步骤，实际直接排 2 天；首答 hard 预期 1 分钟，实际 10 分钟。与 Anki 默认 learning steps（Good 前进、Again 回第一步、Hard 停留当前步）也不一致。该差异影响复习节奏与留存，但不会丢数据。
 
@@ -403,7 +403,7 @@ easy  → 直接毕业
 
 ### 4.4 P1-3：错题本/收藏夹/搜索的材料题答案预览为空
 
-**位置**：[ui-renderer.js](../js/modules/ui-renderer.js#L666-L680)（`renderAnswerText`）、[ui-renderer.js](../js/modules/ui-renderer.js#L608-L631)（错题区域）、[ui-renderer.js](../js/modules/ui-renderer.js#L638-L660)（收藏区域）、[ui-renderer.js](../js/modules/ui-renderer.js#L857-L863)（搜索结果）。
+**位置**：[ui-renderer.js](../../js/modules/ui-renderer.js#L666-L680)（`renderAnswerText`）、[ui-renderer.js](../../js/modules/ui-renderer.js#L608-L631)（错题区域）、[ui-renderer.js](../../js/modules/ui-renderer.js#L638-L660)（收藏区域）、[ui-renderer.js](../../js/modules/ui-renderer.js#L857-L863)（搜索结果）。
 
 **机制**：`renderAnswerText` 只处理 judge/fill/essay，其余走 options/answer；材料题的父题 `options=[]`、`answer=''`，因此列表只渲染“答案：”空行，不渲染 `material` 与 `children` 的题干/答案/解析。答题页和结果页有 material 专用渲染，导出/分享页也有，只有这三个列表视图缺失。
 
@@ -413,7 +413,7 @@ easy  → 直接毕业
 
 ### 4.5 P1-4：粘贴文本以 `[` 开头被误判为 JSON
 
-**位置**：[data-io.js](../js/modules/data-io.js#L110-L117)（`parsePastedText`）。
+**位置**：[data-io.js](../../js/modules/data-io.js#L110-L117)（`parsePastedText`）。
 
 **机制**：
 
@@ -434,47 +434,47 @@ return QB.MdImporter.parse(...);
 
 | ID | 位置 | 现象/证据 | 影响 | 建议 |
 | --- | --- | --- | --- | --- |
-| P2-1 | [wrong-book.js](../js/modules/wrong-book.js#L21-L27)、[favorites.js](../js/modules/favorites.js#L9-L15)、[db.js](../js/data/db.js#L96-L101) | `list()` 调 `buildIndex` → `loadQuestions` 整库读 | 与 README/ARCHITECTURE “错题/收藏视图不再触库”冲突；API 模式仍发全库 GET；bench 未覆盖 | 列表条目存题目快照，或只按 hash 取单题；若保留整库读，修正文档与 bench |
-| P2-2 | [shuffle.js](../js/utils/shuffle.js#L65-L65) | `shuffleOptions` 只处理 single/multi，indefinite 原样返回 | README/开始弹窗称“单选/多选/不定项选项乱序”，不定项实际不洗牌；答案模式可被位置推断 | 加入 `indefinite`；补不定项种子洗牌与答案重映射测试 |
-| P2-3 | [local-adapter.js](../js/data/local-adapter.js#L661-L665)、[srs-store.js](../js/modules/srs-store.js#L70-L79) | 每次作答写整表 review map + 整份 revlog | 实测 3000 状态 1.59ms、3000+20k 日志 6.38ms、20k+20k 18.41ms；map 363KB/2.42MB | 改为单题 patch + 追加日志分片/定时合并；bench 增加门禁 |
-| P2-4 | [api-adapter.js](../js/data/api-adapter.js#L384-L423) | 每次作答 PUT 整表 map + revlog | 3000 题每次约 363KB、20k 题约 2.42MB 上行；弱网不可用 | 服务端增加 `PATCH /reviews/{hash}` 或 append-only log；兼容旧整表 |
-| P2-5 | [wire.js](../js/data/wire.js#L14-L38)、[api-adapter.js](../js/data/api-adapter.js#L119-L127)、[data-io.js](../js/modules/data-io.js#L74-L79) | wire 未映射 `bank.source`，`toWireBank` 不发送 source | API 模式题库来源徽章/URL 刷新按钮在重载后丢失；本地备份转后端也丢 source | wire bank.from/to 增加 source；toWireBank 发送；补 API/local parity 测试 |
-| P2-6 | [wire.js](../js/data/wire.js#L88-L95)、[app.js](../js/app.js#L438-L451) | `attempt.from` 丢弃 `pending/unanswered`；本地记录写入这些字段 | API 模式历史记录丢失待自评/未作答计数；本地/后端形状漂移 | wire 映射补齐；契约测试断言 local/api 字段集合一致 |
-| P2-7 | [backup.js](../js/modules/backup.js#L68-L75)、[serve-api.mjs](../scripts/serve-api.mjs#L438-L448) | merge 模式对 banks/history/revlog 是整键覆盖 | 备份后新建的题库/历史在合并恢复时可能被整个数组替换；与弹窗“保留其余现有数据”不符 | 实现实体级合并（按 id 并集，冲突按 updated_at/last）或把文案改为“同名键覆盖” |
-| P2-8 | [qbk-importer.js](../js/importers/qbk-importer.js#L19-L24)、[docx-importer.js](../js/importers/docx-importer.js#L109-L110) | 解析阶段即 `Assets.putEntries` | 用户取消预览/校验失败会留下未引用图片；长期累积占用 IDB | 解析阶段只暂存，确认落库后写资产；或取消时按新增 id 清理 |
-| P2-9 | [api-adapter.js](../js/data/api-adapter.js#L217-L225) | `offset/limit` 转 page/size 时 offset 非 size 整数倍会向下取整 | 非对齐区间读到错误页；本地 `offset` 语义与 API 不一致 | 服务端支持 offset 或适配器报错；补边界测试 |
-| P2-10 | [serve-api.mjs](../scripts/serve-api.mjs#L185-L203)、[serve-api.mjs](../scripts/serve-api.mjs#L218-L238) | `questions.update` 不重算 hash；`insertMany` 缺 hash 时不去重 | 第三方客户端部分 patch 会留下陈旧 content_hash；无 hash 批量导入重复 | 服务端基于合并后完整题目重算；缺 hash 时补算后再 dedupe |
-| P2-11 | [exporter.js](../js/modules/exporter.js#L66-L69) | CSV 不处理以 `= + - @` 开头的单元格 | Excel 打开可执行公式（CSV 注入），分享导出文件有风险 | 对首字符加 `'` 前缀或转义；补 CSV 注入测试 |
-| P2-12 | [app.js](../js/app.js#L1102-L1109)、[progress-saver.js](../js/modules/progress-saver.js#L15-L17)、[question-editor.js](../js/modules/question-editor.js#L768-L801) | 点击委托未 catch；debounce 保存未 catch；管理器删除未 catch | API/配额失败时未处理 Promise 拒绝，用户无反馈 | 统一 `handleAction().catch(toast)`；所有 fire-and-forget 保存加 catch |
-| P2-13 | [sync-dav.js](../js/modules/sync-dav.js#L55-L61) | `btoa(user:pass)` 仅 Latin-1 | 中文/非 ASCII 账号或应用密码直接抛 `InvalidCharacterError` | 用 `TextEncoder` + 手写 base64（或 UTF-8 编码后再 btoa） |
-| P2-14 | [zip-reader.js](../js/utils/zip-reader.js#L49-L86)、[qbk.js](../js/modules/qbk.js#L47-L49) | 无 CRC/解压上限/ZIP64；`parseBundle` 忽略 byteOffset | 恶意/损坏包可致内存膨胀或异常；子视图输入错位 | 增加条目数量/解压字节上限、CRC 校验；`new Uint8Array(buffer, byteOffset, byteLength)` |
-| P2-15 | [question-id.js](../js/utils/question-id.js#L17-L25)、[assets.js](../js/utils/assets.js#L37-L39) | 32 位 FNV（内容 hash/id） | 大库静默丢题/图片覆盖；10000 题碰撞约 1.2% | 升级 64 位或 SHA-256；至少同库导入时二次内容比对 |
-| P2-16 | [ui-renderer.js](../js/modules/ui-renderer.js#L77-L93)、[ui-renderer.js](../js/modules/ui-renderer.js#L168-L169) | 首页“本地存储/数据保存在本浏览器”在 API 模式仍按 localStorage 统计 | API 模式数据实际在后端，文案误导；配额告警无意义 | 按 `QB.DB.backend` 切换文案与指标；API 模式显示后端状态/备份提示 |
-| P2-17 | [rich-text.js](../js/utils/rich-text.js#L156-L177)、[app.js](../js/app.js#L303-L308) | 每次 render 回收并重建全部图片 blob URL | 图片多的视图闪烁、重复 IDB 读 | 只对新增/变化节点 hydrate；缓存 id→blob URL，视图销毁时回收 |
-| P2-18 | [local-adapter.js](../js/data/local-adapter.js#L661-L665)、[srs-store.js](../js/modules/srs-store.js#L70-L79) | 跨标签读改写整表，无版本号 | 两个标签同时评分，后写覆盖前写 | 跨标签 storage 事件已同步缓存；评分前重读并合并，或引入 per-hash patch |
-| P2-19 | [question-editor.js](../js/modules/question-editor.js#L322-L331)、[exporter.js](../js/modules/exporter.js#L192-L198) | 编辑器默认把每个小问 score 写成 10 | 所有编辑器创建的材料题都触发 CSV/XLSX 额外“小问分值”列；把默认值当显式值 | 区分“未设置=0”与“默认=10”；仅用户显式填写才写 score |
-| P2-20 | [app.js](../js/app.js#L261-L279)、[fsrs-opt.js](../js/modules/fsrs-opt.js#L193-L193)、[api-adapter.js](../js/data/api-adapter.js#L426-L427) | stats 每次 render 调 `diagnose()` 读全量 revlog；API 无 revlog 缓存 | 20k+ 日志每次进入统计页发全量 GET 并重放 | 缓存 revlog/诊断结果，按写修订号失效；或服务端提供诊断聚合 |
-| P2-21 | [app.js](../js/app.js#L418-L462) | `finishQuiz` 无入口锁，`locked` 在历史写入后才置位 | 快速双击交卷可重复写历史/错题 | 进入即置 `locked`/`finishing`，重复调用直接返回 |
-| P2-22 | [app.js](../js/app.js#L1285-L1293) | 键盘 Enter 在最后一题直接 `finishQuiz()` | 绕过“未答/半对确认”弹窗，误交卷 | 键盘交卷复用 `finish-exam` 的确认逻辑 |
-| P2-23 | [serve-api.mjs](../scripts/serve-api.mjs#L66-L72) | `readJson` 解析失败静默回退 `fallback` | 坏 `banks.json` 被当成空库；后续写入覆盖原文件，数据不可恢复 | 解析失败抛错并拒绝启动/写入；保留 `.corrupt` 副本 |
-| P2-24 | [review-queue.js](../js/modules/review-queue.js#L93-L98)、[SRS.md](SRS.md#L150-L154) | 默认 `shuffleDue` 打乱 due 组 | 文档“逾期在前、按 due 升序”不成立；最逾期题不优先 | 默认 `shuffleDue:false`，或把文案改为“随机顺序（选取仍按逾期优先）” |
+| P2-1 | [wrong-book.js](../../js/modules/wrong-book.js#L21-L27)、[favorites.js](../../js/modules/favorites.js#L9-L15)、[db.js](../../js/data/db.js#L96-L101) | `list()` 调 `buildIndex` → `loadQuestions` 整库读 | 与 README/ARCHITECTURE “错题/收藏视图不再触库”冲突；API 模式仍发全库 GET；bench 未覆盖 | 列表条目存题目快照，或只按 hash 取单题；若保留整库读，修正文档与 bench |
+| P2-2 | [shuffle.js](../../js/utils/shuffle.js#L65-L65) | `shuffleOptions` 只处理 single/multi，indefinite 原样返回 | README/开始弹窗称“单选/多选/不定项选项乱序”，不定项实际不洗牌；答案模式可被位置推断 | 加入 `indefinite`；补不定项种子洗牌与答案重映射测试 |
+| P2-3 | [local-adapter.js](../../js/data/local-adapter.js#L661-L665)、[srs-store.js](../../js/modules/srs-store.js#L70-L79) | 每次作答写整表 review map + 整份 revlog | 实测 3000 状态 1.59ms、3000+20k 日志 6.38ms、20k+20k 18.41ms；map 363KB/2.42MB | 改为单题 patch + 追加日志分片/定时合并；bench 增加门禁 |
+| P2-4 | [api-adapter.js](../../js/data/api-adapter.js#L384-L423) | 每次作答 PUT 整表 map + revlog | 3000 题每次约 363KB、20k 题约 2.42MB 上行；弱网不可用 | 服务端增加 `PATCH /reviews/{hash}` 或 append-only log；兼容旧整表 |
+| P2-5 | [wire.js](../../js/data/wire.js#L14-L38)、[api-adapter.js](../../js/data/api-adapter.js#L119-L127)、[data-io.js](../../js/modules/data-io.js#L74-L79) | wire 未映射 `bank.source`，`toWireBank` 不发送 source | API 模式题库来源徽章/URL 刷新按钮在重载后丢失；本地备份转后端也丢 source | wire bank.from/to 增加 source；toWireBank 发送；补 API/local parity 测试 |
+| P2-6 | [wire.js](../../js/data/wire.js#L88-L95)、[app.js](../../js/app.js#L438-L451) | `attempt.from` 丢弃 `pending/unanswered`；本地记录写入这些字段 | API 模式历史记录丢失待自评/未作答计数；本地/后端形状漂移 | wire 映射补齐；契约测试断言 local/api 字段集合一致 |
+| P2-7 | [backup.js](../../js/modules/backup.js#L68-L75)、[serve-api.mjs](../../scripts/serve-api.mjs#L438-L448) | merge 模式对 banks/history/revlog 是整键覆盖 | 备份后新建的题库/历史在合并恢复时可能被整个数组替换；与弹窗“保留其余现有数据”不符 | 实现实体级合并（按 id 并集，冲突按 updated_at/last）或把文案改为“同名键覆盖” |
+| P2-8 | [qbk-importer.js](../../js/importers/qbk-importer.js#L19-L24)、[docx-importer.js](../../js/importers/docx-importer.js#L109-L110) | 解析阶段即 `Assets.putEntries` | 用户取消预览/校验失败会留下未引用图片；长期累积占用 IDB | 解析阶段只暂存，确认落库后写资产；或取消时按新增 id 清理 |
+| P2-9 | [api-adapter.js](../../js/data/api-adapter.js#L217-L225) | `offset/limit` 转 page/size 时 offset 非 size 整数倍会向下取整 | 非对齐区间读到错误页；本地 `offset` 语义与 API 不一致 | 服务端支持 offset 或适配器报错；补边界测试 |
+| P2-10 | [serve-api.mjs](../../scripts/serve-api.mjs#L185-L203)、[serve-api.mjs](../../scripts/serve-api.mjs#L218-L238) | `questions.update` 不重算 hash；`insertMany` 缺 hash 时不去重 | 第三方客户端部分 patch 会留下陈旧 content_hash；无 hash 批量导入重复 | 服务端基于合并后完整题目重算；缺 hash 时补算后再 dedupe |
+| P2-11 | [exporter.js](../../js/modules/exporter.js#L66-L69) | CSV 不处理以 `= + - @` 开头的单元格 | Excel 打开可执行公式（CSV 注入），分享导出文件有风险 | 对首字符加 `'` 前缀或转义；补 CSV 注入测试 |
+| P2-12 | [app.js](../../js/app.js#L1102-L1109)、[progress-saver.js](../../js/modules/progress-saver.js#L15-L17)、[question-editor.js](../../js/modules/question-editor.js#L768-L801) | 点击委托未 catch；debounce 保存未 catch；管理器删除未 catch | API/配额失败时未处理 Promise 拒绝，用户无反馈 | 统一 `handleAction().catch(toast)`；所有 fire-and-forget 保存加 catch |
+| P2-13 | [sync-dav.js](../../js/modules/sync-dav.js#L55-L61) | `btoa(user:pass)` 仅 Latin-1 | 中文/非 ASCII 账号或应用密码直接抛 `InvalidCharacterError` | 用 `TextEncoder` + 手写 base64（或 UTF-8 编码后再 btoa） |
+| P2-14 | [zip-reader.js](../../js/utils/zip-reader.js#L49-L86)、[qbk.js](../../js/modules/qbk.js#L47-L49) | 无 CRC/解压上限/ZIP64；`parseBundle` 忽略 byteOffset | 恶意/损坏包可致内存膨胀或异常；子视图输入错位 | 增加条目数量/解压字节上限、CRC 校验；`new Uint8Array(buffer, byteOffset, byteLength)` |
+| P2-15 | [question-id.js](../../js/utils/question-id.js#L17-L25)、[assets.js](../../js/utils/assets.js#L37-L39) | 32 位 FNV（内容 hash/id） | 大库静默丢题/图片覆盖；10000 题碰撞约 1.2% | 升级 64 位或 SHA-256；至少同库导入时二次内容比对 |
+| P2-16 | [ui-renderer.js](../../js/modules/ui-renderer.js#L77-L93)、[ui-renderer.js](../../js/modules/ui-renderer.js#L168-L169) | 首页“本地存储/数据保存在本浏览器”在 API 模式仍按 localStorage 统计 | API 模式数据实际在后端，文案误导；配额告警无意义 | 按 `QB.DB.backend` 切换文案与指标；API 模式显示后端状态/备份提示 |
+| P2-17 | [rich-text.js](../../js/utils/rich-text.js#L156-L177)、[app.js](../../js/app.js#L303-L308) | 每次 render 回收并重建全部图片 blob URL | 图片多的视图闪烁、重复 IDB 读 | 只对新增/变化节点 hydrate；缓存 id→blob URL，视图销毁时回收 |
+| P2-18 | [local-adapter.js](../../js/data/local-adapter.js#L661-L665)、[srs-store.js](../../js/modules/srs-store.js#L70-L79) | 跨标签读改写整表，无版本号 | 两个标签同时评分，后写覆盖前写 | 跨标签 storage 事件已同步缓存；评分前重读并合并，或引入 per-hash patch |
+| P2-19 | [question-editor.js](../../js/modules/question-editor.js#L322-L331)、[exporter.js](../../js/modules/exporter.js#L192-L198) | 编辑器默认把每个小问 score 写成 10 | 所有编辑器创建的材料题都触发 CSV/XLSX 额外“小问分值”列；把默认值当显式值 | 区分“未设置=0”与“默认=10”；仅用户显式填写才写 score |
+| P2-20 | [app.js](../../js/app.js#L261-L279)、[fsrs-opt.js](../../js/modules/fsrs-opt.js#L193-L193)、[api-adapter.js](../../js/data/api-adapter.js#L426-L427) | stats 每次 render 调 `diagnose()` 读全量 revlog；API 无 revlog 缓存 | 20k+ 日志每次进入统计页发全量 GET 并重放 | 缓存 revlog/诊断结果，按写修订号失效；或服务端提供诊断聚合 |
+| P2-21 | [app.js](../../js/app.js#L418-L462) | `finishQuiz` 无入口锁，`locked` 在历史写入后才置位 | 快速双击交卷可重复写历史/错题 | 进入即置 `locked`/`finishing`，重复调用直接返回 |
+| P2-22 | [app.js](../../js/app.js#L1285-L1293) | 键盘 Enter 在最后一题直接 `finishQuiz()` | 绕过“未答/半对确认”弹窗，误交卷 | 键盘交卷复用 `finish-exam` 的确认逻辑 |
+| P2-23 | [serve-api.mjs](../../scripts/serve-api.mjs#L66-L72) | `readJson` 解析失败静默回退 `fallback` | 坏 `banks.json` 被当成空库；后续写入覆盖原文件，数据不可恢复 | 解析失败抛错并拒绝启动/写入；保留 `.corrupt` 副本 |
+| P2-24 | [review-queue.js](../../js/modules/review-queue.js#L93-L98)、[SRS.md](../SRS.md#L150-L154) | 默认 `shuffleDue` 打乱 due 组 | 文档“逾期在前、按 due 升序”不成立；最逾期题不优先 | 默认 `shuffleDue:false`，或把文案改为“随机顺序（选取仍按逾期优先）” |
 
 ### 4.7 P3 级问题（卫生与一致性）
 
 | 项 | 位置 | 说明 |
 | --- | --- | --- |
-| 重复函数 | [question-editor.js](../js/modules/question-editor.js#L83-L88)、[question-editor.js](../js/modules/question-editor.js#L305-L311) | `canEditQuestion` 定义两次，后定义生效；第一处注释“材料题不可编辑”与现状相反，属死代码 |
-| 未使用变量 | [fsrs-train-core.js](../js/modules/fsrs-train-core.js#L142-L156) | `cur` 赋值后未使用 |
-| 冗余判断 | [adapters.js](../js/importers/adapters.js#L256-L256) | `options.length >= 2 && options.length <= 2` 等价于 `=== 2` |
-| 注释陈旧 | [srs.js](../js/modules/srs.js#L3-L3)、[fsrs-opt.js](../js/modules/fsrs-opt.js#L2-L2) | 仍写 FSRS-4.5，实际 FSRS-6 |
-| SW 注释 | [sw.js](../sw.js#L25-L39)、[app.js](../js/app.js#L1421-L1422) | 注释称“无 skipWaiting”，代码有 `skipWaiting()` + `clients.claim()` |
+| 重复函数 | [question-editor.js](../../js/modules/question-editor.js#L83-L88)、[question-editor.js](../../js/modules/question-editor.js#L305-L311) | `canEditQuestion` 定义两次，后定义生效；第一处注释“材料题不可编辑”与现状相反，属死代码 |
+| 未使用变量 | [fsrs-train-core.js](../../js/modules/fsrs-train-core.js#L142-L156) | `cur` 赋值后未使用 |
+| 冗余判断 | [adapters.js](../../js/importers/adapters.js#L256-L256) | `options.length >= 2 && options.length <= 2` 等价于 `=== 2` |
+| 注释陈旧 | [srs.js](../../js/modules/srs.js#L3-L3)、[fsrs-opt.js](../../js/modules/fsrs-opt.js#L2-L2) | 仍写 FSRS-4.5，实际 FSRS-6 |
+| SW 注释 | [sw.js](../../sw.js#L25-L39)、[app.js](../../js/app.js#L1421-L1422) | 注释称“无 skipWaiting”，代码有 `skipWaiting()` + `clients.claim()` |
 | 死代码 | `Favorites.has/count`、`WrongBook.count`、`QuizEngine.sliceQuestions/getUserAnswer`、`QuestionEditor.openReservedDialog`、`QB.App.State` 导出 | 无调用方；建议删除或补测试 |
-| 首屏请求 | [index.html](../index.html#L49-L123) | 65 个同步脚本、70 个首屏文件；HTTP/2 可接受，HTTP/1.1/弱网偏慢 |
-| 可访问性 | [index.html](../index.html#L34-L34)、`css/style.css` | `#view aria-live=polite` 覆盖整视图；无 `radiogroup`；无 axe/Lighthouse 门禁；无 768px 断点 |
-| 统计口径 | [statistics.js](../js/modules/statistics.js#L84-L104) | 热力只计 `correct+wrong`，不含半对/待自评；`overview.totalAnswered` 实为总题数 |
-| 分页 | [question-editor.js](../js/modules/question-editor.js#L774-L775) | `next` 页码无上限，可翻到空页 |
-| 资产读取 | [assets.js](../js/utils/assets.js#L158-L166)、[api-adapter.js](../js/data/api-adapter.js#L486-L494) | `getMap`/`all` 串行逐条读，图片多时 N+1 |
-| 服务端错误面 | [serve-api.mjs](../scripts/serve-api.mjs#L844-L848) | 500 错误把内部 `e.message` 原样返回；本机参考实现可接受，公网部署应泛化 |
+| 首屏请求 | [index.html](../../index.html#L49-L123) | 65 个同步脚本、70 个首屏文件；HTTP/2 可接受，HTTP/1.1/弱网偏慢 |
+| 可访问性 | [index.html](../../index.html#L34-L34)、`css/style.css` | `#view aria-live=polite` 覆盖整视图；无 `radiogroup`；无 axe/Lighthouse 门禁；无 768px 断点 |
+| 统计口径 | [statistics.js](../../js/modules/statistics.js#L84-L104) | 热力只计 `correct+wrong`，不含半对/待自评；`overview.totalAnswered` 实为总题数 |
+| 分页 | [question-editor.js](../../js/modules/question-editor.js#L774-L775) | `next` 页码无上限，可翻到空页 |
+| 资产读取 | [assets.js](../../js/utils/assets.js#L158-L166)、[api-adapter.js](../../js/data/api-adapter.js#L486-L494) | `getMap`/`all` 串行逐条读，图片多时 N+1 |
+| 服务端错误面 | [serve-api.mjs](../../scripts/serve-api.mjs#L844-L848) | 500 错误把内部 `e.message` 原样返回；本机参考实现可接受，公网部署应泛化 |
 
 ---
 
@@ -821,16 +821,16 @@ curl http://127.0.0.1:8788/.qforge-data/banks.json
 
 | 主题 | 文件 |
 | --- | --- |
-| 配置/后端开关 | [config.js](../js/config.js) |
-| Repository 契约 | [contracts.js](../js/data/contracts.js) |
-| 本地/ REST 适配 | [local-adapter.js](../js/data/local-adapter.js)、[api-adapter.js](../js/data/api-adapter.js) |
-| 判分/材料题 | [judge-answer.js](../js/utils/judge-answer.js)、[quiz-engine.js](../js/modules/quiz-engine.js) |
-| FSRS/优化 | [fsrs.js](../js/modules/fsrs.js)、[fsrs-train-core.js](../js/modules/fsrs-train-core.js)、[fsrs-opt.js](../js/modules/fsrs-opt.js) |
-| 复习队列/设置 | [review-queue.js](../js/modules/review-queue.js)、[sched-settings.js](../js/modules/sched-settings.js) |
-| 导入/导出 | [importers/](../js/importers/)、[exporter.js](../js/modules/exporter.js) |
-| 渲染/DOM | [ui-renderer.js](../js/modules/ui-renderer.js)、[dom-patch.js](../js/modules/dom-patch.js) |
-| 参考后端/安全 | [serve-api.mjs](../scripts/serve-api.mjs)、[static-server.mjs](../scripts/lib/static-server.mjs) |
-| 规范 | [SRS.md](SRS.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[API-CONTRACT.md](API-CONTRACT.md)、[DATABASE.md](DATABASE.md) |
+| 配置/后端开关 | [config.js](../../js/config.js) |
+| Repository 契约 | [contracts.js](../../js/data/contracts.js) |
+| 本地/ REST 适配 | [local-adapter.js](../../js/data/local-adapter.js)、[api-adapter.js](../../js/data/api-adapter.js) |
+| 判分/材料题 | [judge-answer.js](../../js/utils/judge-answer.js)、[quiz-engine.js](../../js/modules/quiz-engine.js) |
+| FSRS/优化 | [fsrs.js](../../js/modules/fsrs.js)、[fsrs-train-core.js](../../js/modules/fsrs-train-core.js)、[fsrs-opt.js](../../js/modules/fsrs-opt.js) |
+| 复习队列/设置 | [review-queue.js](../../js/modules/review-queue.js)、[sched-settings.js](../../js/modules/sched-settings.js) |
+| 导入/导出 | [importers/](../../js/importers/)、[exporter.js](../../js/modules/exporter.js) |
+| 渲染/DOM | [ui-renderer.js](../../js/modules/ui-renderer.js)、[dom-patch.js](../../js/modules/dom-patch.js) |
+| 参考后端/安全 | [serve-api.mjs](../../scripts/serve-api.mjs)、[static-server.mjs](../../scripts/lib/static-server.mjs) |
+| 规范 | [SRS.md](../SRS.md)、[ARCHITECTURE.md](../ARCHITECTURE.md)、[API-CONTRACT.md](../API-CONTRACT.md)、[DATABASE.md](../DATABASE.md) |
 
 ### 8.5 竞品来源（2026-11-01）
 

@@ -10,7 +10,7 @@
 
 | 读数 | 当前值 | 事实源 |
 | --- | --- | --- |
-| SW 缓存版本 | qforge-v50 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+| SW 缓存版本 | qforge-v55 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
 | 数据 schemaVersion | 7 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
 | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
 
@@ -44,7 +44,7 @@ PORT=9000 HOST=0.0.0.0 node scripts/serve.mjs   # 等价环境变量
 | `WORKERS` | `FSRS_URL('js/workers/fsrs-worker.js')` | FSRS 训练 Worker 路径（CDN 化时改此） |
 | 顶层 | `DATA_BACKEND('local')`、`DEDUPE_ON_IMPORT`、`SHUFFLE_OPTIONS`、`TYPES/TYPE_LABELS/TYPE_BADGES/DIFFICULTY_*` | 后端开关、业务字典 |
 
-**前后端分离**：把 `DATA_BACKEND` 改为 `'api'`、`NETWORK.API_BASE_URL` 指向后端（或部署同域用 `'/api'` 留空），实现 `js/data/api-adapter.js`（方法名已在 `CONTRACTS.QB` 定义）。`scripts/serve.mjs` 的端口/监听地址属开发工具配置，走命令行参数或 `PORT/HOST` 环境变量，不进 `config.js`。
+**前后端分离**：把 `DATA_BACKEND` 改为 `'api'`、`NETWORK.API_BASE_URL` 指向后端（或部署同域用 `'/api'` 留空），`js/data/api-adapter.js` 已提供完整 REST 实现（默认不启用；方法名对齐 `CONTRACTS.QB`），启用方式为 `DATA_BACKEND='api'` 或查询串 `?backend=api`。`scripts/serve.mjs` 的端口/监听地址属开发工具配置，走命令行参数或 `PORT/HOST` 环境变量，不进 `config.js`。
 
 **参考后端（阶段 C）**：`scripts/serve-api.mjs` 是零依赖的静态文件 + `/api/*` 服务（照 [API-CONTRACT.md](API-CONTRACT.md)），数据落 `<工程根>/.qforge-data/`（已 gitignore，JSON + 原子写）：
 
@@ -56,7 +56,7 @@ PORT=8788 HOST=0.0.0.0 DATA_DIR=/tmp/qf-data node scripts/serve-api.mjs
 
 前端切到后端**无需改 UI**（配置层即可）：启动 `serve-api.mjs` 后用查询串覆盖后端选择，例如
 `http://127.0.0.1:8788/?backend=api&api=`（同源，`api` 留空即相对路径）；跨域时填完整地址
-`?backend=api&api=http://127.0.0.1:8788`。**C020 起 CSP 默认 `connect-src 'self'`**：跨域后端必须同时把该 origin 加入 `NETWORK.CSP_CONNECT_ALLOWLIST`、`index.html` 的 CSP meta 与 `scripts/lib/security-headers.mjs` 的 `CSP`（否则浏览器直接拦截；见下「静态安全头」）。等价地可在页面前置 `window.__QF_BACKEND__='api'`。
+`?backend=api&api=http://127.0.0.1:8788`。**C020 起 CSP 默认 `connect-src 'self'`**：跨域后端必须同时把该 origin 加入 `NETWORK.CSP_CONNECT_ALLOWLIST`、`index.html` 的 CSP meta 与 `scripts/lib/security-headers.mjs` 的 `CSP`（否则浏览器直接拦截；见下「静态安全头」）。等价地可在页面前置 `window.__QF_BACKEND__='api'`。**覆盖只在本地生效**：`file://` 或 `localhost/127.0.0.1/[::1]` 之外（含生产域名）一律忽略 `?backend=`/`?api=`/`__QF_BACKEND__`，防止一条带参数的链接把用户数据切到其他后端；生产切换后端必须改 `CONFIG.DATA_BACKEND` 并重新部署。
 不支持 multipart 上传（资产走**原始字节** `POST /api/assets`）；`POST /api/banks/{id}/import`
 仅实现 `{ questions, mode }` JSON 分支。单用户参考实现；`/api/*` 默认无鉴权，设置 `API_TOKEN`（或 `createServer({ token })`）后要求 `Authorization: Bearer <token>`，前端填 `NETWORK.API_TOKEN` 即自动附带，静态文件与 `/health` 保持公开；`reviews` 为整表 last-write-wins。**静态服务不暴露数据/开发文件**：`resolveSafePath` 拒绝以 `.` 开头的路径段（`.git`/`.trae`/`.qforge-data` 等）、`scripts`、`qforge-evaluation`、`CHANGELOG.internal.md`，并按绝对路径拒绝 `dataDir`；即使用户把 `DATA_DIR` 放在静态 root 内，`GET /<dataDir>/banks.json` 也返回 403。生产部署仍建议把 `DATA_DIR` 移出静态 root（物理隔离）。
 

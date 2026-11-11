@@ -25,7 +25,7 @@
 - **FSRS 个性化参数优化器**：本地累积评分日志（revlog），以相邻评分为样本做伯努利负对数似然拟合（数值梯度 + Adam 优化 21 个权重）；支持全局与按题库 preset（难度差异大的题库分开训练），冷启动用官方默认权重，样本 ≥100 且**独立留出集** logloss 改善 ≥0.2% 才采纳，不足则诚实回退，一键训练/恢复，全程不上传任何数据；http(s) 下训练在专用 Web Worker 后台执行（file:///失败自动回退主线程，结果一致）。**增量重训**：采纳后记录训练点，`shouldRetrain` 按新增样本量提示是否值得重训，重训以上次权重**热启动**（实测 3893.58 ms → 1548.56 ms，2.51×，门控基线不变）。
 - **轻量公式（零依赖）**：题干/选项/解析/参考答案支持纯文本公式记号——上下标 `x^{2}`/`a_{n}` 与公式子集 `\frac{a}{b}`、`\sqrt{x}`、`\sqrt[n]{x}`（CSS 排版，参数组可嵌套、内部可再嵌上下标/公式），**不引入 KaTeX/MathJax**；各导入/导出格式原样保留，判分/去重/搜索基于原始文本，不影响匹配。
 - **学习数据**：错题本、收藏夹、历史记录与统计；关键词搜索覆盖**题干/选项/答案/填空/参考答案/解析/材料正文/材料子问题/标签/分类**（高亮），支持题型/分类/**标签**组合筛选；错题/收藏/搜索均每页 20 条分页。
-- **安全基线**：全站 **CSP**（`script-src 'self'`，无内联脚本/无 `eval`；`object-src 'none'`、`base-uri`/`form-action` 收紧；`img-src` 放行 IndexedDB 的 `blob:`，`connect-src` 放行自建后端/WebDAV/URL 导入所需的 http(s)；`file:` 仅用于双击 `index.html` 直开场景）；本地静态服务与参考后端统一附加 `X-Content-Type-Options: nosniff`、`Referrer-Policy: same-origin`、HTML `X-Frame-Options: DENY` + `frame-ancestors 'none'`；页面 meta CSP 与服务端头由 `scripts/lib/security-headers.mjs` 单点定义并由测试逐字符比对，防三套口径漂移。**静态文件不暴露数据/开发文件**：拒绝点目录（`.git`/`.trae`/`.qforge-data` 等）、`scripts`、`qforge-evaluation`、`CHANGELOG.internal.md`，并按绝对路径拒绝参考后端 `dataDir`（Bearer 只保护 `/api/*`，不保护静态文件）。**ZIP 导入安全边界**：条目数/单条/总解压字节上限 + CRC32 校验；**CSV 导出公式注入防护**（危险前缀加单引号）。
+- **安全基线**：全站 **CSP**（`script-src 'self'`，无内联脚本/无 `eval`；`object-src 'none'`、`base-uri`/`form-action` 收紧；`img-src` 放行 IndexedDB 的 `blob:`，`connect-src` 默认仅 `'self'`，跨源后端/WebDAV/URL 导入需同时修改 `index.html` 的 CSP meta、`scripts/lib/security-headers.mjs` 的 `CSP` 与 `CONFIG.NETWORK.CSP_CONNECT_ALLOWLIST` 三处；`file:` 仅用于双击 `index.html` 直开场景）；本地静态服务与参考后端统一附加 `X-Content-Type-Options: nosniff`、`Referrer-Policy: same-origin`、HTML `X-Frame-Options: DENY` + `frame-ancestors 'none'`；页面 meta CSP 与服务端头由 `scripts/lib/security-headers.mjs` 单点定义并由测试逐字符比对，防三套口径漂移。**静态文件不暴露数据/开发文件**：拒绝点目录（`.git`/`.trae`/`.qforge-data` 等）、`scripts`、`qforge-evaluation`、`CHANGELOG.internal.md`，并按绝对路径拒绝参考后端 `dataDir`（Bearer 只保护 `/api/*`，不保护静态文件）。**ZIP 导入安全边界**：条目数/单条/总解压字节上限 + CRC32 校验；**CSV 导出公式注入防护**（危险前缀加单引号）。
 - **公共抽象收敛**：FNV-1a（contentHash/资产 id/校验和）、mulberry32（乱序与 FSRS fuzz）、答案文本（导出/分享页/编辑器/判分）、FSRS 权重仓归一共用 `js/utils/` 唯一实现；数据层不再反向依赖应用层，黄金值测试守护。
 - **可观测与可打印**：首页本地存储占用条（70%/85% 两档告警）、`?` 快捷键帮助面板、打印/另存 PDF 样式（自动隐藏外壳与按钮）。
 - **备份与恢复**：单文件全量备份（含全部题库、学习数据与图片资产，有图自动打包 .qfbk），支持覆盖/合并恢复、未引用图片清理、存储占用提示与 **WebDAV 云备份**（坚果云/Nextcloud，固定对象 PUT/GET，账号密码仅存本机）。
@@ -61,8 +61,8 @@ qb/
 │   │   ├── contracts.js       # 仓库接口契约 + LocalStorage 逻辑键
 │   │   ├── wire.js            # wire(snake_case) ↔ 本地(camelCase) 字段映射（api-adapter 与备份跨布局转换共用）
 │   │   ├── local-adapter.js   # LocalStorage 实现（本期启用）
-│   │   ├── api-adapter.js     # REST 实现骨架（预留，未启用）
-│   │   ├── db.js              # 门面：按 config 选择适配器，暴露三个 Repo
+│   │   ├── api-adapter.js     # 完整 REST 实现（默认不启用；DATA_BACKEND='api' 或 ?backend=api 启用）
+│   │   ├── db.js              # 门面：按 config 选择适配器，暴露 7 组 Repo
 │   │   └── sample-data.js     # 内置 18 题样例（判断/单选/多选/填空/简答各 3 + 不定项 3）
 │   ├── utils/                 # 公共抽象：helpers / rich-text / storage / shuffle / answer-normalize
 │   │                          #   / judge-answer / question-id / zip-reader / zip-writer(CRC32) / assets(IDB)
@@ -91,6 +91,12 @@ qb/
 
 > 全部在 [TESTING.md](docs/TESTING.md)：逐套件断言数与运行项数、性能门禁、CI 矩阵。
 > 三条底线不变：**有数据才算做完**；没有断言的功能不算完成；本地与 CI 必须同一条命令。
+
+## 部署
+
+- 产物就是仓库根目录的静态文件，无构建步骤；推送到 GitHub Pages（子路径可用，`.nojekyll` 已就位）或任意静态服务器即可。
+- 发布唯一需要手改的两处：`package.json` 的 `version` 与 `sw.js` 的 `CACHE`（改过 `js/`、`css/` 必须 bump CACHE，否则老用户继续命中旧缓存）。
+- 发布前跑 `npm run verify`；再跑 `node scripts/check-release.mjs --release` 校验并写回 `docs/release-ledger.json`。完整步骤见 [发布检查单](docs/RELEASE-CHECKLIST.md)。
 
 ## 远端仓库
 
@@ -129,7 +135,7 @@ qb/
 - [测试矩阵](docs/TESTING.md) —— 逐套件断言数与运行项数、跑法、时区矩阵
 - [性能打点](docs/BENCH.md) —— 性能门禁、容量档位、heap 红线与实测读数
 - [删除记录](docs/deletions.md) —— 结构性删除 / 出库的账本（判据校验：字段齐全、无假删除）
-- [模块分层](docs/modules.md) —— 86 个 `<script>` 的装配清单与加载顺序（唯一事实源：`contracts/modules.json`）
+- [模块分层](docs/modules.md) —— 88 个 `<script>` 的装配清单与加载顺序（唯一事实源：`contracts/modules.json`）
 - [第三方迁移桥 · 结论与计划](docs/MIGRATION-BRIDGE-PLAN.md) —— 要不要做、先做哪个、风险在哪（§5 排期）
 - [第三方迁移桥 · 事实基线](docs/MIGRATION-BRIDGE-FACTS.md) —— 逐来源字段表、能力对照、映射、SQLite 可行性
 - [间隔重复（FSRS-6）](docs/SRS.md) —— 公式、状态机、优化器、数据结构
@@ -140,7 +146,7 @@ qb/
 
 **过程快照**（当时的事实记录，**不是**当前约定；数字过期是正常的，别拿它当规范）：
 
-- [全量审计（2026-10-29）](docs/EVALUATION-2026-10-29.md) · [全维度评估（2026-11-01）](docs/EVALUATION-2026-11-01.md) · [第二轮复核（2026-11-02）](docs/EVALUATION-2026-11-02.md)
+- [全量审计（2026-10-29）](docs/archive/EVALUATION-2026-10-29.md) · [全维度评估（2026-11-01）](docs/archive/EVALUATION-2026-11-01.md) · [第二轮复核（2026-11-02）](docs/archive/EVALUATION-2026-11-02.md)
 - [竞品对比快照（2026-11-02）](docs/COMPETITORS-2026-11-02.md)
 
 > **为什么分开列**：同一个仓库里，"现在的约定"与"某天看到的数字"混在一起时，读者无法判断哪一份该信。

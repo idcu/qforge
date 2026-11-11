@@ -5,7 +5,7 @@
 
 ## 为什么是「装配清单」，不是可插拔模块
 
-淬题是**双击 `index.html` 即用**的纯静态单页应用：86 个 classic `<script>` 顺序加载，
+淬题是**双击 `index.html` 即用**的纯静态单页应用：88 个 classic `<script>` 顺序加载，
 全部挂在单一全局命名空间 `QB` 上（见 `js/config.js`）。没有打包器，所以**顺序就是依赖图**；
 顺序错了不会在启动时报错，只在某个功能第一次用到时才 `undefined`。
 
@@ -45,14 +45,24 @@
 2. `index.html` 的 `<script src>` 序列与清单**逐条相等**（加/删/调序都要同步改清单）；
 3. `requires` 是数组、id 存在、不重复且排在本条之前（**加载期前置依赖 DAG**，运行期才用到的后置模块不登记）；
 4. `keeps` 是数组，且每个声明的全局符号在本模块源码里都有对应赋值（**防误删导出**）；
-5. `js/app.js` 最后、`js/config.js` 最先；
+5. `js/app.js` 最后（`loadAfterEntry: true` 的运行时路由允许排在其后）、`js/config.js` 最先；
 6. `js/**` 下每个脚本都被引用（`js/workers/*` 例外）；
 7. `index.html` 里的每个 src 都真实存在。
 
-牙齿测试：清单删一条 → 「85 / 84 条不一致」；交换相邻两条 script → 「第 6 项不一致」；
+牙齿测试：清单删一条 → 「87 / 86 条不一致」；交换相邻两条 script → 「第 6 项不一致」；
 把 `requires` 指向排在后面的模块 → 「没有排它前面」；`requires` 指向不存在的 id → 「不存在的 id」；
 删掉 `QB.Storage =` 赋值 → 「未导出声明的 QB.Storage」。
 `node scripts/check-modules.mjs --selftest` 会自动跑后三类负例，要求 3/3 全红。
+
+## 真实引用门禁（`scripts/check-deps.mjs`）
+
+`check-modules` 只看清单里**声明**的 `requires`，看不到代码里真实出现的 `QB.X`。`check-deps` 用去注释/去字符串的词法扫描 + `keeps` 的符号归属补上盲区，报告三类问题：
+
+1. **未登记向上引用**：L0/L1 直接引用更高层模块导出的符号（如 `storage` 调 `QB.Migration`）；
+2. **未登记双向环**：两个模块直接互引（A→B 且 B→A）。更大的强连通分量在零打包器 + 全局命名空间下由共享枢纽传递形成，仅作信息项展示，不阻断；
+3. **未在 `modules.json` 登记的 js 文件**（`js/workers/*` 等 Worker 入口按 `contracts/deps-allow.json` 白名单登记）。
+
+存量例外必须写进 `contracts/deps-allow.json`，每条带 `until`；到期即判红，禁止用它放行新增违规。牙齿测试：`node scripts/check-deps.mjs --selftest`（基线通过、插入 L0→L2 引用必红、删一条例外必红）。
 
 ## 加一个脚本时
 
