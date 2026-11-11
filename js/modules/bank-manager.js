@@ -4,7 +4,7 @@
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
-  const UI = QB.UIRenderer;
+  const UI = QB.UIPort;
 
   QB.BankManager = {
     /** 新建题库（弹窗表单） */
@@ -85,7 +85,7 @@
 
     /** 删除（级联删除题目与用户数据） */
     async remove(bank) {
-      const ok = await UI.confirmDialog(
+      const ok = await UI.confirm(
         '确定删除题库「' + bank.name + '」吗？该题库下的题目、复习计划、错题、收藏、该题库训练权重及历史记录都会被一并删除，且不可恢复。',
         '删除'
       );

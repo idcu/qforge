@@ -87,6 +87,23 @@ section('全局配置契约（config.js 分组 + 旧键兼容）');
   eq(QB.Source.URL_TIMEOUT_MS, C.NETWORK.URL_IMPORT_TIMEOUT_MS, 'Source 超时读取配置');
 }
 
+section('后端覆盖仅本地生效（生产域忽略覆盖参数）');
+{
+  const loadConfig = (loc) => {
+    const win = { location: loc, URLSearchParams: URLSearchParams };
+    new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/config.js'), 'utf8'))(win, win);
+    return win.QB.CONFIG;
+  };
+  eq(loadConfig({ protocol: 'https:', hostname: 'example.com', search: '?backend=api' }).DATA_BACKEND,
+    'local', '生产 https 忽略 ?backend=api');
+  eq(loadConfig({ protocol: 'https:', hostname: 'localhost', search: '?backend=api' }).DATA_BACKEND,
+    'api', 'localhost 允许 ?backend=api');
+  eq(loadConfig({ protocol: 'file:', hostname: '', search: '?backend=api' }).DATA_BACKEND,
+    'api', 'file:// 允许 ?backend=api');
+  eq(loadConfig({ protocol: 'http:', hostname: '127.0.0.1', search: '' }).DATA_BACKEND,
+    'local', '127.0.0.1 无参数默认 local');
+}
+
 section('答案规范化与判分策略');
 eq(QB.normalizeAnswer(' Ａ Ｂ　', {}), 'ab', '全角/空格归一');
 eq(QB.parseBoolean('正确'), true, 'parseBoolean 正确');
@@ -461,6 +478,15 @@ eq(QB.Adapters.normalizeType('不定项选择'), 'indefinite', '题型名「不�
   eq(QB.judgeAnswer(q0, ['A', 'B', 'D']).isCorrect, true, '样例不定项：全对满分');
   eq(QB.judgeAnswer(q0, ['A', 'B']).partial, true, '样例不定项：少选半分');
   ok(!QB.judgeAnswer(q0, ['A', 'C']).partial, '样例不定项：错选 0 分无 partial');
+}
+{
+  // 进度百分比：已答/总题数口径，最后一题必须 100%，0 题不除零
+  const e = new QB.QuizEngine();
+  e.loadQuestions(QB.SAMPLE.questions.slice(0, 4), 'mixed', { shuffleOptions: false });
+  eq(e.getProgress().percentage, 25, '进度：第 1/4 题 = 25%');
+  e.currentIndex = 3;
+  eq(e.getProgress().percentage, 100, '进度：第 4/4 题 = 100%');
+  eq(new QB.QuizEngine().getProgress().percentage, 0, '进度：0 题 = 0%（不除零）');
 }
 
 /* ================= 2.8 材料题（综合题，M1） ================= */

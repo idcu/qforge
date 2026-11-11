@@ -1,7 +1,7 @@
 /**
  * 数据访问门面（DB）
- * 依据 QB.CONFIG.DATA_BACKEND 选择适配器，向上暴露统一的三个 Repository。
- * 业务模块只使用 QB.DB.banks / QB.DB.questions / QB.DB.progress，不关心后端形态。
+ * 依据 QB.CONFIG.DATA_BACKEND 选择适配器，向上暴露统一的 7 组 Repository。
+ * 业务模块只使用 QB.DB.banks / questions / progress / reviews / revlog / weights / backup，不关心后端形态。
  */
 (function (global) {
   'use strict';

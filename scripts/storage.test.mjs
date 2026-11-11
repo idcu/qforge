@@ -48,10 +48,20 @@ section('setSync：同步落盘、失败上抛、可重试');
   ok(threw !== null, 'setSync 配额失败时抛错（不再假成功）');
   eq(fired, 1, 'onError 订阅方被通知一次');
   ok(S.lastError && S.lastError.name === 'QuotaExceededError', 'lastError 记录');
-  // 失败后待写保留：恢复底层写入，forceSync 重试成功
+  // T10：onWriteError 是 onError 的语义化别名，同一事件源、同样可退订
+  let writeFired = 0;
+  const offWrite = S.onWriteError(() => { writeFired++; });
+  ls.setItem = (k, v) => {
+    if (k === 'qb:k-fail') { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+    return rawSet(k, v);
+  };
+  try { S.setSync('k-fail', { v: 3 }); } catch (e) { /* 期望抛出 */ }
+  eq(writeFired, 1, 'onWriteError 订阅方收到写失败');
+  offWrite();
+  // 失败后待写保留：恢复底层写入，forceSync 重试成功（最近一次待写值 v=3）
   ls.setItem = rawSet;
   S.forceSync();
-  eq(JSON.parse(ls.getItem('qb:k-fail')).v, 2, '恢复后 forceSync 把待写数据落盘');
+  eq(JSON.parse(ls.getItem('qb:k-fail')).v, 3, '恢复后 forceSync 把待写数据落盘');
   off();
   S.clearAll();
 }

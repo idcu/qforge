@@ -570,8 +570,8 @@
     if (check.ok) return { ok: true, payload: payload, omitted: false, budget: check };
     const text = QB.Annotation.overflowText(check, '');
     let proceed = false;
-    if (QB.UIRenderer && typeof QB.UIRenderer.confirmDialog === 'function') {
-      proceed = await QB.UIRenderer.confirmDialog(null, '不含批注继续导出', {
+    if (QB.UIPort && typeof QB.UIPort.confirm === 'function') {
+      proceed = await QB.UIPort.confirm(null, '不含批注继续导出', {
         lines: [
           text,
           '「不含批注继续导出」：题目、答案、解析与图片照常导出，仅省略批注；本机批注数据不变。',
@@ -631,16 +631,16 @@
       const radios = formats.map((f) =>
         '<div class="checkbox-row"><input type="radio" id="exp-fmt-' + f.id + '" name="exp-fmt" value="' + f.id + '"' + (f.id === 'json' ? ' checked' : '') + '>' +
         '<label for="exp-fmt-' + f.id + '">' + QB.escapeHtml(f.label) + '</label></div>').join('');
-      QB.UIRenderer.openModal(
+      QB.UIPort.openModal(
         '<h3>导出' + QB.escapeHtml(kindLabel) + '</h3>' +
         '<div class="li-meta">共 ' + count + ' ' + unit + '，请选择导出格式：</div>' + radios +
         '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
         '<button class="btn" data-action="modal-ok">导出</button></div>',
         (modal) => {
-          modal.querySelector('[data-action="modal-cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
+          modal.querySelector('[data-action="modal-cancel"]').onclick = () => { QB.UIPort.closeModal(); resolve(null); };
           modal.querySelector('[data-action="modal-ok"]').onclick = () => {
             const id = modal.querySelector('input[name="exp-fmt"]:checked').value;
-            QB.UIRenderer.closeModal();
+            QB.UIPort.closeModal();
             resolve(id);
           };
         },
@@ -656,17 +656,17 @@
    */
   async function openFlow(opts) {
     const def = KINDS[opts.kind];
-    if (!def) { QB.UIRenderer.toast('不支持的导出对象', 'err'); return null; }
-    if (!opts.bank) { QB.UIRenderer.toast('请先选择题库', 'err'); return null; }
+    if (!def) { QB.UIPort.toast('不支持的导出对象', 'err'); return null; }
+    if (!opts.bank) { QB.UIPort.toast('请先选择题库', 'err'); return null; }
 
     let payload;
     try {
       payload = await collect(opts.kind, opts.bank);
     } catch (e) {
-      QB.UIRenderer.toast('导出失败：' + e.message, 'err');
+      QB.UIPort.toast('导出失败：' + e.message, 'err');
       return null;
     }
-    if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
+    if (!payload.entries.length) { QB.UIPort.toast(def.label + '为空，无可导出内容', 'err'); return null; }
 
     const unit = def.unit || '题';
     const formatId = await chooseFormat(payload.entries.length, def.label, def.formats, unit, opts.kind, opts.trigger);
@@ -675,25 +675,25 @@
     // C026：批注总量超限 → 导出前确认（不含批注继续 / 取消去清理），不静默丢批注
     const gate = await ensureAnnotationBudget(formatId, payload);
     if (!gate.ok) {
-      QB.UIRenderer.toast('已取消导出：批注总量超限，请先删减批注后重试', 'err');
+      QB.UIPort.toast('已取消导出：批注总量超限，请先删减批注后重试', 'err');
       return null;
     }
     payload = gate.payload;
-    if (gate.omitted) QB.UIRenderer.toast('批注总量超限，已按确认省略批注导出（本机批注不变）', 'err');
+    if (gate.omitted) QB.UIPort.toast('批注总量超限，已按确认省略批注导出（本机批注不变）', 'err');
 
     let built;
     try {
       built = await buildAsync(formatId, payload);
     } catch (e) {
-      QB.UIRenderer.toast('导出失败：' + e.message, 'err');
+      QB.UIPort.toast('导出失败：' + e.message, 'err');
       return null;
     }
     const filename = safeName(opts.bank.name) + '-' + def.label + '-' + payload.entries.length + unit + '-' + stamp() + '.' + built.ext;
     download(filename, built.mime, built.content);
     const imgNote = built.assetCount ? '，含图片 ' + built.assetCount + ' 张' : '';
-    QB.UIRenderer.toast('已导出' + def.label + ' ' + payload.entries.length + ' ' + unit + '（' + formatId.toUpperCase() + imgNote + '）',
+    QB.UIPort.toast('已导出' + def.label + ' ' + payload.entries.length + ' ' + unit + '（' + formatId.toUpperCase() + imgNote + '）',
       built.missing ? 'err' : 'ok');
-    if (built.missing) QB.UIRenderer.toast('有 ' + built.missing + ' 张引用图片缺失（未找到本地资产），仅导出占位标记', 'err');
+    if (built.missing) QB.UIPort.toast('有 ' + built.missing + ' 张引用图片缺失（未找到本地资产），仅导出占位标记', 'err');
     return { kind: opts.kind, format: formatId, count: payload.entries.length, filename: filename, assetCount: built.assetCount };
   }
 
@@ -705,7 +705,7 @@
   function askPackageInfo(bank, count, returnFocusTo, mode) {
     const share = mode === 'share';
     return new Promise((resolve) => {
-      QB.UIRenderer.openModal(
+      QB.UIPort.openModal(
         '<h3>' + (share ? '分享题包 · ' : '导出分发题包 · ') + QB.escapeHtml(bank.name) + '</h3>' +
         '<p class="li-meta">' + (share
           ? '生成自包含 .qbk 并转成 #share 回链 / 粘贴码，对方离线导入（无账号、不访问服务器）。'
@@ -725,10 +725,10 @@
             author: (modal.querySelector('#pkg-author').value || '').trim(),
             description: (modal.querySelector('#pkg-desc').value || '').trim()
           });
-          modal.querySelector('[data-action="modal-cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
+          modal.querySelector('[data-action="modal-cancel"]').onclick = () => { QB.UIPort.closeModal(); resolve(null); };
           const preview = modal.querySelector('[data-action="pkg-preview"]');
-          if (preview) preview.onclick = () => { QB.UIRenderer.closeModal(); resolve({ preview: true }); };
-          modal.querySelector('[data-action="modal-ok"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(readInfo()); };
+          if (preview) preview.onclick = () => { QB.UIPort.closeModal(); resolve({ preview: true }); };
+          modal.querySelector('[data-action="modal-ok"]').onclick = () => { QB.UIPort.closeModal(); resolve(readInfo()); };
         },
         undefined,
         returnFocusTo
@@ -738,21 +738,21 @@
 
   /** 只读预览：复用分享页（自包含 HTML，不联网、不上传），在新标签页打开 */
   async function openPreview(payload) {
-    if (!QB.SharePage) { QB.UIRenderer.toast('分享页模块未加载', 'err'); return false; }
+    if (!QB.SharePage) { QB.UIPort.toast('分享页模块未加载', 'err'); return false; }
     let html;
     try {
       const built = await QB.SharePage.build(payload);
       // build() 契约为 { content, ext, mime, ... }；Blob 只能接收 HTML 字符串
       html = built && typeof built === 'object' ? built.content : built;
     } catch (e) {
-      QB.UIRenderer.toast('预览生成失败：' + e.message, 'err');
+      QB.UIPort.toast('预览生成失败：' + e.message, 'err');
       return false;
     }
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
     const win = window.open(url, '_blank');
     if (!win) {
       URL.revokeObjectURL(url);
-      QB.UIRenderer.toast('浏览器拦截了新窗口，请允许本站弹窗后重试', 'err');
+      QB.UIPort.toast('浏览器拦截了新窗口，请允许本站弹窗后重试', 'err');
       return false;
     }
     setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -767,26 +767,26 @@
    */
   async function prepareDistribution(kind, bank, trigger, mode) {
     const def = KINDS[kind];
-    if (!def) { QB.UIRenderer.toast('不支持的导出对象', 'err'); return null; }
-    if (!bank) { QB.UIRenderer.toast('请先选择题库', 'err'); return null; }
+    if (!def) { QB.UIPort.toast('不支持的导出对象', 'err'); return null; }
+    if (!bank) { QB.UIPort.toast('请先选择题库', 'err'); return null; }
 
     let payload;
     try {
       payload = await collect(kind, bank);
     } catch (e) {
-      QB.UIRenderer.toast('导出失败：' + e.message, 'err');
+      QB.UIPort.toast('导出失败：' + e.message, 'err');
       return null;
     }
-    if (!payload.entries.length) { QB.UIRenderer.toast(def.label + '为空，无可导出内容', 'err'); return null; }
+    if (!payload.entries.length) { QB.UIPort.toast(def.label + '为空，无可导出内容', 'err'); return null; }
 
     // C026：分发题包 / 分享页都携带批注 → 同样先确认（超限时不含批注继续或取消）
     const gate = await ensureAnnotationBudget('qbk', payload);
     if (!gate.ok) {
-      QB.UIRenderer.toast('已取消导出：批注总量超限，请先删减批注后重试', 'err');
+      QB.UIPort.toast('已取消导出：批注总量超限，请先删减批注后重试', 'err');
       return null;
     }
     payload = gate.payload;
-    if (gate.omitted) QB.UIRenderer.toast('批注总量超限，已按确认省略批注导出（本机批注不变）', 'err');
+    if (gate.omitted) QB.UIPort.toast('批注总量超限，已按确认省略批注导出（本机批注不变）', 'err');
 
     const info = await askPackageInfo(bank, payload.entries.length, trigger, mode);
     if (!info) return null;
@@ -801,7 +801,7 @@
       });
       return { payload, info, built };
     } catch (e) {
-      QB.UIRenderer.toast('导出失败：' + e.message, 'err');
+      QB.UIPort.toast('导出失败：' + e.message, 'err');
       return null;
     }
   }
@@ -822,9 +822,9 @@
     download(filename, built.mime, built.content);
     const kb = (built.content.byteLength / 1024).toFixed(1);
     const imgNote = built.assetCount ? '，含图片 ' + built.assetCount + ' 张' : '';
-    QB.UIRenderer.toast('已导出分发题包 v' + info.version + '（' + payload.entries.length + ' 题' + imgNote + '，' + kb + ' KB）',
+    QB.UIPort.toast('已导出分发题包 v' + info.version + '（' + payload.entries.length + ' 题' + imgNote + '，' + kb + ' KB）',
       built.missing ? 'err' : 'ok');
-    if (built.missing) QB.UIRenderer.toast('有 ' + built.missing + ' 张引用图片缺失（未找到本地资产），仅导出占位标记', 'err');
+    if (built.missing) QB.UIPort.toast('有 ' + built.missing + ' 张引用图片缺失（未找到本地资产），仅导出占位标记', 'err');
     return {
       kind: 'package', format: 'qbk', count: payload.entries.length, filename: filename,
       bytes: built.content.byteLength, assetCount: built.assetCount, manifest: built.manifest
@@ -849,7 +849,7 @@
     const count = prep.payload.entries.length;
     const kb = (prep.built.content.byteLength / 1024).toFixed(1);
     const imgNote = prep.built.assetCount ? '，含图片 ' + prep.built.assetCount + ' 张' : '';
-    QB.UIRenderer.openModal(
+    QB.UIPort.openModal(
       '<h3>分享题包 · ' + esc(bank.name) + '</h3>' +
       '<p class="li-meta">已生成自包含 .qbk（' + count + ' 题' + imgNote + '，' + kb + ' KB）。' +
       '对方打开回链或粘贴分享码即可离线导入：无账号、不访问服务器。</p>' +
@@ -872,15 +872,15 @@
             const text = target ? target.value : '';
             if (await copyText(text)) {
               btn.textContent = '已复制';
-              QB.UIRenderer.toast('已复制到剪贴板', 'ok');
+              QB.UIPort.toast('已复制到剪贴板', 'ok');
             } else if (target) {
               target.focus();
               target.select();
-              QB.UIRenderer.toast('请手动复制（Ctrl+C）', 'ok');
+              QB.UIPort.toast('请手动复制（Ctrl+C）', 'ok');
             }
           };
         });
-        modal.querySelector('[data-action="modal-ok"]').onclick = () => QB.UIRenderer.closeModal();
+        modal.querySelector('[data-action="modal-ok"]').onclick = () => QB.UIPort.closeModal();
       },
       undefined,
       returnFocusTo
@@ -894,7 +894,7 @@
    * @param {{bank:Object, kind?:string}} opts
    */
   async function shareFlow(opts) {
-    if (!QB.ShareLink) { QB.UIRenderer.toast('分享码模块未加载', 'err'); return null; }
+    if (!QB.ShareLink) { QB.UIPort.toast('分享码模块未加载', 'err'); return null; }
     const prep = await prepareDistribution((opts && opts.kind) || 'bank', opts && opts.bank, opts && opts.trigger, 'share');
     if (!prep) return null;
     if (prep.preview) { await openPreview(prep.payload); return { preview: true }; }
@@ -904,14 +904,14 @@
     const estimatedChars = QB.ShareLink.estimateChars(prep.built.content.byteLength) +
       QB.ShareLink.buildLink(base, '').length;
     if (estimatedChars > softLimit) {
-      const go = await QB.UIRenderer.confirmDialog(
+      const go = await QB.UIPort.confirm(
         '预计分享回链 ' + estimatedChars + ' 字符，超过分享链接上限 ' + softLimit + ' 字符（' +
         (prep.built.content.byteLength / 1024).toFixed(1) + ' KB 题包经 Base64 约放大 1.33 倍）。' +
         '继续将生成完整回链，对方可能无法直接打开；建议改为只发送分享码或导出分发题包文件。',
         '继续生成'
       );
       if (!go) {
-        QB.UIRenderer.toast('已取消分享（题包过大，建议导出分发题包文件）', 'info');
+        QB.UIPort.toast('已取消分享（题包过大，建议导出分发题包文件）', 'info');
         return null;
       }
     }

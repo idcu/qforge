@@ -38,19 +38,9 @@
     return c && c.subtle && typeof c.subtle.encrypt === 'function' ? c : null;
   }
 
-  function bytesToBase64(bytes) {
-    if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
-    let bin = '';
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    return btoa(bin);
-  }
-  function base64ToBytes(text) {
-    if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(String(text), 'base64'));
-    const bin = atob(String(text));
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
+  // Base64 唯一实现见 js/utils/base64.js（与分享页/分享码共用，禁止本地再复制一份）
+  function bytesToBase64(bytes) { return QB.Base64.encodeBytes(bytes); }
+  function base64ToBytes(text) { return QB.Base64.decodeToBytes(text); }
 
   function idbOpen() {
     return new Promise((resolve) => {
@@ -368,7 +358,7 @@
     const last = cfg.lastAt ? QB.Helpers.formatDate(cfg.lastAt) + '（' + Math.round((cfg.lastSize || 0) / 1024) + ' KB）' : '尚未上传';
     const passError = cfg.passError
       ? '<p class="li-meta" style="color:#c62828">' + esc(cfg.passError) + '</p>' : '';
-    QB.UIRenderer.openModal(
+    QB.UIPort.openModal(
       '<h3>WebDAV 云备份</h3>' +
       '<div class="qe-form">' +
       '<label class="qe-label">WebDAV 目录 URL（如 https://dav.jianguoyun.com/dav/我的备份/）</label>' +
@@ -398,29 +388,29 @@
         if (passInput) passInput.value = cfg.pass || '';
         const persist = async (conf) => {
           const saved = await saveConfig(conf);
-          if (saved.passWarning) QB.UIRenderer.toast(saved.passWarning, 'err');
+          if (saved.passWarning) QB.UIPort.toast(saved.passWarning, 'err');
           return saved;
         };
-        modal.querySelector('[data-dav="close"]').onclick = () => QB.UIRenderer.closeModal();
-        modal.querySelector('[data-dav="clear"]').onclick = () => { clearConfig(); QB.UIRenderer.toast('已清除 WebDAV 配置', 'ok'); QB.UIRenderer.closeModal(); };
+        modal.querySelector('[data-dav="close"]').onclick = () => QB.UIPort.closeModal();
+        modal.querySelector('[data-dav="clear"]').onclick = () => { clearConfig(); QB.UIPort.toast('已清除 WebDAV 配置', 'ok'); QB.UIPort.closeModal(); };
         modal.querySelector('[data-dav="up"]').onclick = async () => {
           const conf = read();
           try {
             await persist(conf);
-            QB.UIRenderer.toast('正在上传备份…');
+            QB.UIPort.toast('正在上传备份…');
             const r = await upload({ config: conf });
-            QB.UIRenderer.toast('已上传到 WebDAV（' + Math.round(r.size / 1024) + ' KB' + (r.assetCount ? '，含图 ' + r.assetCount + ' 张' : '') + '）', 'ok');
-            QB.UIRenderer.closeModal();
-          } catch (e) { QB.UIRenderer.toast('上传失败：' + e.message, 'err'); }
+            QB.UIPort.toast('已上传到 WebDAV（' + Math.round(r.size / 1024) + ' KB' + (r.assetCount ? '，含图 ' + r.assetCount + ' 张' : '') + '）', 'ok');
+            QB.UIPort.closeModal();
+          } catch (e) { QB.UIPort.toast('上传失败：' + e.message, 'err'); }
         };
         modal.querySelector('[data-dav="down"]').onclick = async () => {
           try {
             await persist(read());
-            QB.UIRenderer.toast('正在从 WebDAV 拉取…');
+            QB.UIPort.toast('正在从 WebDAV 拉取…');
             const parsed = await fetchBackup({ config: read() });
             await QB.Backup.confirmRestore(parsed); // 用户在恢复弹窗确认覆盖/合并
-            QB.UIRenderer.closeModal();
-          } catch (e) { QB.UIRenderer.toast('下载失败：' + e.message, 'err'); }
+            QB.UIPort.closeModal();
+          } catch (e) { QB.UIPort.toast('下载失败：' + e.message, 'err'); }
         };
       }
     );

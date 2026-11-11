@@ -1223,4 +1223,16 @@
     toast, openModal, closeModal, confirmDialog
   };
   QB.UIRenderer.LIST_PAGE_SIZE = LIST_PAGE_SIZE;
+  // T07：把 UI 能力注册进 L1 端口，供 L2 领域模块使用。
+  // 用转发而不是直接传函数引用：测试里替换/打桩 QB.UIRenderer.toast 等仍能生效，
+  // 也保证 UIPort 永远指向「当前」实现。
+  if (QB.UIPort && typeof QB.UIPort.register === 'function') {
+    QB.UIPort.register({
+      toast() { return QB.UIRenderer.toast.apply(QB.UIRenderer, arguments); },
+      openModal() { return QB.UIRenderer.openModal.apply(QB.UIRenderer, arguments); },
+      closeModal() { return QB.UIRenderer.closeModal.apply(QB.UIRenderer, arguments); },
+      confirmDialog() { return QB.UIRenderer.confirmDialog.apply(QB.UIRenderer, arguments); },
+      renderImportChecksum() { return QB.UIRenderer.renderImportChecksum.apply(QB.UIRenderer, arguments); }
+    });
+  }
 })(window);

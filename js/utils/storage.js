@@ -111,6 +111,12 @@
     _timer: null,
     _errorListeners: [],
     _mergeHooks: [],
+    /**
+     * 迁移执行器端口（T06）：Storage 属于 L1，不得反向引用 L2 的 migrate.js。
+     * 由 migrate.js 加载时调用 registerMigrationRunner 注册；未注册时接管迁移按
+     * 「migration-unavailable」降级，行为与改造前完全一致。
+     */
+    _migrationRunner: null,
     /** 物理键唯一实现（R-07）：LocalStorage 前缀由本函数统一拼接，Quota 复用 */
     fullKeyOf: fullKeyOf,
 
@@ -547,6 +553,16 @@
       } catch (_) { this._bc = null; }
     },
 
+    /** 注册迁移执行器（由 migrate.js 在加载时调用；传非函数即注销） */
+    registerMigrationRunner(fn) {
+      this._migrationRunner = typeof fn === 'function' ? fn : null;
+    },
+
+    /** 是否已有可用的迁移执行器 */
+    hasMigrationRunner() {
+      return typeof this._migrationRunner === 'function';
+    },
+
     /** 迁移赢家切换到 IDB 后广播（复用现有 BroadcastChannel，不新造跨标签机制） */
     announceBackend(mode) {
       if (!this._bc && mode === 'idb') this._subscribeBroadcast();
@@ -701,7 +717,8 @@
     },
 
     /**
-     * 等待另一标签迁移；超过 TTL 后主动接管：重抢过期锁 + 退避重试 `QB.Migration.run()`。
+     * 等待另一标签迁移；超过 TTL 后主动接管：重抢过期锁 + 退避重试已注册的迁移执行器
+     * （`migrate.js` 通过 `registerMigrationRunner` 注入；Storage 不直接引用 L2）。
      * 调用方：`js/app.js::boot`（唯一）；Node 回归见 `scripts/migrate.test.mjs` F2b/F2c。
      *
      * 与 `waitForMigrationSwitch` 的区别：后者只等 marker（胜者崩溃就永远等不到），本方法在
@@ -742,7 +759,7 @@
           }
           continue;
         }
-        if (!QB.Migration || typeof QB.Migration.run !== 'function') { lastError = 'migration-unavailable'; break; }
+        if (!this.hasMigrationRunner()) { lastError = 'migration-unavailable'; break; }
         attempts += 1;
         const res = await this._runTakeoverMigration();
         if (res.switched) {
@@ -781,7 +798,7 @@
       let res = null;
       let error = null;
       try {
-        res = await QB.Migration.run();
+        res = await this._migrationRunner();
       } catch (e) {
         error = (e && e.message) || String(e);
       }
@@ -1074,6 +1091,16 @@
         const i = this._errorListeners.indexOf(fn);
         if (i >= 0) this._errorListeners.splice(i, 1);
       };
+    },
+
+    /**
+     * T10：写失败订阅的语义化别名（与 onError 同一事件源）。
+     * 落盘失败时已记录 lastError、保留待写队列并重试；这里只负责让上层可见。
+     * @param {(e:Error)=>void} fn
+     * @returns {()=>void} 退订函数
+     */
+    onWriteError(fn) {
+      return this.onError(fn);
     },
 
     /**

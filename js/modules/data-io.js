@@ -11,7 +11,7 @@
 (function (global) {
   'use strict';
   const QB = (global.QB = global.QB || {});
-  const UI = QB.UIRenderer;
+  const UI = QB.UIPort;
 
   const ACCEPT = '.json,.csv,.tsv,.txt,.md,.markdown,.xlsx,.docx,.qbk,.apkg,.quizlet';
 

@@ -46,7 +46,7 @@ section('契约表结构');
 section('assertAdapter（仓库契约校验）');
 {
   ok(QB.assertAdapter(QB.LocalAdapter, 'local') === QB.LocalAdapter, 'local-adapter 满足全部 7 组契约');
-  ok(QB.assertAdapter(QB.ApiAdapter, 'api') === QB.ApiAdapter, 'api-adapter 骨架同样覆盖全部 7 组（未实现即诚实拒绝）');
+  ok(QB.assertAdapter(QB.ApiAdapter, 'api') === QB.ApiAdapter, 'api-adapter 完整实现同样覆盖全部 7 组（默认不启用）');
   throws(() => QB.assertAdapter({}, 'x'), /banks\.\*/, '缺整组时报 banks.*');
   const broken = Object.assign({}, QB.LocalAdapter, {
     reviews: { list() {}, remove() {} } // 缺 save

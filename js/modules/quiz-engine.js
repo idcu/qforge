@@ -76,11 +76,12 @@
   };
 
   QuizEngine.prototype.getProgress = function () {
-    const total = this.questions.length || 1;
+    const total = this.questions.length;
     return {
-      current: Math.min(this.currentIndex + 1, total),
-      total: this.questions.length,
-      percentage: Math.round((this.currentIndex / total) * 100)
+      current: Math.min(this.currentIndex + 1, total || 1),
+      total: total,
+      // 已答/总题数口径：第 1 题即 1/N，最后一题 100%；0 题时为 0（不除零）
+      percentage: total ? Math.round(((this.currentIndex + 1) / total) * 100) : 0
     };
   };
 

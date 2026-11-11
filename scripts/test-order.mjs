@@ -36,6 +36,7 @@ export const ORDER = [
   'import-commit.test.mjs',
   'shard.test.mjs',
   'contract.test.mjs',
+  'ui-port.test.mjs',
   'sched.test.mjs',
   'references.test.mjs',
   'api-backend.test.mjs',

@@ -16,8 +16,8 @@
   'use strict';
   const QB = (global.QB = global.QB || {});
   const Core = QB.FSRSTrainCore;
-  // revlog FIFO 上限：唯一常量定义源在 local-adapter（REVLOG_MAX），此处再导出供历史调用方/测试用
-  const LOG_LIMIT = (QB.LocalAdapter && QB.LocalAdapter.REVLOG_MAX) || 20000;
+  // revlog FIFO 上限：唯一配置源为 QB.CONFIG.LIMITS.REVLOG_MAX（此处只读配置，不反向依赖 L1 实现）
+  const LOG_LIMIT = (QB.CONFIG && QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000;
 
   /* ---------------- revlog 读写（经契约层 QB.DB.revlog） ---------------- */
 

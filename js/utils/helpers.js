@@ -129,6 +129,14 @@
       return countA === countB;
     },
 
+    /** 人类可读字节数（quota 与 annotation 共用；L0 提供，避免 L0 反向依赖 L1） */
+    formatBytes(n) {
+      const v = Number(n) || 0;
+      if (v >= 1024 * 1024) return (v / (1024 * 1024)).toFixed(1) + ' MB';
+      if (v >= 1024) return (v / 1024).toFixed(0) + ' KB';
+      return v + ' B';
+    },
+
     /** 延迟 */
     sleep(ms) {
       return new Promise((resolve) => setTimeout(resolve, ms));

@@ -82,9 +82,7 @@
   /** 统一超限文案：具体字节 + 调用方提供的处理方式（禁止各模块自行拼提示） */
   function overflowText(check, handling) {
     const c = check || {};
-    const fmt = QB.Quota && typeof QB.Quota.formatBytes === 'function'
-      ? QB.Quota.formatBytes
-      : function (n) { return Math.round((Number(n) || 0) / 1024) + ' KB'; };
+    const fmt = QB.Helpers.formatBytes;
     return '批注总量 ' + fmt(c.bytes) + '，超过上限 ' + fmt(c.limit) +
       '（超出 ' + fmt(c.overflow) + '）。' + (handling || '');
   }

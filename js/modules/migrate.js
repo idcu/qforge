@@ -787,4 +787,9 @@
     migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7,
     LOCK_TTL_MS
   };
+  // T06：把「执行迁移」注册进 L1 的 Storage 端口，替换 storage.js 原来对 QB.Migration 的直接引用。
+  // 闭包内动态读 QB.Migration.run，保证测试里替换 run 的桩仍然生效。
+  if (QB.Storage && typeof QB.Storage.registerMigrationRunner === 'function') {
+    QB.Storage.registerMigrationRunner(function () { return QB.Migration.run(); });
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

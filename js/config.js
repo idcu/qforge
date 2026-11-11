@@ -95,12 +95,21 @@
    *   2) 或 URL 查询串 `?backend=api&api=http://host:8788`（本地验收参考后端用，见 DEVELOPMENT §1）。
    * 未提供时不改变默认（local），保证既有行为不变。
    */
+  /** 覆盖开关只对本地开发/双击场景开放：file:// 或 localhost/127.0.0.1/[::1] */
+  function isDevOrigin(loc) {
+    if (!loc || typeof loc !== 'object') return false;
+    if (loc.protocol === 'file:') return true;
+    const host = String(loc.hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+  }
   function backendOverride() {
     const out = { backend: null, api: null };
     try {
+      const loc = global.location;
+      // 生产域名一律忽略覆盖：避免一条带 ?backend= 的链接把用户数据切到别的后端
+      if (!isDevOrigin(loc)) return out;
       if (typeof global.__QF_BACKEND__ === 'string') out.backend = global.__QF_BACKEND__;
       if (typeof global.__QF_API__ === 'string') out.api = global.__QF_API__;
-      const loc = global.location;
       const search = (loc && typeof loc.search === 'string') ? loc.search : '';
       if (search && typeof global.URLSearchParams === 'function') {
         const qs = new global.URLSearchParams(search);

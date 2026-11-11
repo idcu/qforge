@@ -803,7 +803,7 @@
         const backup = parsed.backup;
         const used = QB.Storage.usageBytes();
         const keys = Object.keys(backup.data || {});
-        QB.UIRenderer.openModal(
+        QB.UIPort.openModal(
           '<h3>恢复备份</h3>' +
           '<p>备份包含 <b>' + keys.length + '</b> 个数据键' +
           (parsed.assets.length ? '、<b>' + parsed.assets.length + '</b> 张图片' : '') +
@@ -818,17 +818,17 @@
           '<div class="modal-actions"><button class="btn btn-ghost" data-bk="cancel">取消</button>' +
           '<button class="btn btn-danger" data-bk="ok">确认恢复</button></div>',
           (modal) => {
-            modal.querySelector('[data-bk="cancel"]').onclick = () => { QB.UIRenderer.closeModal(); resolve(null); };
+            modal.querySelector('[data-bk="cancel"]').onclick = () => { QB.UIPort.closeModal(); resolve(null); };
             modal.querySelector('[data-bk="ok"]').onclick = async () => {
               const mode = modal.querySelector('#bk-merge').checked ? 'merge' : 'replace';
               try {
                 const r = await applyBackup(backup, { mode: mode });
                 const imgCount = await restoreAssets(parsed.assets, mode);
-                QB.UIRenderer.closeModal();
-                QB.UIRenderer.toast('已恢复 ' + r.keys + ' 个数据键' + (imgCount ? '、' + imgCount + ' 张图片' : ''), 'ok');
+                QB.UIPort.closeModal();
+                QB.UIPort.toast('已恢复 ' + r.keys + ' 个数据键' + (imgCount ? '、' + imgCount + ' 张图片' : ''), 'ok');
                 resolve({ keys: r.keys, mode: mode, assets: imgCount });
               } catch (e) {
-                QB.UIRenderer.toast('恢复失败：' + e.message, 'err');
+                QB.UIPort.toast('恢复失败：' + e.message, 'err');
                 reject(e);
               }
             };
@@ -885,7 +885,7 @@
     const reenableBtn = (marker === 'ls' || marker === 'ls-fallback')
       ? '<button class="btn btn-ghost" data-bk="reenable-idb">重新启用 IndexedDB</button>'
       : '';
-    QB.UIRenderer.openModal(
+    QB.UIPort.openModal(
       '<h3>备份与恢复</h3>' +
       '<div class="card" style="margin:10px 0"><div class="li-meta">本地存储占用（' + backendLabel + '）</div>' +
       '<div style="font-size:20px;font-weight:600;margin:4px 0">' + KB + ' KB' +
@@ -904,39 +904,39 @@
       legacyBtn + rollbackBtn + reenableBtn +
       '<button class="btn btn-ghost" data-bk="close">关闭</button></div>',
       (modal) => {
-        modal.querySelector('[data-bk="close"]').onclick = () => QB.UIRenderer.closeModal();
+        modal.querySelector('[data-bk="close"]').onclick = () => QB.UIPort.closeModal();
         modal.querySelector('[data-bk="export"]').onclick = async () => {
           try {
             const r = await download();
-            QB.UIRenderer.toast(r.assetCount ? '备份已生成（含图片 ' + r.assetCount + ' 张，.qfbk）' : '备份已生成（.json）', 'ok');
+            QB.UIPort.toast(r.assetCount ? '备份已生成（含图片 ' + r.assetCount + ' 张，.qfbk）' : '备份已生成（.json）', 'ok');
           } catch (e) {
             // fail-loud：全量导出失败（含 ensureAll 失败）必须可见，不得只留 unhandled rejection
-            QB.UIRenderer.toast('备份导出失败：' + ((e && e.message) || e), 'err');
+            QB.UIPort.toast('备份导出失败：' + ((e && e.message) || e), 'err');
           }
         };
         modal.querySelector('[data-bk="export-legacy"]').onclick = async () => {
           try {
             const r = await download(undefined, { legacy: true });
-            QB.UIRenderer.toast('已导出兼容旧版备份（schema ≤4）' + (r.assetCount ? '，含图片 ' + r.assetCount + ' 张' : ''), 'ok');
-          } catch (e) { QB.UIRenderer.toast('旧版兼容导出失败：' + e.message, 'err'); }
+            QB.UIPort.toast('已导出兼容旧版备份（schema ≤4）' + (r.assetCount ? '，含图片 ' + r.assetCount + ' 张' : ''), 'ok');
+          } catch (e) { QB.UIPort.toast('旧版兼容导出失败：' + e.message, 'err'); }
         };
         modal.querySelector('[data-bk="import"]').onclick = () => pickAndRestore();
         modal.querySelector('[data-bk="auto-restore"]').onclick = async () => {
           try {
             const auto = await readAutoBackup();
-            if (!auto) { QB.UIRenderer.toast('没有可用的迁移前自动备份', 'err'); return; }
+            if (!auto) { QB.UIPort.toast('没有可用的迁移前自动备份', 'err'); return; }
             const at = QB.Helpers.escapeHtml(auto.exportedAt || '未知');
-            const ok = await QB.UIRenderer.confirmDialog(
+            const ok = await QB.UIPort.confirm(
               '用迁移前自动备份（' + at + '）覆盖恢复当前全部数据？恢复后请刷新页面。', '覆盖恢复'
             );
             if (!ok) return;
             const r = await applyBackup(auto, { mode: 'replace' });
-            QB.UIRenderer.toast('已从迁移前自动备份恢复 ' + r.keys + ' 个数据键，建议刷新页面', 'ok');
-          } catch (e) { QB.UIRenderer.toast('恢复失败：' + e.message, 'err'); }
+            QB.UIPort.toast('已从迁移前自动备份恢复 ' + r.keys + ' 个数据键，建议刷新页面', 'ok');
+          } catch (e) { QB.UIPort.toast('恢复失败：' + e.message, 'err'); }
         };
         modal.querySelector('[data-bk="dav"]').onclick = () => {
           if (QB.SyncDAV) QB.SyncDAV.openFlow();
-          else QB.UIRenderer.toast('WebDAV 模块未加载', 'err');
+          else QB.UIPort.toast('WebDAV 模块未加载', 'err');
         };
         modal.querySelector('[data-bk="gc"]').onclick = async () => {
           try {
@@ -945,48 +945,48 @@
             if (QB.Storage && typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
             const [referenced, all] = await Promise.all([globallyReferencedAssetIds(), QB.Assets.ids()]);
             const orphans = all.length - referenced.length;
-            if (orphans <= 0) { QB.UIRenderer.toast('没有未引用的图片（共 ' + all.length + ' 张）'); return; }
-            const ok = await QB.UIRenderer.confirmDialog('发现 ' + orphans + ' 张未被任何题目引用的图片（共 ' + all.length + ' 张），确认删除？', '删除');
+            if (orphans <= 0) { QB.UIPort.toast('没有未引用的图片（共 ' + all.length + ' 张）'); return; }
+            const ok = await QB.UIPort.confirm('发现 ' + orphans + ' 张未被任何题目引用的图片（共 ' + all.length + ' 张），确认删除？', '删除');
             if (!ok) return;
             const removed = await QB.Assets.removeOrphans(referenced);
-            QB.UIRenderer.toast('已清理 ' + removed.length + ' 张未引用图片', 'ok');
-          } catch (e) { QB.UIRenderer.toast('清理失败：' + e.message, 'err'); }
+            QB.UIPort.toast('已清理 ' + removed.length + ' 张未引用图片', 'ok');
+          } catch (e) { QB.UIPort.toast('清理失败：' + e.message, 'err'); }
         };
         const cleanupBtn = modal.querySelector('[data-bk="cleanup-ls"]');
         if (cleanupBtn) cleanupBtn.onclick = async () => {
           try {
-            const ok = await QB.UIRenderer.confirmDialog(
+            const ok = await QB.UIPort.confirm(
               '删除 LocalStorage 中保留的旧数据（约 ' + Math.round(legacyBytes / 1024) + ' KB）？'
               + 'IndexedDB 数据不受影响；删除后无法用旧快照直接回退，但仍可先导出备份。', '删除'
             );
             if (!ok) return;
             const r = QB.Store.cleanupLegacyLS();
-            QB.UIRenderer.toast('已清理 ' + r.removed + ' 个旧 LocalStorage 键', 'ok');
-            QB.UIRenderer.closeModal();
-          } catch (e) { QB.UIRenderer.toast('清理失败：' + e.message, 'err'); }
+            QB.UIPort.toast('已清理 ' + r.removed + ' 个旧 LocalStorage 键', 'ok');
+            QB.UIPort.closeModal();
+          } catch (e) { QB.UIPort.toast('清理失败：' + e.message, 'err'); }
         };
         const rollbackBtnEl = modal.querySelector('[data-bk="rollback-ls"]');
         if (rollbackBtnEl) rollbackBtnEl.onclick = async () => {
           try {
-            const ok = await QB.UIRenderer.confirmDialog(
+            const ok = await QB.UIPort.confirm(
               '把当前 IndexedDB 数据写回 LocalStorage 并切回 LocalStorage？'
               + '若数据量超过 LocalStorage 约 5MB 上限，回退会失败并保持 IndexedDB（不会半切）。', '回退'
             );
             if (!ok) return;
             const r = await QB.Store.rollbackToLS('current');
             QB.Storage.adoptStore({ mode: 'ls' });
-            QB.UIRenderer.toast('已回退 ' + r.keys + ' 个键到 LocalStorage，刷新页面生效', 'ok');
+            QB.UIPort.toast('已回退 ' + r.keys + ' 个键到 LocalStorage，刷新页面生效', 'ok');
             if (typeof location !== 'undefined' && location.reload) location.reload();
-          } catch (e) { QB.UIRenderer.toast('回退失败：' + e.message, 'err'); }
+          } catch (e) { QB.UIPort.toast('回退失败：' + e.message, 'err'); }
         };
         const reenableBtnEl = modal.querySelector('[data-bk="reenable-idb"]');
         if (reenableBtnEl) reenableBtnEl.onclick = async () => {
           try {
             const r = await QB.Store.reenableIdb();
             await QB.Storage.initStore();
-            QB.UIRenderer.toast('已切换到 IndexedDB（迁移 ' + r.keys + ' 个键，校验通过），刷新页面生效', 'ok');
+            QB.UIPort.toast('已切换到 IndexedDB（迁移 ' + r.keys + ' 个键，校验通过），刷新页面生效', 'ok');
             if (typeof location !== 'undefined' && location.reload) location.reload();
-          } catch (e) { QB.UIRenderer.toast('启用 IndexedDB 失败：' + e.message, 'err'); }
+          } catch (e) { QB.UIPort.toast('启用 IndexedDB 失败：' + e.message, 'err'); }
         };
       }
     );

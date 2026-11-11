@@ -74,12 +74,8 @@
     return null;
   }
 
-  function formatBytes(n) {
-    const v = Number(n) || 0;
-    if (v >= 1024 * 1024) return (v / (1024 * 1024)).toFixed(1) + ' MB';
-    if (v >= 1024) return (v / 1024).toFixed(0) + ' KB';
-    return v + ' B';
-  }
+  // formatBytes 已下沉到 L0 的 QB.Helpers（T06），此处仅保留 QB.Quota 的对外别名，行为不变
+  const formatBytes = function (n) { return QB.Helpers.formatBytes(n); };
 
   /* ---------------- 用量快照（C009）：渲染热路径不再全量 stringify ----------------
    * 以前 `renderStorageHealth` 每次渲染都调 `Storage.usageBytes()`：IDB 下遍历整库 +

@@ -1,7 +1,7 @@
 /**
  * 数据访问层契约（与实现解耦）
- * UI 只依赖这三个 Repository 接口，不直接接触 LocalStorage / fetch。
- * 实现：local-adapter（本期）/ api-adapter（后续）。
+ * UI 只依赖这 7 组 Repository 接口，不直接接触 LocalStorage / fetch。
+ * 实现：local-adapter（默认）/ api-adapter（DATA_BACKEND='api' 时启用）。
  * 存储键结构与数据库表一一对应，见 docs/DATABASE.md。
  */
 (function (global) {
@@ -158,4 +158,46 @@
     }
     return driver;
   };
+  /**
+   * UI 端口（T07）：L2 领域模块（导出/备份/同步/导入/题库管理）只通过这里做提示与确认，
+   * 不再直接依赖 L3 的 QB.UIRenderer。实现由 ui-renderer.js 加载时 register 注入。
+   * 未注册时：toast/openModal/closeModal 为 no-op，confirm 恒为 false（按「用户取消」处理），
+   * 从而让这些模块在 Node / 无 DOM 环境下可运行、可单测。
+   */
+  QB.UIPort = {
+    _impl: null,
+    register(impl) { this._impl = impl && typeof impl === 'object' ? impl : null; },
+    _implFn(name) {
+      const impl = this._impl;
+      return impl && typeof impl[name] === 'function' ? impl[name].bind(impl) : null;
+    },
+    /** 轻提示（type: 'ok' | 'err' | 省略） */
+    toast(message, type) {
+      const fn = this._implFn('toast');
+      if (fn) { try { return fn(message, type); } catch (e) { /* UI 失败不得影响业务 */ } }
+    },
+    /** 确认框；实现缺席或异常时返回 false，调用方一律按「取消」处理 */
+    confirm(message, confirmText, opts) {
+      const fn = this._implFn('confirmDialog');
+      if (!fn) return Promise.resolve(false);
+      try { return Promise.resolve(fn(message, confirmText, opts)).then((v) => !!v); } catch (e) { return Promise.resolve(false); }
+    },
+    /** 打开弹窗（参数与 UIRenderer.openModal 一致） */
+    openModal(html, onMount, onClose, returnFocusTo) {
+      const fn = this._implFn('openModal');
+      if (fn) { try { return fn(html, onMount, onClose, returnFocusTo); } catch (e) { /* no-op */ } }
+    },
+    /** 关闭弹窗 */
+    closeModal() {
+      const fn = this._implFn('closeModal');
+      if (fn) { try { return fn(); } catch (e) { /* no-op */ } }
+    },
+    /** 导入预览的校验和 HTML；实现缺席时返回空串（预览仍可正常显示） */
+    renderImportChecksum(meta) {
+      const fn = this._implFn('renderImportChecksum');
+      if (fn) { try { return fn(meta) || ''; } catch (e) { /* 渲染失败不阻断导入 */ } }
+      return '';
+    }
+  };
+
 })(window);
