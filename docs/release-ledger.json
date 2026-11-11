@@ -1,8 +1,8 @@
 {
   "_comment": "发布台账：只记录『上一次已发布』的应用版本与 SW 缓存名。check-release.mjs 默认模式禁止回退（当前值必须 ≥ 台账）；--release 模式要求 CACHE 严格大于台账（本次确实 bump 过），并在通过后自动写回本文件。应用版本在 package.json 与 js/config.js，.ngm-version 是 ngm 工具链版本，二者语义不同。",
   "lastReleased": {
-    "version": "1.0.0",
-    "cache": "qforge-v50",
+    "version": "1.0.1",
+    "cache": "qforge-v56",
     "date": "2026-11-11"
   }
 }
