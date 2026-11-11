@@ -120,6 +120,35 @@ Get-ChildItem scripts\*.test.mjs, scripts\smoke-test.mjs | ForEach-Object { node
 node scripts/test-all.mjs
 ```
 
+## 已知环境问题：偶发 `exit 134`（V8 分配失败）
+
+**现象**：串行跑 `storage.test.mjs`（`node storage.test.mjs`，在 `scripts/` 下）时偶发 `FATAL ERROR: AlignedAlloc Allocation failed - process out of memory`
+或 `FATAL ERROR: Zone Allocation failed - process out of memory`，退出码 134（SIGABRT）。崩溃位置不固定——实测两次分别在
+「P2-06 reviewMeta」段首和打印完「汇总」之后。崩溃时存活堆 12.6–13.9 MB、已提交堆 18.6–19.8 MB，此前 GC 全是 Scavenge
+（单次 0.22–0.35 ms，`mu = 1.000`），native 栈只有地址无符号，日志不含失败分配的 size / alignment 与 `GetLastError`。
+日志：`.analysis/flake/`（已 gitignore，不入库）。
+
+**已排除**：
+
+| 假设 | 排除依据 |
+|---|---|
+| 测试数据量过大 | 全套数据 <1 MB；`--max-old-space-size=48` 下 109 条断言稳定通过 |
+| 并发争抢 | 当时是串行循环（`1..20`，一次一个 node 进程），两次崩溃在同一 shell 内 |
+| V8 堆上限 | 实测 `heap_size_limit` = 4192 MB（`--max-old-space-size=48` 时为 144 MB） |
+| `NODE_OPTIONS` 设了小堆 | 进程 / 用户 / 系统 / `HKCU\Environment` 四处皆空 |
+| 提交内存不足 | Commit Limit 37.4 GB（物理 32.5 GB + 4.9 GB 页面文件），崩溃时余量约 17 GB，进程峰值工作集 65 MB |
+
+**结论**：进程向系统申请内存被外部拒绝，最可能是沙箱 Job 对象配额或 EDR / 杀软钩子。日志本身不带失败分配的
+size / alignment 与 `GetLastError`，无法再往下定性。同一命令 40 次里仅在 3 秒窗口内崩过 2 次，之后不复现。
+
+**复发时怎么抓**：
+
+1. 抓崩溃瞬间的 Job 对象内存限额（Process Hacker → `JobObjectExtendedLimitInformation`）、进程虚拟内存与句柄数；
+2. 查 EDR / 杀软事件日志，确认是否有 mmap 拦截记录；
+3. 在 CI 上出现时，抓 runner 的 Commit Limit 与失败瞬间进程虚拟内存（runner 是独立 16 GB VM，无本机沙箱层，理论上不复现）。
+
+> **不要**通过放宽或改写测试断言来消除该现象：它不反映被测代码的问题，改断言只会掩盖环境故障。
+
 ---
 
 ## 附：十问看板（成熟度自评）
