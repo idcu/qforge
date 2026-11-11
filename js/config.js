@@ -123,7 +123,7 @@
 
   QB.CONFIG = {
     APP_NAME: '淬题',
-    VERSION: '1.0.0',
+    VERSION: '1.0.1',
 
     // 数据后端：'local' | 'api'（可由 backendOverride 覆盖，见上）
     DATA_BACKEND: OVERRIDE.backend || 'local',

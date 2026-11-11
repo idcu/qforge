@@ -8,6 +8,7 @@
 - 发布只允许手改两个数值：`package.json` 的 `version`、`sw.js` 的 `CACHE`。其余数字（断言数、模块数、脚本数）由门禁复算，不得手改。
 - 本仓库零运行时依赖；不要引入 `npm install`、打包器或 TypeScript。
 - `js/`、`css/` 任一文件变更后 **必须** bump `sw.js` 的 `CACHE`，否则老用户会继续命中旧缓存。
+- 提交按主题切分时，中间提交是同一已验证工作区的切片，单独 checkout 可能 `docs-check` 红；以 HEAD 上跑通的 `npm run verify` 为准。
 
 ## 1. 版本一致
 
