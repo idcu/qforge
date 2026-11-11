@@ -1339,11 +1339,13 @@ for (const tier of [5000, 20000, 50000]) {
     const keyProbe = 'bench:keys-view-probe';
     Q.Storage.setSync(keyProbe, 1);
     let keysLen = 0;
-    const kb = await timed(() => {
+    // 单轮 5 样本的中位数仍会随 GC/调度抖动（实测同棵树 34.67–49.25 ms），
+    // 改用 stableTimed：3 轮 × 5 样本，取各轮中位数的中位数。阈值不变，只降测量噪声。
+    const kb = await stableTimed(() => {
       Q.Storage._keysCache = null;
       Q.Storage._keysRevCached = -1;
       keysLen = Q.Storage.keys().length;
-    }, 5);
+    }, 5, 3);
     report.push({
       name: 'keys() 首次构建（50000 题 · IDB）',
       median: kb.median, min: kb.min, max: kb.max,
