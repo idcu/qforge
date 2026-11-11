@@ -68,36 +68,53 @@ node scripts/build-staging.mjs --selftest
 
 ## 5. 冒烟（发布后立即执行）
 
-> 标记说明：`[人工]` = 只能在真实浏览器（Chrome/Edge）里手点，自动化无法替代；`[自动]` = 已有脚本覆盖，可离线复算。
-> 自动化浏览器会吞掉 `a[download]` + blob 下载，因此所有「文件真的落盘 / 真的打开」的检查只能是 `[人工]`。
-> 应用侧的序列化、字段完整性与校验和由 Node 测试证明，**不要**把它当成「下载链路已验证」。
+> 标记说明：
+> - `[自动]`：已有门禁脚本，`npm run verify` 里就跑。
+> - `[可脚本化]`：需要浏览器，但可自动验证。用 Playwright/Puppeteer 驱动本机 Chrome/Edge 即可，
+>   关键是显式接管下载（`acceptDownloads: true`）——**默认不接管下载时，下载会被直接丢弃**，
+>   看起来像「应用没导出」。这只是驱动默认行为，不是应用缺陷。
+> - `[人工]`：只能人眼看或真机断网，下面只剩这一类。
 
 - [ ] `[自动]` 静态 CSP 未拦截任何资源：`node scripts/check-csp.mjs` 退出码 0。
-- [ ] `[人工]` 打开首页：控制台无报错（含运行期 CSP 拦截）。
-- [ ] `[人工]` 导入示例题库 → 开始练习 → 交卷 → 统计页有数据（要看到「有数据态」的真实渲染，不是空白态）。
-- [ ] `[人工]` 导出文件真实落盘并校验，按下方「5.1 导出落盘校验」的步骤执行。
-- [ ] `[人工]` 断网后刷新：应用壳仍可打开（离线可用）。**必须记录用的是哪种断网**（三者严格程度不同）：
-      - 物理/系统级断网（禁用网卡、拔网线）：最严格；
-      - 服务端不可达（停掉本地静态服务器，浏览器仍在线）：能验证 SW 缓存，但不覆盖真实网络栈；
-      - DevTools/CDP 模拟离线：最弱，只能说明请求被拦截，不能代表真实断网。
-- [ ] `[人工]`（仅当本次涉及 api 后端）本地 `?backend=api` 与同源部署各验证一次读写。
+- [ ] `[可脚本化]` 打开首页：控制台无报错（含运行期 CSP 拦截）。
+      做法：`page.on('console')` 收 error + `page.on('pageerror')`，断言两个数组都为空。
+- [ ] `[可脚本化]` 导入示例题库 → 开始练习 → 交卷 → 统计页有数据。
+      做法：同一驱动按文本/角色定位点完流程，断言统计页出现非零数值（如「测试次数」> 0），而非空白态。
+- [ ] `[可脚本化]` 导出文件真实落盘并校验（见下方「5.1 导出落盘校验」）。
+- [ ] `[人工]` 真实物理断网（禁用网卡或拔网线）后刷新：应用壳仍可打开。
+      说明：服务端不可达（停掉本地静态服务器）与 CDP `context.setOffline(true)` 都可以脚本化，
+      但前者只覆盖 SW 缓存层、后者只覆盖请求拦截层，都不能代表真实网络栈；这一项必须真机断网。
+- [ ] `[可脚本化]`（仅当本次涉及 api 后端）本地 `?backend=api` 与同源部署各验证一次读写。
 
-### 5.1 导出落盘校验（人工，约 2 分钟）
+### 5.1 导出落盘校验
 
-1. 用真实浏览器（Chrome/Edge，**非**自动化环境）打开应用，选一个有题目的题库。
-2. 点「导出」→ 选 JSON（或 CSV），确认文件真的出现在系统「下载」目录。
-   自动化环境里这一步不会产生文件，属已知限制，不是缺陷。
-3. 记录**文件名与字节大小**（任选其一）：
-   - 资源管理器右键 → 属性；
-   - PowerShell：`Get-ChildItem "$env:USERPROFILE\Downloads" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 Name, Length`
-4. 打开文件核对内容：
-   - JSON：`questions` 数组长度 = 题库题数；单题含 `type/question/options/answer/analysis/category/difficulty/tags` 等字段；
-     顶层含 `app/version/exportedAt/kind/bank/checksum`。
-   - CSV：表头 16 列（含材料题时 18 或 19 列），数据行数 = 题数。
-5. 再用应用自己的导入器把该文件读回一次：应提示导入 N 题，且**无警告**（不出现「内容校验和不一致」）。
-6. 已知限制：自动化浏览器吞掉 `a[download]` + blob 下载，所以本项**无法自动验证**。
-   应用侧「能生成正确内容」已由 `node scripts/exporter.test.mjs` 与 `node scripts/assets.test.mjs` 覆盖
-   （含 JSON/CSV 往返、`checksum` 计算与复核）；这两件事不是一回事，验收时别互相替代。
+**自动做法（推荐）**：用 Playwright 驱动本机 Edge/Chrome，显式接管下载。
+
+```js
+const { chromium } = require('playwright');
+const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const ctx = await browser.newContext({ acceptDownloads: true }); // 关键：默认 false 时下载被丢弃
+const page = await ctx.newPage();
+await page.goto('http://127.0.0.1:8777/');
+const dl = page.waitForEvent('download');
+await page.click('[data-action="bank-export"]');   // 或直接调 QB.Exporters.openFlow
+await page.click('[data-action="modal-ok"]');      // 默认选中 JSON
+const d = await dl;
+await d.saveAs('.analysis/dl/' + d.suggestedFilename());
+```
+
+拿到文件后断言：字节数 > 0；`questions.length` = 题库题数；单题字段含
+`type/question/options/answer/analysis/category/difficulty/tags`；顶层有 `checksum`。
+再用应用自己的导入器读回：`QB.JsonImporter.parse({ text })`，断言题数一致、
+`meta.checksumOk === true`、`warnings` 为空。
+
+**v1.0.1 实证**：本机 Edge（`channel: 'msedge'`、`acceptDownloads: true`）走真实 UI 导出，
+得到 `导出冒烟库-题库-18题-20261111-181603-461.json`，**10539 字节**，18 题、11 个单题字段、
+`checksum: 3:0884ab3d249726a9`；导入器读回 18 题、`checksumOk: true`、`warnings: []`，页面 console 报错 0。
+脚本与产物在 `.analysis/`（已 gitignore，不入库）。
+
+**人工做法（兜底）**：真实浏览器手点导出 → 确认文件出现在系统「下载」目录（记录文件名与字节大小）
+→ 打开核对题数与字段 → 用应用导入器读回确认无告警。
 
 ## 6. 回滚
 
