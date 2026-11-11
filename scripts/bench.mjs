@@ -1766,26 +1766,36 @@ if (process.argv.indexOf('--assert') >= 0) {
   //   HEAD 实测 0.0902 / 0.2787，同机复跑旧代码 e772e60 也是 0.0882 / 0.2784（同超限）→ 是机器漂移，不是代码回退。
   // 改为「同轮标定比值」：ratio = 本轮被测中位数 / 标定单位耗时（标定工作与被测 patch 同构，见 5b）；
   //   机器漂移同向影响两侧、在比值中抵消；真实代码回退只抬高分子 → 比值上升。
-  // 基线取未改业务代码的当前 HEAD 用本方法实测（数据与方差见 CHANGELOG.internal.md 2026-11-03）。
-  // 容差 6%：同机连续 6 次运行摆动 ≤2.2%（grade 2.69~2.75，gradeMany 4.94~5.11）；
-  //   6% ≈ 3 倍摆动，留足环境噪声；同时负向注入 +10% 实测 2.97~3.08 / 5.46~5.64 > 2.90 / 5.35 → 必失败。
+  // 基线按 Node 大版本存放（scripts/bench-baseline.json）：Node 26 的 V8 对标定工作优化远大于被测 patch，
+  //   同一份代码在 24 上比值 2.58/4.78、在 26 上 4.99/8.94，而绝对耗时反而更快（0.21→0.14 ms / 0.37→0.24 ms），
+  //   属于引擎差异而非代码回退（实测记录见 work/bench-node24.log、work/bench-node26.log）。
+  //   容差 6%：同机连续 6 次运行摆动 ≤2.2%（grade 2.69~2.75，gradeMany 4.94~5.11）；
+  //   6% ≈ 3 倍摆动，留足环境噪声；同时负向注入 +10% 实测 > 基线×1.06 → 必失败。
   //   容差再放宽会把 10% 级真实回退淹进噪声，再收紧则对未验证机器/负载过于苛刻（见 docs/DEVELOPMENT.md）。
-  const GRADE_RATIO_BASELINE = 2.74;
-  const GRADE_MANY_RATIO_BASELINE = 5.05;
-  const RATIO_TOLERANCE = 1.06;
-  [['SRSStore.grade 单次评分', GRADE_RATIO_BASELINE], ['SRSStore.gradeMany 批量 20 题', GRADE_MANY_RATIO_BASELINE]]
-    .forEach(([needle, base]) => {
+  const BASELINE = JSON.parse(fs.readFileSync(path.join(__dirname, 'bench-baseline.json'), 'utf8'));
+  const NODE_MAJOR = process.versions.node.split('.')[0];
+  const nodeBaseline = BASELINE.node && BASELINE.node[NODE_MAJOR];
+  const RATIO_TOLERANCE = BASELINE.tolerance || 1.06;
+  [['SRSStore.grade 单次评分', 'grade'], ['SRSStore.gradeMany 批量 20 题', 'gradeMany']]
+    .forEach(([needle, key]) => {
       const r = report.find((x) => x.name.indexOf(needle) === 0);
       if (!r) { fails.push(needle + ' 缺失'); return; }
       if (!isFinite(r.ratio)) { fails.push(needle + ' 比值打点缺失'); return; }
+      // 未知 Node 大版本 fail-closed：宁可红，也不拿别的引擎基线误判代码回退/通过
+      if (!nodeBaseline || !isFinite(nodeBaseline[key])) {
+        fails.push(needle + ' 缺少 Node ' + NODE_MAJOR + ' 的比值基线（请测量后补 scripts/bench-baseline.json）');
+        console.log('  ✗ ' + needle + '：Node ' + process.versions.node + ' 无比值基线（fail-closed）');
+        return;
+      }
+      const base = nodeBaseline[key];
       const max = base * RATIO_TOLERANCE;
       const ok = r.ratio <= max;
       console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：比值 ' + r.ratio.toFixed(2) + ' ≤ ' + max.toFixed(2)
-        + '（基线 ' + base.toFixed(2) + ' ×' + RATIO_TOLERANCE + '；p50 ' + (r.p50 == null ? NaN : r.p50).toFixed(4)
+        + '（Node ' + NODE_MAJOR + ' 基线 ' + base.toFixed(2) + ' ×' + RATIO_TOLERANCE + '；p50 ' + (r.p50 == null ? NaN : r.p50).toFixed(4)
         + ' ms / 标定 ' + (r.unitMs * 1000).toFixed(1) + ' µs，同机参考；' + r.runs + ' 轮×' + (r.samples && r.runs ? (r.samples / r.runs) : '?')
         + ' 样本，轮间极差 ' + r.ratioSpread.toFixed(2) + '×'
         + (r.injectRatio ? '；负向注入 +' + (r.injectRatio * 100).toFixed(0) + '%（' + ((r.injectMs || 0) * 1000).toFixed(1) + ' µs/样本）' : '') + '）');
-      if (!ok) fails.push(needle + ' ratio ' + r.ratio.toFixed(2) + ' > 基线×' + RATIO_TOLERANCE + ' ' + max.toFixed(2));
+      if (!ok) fails.push(needle + ' ratio ' + r.ratio.toFixed(2) + ' > Node ' + NODE_MAJOR + ' 基线×' + RATIO_TOLERANCE + ' ' + max.toFixed(2));
     });
   const heapDeltaMb = (heapAfter - heapBefore) / 1024 / 1024;
   const heapOk = heapDeltaMb <= 40;

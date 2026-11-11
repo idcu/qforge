@@ -5,9 +5,10 @@
   "description": "淬题 qforge —— 零依赖、本地优先的题库 / 刷题 / FSRS 间隔重复静态应用",
   "scripts": {
     "test": "node scripts/check-ngm.mjs && node scripts/test-all.mjs",
-    "verify:fast": "node scripts/check-ngm.mjs && node scripts/check-modules.mjs && node scripts/check-layers.mjs && node scripts/check-csp.mjs && node scripts/check-changelog.mjs && node scripts/check-deletions.mjs && node scripts/docs-links.mjs && node scripts/check-ci-coverage.mjs && node scripts/test-all.mjs && node scripts/docs-check.mjs --static",
+    "verify:fast": "node scripts/check-ngm.mjs && node scripts/check-modules.mjs && node scripts/check-layers.mjs && node scripts/check-deps.mjs && node scripts/check-csp.mjs && node scripts/check-changelog.mjs && node scripts/check-deletions.mjs && node scripts/docs-links.mjs && node scripts/check-ci-coverage.mjs && node scripts/test-all.mjs && node scripts/docs-check.mjs --static && node scripts/check-release.mjs",
     "verify": "npm run verify:fast && npm run bench && node scripts/check-discipline.mjs --strict",
     "check:modules": "node scripts/check-modules.mjs",
+    "check:release": "node scripts/check-release.mjs",
     "check:ngm": "node scripts/check-ngm.mjs",
     "docs:links": "node scripts/docs-links.mjs",
     "docs:check": "node scripts/docs-check.mjs --static",

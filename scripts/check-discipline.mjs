@@ -10,7 +10,7 @@
  *
  * 用法：node scripts/check-discipline.mjs [--strict]
  *   （默认）只报告，退 0；
- *   --strict  低于 L3 退 1（挂 CI 用，防止"新仓库悄悄从 L0 起步"）。
+ *   --strict  存在任何缺口即退 1（挂 CI 用：不允许"有一条是红的但整体还是绿的"）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -267,7 +267,7 @@ for (const c of checks) {
 const gaps = checks.filter((c) => c.state === 'gap').map((c) => c.id);
 if (gaps.length) console.log(`  缺口：第 ${gaps.join('、')} 问`);
 
-if (STRICT && !/^L[34]$/.test(level)) {
-  console.error(`\n--strict：成熟度 ${level} 低于 L3（缺口在第 ${gaps.join('、')} 问）`);
+if (STRICT && gaps.length) {
+  console.error(`\n--strict：存在 ${gaps.length} 个缺口（第 ${gaps.join('、')} 问），成熟度 ${level} 不予放行`);
   process.exitCode = 1;
 }

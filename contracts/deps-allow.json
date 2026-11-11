@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "description": "check-deps.mjs 的存量例外台账。只允许登记已存在的债务，禁止用它放行新增违规；每条必须带 until，到期 check-deps 直接判红。修复后请删掉对应条目（条目多余不会报警，但会掩盖回退，别留着）。",
+  "upward": [],
+  "cycles": [
+    {
+      "modules": ["utils.quota", "utils.storage"],
+      "reason": "storage↔quota：容量估算读取 Storage 占用，Storage 写入前又用 Quota 预检；属于存储层内部协作，消除需重排容量模型（计划 §7 不做）",
+      "until": "2026-12-31"
+    },
+    {
+      "modules": ["modules.backup", "modules.migrate"],
+      "reason": "backup↔migrate：备份需要迁移后的布局，迁移完成提示又经备份入口；同层 L2，暂登记",
+      "until": "2026-12-31"
+    },
+    {
+      "modules": ["modules.backup", "modules.sync-dav"],
+      "reason": "backup↔sync-dav：WebDAV 同步复用备份快照，备份页提供同步入口；同层 L2，暂登记",
+      "until": "2026-12-31"
+    }
+  ],
+  "untracked": [
+    {
+      "file": "js/workers/fsrs-worker.js",
+      "reason": "Worker 入口，由 CONFIG.WORKERS 以 URL 加载，不进入 index.html 的 classic script 顺序，故不登记在 modules.json",
+      "until": "2099-12-31"
+    }
+  ]
+}

@@ -55,8 +55,9 @@ function inspect(text) {
   if (!/--assert/.test(joined) || !/scripts\/bench\.mjs/.test(joined)) {
     problems.push('logic-tests 缺少 `bench.mjs --assert` 性能门禁');
   }
-  if (!/matrix\.node-version == '24' && matrix\.tz == 'Asia\/Shanghai'/.test(joined)) {
-    problems.push('bench 步骤未限定在 Node 24 / Asia-Shanghai 单腿');
+  if (!/matrix\.node-version == '24' \|\| matrix\.node-version == '26'/.test(joined)
+    || !/matrix\.tz == 'Asia\/Shanghai'/.test(joined)) {
+    problems.push('bench 步骤未限定在 Node 24/26 + Asia-Shanghai');
   }
 
   // a11y 必须有独立 job：只进 test-all 时，无障碍回归会被其它套件噪声掩盖；
@@ -120,4 +121,4 @@ if (problems.length) {
   process.exit(1);
 }
 console.log('CI 覆盖自检通过 ✅：logic-tests 单步运行，ORDER ' + ORDER.length
-  + ' 项（冒烟 1 + 套件 ' + (ORDER.length - 1) + '），性能门禁限 Node24/Asia-Shanghai');
+  + ' 项（冒烟 1 + 套件 ' + (ORDER.length - 1) + '），性能门禁限 Node24/26 + Asia-Shanghai');

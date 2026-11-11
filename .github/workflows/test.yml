@@ -25,10 +25,12 @@ jobs:
         run: node scripts/check-ci-coverage.mjs
       - name: 文档链接 / 锚点 / 版本读数
         run: node scripts/docs-links.mjs
-      - name: 装配顺序（86 个 script 的顺序即依赖图）
+      - name: 装配顺序（88 个 script 的顺序即依赖图）
         run: node scripts/check-modules.mjs
       - name: 依赖方向（数据层不得反向点名领域模块）
         run: node scripts/check-layers.mjs
+      - name: 真实引用 / 未登记越层 / 双向环（全局符号归属）
+        run: node scripts/check-deps.mjs
       - name: CSP 三处同步（index.html / security-headers / 部署白名单）
         run: node scripts/check-csp.mjs
       - name: 结构性删除的账本
@@ -56,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['20', '24']
+        node-version: ['20', '24', '26']
         tz: ['UTC', 'Asia/Shanghai']
     env:
       TZ: ${{ matrix.tz }}
@@ -73,8 +75,8 @@ jobs:
       # 覆盖率由 scripts/check-ci-coverage.mjs 静态断言。
       - name: 全量逻辑层测试（${{ matrix.node-version }} / ${{ matrix.tz }}）
         run: node scripts/test-all.mjs
-      - name: 性能门禁（Node 24 / Asia-Shanghai）
-        if: matrix.node-version == '24' && matrix.tz == 'Asia/Shanghai'
+      - name: 性能门禁（Node 24/26 · Asia-Shanghai）
+        if: (matrix.node-version == '24' || matrix.node-version == '26') && matrix.tz == 'Asia/Shanghai'
         run: node --expose-gc scripts/bench.mjs --assert
 
   vendor-check:
@@ -133,7 +135,7 @@ jobs:
 
   discipline:
     # 十问看板（方法论 §8）：只回答"这个仓库几档、缺哪一条"，不改任何东西。
-    # --strict 在低于 L3 时退 1——防止新仓库悄悄从 L0 起步。
+    # --strict 在存在任何缺口时退 1——不允许「有一条是红的但整体还是绿的」。
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
