@@ -53,16 +53,18 @@ npm run verify
 
 ## 4. 部署
 
-- [ ] 部署产物为仓库根目录静态文件（GitHub Pages 子路径可直接访问；`.nojekyll` 已就位）。
-- [ ] 发布流水线：`.github/workflows/deploy.yml`。打 `v*` tag 触发 `verify:fast` + `check-release`，再用
-      `scripts/build-staging.mjs` 生成产物（只在 `$RUNNER_TEMP` 里给全部 `<script src>` 与 `css/style.css` 追加
-      `?v=<tag>`、把 `sw.js` 的 `CACHE` 写为 `qforge-<tag>`），最后上传并部署 Pages。
+- [ ] 部署方式：**推 `main` 即发布**。GitHub Pages 从 `main` 分支根目录自动发布（仓库根就是静态站点，`.nojekyll` 已就位），不需要额外构建或产物上传。
+- [ ] tag 只是留痕与校验：推 `v*` 会触发 [release-check.yml](../.github/workflows/release-check.yml)，
+      跑 `verify:fast` + `check-release` + `build-staging --assert/--selftest`，证明「这个 tag 的内容可发布」。
+      **该工作流不部署**，线上内容只由 `main` 决定。
 - [ ] 本地复算产物（不写仓库）：
 ```powershell
 node scripts/build-staging.mjs --out .analysis\staging --version v1.0.1 --assert
 node scripts/build-staging.mjs --selftest
 ```
 - [ ] PR 上只跑 dry-run：生成产物后断言 `?v=` 数量 = `<script src>` 数、`CACHE` 与版本一致、`git status --porcelain` 为空。
+- [ ] 注意：staging 产物里的 `?v=<tag>` 与 `CACHE=qforge-<tag>` 只存在于 CI 的 `$RUNNER_TEMP`，**不进 Pages**。
+      线上文件与仓库逐字节一致，缓存击穿靠 `sw.js` 的 `CACHE` bump（由 `sw-baseline` 门禁保证）。
 - [ ] 确认没有把 `.qforge-data/`、`scripts/`、`.trae/` 等开发/数据文件发布出去（静态拒绝清单由参考后端与测试守护）。
 - [ ] 首次访问注册 SW 后需刷新一次才由新 SW 接管，属正常语义，不当作缺陷。
 
@@ -118,6 +120,8 @@ await d.saveAs('.analysis/dl/' + d.suggestedFilename());
 
 ## 6. 回滚
 
-- [ ] 保留上一版 tag/产物；回滚 = 在 Actions 里 `workflow_dispatch` 指定上一 tag（或 `git push` 该 tag 的部署重跑），无需改数据。
+- [ ] 回滚 = **改 `main`**：优先 `git revert <要撤销的提交>` 再推 `main`（Pages 会自动重新发布）；
+      紧急时也可把 `main` 指回上一个已验证提交。
+- [ ] **不要用 tag 回滚**：tag 不参与部署，移动或重打 tag 不会改变线上内容，只会破坏留痕。
 - [ ] 回滚后刷新页面两次（第一次让新 SW 装回旧缓存，第二次生效），确认版本号回到旧值。
 - [ ] 若数据 schema 有升级，回滚前先确认旧版本能读取新数据（见 [SCHEMA.md](SCHEMA.md)）；不能读则先导出备份再回滚。

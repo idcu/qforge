@@ -1,15 +1,17 @@
-# 淬题 qforge 发布流水线（无构建）
+# 淬题 qforge 发布校验（只校验，不部署）
 #
-# 设计约束：
-#   - 仓库工作区永不被改写：版本化只发生在 $RUNNER_TEMP 的产物副本里；
-#   - `file://` 双击即用不受影响：查询串只出现在发布产物；
-#   - 打 tag 即部署，回滚 = workflow_dispatch 指定旧 tag（不重写历史）。
+# 发布方式（唯一）：
+#   - **推 main → GitHub Pages 自动从 main 分支根目录发布**（仓库根即静态站点，`.nojekyll` 已就位）。
+#   - 打 `v*` tag 只是留痕 + 触发本工作流做发布前校验，**不会**部署任何东西。
 #
-# 触发：
-#   - push tag v*        → 校验 + 生成产物 + 部署 GitHub Pages
-#   - pull_request       → dry-run：只生成产物并断言 ?v= 数量 / CACHE / 工作区干净
-#   - workflow_dispatch  → 手动部署或回滚到指定 tag
-name: deploy
+# 本工作流职责（只读，产物只写 $RUNNER_TEMP，永不改写工作区）：
+#   - push tag v*        → 证明「这个 tag 的内容可发布」：门禁 + 产物自检
+#   - pull_request(main) → 同样的校验（dry-run 版本号 v0.0.0-dryrun）
+#   - workflow_dispatch  → 对指定 tag 复跑校验（发版前预演 / 回滚前核对旧版）
+#
+# 历史说明：旧版在这里用 actions/deploy-pages 部署 Pages，但仓库的 Pages 发布源是
+# 「main 分支」，两者互斥，tag 上必然失败。现已移除全部部署步骤与 pages/id-token 权限。
+name: release-check
 
 on:
   push:
@@ -19,21 +21,15 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: '要部署或回滚的 tag（例如 v1.0.1）'
+        description: '要校验的 tag（必填，例如 v1.0.1）'
         required: true
         default: ''
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,23 +77,7 @@ jobs:
           set -euo pipefail
           dirty="$(git status --porcelain)"
           if [ -n "$dirty" ]; then
-            echo "::error::发布流程改写了仓库文件："
+            echo "::error::校验流程改写了仓库文件："
             echo "$dirty"
             exit 1
           fi
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: ${{ runner.temp }}/staging
-
-  deploy:
-    # PR 只做 dry-run；tag push 与手动触发才真正部署
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
