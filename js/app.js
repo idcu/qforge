@@ -10,6 +10,11 @@
   const QB = (global.QB = global.QB || {});
   const UI = QB.UIRenderer;
   const esc = QB.escapeHtml;
+  // R-18：等待计时与刷新节奏可注入（测试用注入时钟 / 短时基）。
+  // 这两个名字由 app-boot.test.mjs 的 new Function 参数注入；浏览器里未定义，typeof 兜底为真实实现。
+  // 与既有的 setTimeout / requestIdleCallback / document 同一套注入缝，不引入新的全局符号。
+  const nowMs = typeof injectNow === 'function' ? injectNow : () => Date.now();
+  const waitTickMs = typeof injectWaitTickMs === 'number' ? injectWaitTickMs : 1000;
 
   /* ---------------- 应用状态 ---------------- */
   const State = {
@@ -738,8 +743,8 @@
     // 本标签不写 LocalStorage（会被迁移后的清理当旧数据删除），期间写入进内存队列，切换后补写 IDB。
     // R-18：等待/接管阶段在状态栏显示「阶段 + 已等待秒数」，让用户能判断仍在推进还是卡住。
     // 只增强可观测性：超时值（30s）与接管语义不变，不提供取消（半迁移状态的风险高于收益）。
-    const waitStartedAt = Date.now();
-    const waitedSeconds = () => Math.max(0, Math.floor((Date.now() - waitStartedAt) / 1000));
+    const waitStartedAt = nowMs();
+    const waitedSeconds = () => Math.max(0, Math.floor((nowMs() - waitStartedAt) / 1000));
     const paintWait = (stage, tail) => {
       const el = document.getElementById('status-text');
       if (el) el.textContent = '存储迁移·' + stage + '（已等待 ' + waitedSeconds() + ' 秒）：' + tail;
@@ -749,7 +754,7 @@
       if (runRes && (runRes.locked || (markerIdb && QB.Storage.mode !== 'idb'))) {
         paintWait('等待切换', '另一标签正在迁移，本页写入暂存');
         UI.toast('另一标签正在迁移存储，本页写入将暂存，完成切换后自动保存', 'ok');
-        waitTimer = setInterval(() => paintWait('等待切换', '另一标签正在迁移，本页写入暂存'), 1000);
+        waitTimer = setInterval(() => paintWait('等待切换', '另一标签正在迁移，本页写入暂存'), waitTickMs);
         // 等待超过 TTL 后主动重抢过期锁并重试迁移（胜者崩溃不再永久卡死）；
         // 锁心跳保证「胜者只是慢」时不会被误抢，接管失败则持久提示本页写入未落盘。
         let waitRes = null;

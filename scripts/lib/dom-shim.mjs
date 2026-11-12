@@ -137,6 +137,7 @@ export function createDom(opts) {
       set(v) { html = String(v); el.children.length = 0; }
     });
     Object.defineProperty(el, 'textContent', {
+      configurable: true, // 允许套件临时替换为「记录每次写入」的实现（如 app-boot 的真实定时器护栏）
       get() { return el.__text || ''; },
       set(v) { el.__text = String(v); }
     });

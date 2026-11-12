@@ -88,7 +88,8 @@ function apiStub(stat) {
 
 /**
  * 建一个可运行 app.js 的环境；返回 QB/DOM/调用记录。
- * opts: { api, share, shareCode, appSource, migrationLocked, takeoverDelayMs, takeoverResult, onTakeoverWait }
+ * opts: { api, share, shareCode, appSource, migrationLocked, takeoverDelayMs, takeoverResult, onTakeoverWait,
+ *         manualInterval, manualTakeover, injectNow, injectWaitTickMs, recordStatusWrites }
  */
 async function makeEnv(opts) {
   const o = opts || {};
@@ -98,6 +99,15 @@ async function makeEnv(opts) {
   };
   const { QB, window } = await createHarness(QB_DIR);
   const dom = createDom({ nullIds: ['toast-wrap'] });
+  // 记录状态栏每一次写入（含写入时刻）：真实定时器护栏据此断言，避免轮询恰好错过某一帧
+  if (o.recordStatusWrites) {
+    stat.statusWrites = [];
+    const el = dom.document.getElementById('status-text');
+    Object.defineProperty(el, 'textContent', {
+      get() { return el.__text || ''; },
+      set(v) { el.__text = String(v); stat.statusWrites.push({ text: el.__text, at: Date.now() }); }
+    });
+  }
 
   // 观测「下载诊断信息」真实路径：createObjectURL 记录 Blob，供断言其内容
   const realCreateObjectURL = URL.createObjectURL;
@@ -168,16 +178,27 @@ async function makeEnv(opts) {
     if (o.migrationResult) return o.migrationResult;
     return o.migrationLocked ? { locked: true, migrated: 0 } : { locked: false, migrated: 0 };
   };
-  // R-18：可控接管等待；采样 app.js 在等待期间写入状态栏的「阶段 + 已等待秒数」
+  // R-18：可控接管等待。等待期间的状态栏采样由测试自己驱动：
+  //   - injectNow 提供「注入时钟」，秒数不再取自真实流逝；
+  //   - manualInterval 把 app.js 的 waitTimer 换成登记表，测试用 fire() 精确触发每一帧；
+  //   - manualTakeover 不自动放行，由测试在采样完成后 release()。
+  const manualTimers = !!o.manualInterval;
+  const intervals = new Map();
+  let intervalSeq = 0;
+  stat.fireIntervals = () => { for (const fn of Array.from(intervals.values())) fn(); };
   if (o.migrationLocked) {
     stat.waitSamples = [];
     QB.Storage.waitForMigrationTakeover = () => new Promise((resolve) => {
       const readStatus = () => String(dom.document.getElementById('status-text').textContent || '');
-      stat.waitSamples.push(readStatus());
+      const release = () => resolve(o.takeoverResult || { switched: true, takeover: false });
+      stat.waitSamples.push(readStatus()); // t=0 帧（app.js 的 paintWait 刚写完）
       if (typeof o.onTakeoverWait === 'function') {
-        o.onTakeoverWait({ samples: stat.waitSamples, readStatus: readStatus });
+        o.onTakeoverWait({
+          samples: stat.waitSamples, readStatus: readStatus,
+          release: release, fire: stat.fireIntervals
+        });
       }
-      setTimeout(() => resolve(o.takeoverResult || { switched: true, takeover: false }), o.takeoverDelayMs || 0);
+      if (!o.manualTakeover) setTimeout(release, o.takeoverDelayMs || 0);
     });
   }
   const origInit = QB.DB.init;
@@ -197,10 +218,16 @@ async function makeEnv(opts) {
       return r;
     };
   }
+  // 定时器注入缝：默认真实 setInterval/clearInterval；manualInterval 时换成手工登记表
+  const setInt = manualTimers ? (fn) => { intervals.set(++intervalSeq, fn); return intervalSeq; } : setInterval;
+  const clearInt = manualTimers ? (id) => { intervals.delete(id); } : clearInterval;
+  // injectNow / injectWaitTickMs 是 app.js 的时间与节奏注入点（浏览器中未定义，走真实实现）
   new Function('window', 'globalThis', 'document', 'location', 'navigator',
-    'requestIdleCallback', 'setTimeout', 'history', source)(
+    'requestIdleCallback', 'setTimeout', 'setInterval', 'clearInterval',
+    'injectNow', 'injectWaitTickMs', 'history', source)(
     window, window, dom.document, dom.location, dom.navigator,
-    dom.requestIdleCallback, setTimeout, dom.history);
+    dom.requestIdleCallback, setTimeout, setInt, clearInt,
+    o.injectNow, o.injectWaitTickMs, dom.history);
 
   const booted = await waitUntil(() => window.QB.App && window.QB.App.State.banksLoaded === true,
     o.bootFail ? 80 : 2000);
@@ -484,41 +511,67 @@ section('删库 UI：确认后级联删除并回落到现存库；取消不删�
 
 /* ============================================================
  * 2. R-18 迁移等待：状态栏显示阶段 + 已等待秒数
+ *    A. 注入时钟：时间由测试推进、每一帧由测试触发，断言的是「各时刻的文案序列」，
+ *       而不是「等它出现」——事件循环被 CI 抢占也不会漏帧；
+ *    B. 真实定时器护栏：120 ms 时基 + 真实 Date.now 跑一次真实 setInterval 链路，
+ *       防止「断言只在假时间里成立」。
  * ============================================================ */
 section('R-18 迁移等待：状态栏显示阶段与已等待秒数，切换后清理');
 {
+  // A. 注入时钟 + 手工帧：t=0 / 1s / 2s 三帧文案逐帧断言
+  let clock = 0;
   const env = await makeEnv({
     migrationLocked: true,
-    // 等待窗口 1.85s（boot 等待上限 2s）：即便事件循环被并行负载阻塞，
-    // 也保证「秒数递增」有足够观察窗口，且不至于超出 waitUntil 上限
-    takeoverDelayMs: 1850,
-    onTakeoverWait: ({ samples, readStatus }) => {
-      // 秒数从 app.js 的 waitStartedAt 起算，而该时刻在迁移检查 await 之后才记录；
-      // 固定 1050ms 采样在并行/慢负载下会读到「0 秒」（实测 12 次中 1 次偶发失败）。
-      // 改为轮询到秒数真实递增再采样：仍是同一行为断言（未放宽），只消除时序竞态。
-      const timer = setInterval(() => {
-        const text = readStatus();
-        if (/已等待 [1-9]\d* 秒/.test(text)) {
-          samples.push(text);
-          clearInterval(timer);
-        }
-      }, 30);
-      setTimeout(() => clearInterval(timer), 5000);
+    manualInterval: true,
+    manualTakeover: true,
+    injectNow: () => clock,
+    onTakeoverWait: ({ samples, readStatus, fire, release }) => {
+      clock = 1000; fire(); samples.push(readStatus()); // 到 1 秒，触发一次 waitTimer
+      clock = 2000; fire(); samples.push(readStatus()); // 到 2 秒
+      release();                                        // 三帧采完再放行等待
     }
   });
   eq(env.migration, 1, '持锁启动时仍执行一次迁移检查');
-  ok(env.waitSamples.length >= 2, '等待期采样 ' + env.waitSamples.length + ' 次（首帧 + 1s 后）');
-  const first = env.waitSamples[0] || '';
-  const later = env.waitSamples[1] || '';
-  ok(first.indexOf('存储迁移·等待切换') >= 0, '首帧含阶段「等待切换」：' + first);
-  ok(/已等待 0 秒/.test(first), '首帧显示 0 秒：' + first);
-  ok(/已等待 [1-9]\d* 秒/.test(later), '秒数递增（已等待 ≥1 秒）：' + later);
+  ok(env.waitSamples.length === 3, '注入时钟逐帧采样 ' + env.waitSamples.length + ' 次（0/1/2 秒）');
+  const frames = env.waitSamples;
+  ok(String(frames[0] || '').startsWith('存储迁移·等待切换（已等待 0 秒）'),
+    't=0 帧：阶段「等待切换」+ 0 秒：' + frames[0]);
+  ok(String(frames[1] || '').indexOf('（已等待 1 秒）') >= 0, 't=1s 帧秒数递增：' + frames[1]);
+  ok(String(frames[2] || '').indexOf('（已等待 2 秒）') >= 0, 't=2s 帧秒数继续递增：' + frames[2]);
   eq(env.booted, true, '等待完成后 boot 继续（未被等待阻塞）');
   const finalText = String(env.dom.document.getElementById('status-text').textContent || '');
-  ok(finalText.indexOf('已等待') < 0, '切换完成后状态栏不再停留在等待文案：' + finalText);
-  ok(toastsText(env).indexOf('存储迁移完成') >= 0, '切换完成有可见提示');
+  ok(finalText.indexOf('已等待') < 0 && toastsText(env).indexOf('存储迁移完成') >= 0,
+    '切换后清空等待文案并有完成提示：' + finalText);
   eq(rejections.length, 0, '等待路径无未处理 rejection');
   env.restore();
+
+  // B. 真实定时器护栏：120 ms 时基、真实 Date.now、真实 setInterval。
+  //    观测方式：记录状态栏每次写入的时刻（不轮询——轮询会与被测的 120 ms 帧互相抢时序，
+  //    CI 慢机上出现过「末帧已过 1.4 秒但采样全落在旧文案」的假红）。
+  const blockMs = Number(process.env.QFORGE_TEST_BLOCK_MS || 0);
+  const env2 = await makeEnv({
+    migrationLocked: true,
+    injectWaitTickMs: 120,
+    takeoverDelayMs: 1400,
+    recordStatusWrites: true,
+    onTakeoverWait: () => {
+      if (blockMs > 0) { const t = Date.now(); while (Date.now() - t < blockMs) { /* 模拟事件循环被接管 */ } }
+    }
+  });
+  const seen = [];
+  for (const w of (env2.statusWrites || [])) {
+    const m = /已等待 (\d+) 秒/.exec(w.text);
+    if (m) seen.push({ sec: Number(m[1]), at: w.at });
+  }
+  const base = seen.length ? seen[0].at : 0;
+  const grew = seen.filter((x) => x.sec >= 1);
+  // 秒数须与真实流逝一致（±1 秒：写入时刻与 app.js 的 waitStartedAt 有毫秒级差）
+  const consistent = seen.every((x) => Math.abs(x.sec - Math.floor((x.at - base) / 1000)) <= 1);
+  const last = seen.length ? seen[seen.length - 1] : null;
+  ok(seen.length >= 3 && grew.length >= 1 && consistent,
+    '真实定时器链路（120ms 时基）：' + seen.length + ' 帧，递增 ' + grew.length + ' 帧，末帧 '
+    + (last ? last.sec : '?') + ' 秒 / 实测 ' + (last ? last.at - base : '?') + ' ms');
+  env2.restore();
 }
 
 /* ============================================================
