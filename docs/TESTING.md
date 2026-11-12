@@ -21,15 +21,18 @@
 `scripts/docs-baseline.json` 的计数比对——计数为 0、解析不到计数、与基线不一致、合计不等于基线总数，
 任一成立即 exit 1。新增/删除断言后须同 commit 运行 `node scripts/docs-check.mjs --write` 刷新基线，
 否则总闸会红（这是有意的：基线是「断言真的跑了」的凭证，不是可跳过的参考值）。
-`node scripts/test-all.mjs --selftest` 注入一个「通过: 0 且 exit 0」的假套件并断言门禁拦下它
-（拦截 = exit 0，放行 = exit 1），用于证明这道闸真的会失败，而不是永远绿。
+`node scripts/test-all.mjs --selftest` 用两个注入套件跑真实流水线（一个「通过: 0 且 exit 0」的空跑、
+一个 exit 1 且带 `✗` 断言原文），断言 7 项全部生效（退出码 1、摘要落盘、摘要含套件名与断言原文、
+记录最后完成套件、stdout 有 `::error::` 与失败汇总）——全部生效 = exit 0，任一失效 = exit 1。
 
-**失败留证（2026-11-09）**：任一运行项被判失败（非 0 退出、解析不到计数、断言数 ≠ 基线、文件缺失）
-时，`scripts/test-all.mjs` 把该套件的**完整原始输出**（stdout + stderr，前置 suite/status/reason/
-time/node/order 头）写到未跟踪目录 `.analysis/test-failures/<UTC 时间戳>-<套件名>.log`，解决
-「偶发失败、日志被覆盖、无法回溯」。约束：只在失败时落盘（成功运行**不产生任何文件**）；数量与体积
-双上限 **20 个 / 5 MiB**，超出按 mtime 淘汰最旧；写盘失败只告警、**不改变判定与退出码**；仅用 Node
-内置模块，零新增依赖。该目录不随仓库提交。
+**失败留证（2026-11-12 加固）**：任一运行项被判失败（非 0 退出、解析不到计数、断言数 ≠ 基线、文件缺失）
+时，`scripts/test-all.mjs` 在未跟踪目录 `.analysis/test-failures/` 落三类证据：① `<UTC 时间戳>-<套件名>.log`
+是该套件完整原始输出（stdout + stderr + suite/status/reason/time/node 头）；② `progress.txt` 逐套件**增量**
+记录（开始/结束、耗时、PASS/FAIL、失败原因与断言原文），进程若在汇总前异常退出，仍能看出**最后完成到哪个
+套件**；③ `summary.txt` 是固定位置的逐套件摘要 + 失败清单。退出走 `process.exitCode = 1` 而非
+`process.exit(1)`：POSIX 上 stdout 接管道时后者会在冲刷前掐断，注解与摘要可能一起丢。约束：成功运行删除
+`progress.txt`、**不产生任何残留文件**；日志数量与体积双上限 **20 个 / 5 MiB**，超出按 mtime 淘汰最旧；
+写盘失败只告警、**不改变判定与退出码**；仅用 Node 内置模块，零新增依赖。该目录不随仓库提交。
 
 **断言原语（C024）**：37 个运行项（1 冒烟 + 36 套件）的 `ok/eq/deepEq/section/throws` 统一来自 `scripts/lib/assert.mjs`
 的 `createAssert({ failures, onPass })`。各套件**仍保留**自己的 `let pass = 0; const failures = []`，
@@ -46,8 +49,10 @@ time/node/order 头）写到未跟踪目录 `.analysis/test-failures/<UTC 时间
 **CI 侧（C002）**：`.github/workflows/test.yml` 的 `logic-tests` 用同一条命令（Node 20/24/26 × 时区 UTC/Asia/Shanghai
 共 6 条腿；性能门禁只在 Node 24/26 的 Asia/Shanghai 腿跑），不再维护逐套件步骤；集合一致性由
 `node scripts/check-ci-coverage.mjs` 断言（单步存在、无逐套件步骤、`scripts/test-order.mjs` 的 ORDER 与磁盘套件双向一致）。
-失败时在 Actions 环境额外打印 `::error::` 注解（job 日志需 admin 才能读取，注解可经公开 checks API 取），
-下一次偶发红能直接看到失败套件与原因，不必再靠本地复现猜。
+失败时在 Actions 环境打印 `::error::` 注解（job 日志需 admin 才能读取，注解可经公开 checks API 取），
+每条带失败套件、原因与断言原文，末条记「最后完成」套件；`test.yml` 另有 `if: always()` 的
+artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红绿都走一遍，红了直接下载看
+套件名与断言原文，不必再靠本地复现猜。
 
 **文档数字校验（C004）**：`node scripts/docs-check.mjs --static` 读基线但不盲信基线——
 ① 文档里出现了 `scripts/<suite>.test.mjs` 却**没有断言数字**时判红（旧实现直接跳过，数字被删掉也能绿）；
