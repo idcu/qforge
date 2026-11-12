@@ -1,8 +1,8 @@
 {
-  "_comment": "相对门禁基线（比值口径：被测耗时 / 同轮标定单位耗时）。按 Node 大版本存放，因为 V8 对标定工作与被测路径的优化幅度不同，比值随引擎版本变化。新增 Node 大版本前先跑 node --expose-gc scripts/bench.mjs --assert 实测，禁止直接复制其他版本的数字。顶层 tolerance 是未单列指标的默认容差（keysBuild 用 1.06）；grade/gradeMany 按 2026-11-12 实测分布单独定容差（node.<ver>.tolerance），推导见 docs/BENCH.md 3-B。字段：grade/gradeMany = SRS 各轮比值（轮中位数 / 标定单位耗时）的 p25 基线（21 轮×1000 / 21 轮×200）；keysBuild = keys() 首次构建（50000·IDB）相对纯内存字符串物化探针的轮中位数比值。",
+  "_comment": "相对门禁基线（比值口径：被测耗时 / 同轮标定单位耗时）。按 Node 大版本存放，因为 V8 对标定工作与被测路径的优化幅度不同，比值随引擎版本变化。新增 Node 大版本前先跑 node --expose-gc scripts/bench.mjs --assert 实测，禁止直接复制其他版本的数字。顶层 tolerance 是未单列指标的默认容差；grade/gradeMany 按 2026-11-12 实测分布单独定容差（node.<ver>.tolerance），推导见 docs/BENCH.md 3-B。字段：grade/gradeMany = SRS 各轮比值（轮中位数 / 标定单位耗时）的 p25 基线（21 轮×1000 / 21 轮×200）。keysBuildMin = keys() 首次构建 10 轮 × 20 样本的全局最小样本基线（绝对毫秒，2026-11-12 起）；外部标定探针比值已于 2026-11-12 证伪（探针自身日间漂移 30%，比值在 1.12–1.52 间翻面），故 keysBuildMin 不走比值口径。容差 1.35 覆盖 10 轮最小值实测分布（Node 24 15.95–17.92、Node 26 21.70–24.06），并保留抓住 1.5× 构建退化的余量；见 docs/BENCH.md 3-B-1。",
   "tolerance": 1.06,
   "node": {
-    "24": { "grade": 2.43, "gradeMany": 4.54, "keysBuild": 1.38, "tolerance": { "grade": 1.09, "gradeMany": 1.06 } },
-    "26": { "grade": 4.69, "gradeMany": 8.40, "keysBuild": 1.41, "tolerance": { "grade": 1.08, "gradeMany": 1.07 } }
+    "24": { "grade": 2.43, "gradeMany": 4.54, "keysBuildMin": 15.95, "tolerance": { "grade": 1.09, "gradeMany": 1.06, "keysBuildMin": 1.35 } },
+    "26": { "grade": 4.69, "gradeMany": 8.40, "keysBuildMin": 21.70, "tolerance": { "grade": 1.08, "gradeMany": 1.07, "keysBuildMin": 1.35 } }
   }
 }

@@ -29,13 +29,17 @@
  *   （只在 scripts 侧给每个被测样本前置一段「样本耗时 × 比例」的 hrtime 忙等，不修改业务代码）。
  *   门禁要求 --expose-gc：每轮前强制 GC，消除堆相位差；无该参数时比值仍输出但波动更大。
  *
- * keys 首次构建相对门禁（绝对毫秒阈值对整体负载敏感，40 ms 阈值会随负载翻转）：
- *   `keys() 首次构建（50000 · IDB）` 改为「同轮标定比值」判定。每轮在 20 个被测样本前后
- *   各跑 30 次固定工作量的探针（与首次构建同性质：纯内存字符串物化 + Set 去重 + 数组物化，
- *   无 I/O），判定量 = 被测中位数 / 探针中位数。
- *   负向验证：QF_BENCH_INJECT_KEYS_SLOW=0.1 node --expose-gc scripts/bench.mjs --assert
- *   （该开关只给这一条路径的样本前置忙等，不影响 SRS 两条）。
- *   原理与基线见 docs/BENCH.md「3-B-1. keys() 首次构建的相对门禁」。
+ * keys 视图门禁（2026-11-12 定稿：首次构建 10 轮最小值绝对判据 + 命中自比值）：
+ *   ① 首次构建：10 轮 × 20 样本，判定量 = 全局最小样本，上限 = Node 大版本基线 × 1.35
+ *      （Node 24 15.95 → 21.53 ms，Node 26 21.70 → 29.30 ms；未知版本 fail-closed）。
+ *      负载只会让某一轮变慢、不会拉低最小值，所以最小值是稳定的绝对估计；中位数会被 GC 长尾
+ *      抬高（同机 Node 24 单次运行 19.7–26.5 ms，摆 34%），40 ms 量级的绝对中位数压不住噪声。
+ *   ② 附加：`keys() 写入已存在键后` 中位数 ≤ max(首次构建中位数 / 10, 1 ms)，抓「任何写入即失效」。
+ *   旧的外部标定探针比值已证伪：探针自身日间漂移 30%（Node 24 13–20 ms / Node 26 21–28 ms），
+ *   比值在 1.12–1.52 之间翻面，是本机与 CI Node 24 红的直接原因。
+ *   负向验证：QF_BENCH_INJECT_KEYS_BUILD_SLOW=1.5（或 2）node --expose-gc scripts/bench.mjs --assert
+ *   （只给首次构建样本前置忙等，1.5×/2× 均判红）；写入即失效场景用 QF_BENCH_INJECT_KEYS_REBUILD=1。
+ *   原理与实测见 docs/BENCH.md「3-B-1. keys() 视图门禁」。
  *
  * IDB 单次评分写入门禁（不做比值，改用最小样本）：
  *   `IDB 单次评分写入（5000/20000/50000）` 每档 5 轮 × 20 样本、每轮前强制 GC，判定值取
@@ -43,6 +47,13 @@
  *   而非 CPU，纯内存探针自身抖动 19–29%，解释不了它（三轮证据见 docs/BENCH.md「3-B-2」）。
  *   负向验证：QF_BENCH_INJECT_IDB_WRITE_SLOW=10 node --expose-gc scripts/bench.mjs --assert
  *   （只给这一条路径的样本前置忙等，其余门禁不受影响）。
+ *
+ * per-hash 写入门禁（2026-11-12 起同样改用最小样本）：
+ *   判定量从 1000/3000/20000 三档的「轮中位数」改为「全局最小样本」：中位数被 GC 长尾污染
+ *   （同机 Node 24 实测 0.18→0.38 ms，摆动 2.1×），绝对值阈值与相对判据都被推过线；
+ *   最小样本是 intrinsic 成本（0.16–0.18 ms，稳定），整表重写（4.07 ms）仍被 1 ms 上限拦住。
+ *   负向验证：QF_BENCH_INJECT_PERHASH_SLOW=2 node --expose-gc scripts/bench.mjs --assert
+ *   （只给 per-hash 样本前置忙等）。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -849,9 +860,15 @@ function calibrationUnitCost(totalUnits) {
  * 实测注意：长忙等（≥70 µs/样本）会拉高 CPU 频率、让随后被测样本略变快，故这里按 10% 量级注入；
  * 具体注入前后的实测数字记录在 CHANGELOG.internal.md，不参与门禁判定。 */
 const INJECT_SLOW = Number(process.env.QF_BENCH_INJECT_SLOW || 0);
-/* keys 首次构建的专用负向注入开关：SRS 的 INJECT_SLOW 会同时命中两条 SRS 指标，
- * 这里需要「只让 keys 这条路径变慢」来证明比值判据没有变钝，故单独一个变量。 */
-const KEYS_INJECT_SLOW = Number(process.env.QF_BENCH_INJECT_KEYS_SLOW || 0);
+/* keys 视图门禁的负向注入：=1 时在「写入已存在键」样本前清空 keys 视图缓存，
+ * 等价于回退成「任何写入都让视图失效」，用于证明该门禁仍会红。只动 bench 侧调用，不改业务代码。 */
+const KEYS_REBUILD_INJECT = process.env.QF_BENCH_INJECT_KEYS_REBUILD === '1';
+/* keys 首次构建的负向注入（倍数）：N>1 时把首次构建的最小样本放大到约 N 倍，
+ * 用于证明 40 ms 量级的绝对门禁能抓住 1.5× / 2× 的构建退化。 */
+const KEYS_BUILD_INJECT = Number(process.env.QF_BENCH_INJECT_KEYS_BUILD_SLOW || 1);
+const KEYS_BUILD_ROUNDS = 10;
+/* per-hash 写入的负向注入（毫秒/样本）：给单次写入前置忙等，用于证明 min 口径仍能拦住回退。 */
+const PERHASH_INJECT_MS = Number(process.env.QF_BENCH_INJECT_PERHASH_SLOW || 0);
 let burnSink = 0;
 function burnFor(ms) {
   const end = process.hrtime.bigint() + BigInt(Math.round(ms * 1e6));
@@ -894,57 +911,6 @@ async function calibratedTimed(fn, n, runs, unitsPerSample) {
     ratioP25: percentile(ratios, 0.25),
     ratioSpread: Math.max.apply(null, ratios) / Math.min.apply(null, ratios),
     unitMs: median(unitCosts), injectRatio: INJECT_SLOW, injectMs: injectMs
-  };
-}
-
-/* keys() 首次构建的同轮标定探针：固定 50000 次「前缀 + 序号」字符串物化 → Set 去重 → Array.from，
- * 与 `Storage._buildKeys()` 的 IDB 分支同性质（纯内存、无 I/O、无业务模块调用）。
- * 探针只依赖标准 JS 基元，`Storage.keys()` 的真实回退不会把探针一起拖慢 → 比值单向上升。 */
-const KEYS_PROBE_N = 50000;
-let keysProbeSink = 0;
-function keysBuildProbe() {
-  const out = new Set();
-  for (let i = 0; i < KEYS_PROBE_N; i++) out.add('qb:review:probe:' + ('b' + (i & 1023)) + ':' + i);
-  const arr = Array.from(out);
-  keysProbeSink += arr.length;
-  return arr.length;
-}
-/** 同轮标定测量（长任务版）：每轮「探针 → 被测 n 样本 → 探针」，判定量 = 本轮被测中位数 / 探针中位数。
- *  探针取 probeSamples 次中位数，前后两批取均值抵消单向漂移。
- *  负向注入只作用于本路径（KEYS_INJECT_SLOW），不改业务代码。 */
-async function calibratedBuildTimed(fn, n, runs, probeFn, probeSamples) {
-  runs = runs || 3;
-  probeSamples = probeSamples || 10;
-  const injectMs = KEYS_INJECT_SLOW > 0 ? (await timed(fn, 2)).median * KEYS_INJECT_SLOW : 0;
-  const measuredFn = injectMs > 0 ? () => { burnSink += burnFor(injectMs); return fn(); } : fn;
-  const meds = [];
-  const all = [];
-  const ratios = [];
-  const probeCosts = [];
-  let min = Infinity;
-  let max = 0;
-  for (let r = 0; r < runs; r++) {
-    bestEffortGc();
-    const pre = (await timed(probeFn, probeSamples)).median;
-    const t = await timed(measuredFn, n);
-    const post = (await timed(probeFn, probeSamples)).median;
-    const unit = (pre + post) / 2;
-    meds.push(t.median);
-    all.push.apply(all, t.samples);
-    ratios.push(t.median / unit);
-    probeCosts.push(unit);
-    min = Math.min(min, t.min);
-    max = Math.max(max, t.max);
-  }
-  return {
-    median: median(meds), best: Math.min.apply(null, meds),
-    p50: percentile(all, 0.5), p95: percentile(all, 0.95),
-    runs: runs, samples: all.length, min: min, max: max,
-    ratio: median(ratios), ratioRounds: ratios,
-    ratioSpread: Math.max.apply(null, ratios) / Math.min.apply(null, ratios),
-    ratioPooled: percentile(all, 0.5) / median(probeCosts),
-    unitMs: median(probeCosts), sampleRounds: meds, probeRounds: probeCosts,
-    injectRatio: KEYS_INJECT_SLOW, injectMs: injectMs
   };
 }
 
@@ -1115,12 +1081,15 @@ for (const tier of [1000, 3000, 20000]) {
   const lastQ = legacy.questions[tier - 1];
   const writeKey = QB.makeContentHash(lastQ);
   const writeOnceLocal = async (i) => {
+    if (PERHASH_INJECT_MS > 0) burnSink += burnFor(PERHASH_INJECT_MS);
     const d = {}; d[writeKey] = QB.ReviewStore.get(legacy.bankId, writeKey);
     await QB.DB.reviews.patch(legacy.bankId, d, [{ t: 100000 + i, h: writeKey, r: 3, b: legacy.bankId }]);
     QB.Storage.forceSync();
   };
-  // 20000 档同时进绝对门禁（≤1 ms）与相对判据（≤ max(4×1000, 3×3000)+0.2），
-  // 单轮 20 样本的长尾会把中位数推过线；只给这一档加三轮，阈值与判据不变。
+  // 20000 档同时进绝对门禁（最小样本 ≤1 ms）与相对判据（≤ max(4×1000, 3×3000)+0.2）。
+  // 判定量从「轮中位数」改为「全局最小样本」：中位数被 GC 长尾污染（同机 Node 24 实测
+  // 0.18→0.38 ms 摆动 2.1×），最小样本是 intrinsic 成本（0.16–0.18 稳定），
+  // 与 4d4ec51 对 IDB 单次写的结论一致。
   const w = tier === 20000 ? await stableTimed(writeOnceLocal, 20, 3) : await timed(writeOnceLocal, 20);
   report.push({
     name: 'per-hash 单次评分本地写（' + tier + ' 状态）',
@@ -1450,39 +1419,62 @@ for (const tier of [5000, 20000, 50000]) {
 
   /* C1：逻辑键视图的两笔成本（首次物化 / 更新已存在键后是否误重建）。
    * 只取 50k 档：与真机 keys 视图成本同量级；写入已存在键必须命中，
-   * 若精准失效回退成「任何写入都失效」，该行会回落到首次构建量级。 */
+   * 若精准失效回退成「任何写入都失效」，该行会回落到首次构建量级。
+   * 首次构建判定 = 10 轮 × 20 样本的全局最小样本（绝对判据，按 Node 大版本分基线）：
+   * 负载只会让某轮变慢、不会拉低最小值，最小值是稳定的绝对估计；中位数会被 GC 长尾抬高。
+   * 附加判定「写后 keys()」≤ max(首次/10, 1 ms) 与机器速度无关，抓任何写入即失效。 */
   if (tier === 50000) {
     const keyProbe = 'bench:keys-view-probe';
     Q.Storage.setSync(keyProbe, 1);
     let keysLen = 0;
-    // 绝对值口径曾因整体负载在 25.9–45.6 ms 摆动而贴着 40 ms 阈值翻转；
-    // 改为同轮标定比值：20 样本 × 5 轮，每轮前后各跑 30 次纯内存字符串物化探针。
-    const kb = await calibratedBuildTimed(() => {
+    const buildOnce = () => {
       Q.Storage._keysCache = null;
       Q.Storage._keysRevCached = -1;
       keysLen = Q.Storage.keys().length;
-    }, 20, 5, keysBuildProbe, 30);
+    };
+    // 负向注入：按倍数放大首次构建（如 1.5 / 2），基准取未注入时的最小样本。
+    let buildInjectMs = 0;
+    if (KEYS_BUILD_INJECT > 1) {
+      bestEffortGc();
+      const pilot = await stableTimed(buildOnce, 20, 2);
+      buildInjectMs = pilot.min * (KEYS_BUILD_INJECT - 1);
+    }
+    const measuredBuild = buildInjectMs > 0
+      ? () => { burnSink += burnFor(buildInjectMs); buildOnce(); }
+      : buildOnce;
+    // 负载只会让某一轮变慢，不会把最小值拉低：10 轮 × 20 样本的最小值是稳定的绝对估计。
+    const roundMins = [];
+    const roundMedians = [];
+    const allSamples = [];
+    for (let r = 0; r < KEYS_BUILD_ROUNDS; r++) {
+      bestEffortGc();
+      const t = await timed(measuredBuild, 20);
+      roundMins.push(t.min);
+      roundMedians.push(t.median);
+      allSamples.push.apply(allSamples, t.samples);
+    }
+    const buildMin = Math.min.apply(null, roundMins);
     report.push({
       name: 'keys() 首次构建（50000 题 · IDB）',
-      median: kb.median, best: kb.best, p50: kb.p50, p95: kb.p95,
-      runs: kb.runs, samples: kb.samples, min: kb.min, max: kb.max,
-      ratio: kb.ratio, ratioRounds: kb.ratioRounds, ratioSpread: kb.ratioSpread,
-      unitMs: kb.unitMs, injectRatio: kb.injectRatio, injectMs: kb.injectMs,
-      sampleRounds: kb.sampleRounds, probeRounds: kb.probeRounds,
-      extra: '逻辑键 ' + keysLen + ' 个（含 50k 字符串物化）；轮内 keys 中位 '
-        + kb.sampleRounds.map((v) => v.toFixed(1)).join('/') + ' ms，探针 '
-        + kb.probeRounds.map((v) => v.toFixed(1)).join('/') + ' ms；比值 '
-        + kb.ratioRounds.map((v) => v.toFixed(2)).join('/') + '（中位 ' + kb.ratio.toFixed(2)
-        + '，合并 ' + kb.ratioPooled.toFixed(2) + '）；门禁=同轮标定比值'
+      median: median(roundMedians), min: buildMin,
+      max: Math.max.apply(null, roundMins), runs: KEYS_BUILD_ROUNDS, samples: allSamples.length,
+      p50: percentile(allSamples, 0.5), p95: percentile(allSamples, 0.95),
+      roundMins: roundMins,
+      extra: '逻辑键 ' + keysLen + ' 个（含 50k 字符串物化）；' + KEYS_BUILD_ROUNDS + ' 轮×20 样本，轮最小值 '
+        + roundMins.map((v) => v.toFixed(2)).join('/') + ' ms，全局最小 ' + ms(buildMin) + ' 为判定量'
+        + (buildInjectMs > 0 ? '；负向注入 ×' + KEYS_BUILD_INJECT + '（+' + ms(buildInjectMs) + '/样本）' : '')
     });
-    const wb = await timed((i) => {
+    const wb = await stableTimed((i) => {
+      // 负向注入：模拟「任何写入都让视图失效」，用于证明本门禁仍会红。
+      if (KEYS_REBUILD_INJECT) { Q.Storage._keysCache = null; Q.Storage._keysRevCached = -1; }
       Q.Storage.setSync(keyProbe, { v: i + 2 });
       Q.Storage.keys();
-    }, 20);
+    }, 20, 3);
     report.push({
       name: 'keys() 写入已存在键后（50000 题 · IDB）',
       median: wb.median, min: wb.min, max: wb.max,
       extra: '更新已存在键不应使视图失效；误失效会回落到「首次构建」量级'
+        + (KEYS_REBUILD_INJECT ? '；负向注入=写入即失效' : '')
     });
     // C 步骤1：keysScoped 只观测、不设门禁（跨机器阈值不稳定）。
     if (!Q.Storage.isBankHydrated(legacy.bankId)) await Q.Storage.ensureBank(legacy.bankId);
@@ -1808,7 +1800,8 @@ function writeFailureEvidence(fails, gateLines) {
       },
       inject: {
         QF_BENCH_INJECT_SLOW: process.env.QF_BENCH_INJECT_SLOW || '',
-        QF_BENCH_INJECT_KEYS_SLOW: process.env.QF_BENCH_INJECT_KEYS_SLOW || '',
+        QF_BENCH_INJECT_KEYS_REBUILD: process.env.QF_BENCH_INJECT_KEYS_REBUILD || '',
+        QF_BENCH_INJECT_PERHASH_SLOW: process.env.QF_BENCH_INJECT_PERHASH_SLOW || '',
         QF_BENCH_INJECT_IDB_WRITE_SLOW: process.env.QF_BENCH_INJECT_IDB_WRITE_SLOW || ''
       },
       fails: fails,
@@ -1949,22 +1942,24 @@ if (process.argv.indexOf('--assert') >= 0) {
   //   gradeMany 1.07（阈值 8.99）；Node 24 为 1.09 / 1.06。两项分开定，不共用数值。
   //   两项均 ≈1.03–1.04× 基线，远低于「基线×1.5」硬上限；20% 退化在实测最快态（4.44 / 7.86）仍被判红，
   //   10% 退化在中位态可抓、最快态抓不到（如实记录）。原始 20 次数值与推导见 docs/BENCH.md 3-B。
-  // keys() 首次构建同样改判比值：绝对 40 ms 阈值在整体负载 46% 时会摸到 40.86–45.55 ms，
-  //   判定随负载翻转；探针（纯内存 50000 字符串物化/Set/Array.from）与首次构建同性质、同轮前后各测一次，
-  //   负载同向放大两侧、在比值中抵消。容差沿用 bench-baseline.json 顶层默认 1.06（见 docs/BENCH.md 3-B-1）。
+  // keys() 视图（2026-11-12 改口径）：旧的「外部标定探针比值」被证伪 —— 探针自身日间漂移 30%
+  //   （Node 24 探针 13–20 ms、Node 26 探针 21–28 ms，同一天内也摆 1.3×），比值在 1.12–1.52 之间翻面，
+  //   与本机/CI 的 Node 24 红、Node 26 偶发红一致；而 Storage 实现自基线以来零改动（git diff 866f784..HEAD -- js/utils/storage.js 为空）。
+  //   现判定：① 首次构建 10 轮最小样本 ≤ Node 大版本基线 × 1.35（Node 24 15.95→21.53 ms、
+  //   Node 26 21.70→29.30 ms；未知版本 fail-closed）；② 写入已存在键后中位数 ≤ max(首次/10, 1 ms)。
+  //   首次构建用最小值：负载只会让某轮变慢、不会拉低最小值；中位数会被 GC 长尾抬高
+  //   （同机 Node 24 单次运行 19.7–26.5 ms，摆 34%）。实测 1.5×/2× 注入均被 ① 判红（docs/BENCH.md 3-B-1）。
   const BASELINE = JSON.parse(fs.readFileSync(path.join(__dirname, 'bench-baseline.json'), 'utf8'));
   const NODE_MAJOR = process.versions.node.split('.')[0];
   const nodeBaseline = BASELINE.node && BASELINE.node[NODE_MAJOR];
   const RATIO_TOLERANCE = BASELINE.tolerance || 1.06;
-  // 按指标取容差：优先 node 级 `tolerance[key]`（实测分布推导，见 docs/BENCH.md 3-B），
-  // 未单列时回落到顶层 1.06（keys() 首次构建仍用它）。
+  // 按指标取容差：优先 node 级 `tolerance[key]`（实测分布推导，见 docs/BENCH.md 3-B）。
   const toleranceOf = (key) => {
     const t = nodeBaseline && nodeBaseline.tolerance;
     if (t && isFinite(t[key])) return t[key];
     return RATIO_TOLERANCE;
   };
-  [['SRSStore.grade 单次评分', 'grade'], ['SRSStore.gradeMany 批量 20 题', 'gradeMany'],
-    ['keys() 首次构建（50000', 'keysBuild']]
+  [['SRSStore.grade 单次评分', 'grade'], ['SRSStore.gradeMany 批量 20 题', 'gradeMany']]
     .forEach(([needle, key]) => {
       const r = report.find((x) => x.name.indexOf(needle) === 0);
       if (!r) { fails.push(needle + ' 缺失'); return; }
@@ -1980,8 +1975,7 @@ if (process.argv.indexOf('--assert') >= 0) {
       const max = base * tol;
       // SRS 两条的判定量取「各轮比值的 p25」：负载/GC 只会让个别轮变慢（周期性慢轮），
       // 轮中位数的中位数会被它们抬高且跨运行摆动 17–40%；p25 取内在成本、跨运行 7–13%。
-      // keys() 首次构建仍用轮中位数的中位数（见 3-B-1）。
-      const isSrs = key !== 'keysBuild' && isFinite(r.ratioP25);
+      const isSrs = isFinite(r.ratioP25);
       const measured = isSrs ? r.ratioP25 : r.ratio;
       const ok = measured <= max;
       console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：比值' + (isSrs ? '(p25) ' : ' ') + measured.toFixed(2) + ' ≤ ' + max.toFixed(2)
@@ -1992,6 +1986,32 @@ if (process.argv.indexOf('--assert') >= 0) {
         + (r.injectRatio ? '；负向注入 +' + (r.injectRatio * 100).toFixed(0) + '%（' + ((r.injectMs || 0) * 1000).toFixed(1) + ' µs/样本）' : '') + '）');
       if (!ok) fails.push(needle + ' ratio' + (isSrs ? '(p25)' : '') + ' ' + measured.toFixed(2) + ' > Node ' + NODE_MAJOR + ' 基线×' + tol + ' ' + max.toFixed(2));
     });
+  // keys() 视图：① 首次构建用 10 轮最小值的绝对门禁（按 Node 大版本分基线，未知版本 fail-closed）；
+  // ② 附加「写入已存在键后 ≤ max(首次/10, 1 ms)」的同进程自比值，抓「任何写入即失效」。
+  // 为什么用最小值：负载只会让某一轮变慢，不会把最小值拉低；10 轮 × 20 样本的最小值是稳定的绝对估计，
+  // 而中位数会被 GC 长尾抬高（同机 Node 24 单次运行 19.7–26.5 ms，摆 34%），40 ms 量级会被噪声吃掉。
+  const kbRow = report.find((x) => x.name.indexOf('keys() 首次构建（50000') === 0);
+  const kwRow = report.find((x) => x.name.indexOf('keys() 写入已存在键后（50000') === 0);
+  const keysBase = nodeBaseline && nodeBaseline.keysBuildMin;
+  const keysTol = toleranceOf('keysBuildMin');
+  const keysLimit = isFinite(keysBase) ? keysBase * keysTol : NaN;
+  const keysBuildOk = !!kbRow && !!kwRow && isFinite(kbRow.min) && isFinite(kwRow.median)
+    && isFinite(keysLimit) && kbRow.min <= keysLimit
+    && kwRow.median <= Math.max(kbRow.median / 10, 1);
+  if (!isFinite(keysLimit)) {
+    console.log('  ✗ keys() 视图：Node ' + process.versions.node + ' 无最小样本基线（fail-closed）');
+    fails.push('keys() 首次构建缺少 Node ' + NODE_MAJOR + ' 的基线（请测量后补 scripts/bench-baseline.json）');
+  }
+  console.log((keysBuildOk ? '  ✓ ' : '  ✗ ') + 'keys() 视图：首次构建最小 ' + ms(kbRow ? kbRow.min : NaN)
+    + ' ≤ ' + (isFinite(keysLimit) ? keysLimit.toFixed(2) : 'NaN') + ' ms（Node ' + NODE_MAJOR + ' 基线 '
+    + (isFinite(keysBase) ? keysBase.toFixed(2) : 'NaN') + ' ×' + keysTol + '，' + KEYS_BUILD_ROUNDS + ' 轮最小值）'
+    + '；写入已存在键后 ' + ms(kwRow ? kwRow.median : NaN) + ' ≤ max(首次/10, 1.00 ms)（命中缓存；同进程自比值）'
+    + (KEYS_BUILD_INJECT > 1 ? '；负向注入 ×' + KEYS_BUILD_INJECT : '')
+    + (KEYS_REBUILD_INJECT ? '；负向注入=写入即失效' : ''));
+  if (!keysBuildOk && isFinite(keysLimit)) {
+    fails.push('keys() 视图门禁不达标（首次最小 ' + ms(kbRow ? kbRow.min : NaN) + ' > ' + keysLimit.toFixed(2)
+      + ' ms 或写入后 ' + ms(kwRow ? kwRow.median : NaN) + '）');
+  }
   const heapDeltaMb = (heapAfter - heapBefore) / 1024 / 1024;
   const heapOk = heapDeltaMb <= 40;
   console.log((heapOk ? '  ✓ ' : '  ✗ ') + 'heapUsed 增量：' + heapDeltaMb.toFixed(2) + 'MB ≤ 40.00MB');
@@ -2101,11 +2121,12 @@ if (process.argv.indexOf('--assert') >= 0) {
   const w1k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（1000') === 0);
   const w20k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（20000') === 0);
   const w3k = report.find((r) => r.name.indexOf('per-hash 单次评分本地写（3000') === 0);
-  const writeOk = w1k && w20k && w3k && w20k.median <= 1
-    && w20k.median <= Math.max(w1k.median * 4, w3k.median * 3) + 0.2;
-  console.log((writeOk ? '  ✓ ' : '  ✗ ') + 'per-hash 写入复杂度：1000 ' + ms(w1k ? w1k.median : NaN)
-    + ' / 3000 ' + ms(w3k ? w3k.median : NaN) + ' / 20000 ' + ms(w20k ? w20k.median : NaN)
-    + '（20000 ≤ 1.00 ms 且 ≤ max(4×1000, 3×3000)+0.2）');
+  const writeOk = w1k && w20k && w3k && w20k.min <= 1
+    && w20k.min <= Math.max(w1k.min * 4, w3k.min * 3) + 0.2;
+  console.log((writeOk ? '  ✓ ' : '  ✗ ') + 'per-hash 写入复杂度：1000 ' + ms(w1k ? w1k.min : NaN)
+    + ' / 3000 ' + ms(w3k ? w3k.min : NaN) + ' / 20000 ' + ms(w20k ? w20k.min : NaN)
+    + '（最小样本：20000 ≤ 1.00 ms 且 ≤ max(4×1000, 3×3000)+0.2；中位数被 GC 长尾污染，只作观测）'
+    + (PERHASH_INJECT_MS > 0 ? '；负向注入 +' + ms(PERHASH_INJECT_MS) + '/样本' : ''));
   if (!writeOk) fails.push('per-hash 写入复杂度不达标');
   // R-02：收卷错题批量写——同轮旧逐题 vs 生产 wrongAddMany；set 调用 ≥25× 减少、累计字节 ≥90% 减少
   const r02Ok = r02CallsRatio >= 25 && r02BytesCut >= 0.9;

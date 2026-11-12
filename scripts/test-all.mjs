@@ -168,6 +168,11 @@ if (typeof baseline.totalAssertions === 'number' && total !== baseline.totalAsse
 }
 if (failed.length) {
   failed.forEach((f) => console.log('  - ' + f));
+  // CI 上把失败项写成 workflow 注解：GitHub job 日志匿名取不到（403，需 admin），
+  // 而 check-run annotations 可经公开 API 读取，下一次偶发红不必再靠复现猜。
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    failed.forEach((f) => console.log('::error title=测试套件失败::' + String(f).replace(/[\r\n]+/g, ' ').slice(0, 900)));
+  }
   console.log('门禁失败 ❌（失败项 ' + failed.length + '）');
   process.exit(1);
 }
