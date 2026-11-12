@@ -43,9 +43,11 @@ time/node/order 头）写到未跟踪目录 `.analysis/test-failures/<UTC 时间
 `NotHydratedError`；需要验证宽松契约的段落显式局部关闭并在用例末尾恢复，或用
 `QFORGE_STRICT_READS=0` 跑整个进程。生产默认仍为 `false`（是否开启见 `docs/STORAGE.md`「C 步骤6」）。
 
-**CI 侧（C002）**：`.github/workflows/test.yml` 的 `logic-tests` 用同一条命令（Node 20/24 × 时区 UTC/Asia/Shanghai
-共 4 条腿），不再维护逐套件步骤；集合一致性由 `node scripts/check-ci-coverage.mjs` 断言
-（单步存在、无逐套件步骤、`scripts/test-order.mjs` 的 ORDER 与磁盘套件双向一致）。
+**CI 侧（C002）**：`.github/workflows/test.yml` 的 `logic-tests` 用同一条命令（Node 20/24/26 × 时区 UTC/Asia/Shanghai
+共 6 条腿；性能门禁只在 Node 24/26 的 Asia/Shanghai 腿跑），不再维护逐套件步骤；集合一致性由
+`node scripts/check-ci-coverage.mjs` 断言（单步存在、无逐套件步骤、`scripts/test-order.mjs` 的 ORDER 与磁盘套件双向一致）。
+失败时在 Actions 环境额外打印 `::error::` 注解（job 日志需 admin 才能读取，注解可经公开 checks API 取），
+下一次偶发红能直接看到失败套件与原因，不必再靠本地复现猜。
 
 **文档数字校验（C004）**：`node scripts/docs-check.mjs --static` 读基线但不盲信基线——
 ① 文档里出现了 `scripts/<suite>.test.mjs` 却**没有断言数字**时判红（旧实现直接跳过，数字被删掉也能绿）；
