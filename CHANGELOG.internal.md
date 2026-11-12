@@ -14,6 +14,15 @@
 
 ## 待办与立项（未实施）
 
+### ngm 适配层替换 base64 / rich-text / sqlite-reader / fsrs（评估过，暂不采用，2026-11-12）
+
+- **状态**：**no-go**。工作区那批未提交在制品（4 个 `gitee.com/idcu/ngm-repo` vendor 包 + 4 个模块改成薄适配层，
+  8 个已跟踪文件 −994/+227）已完整归档到 `.analysis/ngm-sync-2026-11-12/`（`DECISION.md`、`tracked.diff`、
+  `vendor/` 实际文件、`landing-recipe.patch`、`provenance.json`），工作区已复原到 HEAD `33e964f`，未产生业务提交。
+- **否决理由**：+3 个首屏阻塞 `<script>` 换 −0.6 KB gzip（77→80 文件、289.7→289.1 KB），与首屏方向相反；
+  四类行为零断言覆盖（FSRS 模糊化仅靠 `fuzzSeed` 确定性守着）；原 WIP 浏览器双协议均不启动、Node 侧 36/38 套件红。
+- **重新开启的三个条件与完整落地配方**：见归档内 `DECISION.md`（含浏览器双协议 / 6009 断言 / 63 门禁实测数据）。
+
 ### 作用域读取 API（O1 `getScoped/keysScoped` + 测试期严格守卫）
 
 - **状态**：**步骤 1–5 已实施；步骤 6 已评估裁定 no-go（生产默认未改）**（2026-11-08）。
