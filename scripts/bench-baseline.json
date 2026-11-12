@@ -1,8 +1,8 @@
 {
-  "_comment": "SRS 相对门禁基线（比值口径：被测中位数 / 同轮标定单位耗时）。按 Node 大版本存放，因为 V8 对标定工作与被测 patch 的优化幅度不同，比值随引擎版本变化。新增 Node 大版本前先跑 node --expose-gc scripts/bench.mjs --assert 实测，禁止直接复制其他版本的数字。容差统一 1.06（见 docs/DEVELOPMENT.md 3-B）。",
+  "_comment": "相对门禁基线（比值口径：被测中位数 / 同轮标定单位耗时）。按 Node 大版本存放，因为 V8 对标定工作与被测路径的优化幅度不同，比值随引擎版本变化。新增 Node 大版本前先跑 node --expose-gc scripts/bench.mjs --assert 实测，禁止直接复制其他版本的数字。容差统一 1.06（见 docs/BENCH.md 3-B 与 3-B-1）。字段：grade/gradeMany = SRS 单次/批量评分相对单位标定的比值；keysBuild = keys() 首次构建（50000·IDB）相对纯内存字符串物化探针的比值。",
   "tolerance": 1.06,
   "node": {
-    "24": { "grade": 2.74, "gradeMany": 5.05 },
-    "26": { "grade": 4.99, "gradeMany": 8.94 }
+    "24": { "grade": 2.74, "gradeMany": 5.05, "keysBuild": 1.38 },
+    "26": { "grade": 4.99, "gradeMany": 8.94, "keysBuild": 1.41 }
   }
 }

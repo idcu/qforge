@@ -25,6 +25,14 @@
  *   负向验证：QF_BENCH_INJECT_SLOW=0.1 node --expose-gc scripts/bench.mjs --assert
  *   （只在 scripts 侧给每个被测样本前置一段「样本耗时 × 比例」的 hrtime 忙等，不修改业务代码）。
  *   门禁要求 --expose-gc：每轮前强制 GC，消除堆相位差；无该参数时比值仍输出但波动更大。
+ *
+ * keys 首次构建相对门禁（绝对毫秒阈值对整体负载敏感，40 ms 阈值会随负载翻转）：
+ *   `keys() 首次构建（50000 · IDB）` 改为「同轮标定比值」判定。每轮在 20 个被测样本前后
+ *   各跑 30 次固定工作量的探针（与首次构建同性质：纯内存字符串物化 + Set 去重 + 数组物化，
+ *   无 I/O），判定量 = 被测中位数 / 探针中位数。
+ *   负向验证：QF_BENCH_INJECT_KEYS_SLOW=0.1 node --expose-gc scripts/bench.mjs --assert
+ *   （该开关只给这一条路径的样本前置忙等，不影响 SRS 两条）。
+ *   原理与基线见 docs/BENCH.md「3-B-1. keys() 首次构建的相对门禁」。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -830,6 +838,9 @@ function calibrationUnitCost(totalUnits) {
  * 实测注意：长忙等（≥70 µs/样本）会拉高 CPU 频率、让随后被测样本略变快，故这里按 10% 量级注入；
  * 具体注入前后的实测数字记录在 CHANGELOG.internal.md，不参与门禁判定。 */
 const INJECT_SLOW = Number(process.env.QF_BENCH_INJECT_SLOW || 0);
+/* keys 首次构建的专用负向注入开关：SRS 的 INJECT_SLOW 会同时命中两条 SRS 指标，
+ * 这里需要「只让 keys 这条路径变慢」来证明比值判据没有变钝，故单独一个变量。 */
+const KEYS_INJECT_SLOW = Number(process.env.QF_BENCH_INJECT_KEYS_SLOW || 0);
 let burnSink = 0;
 function burnFor(ms) {
   const end = process.hrtime.bigint() + BigInt(Math.round(ms * 1e6));
@@ -871,6 +882,57 @@ async function calibratedTimed(fn, n, runs, unitsPerSample) {
     ratio: median(ratios), ratioRounds: ratios,
     ratioSpread: Math.max.apply(null, ratios) / Math.min.apply(null, ratios),
     unitMs: median(unitCosts), injectRatio: INJECT_SLOW, injectMs: injectMs
+  };
+}
+
+/* keys() 首次构建的同轮标定探针：固定 50000 次「前缀 + 序号」字符串物化 → Set 去重 → Array.from，
+ * 与 `Storage._buildKeys()` 的 IDB 分支同性质（纯内存、无 I/O、无业务模块调用）。
+ * 探针只依赖标准 JS 基元，`Storage.keys()` 的真实回退不会把探针一起拖慢 → 比值单向上升。 */
+const KEYS_PROBE_N = 50000;
+let keysProbeSink = 0;
+function keysBuildProbe() {
+  const out = new Set();
+  for (let i = 0; i < KEYS_PROBE_N; i++) out.add('qb:review:probe:' + ('b' + (i & 1023)) + ':' + i);
+  const arr = Array.from(out);
+  keysProbeSink += arr.length;
+  return arr.length;
+}
+/** 同轮标定测量（长任务版）：每轮「探针 → 被测 n 样本 → 探针」，判定量 = 本轮被测中位数 / 探针中位数。
+ *  探针取 probeSamples 次中位数，前后两批取均值抵消单向漂移。
+ *  负向注入只作用于本路径（KEYS_INJECT_SLOW），不改业务代码。 */
+async function calibratedBuildTimed(fn, n, runs, probeFn, probeSamples) {
+  runs = runs || 3;
+  probeSamples = probeSamples || 10;
+  const injectMs = KEYS_INJECT_SLOW > 0 ? (await timed(fn, 2)).median * KEYS_INJECT_SLOW : 0;
+  const measuredFn = injectMs > 0 ? () => { burnSink += burnFor(injectMs); return fn(); } : fn;
+  const meds = [];
+  const all = [];
+  const ratios = [];
+  const probeCosts = [];
+  let min = Infinity;
+  let max = 0;
+  for (let r = 0; r < runs; r++) {
+    bestEffortGc();
+    const pre = (await timed(probeFn, probeSamples)).median;
+    const t = await timed(measuredFn, n);
+    const post = (await timed(probeFn, probeSamples)).median;
+    const unit = (pre + post) / 2;
+    meds.push(t.median);
+    all.push.apply(all, t.samples);
+    ratios.push(t.median / unit);
+    probeCosts.push(unit);
+    min = Math.min(min, t.min);
+    max = Math.max(max, t.max);
+  }
+  return {
+    median: median(meds), best: Math.min.apply(null, meds),
+    p50: percentile(all, 0.5), p95: percentile(all, 0.95),
+    runs: runs, samples: all.length, min: min, max: max,
+    ratio: median(ratios), ratioRounds: ratios,
+    ratioSpread: Math.max.apply(null, ratios) / Math.min.apply(null, ratios),
+    ratioPooled: percentile(all, 0.5) / median(probeCosts),
+    unitMs: median(probeCosts), sampleRounds: meds, probeRounds: probeCosts,
+    injectRatio: KEYS_INJECT_SLOW, injectMs: injectMs
   };
 }
 
@@ -1346,17 +1408,25 @@ for (const tier of [5000, 20000, 50000]) {
     const keyProbe = 'bench:keys-view-probe';
     Q.Storage.setSync(keyProbe, 1);
     let keysLen = 0;
-    // 单轮 5 样本的中位数仍会随 GC/调度抖动（实测同棵树 34.67–49.25 ms），
-    // 改用 stableTimed：3 轮 × 5 样本，取各轮中位数的中位数。阈值不变，只降测量噪声。
-    const kb = await stableTimed(() => {
+    // 绝对值口径曾因整体负载在 25.9–45.6 ms 摆动而贴着 40 ms 阈值翻转；
+    // 改为同轮标定比值：20 样本 × 5 轮，每轮前后各跑 30 次纯内存字符串物化探针。
+    const kb = await calibratedBuildTimed(() => {
       Q.Storage._keysCache = null;
       Q.Storage._keysRevCached = -1;
       keysLen = Q.Storage.keys().length;
-    }, 5, 3);
+    }, 20, 5, keysBuildProbe, 30);
     report.push({
       name: 'keys() 首次构建（50000 题 · IDB）',
-      median: kb.median, min: kb.min, max: kb.max,
-      extra: '逻辑键 ' + keysLen + ' 个（含 50k 字符串物化）'
+      median: kb.median, best: kb.best, p50: kb.p50, p95: kb.p95,
+      runs: kb.runs, samples: kb.samples, min: kb.min, max: kb.max,
+      ratio: kb.ratio, ratioRounds: kb.ratioRounds, ratioSpread: kb.ratioSpread,
+      unitMs: kb.unitMs, injectRatio: kb.injectRatio, injectMs: kb.injectMs,
+      sampleRounds: kb.sampleRounds, probeRounds: kb.probeRounds,
+      extra: '逻辑键 ' + keysLen + ' 个（含 50k 字符串物化）；轮内 keys 中位 '
+        + kb.sampleRounds.map((v) => v.toFixed(1)).join('/') + ' ms，探针 '
+        + kb.probeRounds.map((v) => v.toFixed(1)).join('/') + ' ms；比值 '
+        + kb.ratioRounds.map((v) => v.toFixed(2)).join('/') + '（中位 ' + kb.ratio.toFixed(2)
+        + '，合并 ' + kb.ratioPooled.toFixed(2) + '）；门禁=同轮标定比值'
     });
     const wb = await timed((i) => {
       Q.Storage.setSync(keyProbe, { v: i + 2 });
@@ -1699,7 +1769,6 @@ if (process.argv.indexOf('--assert') >= 0) {
     ['IDB 单次评分写入（5000', 1],
     ['IDB 单次评分写入（20000', 1],
     ['IDB 单次评分写入（50000', 1],
-    ['keys() 首次构建（50000', 40],
     ['keys() 写入已存在键后（50000', 2],
     ['导出构建（JSON+CSV+MD+TXT', 60]
   ];
@@ -1781,11 +1850,15 @@ if (process.argv.indexOf('--assert') >= 0) {
   //   容差 6%：同机连续 6 次运行摆动 ≤2.2%（grade 2.69~2.75，gradeMany 4.94~5.11）；
   //   6% ≈ 3 倍摆动，留足环境噪声；同时负向注入 +10% 实测 > 基线×1.06 → 必失败。
   //   容差再放宽会把 10% 级真实回退淹进噪声，再收紧则对未验证机器/负载过于苛刻（见 docs/DEVELOPMENT.md）。
+  // keys() 首次构建同样改判比值：绝对 40 ms 阈值在整体负载 46% 时会摸到 40.86–45.55 ms，
+  //   判定随负载翻转；探针（纯内存 50000 字符串物化/Set/Array.from）与首次构建同性质、同轮前后各测一次，
+  //   负载同向放大两侧、在比值中抵消。容差与 SRS 共用 bench-baseline.json 的 1.06（来源见 docs/BENCH.md 3-B）。
   const BASELINE = JSON.parse(fs.readFileSync(path.join(__dirname, 'bench-baseline.json'), 'utf8'));
   const NODE_MAJOR = process.versions.node.split('.')[0];
   const nodeBaseline = BASELINE.node && BASELINE.node[NODE_MAJOR];
   const RATIO_TOLERANCE = BASELINE.tolerance || 1.06;
-  [['SRSStore.grade 单次评分', 'grade'], ['SRSStore.gradeMany 批量 20 题', 'gradeMany']]
+  [['SRSStore.grade 单次评分', 'grade'], ['SRSStore.gradeMany 批量 20 题', 'gradeMany'],
+    ['keys() 首次构建（50000', 'keysBuild']]
     .forEach(([needle, key]) => {
       const r = report.find((x) => x.name.indexOf(needle) === 0);
       if (!r) { fails.push(needle + ' 缺失'); return; }
