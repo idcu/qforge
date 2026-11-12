@@ -21,6 +21,7 @@
  * 用法：node scripts/e2e-ci.mjs [--only=s1,s2,s3,s4,s5,s6]
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchBrowser, openSession, findBrowser } from './lib/cdp.mjs';
@@ -28,12 +29,17 @@ import { createAppServer } from './lib/app-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '.analysis', 'e2e-ci');
+// 每次运行使用全新临时 profile（系统临时目录，运行结束无条件删除）：
+// 避免上一次残留的 profile 锁/SingletonLock 导致 Page.navigate 之后求值挂起。
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'qforge-e2e-'));
 const DOWNLOADS = path.join(OUT, 'downloads');
 const SHOTS = path.join(OUT, 'screenshots');
 const APP_PORT = 8821;
 const APP_URL = `http://127.0.0.1:${APP_PORT}`;
 const VIEWPORT = { width: 1280, height: 900 };
-const HARD_LIMIT_MS = 180000;
+const HARD_LIMIT_MS = Number(process.env.QFORGE_E2E_HARD_LIMIT_MS) > 0
+  ? Number(process.env.QFORGE_E2E_HARD_LIMIT_MS)
+  : 180000;
 const TRACE_FILE = path.join(OUT, 'trace.json');
 const RESULT_FILE = path.join(OUT, 'result.json');
 
@@ -45,6 +51,8 @@ const ONLY = (() => {
 })();
 
 fs.rmSync(OUT, { recursive: true, force: true });
+// 历史版本把 profile 放在仓库内（.analysis/e2e-ci-profile），残留可能被旧进程锁住；一次性清理。
+fs.rmSync(path.join(ROOT, '.analysis', 'e2e-ci-profile'), { recursive: true, force: true, maxRetries: 3 });
 fs.mkdirSync(DOWNLOADS, { recursive: true });
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -53,6 +61,13 @@ function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(line);
   runLog.push(line);
+}
+
+/** GitHub Actions 注解：日志匿名不可读时，失败原文仍可通过 check-run annotations 公开查看 */
+function ciCommand(kind, title, message) {
+  if (process.env.GITHUB_ACTIONS !== 'true') return;
+  const esc = (v) => String(v).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+  console.log(`::${kind} title=${esc(title)}::${esc(message)}`);
 }
 
 const scenarios = [];
@@ -75,7 +90,10 @@ function check(ok, label, detail) {
     at: new Date().toISOString()
   };
   current.assertions.push(rec);
-  if (!ok) failedAssertions++;
+  if (!ok) {
+    failedAssertions++;
+    ciCommand('error', 'e2e-' + (current ? current.id : 'run'), label + ' — ' + rec.detail);
+  }
   log(`[${current.id}] ${ok ? 'PASS' : 'FAIL'} ${label} — ${rec.detail}`);
   return !!ok;
 }
@@ -110,6 +128,7 @@ async function finishScenario() {
 
 /** 页面内条件等待（waitForFunction 等价）：50ms 条件轮询，超时 reject；不 sleep 兜底 */
 async function waitFor(s, expr, label, timeout = 20000) {
+  if (current) current.step = '等待：' + label;
   const src = `(async () => {
     const t0 = Date.now();
     for (;;) {
@@ -123,8 +142,17 @@ async function waitFor(s, expr, label, timeout = 20000) {
   return s.ev(src, { awaitPromise: true, timeout: timeout + 3000 });
 }
 
+/** 跨导航条件等待：每次在「当前」执行上下文重新求值，上下文被销毁时重试（reload/跳转后使用） */
+async function waitAcrossNav(s, expr, label, timeout = 30000) {
+  if (current) current.step = '等待：' + label;
+  const r = await s.waitFor(expr, timeout);
+  if (r === true || (r && typeof r === 'object' && !r.timeout)) return r;
+  throw new Error('等待超时：' + label + (r && r.last ? '（最后：' + r.last + '）' : ''));
+}
+
 /** 点击（DOM click，走真实事件委托链）；元素不存在则返回 false */
 async function click(s, selector) {
+  if (current) current.step = '点击：' + selector;
   return s.ev(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) return false;
@@ -448,8 +476,11 @@ async function s6Offline(s) {
     await s.send('Network.emulateNetworkConditions', {
       offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0
     });
+    const originBefore = await s.ev('performance.timeOrigin');
     await s.send('Page.reload', {});
-    await waitFor(s, BOOT + ' && navigator.onLine === false', '离线 reload 启动', 30000);
+    // reload 会销毁执行上下文：用 timeOrigin 变化确认「新文档」而非旧上下文假命中。
+    await waitAcrossNav(s, `performance.timeOrigin !== ${JSON.stringify(originBefore)} && ${BOOT}`
+      + ' && navigator.onLine === false', '离线 reload 启动', 30000);
 
     check(true, '离线 reload 仍能启动');
     const after = await s.ev(`(async () => {
@@ -513,9 +544,82 @@ async function startTrace(browser) {
 /* ------------------------------------------------------------------ */
 let server = null;
 let browser = null;
+let browserBin = null;
 let trace = null;
 let hardTimer = null;
+let timedOut = false;
+const DEBUG_PORT = 9345;
+const runFailures = [];
+let cleaned = false;
 const runStarted = Date.now();
+
+/**
+ * 无条件收尾（成功 / 异常 / 硬超时三条路径都走这里）：
+ * 杀浏览器进程树 → 核对 pid 是否真的退出 → 关静态服务 → 删临时 profile。
+ * 残留进程视为门禁失败（偶发残留会污染后续运行，不能放过）。
+ */
+async function cleanup() {
+  if (cleaned) return;
+  cleaned = true;
+  const pid = browser && browser.pid;
+  try { if (browser) await browser.close(); } catch (e) { log('浏览器关闭失败：' + e.message); }
+  if (pid) {
+    let alive = true;
+    try { process.kill(pid, 0); } catch (e) { alive = false; }
+    if (alive) {
+      failedAssertions++;
+      const detail = 'pid ' + pid + ' 在 close 后仍存活';
+      runFailures.push({ scenario: 'RUN', label: '无残留浏览器进程', detail });
+      ciCommand('error', 'e2e-process', detail);
+      log('残留进程检查：' + detail + '（process.kill(pid,0) 未抛 ESRCH）');
+    } else {
+      log('残留进程检查：pid ' + pid + ' 已退出（process.kill(pid,0) → ESRCH）');
+    }
+  } else {
+    log('残留进程检查：本次未启动浏览器');
+  }
+  try { if (server) await server.close(); } catch (e) { log('静态服务关闭失败：' + e.message); }
+  try {
+    fs.rmSync(PROFILE, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    log('临时 profile 已清理：' + PROFILE + '，仍存在=' + fs.existsSync(PROFILE));
+  } catch (e) {
+    log('临时 profile 清理失败：' + e.message + '（' + PROFILE + '）');
+  }
+}
+
+/** 硬超时取证：当前场景/步骤、未返回的 CDP 方法、最后页面 URL、console 尾部 */
+async function collectDiag() {
+  const diag = {
+    scenario: current ? current.id + ' ' + current.title : '(无进行中场景)',
+    step: current ? current.step || '' : '',
+    inflight: [],
+    url: '',
+    console: [],
+    exceptions: []
+  };
+  try { diag.inflight = browser ? browser.inflight() : []; }
+  catch (e) { diag.inflight = ['(采集失败：' + e.message + ')']; }
+  try {
+    const r = await fetch('http://127.0.0.1:' + DEBUG_PORT + '/json/list');
+    const list = await r.json();
+    const page = list.find((t) => t.type === 'page' && /^https?:/.test(t.url)) || list.find((t) => t.type === 'page');
+    diag.url = page ? page.url : '(无 page target)';
+  } catch (e) { diag.url = '(查询失败：' + e.message + ')'; }
+  if (currentSession) {
+    diag.console = currentSession.events.console.slice(-10).map((c) => c.type + ' ' + c.text);
+    diag.exceptions = currentSession.events.exceptions.slice(-5).map((x) => (x.text || '') + ' ' + (x.desc || ''));
+  }
+  return diag;
+}
+
+function diagLine(diag) {
+  return '场景=' + diag.scenario
+    + '｜步骤=' + (diag.step || '-')
+    + '｜未返回 CDP=' + (diag.inflight.join(',') || '-')
+    + '｜最后 URL=' + diag.url
+    + '｜console 尾=' + (diag.console.join(' || ') || '(空)')
+    + '｜异常尾=' + (diag.exceptions.join(' || ') || '(空)');
+}
 
 async function writeResult(extra) {
   const finishedAt = new Date();
@@ -526,27 +630,45 @@ async function writeResult(extra) {
     finishedAt: finishedAt.toISOString(),
     durationMs: finishedAt.getTime() - runStarted,
     viewport: VIEWPORT,
-    browser: process.env.QFORGE_CHROME || null,
+    browser: browserBin,
     scenarios,
     failures: scenarios.flatMap((sc) => sc.assertions.filter((a) => !a.ok)
-      .map((a) => ({ scenario: sc.id, label: a.label, detail: a.detail })))
+      .map((a) => ({ scenario: sc.id, label: a.label, detail: a.detail }))).concat(runFailures)
   }, extra || {});
   fs.writeFileSync(RESULT_FILE, JSON.stringify(payload, null, 2));
   fs.writeFileSync(path.join(OUT, 'run.log'), runLog.join('\n') + '\n');
 }
 
+async function assertPortFree(port) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 800);
+  try {
+    await fetch('http://127.0.0.1:' + port + '/json/version', { signal: ac.signal });
+    throw new Error('调试端口 ' + port + ' 已被占用：疑似上一次运行残留的浏览器，会导致 CDP 会话错连/挂起');
+  } catch (e) {
+    if (e && e.message && e.message.indexOf('已被占用') >= 0) throw e;
+    // 连接被拒/超时 = 端口空闲，正常
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function main() {
   log('浏览器端到端 CI 门禁启动');
-  log('browser=' + (process.env.QFORGE_CHROME || findBrowser()));
+  const bin = process.env.QFORGE_CHROME || findBrowser();
+  browserBin = bin;
+  log('browser=' + bin);
+  ciCommand('notice', 'e2e-browser', bin);
+  await assertPortFree(DEBUG_PORT);
   server = await createAppServer(ROOT, APP_PORT);
   log('静态服务：' + APP_URL);
 
   browser = await launchBrowser({
-    profileDir: path.join(OUT, 'profile'),
-    port: 9345,
+    profileDir: PROFILE,
+    port: DEBUG_PORT,
     headless: process.env.QFORGE_E2E_HEADED !== '1'
   });
-  log('CDP 就绪');
+  log('CDP 就绪：pid=' + browser.pid + '，临时 profile=' + PROFILE);
   trace = await startTrace(browser);
 
   const s = await openSession(browser, { url: 'about:blank', network: true });
@@ -568,27 +690,47 @@ async function main() {
 }
 
 hardTimer = setTimeout(async () => {
-  log('硬超时：' + HARD_LIMIT_MS + 'ms，写入取证后退出');
+  timedOut = true;
+  log('硬超时：' + HARD_LIMIT_MS + 'ms，开始取证');
+  let diag = null;
   try {
+    diag = await collectDiag();
+    log('硬超时诊断：' + diagLine(diag));
+    ciCommand('error', 'e2e-timeout', '硬超时 ' + HARD_LIMIT_MS + 'ms｜' + diagLine(diag));
     if (current && current.status === 'running') {
-      check(false, '硬超时', HARD_LIMIT_MS + 'ms');
       current.status = 'fail';
       current.finishedAt = new Date().toISOString();
-      await shot(current.id + '-timeout');
+      current.assertions.push({
+        ok: false,
+        label: '硬超时：' + HARD_LIMIT_MS + 'ms',
+        detail: diagLine(diag),
+        at: new Date().toISOString()
+      });
+      failedAssertions++;
     }
+    try {
+      await Promise.race([
+        shot((current ? current.id : 'run') + '-timeout'),
+        new Promise((resolve) => setTimeout(resolve, 8000))
+      ]);
+    } catch (e) { /* 截图失败不阻塞取证 */ }
     if (trace) {
-      try { await trace.stop(); } catch (e) { log('trace 停止失败：' + e.message); }
-      fs.writeFileSync(TRACE_FILE, JSON.stringify({ traceEvents: trace.chunks }, null, 0));
+      try {
+        await trace.stop();
+        fs.writeFileSync(TRACE_FILE, JSON.stringify({ traceEvents: trace.chunks }, null, 0));
+      } catch (e) { log('trace 停止失败：' + e.message); }
     }
-    await writeResult({ timeout: true });
+    await writeResult({ timeout: true, diag });
   } catch (e) {
     log('超时取证失败：' + e.message);
   }
+  await cleanup();
   process.exit(1);
 }, HARD_LIMIT_MS);
 
 main().then(async () => {
   clearTimeout(hardTimer);
+  if (timedOut) return; // 超时路径已写结果并收尾，避免并发覆盖
   let traceEvents = 0;
   try {
     if (trace) {
@@ -599,15 +741,14 @@ main().then(async () => {
   } catch (e) {
     log('trace 落盘失败：' + e.message);
   }
+  await cleanup(); // 先收尾（含残留进程核对），再落结果：残留进程会让本次判红
   await writeResult({ traceEvents });
-  const failed = scenarios.reduce((n, sc) => n + (sc.failed || 0), 0);
-  log(`结果：${failed ? 'FAIL' : 'PASS'}，断言失败 ${failed}，耗时 ${Date.now() - runStarted}ms，产物 ${OUT}`);
-  try { if (browser) await browser.close(); } catch (e) { /* ignore */ }
-  try { if (server) await server.close(); } catch (e) { /* ignore */ }
-  process.exit(failed ? 1 : 0);
+  log(`结果：${failedAssertions ? 'FAIL' : 'PASS'}，断言失败 ${failedAssertions}，耗时 ${Date.now() - runStarted}ms，产物 ${OUT}`);
+  process.exit(failedAssertions ? 1 : 0);
 }).catch(async (e) => {
   clearTimeout(hardTimer);
   log('运行异常：' + (e && e.stack || e));
+  ciCommand('error', 'e2e-crash', (e && e.stack) || String(e));
   if (current && current.status === 'running') {
     check(false, '未捕获异常', e && e.message ? e.message : String(e));
     current.status = 'fail';
@@ -619,8 +760,7 @@ main().then(async () => {
       fs.writeFileSync(TRACE_FILE, JSON.stringify({ traceEvents: trace.chunks }, null, 0));
     }
   } catch (ignored) { /* ignore */ }
+  await cleanup();
   try { await writeResult({ error: String(e && e.stack || e) }); } catch (ignored) { /* ignore */ }
-  try { if (browser) await browser.close(); } catch (ignored) { /* ignore */ }
-  try { if (server) await server.close(); } catch (ignored) { /* ignore */ }
   process.exit(1);
 });

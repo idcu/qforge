@@ -43,6 +43,26 @@ export function findBrowser() {
   return hit;
 }
 
+/** 结束浏览器进程树（Windows 用 taskkill /T，Linux 用 SIGKILL），最多等 5s 确认退出 */
+async function killTree(child) {
+  if (!child || child.exitCode !== null || child.signalCode) return;
+  if (process.platform === 'win32') {
+    await new Promise((resolve) => {
+      const k = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      k.on('exit', resolve);
+      k.on('error', resolve);
+      setTimeout(resolve, 5000);
+    });
+  } else {
+    try { child.kill('SIGKILL'); } catch (e) { /* ignore */ }
+  }
+  const t0 = Date.now();
+  while (Date.now() - t0 < 5000) {
+    try { process.kill(child.pid, 0); } catch (e) { return; }
+    await sleep(100);
+  }
+}
+
 export async function launchBrowser({ profileDir, port, extraArgs = [], headless = false, executablePath }) {
   fs.rmSync(profileDir, { recursive: true, force: true });
   fs.mkdirSync(profileDir, { recursive: true });
@@ -64,8 +84,11 @@ export async function launchBrowser({ profileDir, port, extraArgs = [], headless
     ...extraArgs,
     'about:blank'
   ], { stdio: 'ignore' });
+  let spawnError = null;
+  child.on('error', (e) => { spawnError = e; });
   let wsUrl = null;
   for (let i = 0; i < 100; i++) {
+    if (spawnError) break;
     try {
       const r = await fetch(`http://127.0.0.1:${port}/json/version`);
       const j = await r.json();
@@ -74,28 +97,49 @@ export async function launchBrowser({ profileDir, port, extraArgs = [], headless
     } catch (e) { /* 未就绪 */ }
     await sleep(200);
   }
-  if (!wsUrl) { try { child.kill(); } catch (e) { /* ignore */ } throw new Error('CDP 未就绪：' + bin); }
+  if (!wsUrl) {
+    await killTree(child);
+    throw new Error('CDP 未就绪：' + bin
+      + (spawnError ? '（spawn 失败：' + spawnError.message + '）' : '（20s 内未监听调试端口）'));
+  }
   const ws = new WebSocket(wsUrl);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('CDP WebSocket 连接失败')); });
   let seq = 0;
   const pending = new Map();
   const handlers = new Map();
+
+  const failPending = (why) => {
+    for (const h of pending.values()) {
+      try { clearTimeout(h.timer); } catch (e) { /* ignore */ }
+      h.rej(new Error(why + '：' + h.method));
+    }
+    pending.clear();
+  };
+  ws.onclose = () => failPending('CDP 连接已关闭');
+  ws.onerror = () => failPending('CDP 连接错误');
   ws.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { return; }
     if (msg.id != null) {
       const h = pending.get(msg.id);
       if (!h) return;
       pending.delete(msg.id);
+      try { clearTimeout(h.timer); } catch (e) { /* ignore */ }
       if (msg.error) h.rej(new Error(JSON.stringify(msg.error)));
       else h.res(msg.result);
       return;
     }
     if (msg.method) (handlers.get(msg.method) || []).forEach((fn) => { try { fn(msg.params, msg.sessionId); } catch (e) { /* ignore */ } });
   };
-  const send = (method, params = {}, sessionId) => {
+  // 每条命令都有上限：上下文被导航销毁 / 渲染进程卡住时，reject 而不是永久挂起。
+  const send = (method, params = {}, sessionId, timeoutMs = 15000) => {
     const id = ++seq;
     return new Promise((res, rej) => {
-      pending.set(id, { res, rej });
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        rej(new Error('CDP 超时 ' + timeoutMs + 'ms：' + method));
+      }, timeoutMs);
+      pending.set(id, { res, rej, method, timer });
       ws.send(JSON.stringify(sessionId ? { id, method, params, sessionId } : { id, method, params }));
     });
   };
@@ -103,9 +147,19 @@ export async function launchBrowser({ profileDir, port, extraArgs = [], headless
     if (!handlers.has(method)) handlers.set(method, []);
     handlers.get(method).push(fn);
   };
+  let closePromise = null;
+  const close = async () => {
+    if (closePromise) return closePromise;
+    closePromise = (async () => {
+      try { ws.close(); } catch (e) { /* ignore */ }
+      await killTree(child);
+    })();
+    return closePromise;
+  };
   return {
-    send, on, child,
-    close: async () => { try { ws.close(); } catch (e) { /* ignore */ } try { child.kill(); } catch (e) { /* ignore */ } }
+    send, on, child, pid: child.pid,
+    inflight: () => Array.from(pending.values()).map((h) => h.method),
+    close
   };
 }
 
@@ -136,7 +190,7 @@ export async function openSession(browser, { url = 'about:blank', browserContext
     if (sid !== sessionId) return;
     events.logs.push({ at: Date.now(), level: p.entry.level, text: p.entry.text, source: p.entry.source });
   });
-  const send = (m, p = {}) => browser.send(m, p, sessionId);
+  const send = (m, p = {}, timeoutMs = 15000) => browser.send(m, p, sessionId, timeoutMs);
   await send('Runtime.enable');
   await send('Page.enable');
   await send('Log.enable');
@@ -177,27 +231,41 @@ export async function openSession(browser, { url = 'about:blank', browserContext
   const ev = async (expression, { awaitPromise = true, timeout } = {}) => {
     const payload = { expression, awaitPromise, returnByValue: true, userGesture: true };
     if (timeout) payload.timeout = timeout;
-    const r = await send('Runtime.evaluate', payload);
+    const r = await send('Runtime.evaluate', payload, (timeout || 10000) + 3000);
     if (r.exceptionDetails) {
       throw new Error('evaluate 失败: ' + ((r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text));
     }
     return r.result ? r.result.value : undefined;
   };
-  const navigate = async (targetUrl, timeoutMs = 30000) => {
-    await send('Page.navigate', { url: targetUrl });
+  // 导航 resolve ≠ 执行上下文可用：轻量表达式有界重试，确认上下文真的能求值。
+  const waitContext = async (timeoutMs = 20000) => {
     const t0 = Date.now();
+    let last = null;
     while (Date.now() - t0 < timeoutMs) {
       try {
-        const st = await ev('document.readyState', { awaitPromise: false });
-        if (st === 'complete') return;
-      } catch (e) { /* 导航中 */ }
+        const v = await ev('1 + 1', { awaitPromise: false, timeout: 3000 });
+        if (v === 2) return true;
+      } catch (e) { last = e.message; }
       await sleep(100);
     }
-    throw new Error('navigate 超时: ' + targetUrl);
+    throw new Error('执行上下文未就绪（' + timeoutMs + 'ms）' + (last ? '，最后错误：' + last : ''));
+  };
+  const navigate = async (targetUrl, timeoutMs = 30000) => {
+    await send('Page.navigate', { url: targetUrl }, 15000);
+    const t0 = Date.now();
+    let lastErr = null;
+    while (Date.now() - t0 < timeoutMs) {
+      try {
+        const st = await ev('document.readyState', { awaitPromise: false, timeout: 3000 });
+        if (st === 'complete') { await waitContext(timeoutMs); return; }
+      } catch (e) { lastErr = e.message; }
+      await sleep(100);
+    }
+    throw new Error('navigate 超时：' + targetUrl + (lastErr ? '（最后错误：' + lastErr + '）' : ''));
   };
   const addInitScript = (source) => send('Page.addScriptToEvaluateOnNewDocument', { source });
   const screenshot = async (file) => {
-    const { data } = await send('Page.captureScreenshot', { format: 'png' });
+    const { data } = await send('Page.captureScreenshot', { format: 'png' }, 20000);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, Buffer.from(data, 'base64'));
   };
@@ -216,5 +284,5 @@ export async function openSession(browser, { url = 'about:blank', browserContext
     }
     return { timeout: true, last };
   };
-  return { targetId, sessionId, send, ev, navigate, addInitScript, screenshot, waitFor, events };
+  return { targetId, sessionId, send, ev, navigate, waitContext, addInitScript, screenshot, waitFor, events };
 }
