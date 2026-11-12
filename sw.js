@@ -33,7 +33,6 @@ const CORE = [
   './ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js',
   './ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js',
   './js/importers/xlsx-importer.js',
-  './ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/sqlite-read/src/core.js',
   './js/utils/sqlite-reader.js',
   './js/importers/docx-importer.js',
   './js/importers/qbk-importer.js',
