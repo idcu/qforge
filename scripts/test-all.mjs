@@ -128,14 +128,18 @@ function persistFailure(file, status, output, reason) {
   }
 }
 
-/** 从套件输出里摘失败断言原文（最多 8 行），供摘要与注解使用 */
+/** 从套件输出里摘失败断言原文，供摘要与注解使用
+ *  优先级：先取真正的失败行（`✗` / `FAIL` / `FAILED:`），取不到才退回含「失败」二字的行。
+ *  理由：断言文案里常含「失败」二字（例如「跳过/失败有可见提示」的 ✓ 行），
+ *  只按关键词捞会把通过的 ✓ 行占满名额，真正的那条 ✗ 反而被挤掉（2026-11-12 CI 实测）。 */
 function failLines(out) {
-  return String(out || '').split(/\r?\n/)
-    .filter((l) => /✗|FAIL|失败/.test(l) && !/通过: \d+/.test(l))
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .slice(0, 8)
-    .join(' ⏎ ');
+  const raw = String(out || '').split(/\r?\n/).map((l) => l.trim())
+    .filter((l) => l && !/通过: \d+/.test(l));
+  const strong = raw.filter((l) => /✗/.test(l) || /^FAIL(ED)?[:\s]/.test(l));
+  // 取不到 ✗/FAIL 行时退回输出末 10 行：套件总在末尾打印「失败项：」清单，兜底也拿得到
+  const picked = strong.length ? strong.slice(0, 10) : raw.slice(-10);
+  // 单行截到 300 字符：注解整体上限 900，保留断言标签（在前面）比保留「实测：…」长串更有用
+  return picked.map((l) => (l.length > 300 ? l.slice(0, 300) + '…' : l)).join(' ⏎ ');
 }
 
 function appendProgress(line) {
