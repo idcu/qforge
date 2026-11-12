@@ -825,7 +825,7 @@
       const batch = questions || [];
       const list = Storage.getScopedFresh(K.wrong(bankId), bankId, []).slice();
       batch.forEach((q) => applyWrongEntry(list, q));
-      if (batch.length) Storage.set(K.wrong(bankId), list);
+      if (batch.length) Storage.setSync(K.wrong(bankId), list);
       return list;
     },
     async wrongRemove(bankId, questionKey) {
@@ -880,7 +880,7 @@
       const prev = all[idx];
       const item = Object.assign({}, prev, patch || {}, { id: prev.id, createdAt: prev.createdAt });
       all[idx] = item;
-      Storage.set(K.history, all);
+      Storage.setSync(K.history, all);
       return item;
     },
     async historyRemove(id) {

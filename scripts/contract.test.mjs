@@ -140,17 +140,28 @@ section('错题批量写（R-02）：一次读改写 + 降级');
   QB.Storage.setSync(K, []);
   QB.Storage.forceSync();
 
+  // 批量写入按「落盘一次」计数，不绑定 set / setSync 中的哪个（评分路径已改为同步落盘，
+  // 错题本批量写仍是一次整表读改写；旧逐题实现为 50 次）。
   let calls = 0;
   let bytes = 0;
   const origSet = QB.Storage.set;
-  QB.Storage.set = function (k, v) {
+  const origSetSync = QB.Storage.setSync;
+  const countWrite = (k, v) => {
     if (k === K) { calls += 1; bytes += Buffer.byteLength(JSON.stringify(v), 'utf8'); }
+  };
+  QB.Storage.set = function (k, v) {
+    countWrite(k, v);
     return origSet.call(QB.Storage, k, v);
+  };
+  QB.Storage.setSync = function (k, v) {
+    countWrite(k, v);
+    return origSetSync.call(QB.Storage, k, v);
   };
   const list = await QB.WrongBook.addMany(bank.id, qs);
   QB.Storage.set = origSet;
+  QB.Storage.setSync = origSetSync;
   QB.Storage.forceSync();
-  eq(calls, 1, '50 题一次 addMany 只触发 1 次 Storage.set（旧逐题为 50 次）');
+  eq(calls, 1, '50 题一次 addMany 只落盘 1 次（旧逐题为 50 次）');
   eq(list.length, 50, '返回最终错题列表 50 条');
   eq(list.filter((w) => w.wrongCount === 1).length, 50, '每题为新错题（wrongCount=1）');
 

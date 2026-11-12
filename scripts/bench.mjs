@@ -241,15 +241,24 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
   // 生产路径（R-02）：一次读改写；下方计数与计时均直接调用它，不做本地模拟
   const batchAdd = async () => { await QB.DB.progress.wrongAddMany(benchBank.id, wrongQs); };
 
-  // LS 计数（API 层 set 次数/字节 + 真实落盘次数）
+  // LS 计数（API 层逻辑写次数/字节 + 真实落盘次数）；set / setSync 都算一次写：
+  // 收卷错题本的意图是「整表读改写一次」，不绑定用哪种写入口（评分路径已改为同步落盘）。
   let setCalls = 0;
   let setBytes = 0;
   let diskWrites = 0;
   const origSet = QB.Storage.set;
+  const origSetSync = QB.Storage.setSync;
   const origLsSet = window.localStorage.setItem;
-  QB.Storage.set = function (k, v) {
+  const countWrite = (k, v) => {
     if (k === K) { setCalls += 1; setBytes += Buffer.byteLength(JSON.stringify(v), 'utf8'); }
+  };
+  QB.Storage.set = function (k, v) {
+    countWrite(k, v);
     return origSet.call(QB.Storage, k, v);
+  };
+  QB.Storage.setSync = function (k, v) {
+    countWrite(k, v);
+    return origSetSync.call(QB.Storage, k, v);
   };
   window.localStorage.setItem = function (k, v) {
     if (k.indexOf('user:wrong:') >= 0) diskWrites += 1;
@@ -265,6 +274,7 @@ row('insertMany overwrite 全量重写（对照，含落盘）', await timed(asy
   r02CallsRatio = batchCalls ? oldCalls / batchCalls : 0;
   r02BytesCut = oldBytes ? 1 - batchBytes / oldBytes : 0;
   QB.Storage.set = origSet;
+  QB.Storage.setSync = origSetSync;
   window.localStorage.setItem = origLsSet;
 
   const tOld = await timed(async () => {
@@ -2128,9 +2138,10 @@ if (process.argv.indexOf('--assert') >= 0) {
     + '（最小样本：20000 ≤ 1.00 ms 且 ≤ max(4×1000, 3×3000)+0.2；中位数被 GC 长尾污染，只作观测）'
     + (PERHASH_INJECT_MS > 0 ? '；负向注入 +' + ms(PERHASH_INJECT_MS) + '/样本' : ''));
   if (!writeOk) fails.push('per-hash 写入复杂度不达标');
-  // R-02：收卷错题批量写——同轮旧逐题 vs 生产 wrongAddMany；set 调用 ≥25× 减少、累计字节 ≥90% 减少
+  // R-02：收卷错题批量写——同轮旧逐题 vs 生产 wrongAddMany；逻辑写次数 ≥25× 减少、累计字节 ≥90% 减少
+  //（「逻辑写」= set 或 setSync 一次；不绑定写入口，语义是整表只读改写一次）
   const r02Ok = r02CallsRatio >= 25 && r02BytesCut >= 0.9;
-  console.log((r02Ok ? '  ✓ ' : '  ✗ ') + 'R-02 收卷错题批量写：set 减少 ' + r02CallsRatio.toFixed(1)
+  console.log((r02Ok ? '  ✓ ' : '  ✗ ') + 'R-02 收卷错题批量写：写入调用减少 ' + r02CallsRatio.toFixed(1)
     + '×（要求 ≥25×），累计字节减少 ' + (r02BytesCut * 100).toFixed(1) + '%（要求 ≥90%）');
   if (!r02Ok) fails.push('R-02 收卷错题批量写不达标：' + r02CallsRatio.toFixed(1) + '× / ' + (r02BytesCut * 100).toFixed(1) + '%');
   // R-19：分享前估算——540 题与 8MB 边界，estimateChars 必须与真实 encode 字符数逐字一致（2/2）

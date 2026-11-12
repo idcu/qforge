@@ -100,7 +100,12 @@
     const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
     invalidateReviewLog(); // 今日额度已变化，首页下次渲染重新推导
     if (!entry) return null;
-    if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
+    // 错题本与评分同步落盘（崩溃/强杀不丢最近一次评分）：写入失败走 T10 可观测出口，
+    // 但不得阻断随后的调度写入——两者是独立数据，失败只影响各自。
+    if (QB.WrongBook.isWrongResult(r)) {
+      try { await QB.WrongBook.add(State.bankId, q); }
+      catch (e) { notifyBackgroundError('保存错题失败', e); }
+    }
     try {
       await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
     } catch (e) { notifyBackgroundError('保存复习进度失败', e); }
@@ -197,6 +202,8 @@
         accuracy: score.accuracy,
         byType: State.engine.byType()
       });
+      // 自评回写同步落盘：IDB 模式入队后立即确认，避免「自评后强杀」丢这次成绩。
+      if (QB.Storage && typeof QB.Storage.flush === 'function') await QB.Storage.flush();
     } catch (e) {
       UI.toast('自评已记录，但历史成绩同步失败', 'err');
     }

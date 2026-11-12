@@ -11,7 +11,8 @@ import { createHarness } from './_harness.mjs';
 import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { QB } = await createHarness(path.resolve(__dirname, '..'));
+const ROOT = path.resolve(__dirname, '..');
+const { QB } = await createHarness(ROOT);
 QB.DB.init();
 
 let pass = 0;
@@ -211,6 +212,79 @@ section('删库级联清理：复习状态/preset/按库 revlog 不残留（评�
   // 库B 不受影响
   ok(!!(await QB.SRSStore.getState(cb.id, qb2)), '库B 复习状态保留');
   ok((await QB.FSRSOpt.readLog()).some((e) => e.b === cb.id), '库B revlog 保留');
+}
+
+section('崩溃/强杀：评分与错题本在写入返回时已落盘（不依赖 200ms 防抖）');
+{
+  const raw = new Map(); // 两个 harness 共享同一份底层存储 = 同一块用户磁盘
+  const A = await createHarness(ROOT, { raw });
+  A.QB.DB.init();
+  const bank = await A.QB.DB.banks.create({ name: '崩溃复现库' });
+  await A.QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: '崩溃复现题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+  ], { dedupe: false });
+  const q = (await A.QB.DB.questions.list(bank.id, {})).items[0];
+  const key = A.QB.SRSStore.keyFor(q);
+  await A.QB.Storage.flush(); // 前置数据先正常落盘，让「重启」能看到题库
+
+  // 一次答错：与 recordGraded 同序（错题本 → SRS 评分）。此后进程立即消失：
+  // 不调用 flush、不等 200ms 防抖定时器（模拟强杀）。
+  await A.QB.WrongBook.add(bank.id, q);
+  const st = await A.QB.SRSStore.grade(bank.id, q, A.QB.SRS.RATINGS.again, T0);
+  // 强杀点：此刻进程消失。不 flush，直接看底层存储——同一 tick 内 200ms 防抖定时器不可能已执行，
+  // 因此这两条等价于「写入返回时数据已经在盘上」。
+  const diskKeys = Array.from(raw.keys());
+  ok(diskKeys.some((k) => k.indexOf('wrong:' + bank.id) >= 0), '返回即落盘：错题本已在底层存储（不等 200ms）');
+  ok(diskKeys.some((k) => k.indexOf(key) >= 0), '返回即落盘：评分状态已在底层存储（不等 flush）');
+
+  // 自评回写（交卷记录补成绩）：同样必须在返回时落盘，否则强杀丢这一次成绩
+  const hist = await A.QB.History.add({ bankId: bank.id, total: 1, correct: 0, wrong: 0, score: 0 });
+  await A.QB.History.update(hist.id, { correct: 1, wrong: 0, score: 100, accuracy: 1 });
+  ok(Array.from(raw.entries()).some(([k, v]) => k.indexOf('history') >= 0 && String(v).indexOf('"score":100') >= 0),
+    '自评回写成绩在返回时已落盘（不等 200ms）');
+
+  // 重启：同一份底层存储，走一次启动（DB.init + 题库水合）
+  const B = await createHarness(ROOT, { raw });
+  B.QB.DB.init();
+  if (typeof B.QB.Storage.ensureBank === 'function') await B.QB.Storage.ensureBank(bank.id);
+  const st2 = await B.QB.SRSStore.getState(bank.id, q);
+  eq(st2 && st2.last, st.last, '强杀后重启：最近一次评分仍在（last 一致）');
+  const histB = (await B.QB.History.list()).find((x) => x.id === hist.id);
+  ok(histB && histB.score === 100, '强杀后重启：自评回写的成绩仍在');
+  const wrongs = await B.QB.DB.progress.wrongList(bank.id);
+  ok(wrongs.some((w) => w.questionKey === key), '强杀后重启：错题本条目仍在');
+  eq((await B.QB.DB.revlog.list()).filter((e) => e.h === key).length, 1, '强杀后重启：评分日志恰 1 条');
+
+  // 正常收尾后再重启：不重复补写（幂等）
+  await B.QB.Storage.flush();
+  const C = await createHarness(ROOT, { raw });
+  C.QB.DB.init();
+  if (typeof C.QB.Storage.ensureBank === 'function') await C.QB.Storage.ensureBank(bank.id);
+  eq((await C.QB.DB.revlog.list()).filter((e) => e.h === key).length, 1, '重复重启不重复写入评分日志');
+  eq((await C.QB.DB.progress.wrongList(bank.id)).length, wrongs.length, '重复重启不重复写入错题本');
+  const st3 = await C.QB.SRSStore.getState(bank.id, q);
+  eq(st3 && st3.last, st.last, '重复重启后评分未被改写');
+}
+
+section('写失败仍可观测：同步落盘失败抛错 + onWriteError 通知（T10 不回归）');
+{
+  const raw = new Map();
+  const H = await createHarness(ROOT, { raw });
+  H.QB.DB.init();
+  const bank = await H.QB.DB.banks.create({ name: '写失败库' });
+  await H.QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: '写失败题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+  ], { dedupe: false });
+  const q = (await H.QB.DB.questions.list(bank.id, {})).items[0];
+  await H.QB.Storage.flush();
+  const errs = [];
+  H.QB.Storage.onWriteError((e) => errs.push(e));
+  H.controls.failWrites = true;
+  let threw = false;
+  try { await H.QB.WrongBook.add(bank.id, q); } catch (e) { threw = true; }
+  H.controls.failWrites = false;
+  ok(threw, '同步落盘失败向调用方抛错');
+  ok(errs.length >= 1, 'onWriteError 已通知（可观测，不静默）');
 }
 
 console.log('\n================ 汇总 ================');
