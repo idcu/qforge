@@ -391,7 +391,8 @@ const DOCS_WITH_NUMBERS = [
   'README.md',
   'docs/DEVELOPMENT.md',
   'docs/TESTING.md',
-  'docs/BENCH.md'
+  'docs/BENCH.md',
+  'docs/BENCH-DATA.md'
 ].map(readDoc);
 
 const ctx = { counts, totalAssertions, gateCount, runOrder, suiteFiles, firstScreen };
