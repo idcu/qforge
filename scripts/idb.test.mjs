@@ -1486,7 +1486,8 @@ section('B 段前置：建库/进入新库 ensureBank（C 步骤3 后半：legac
   // 静态：ensureBank 归属调用方（建库/示例库/删库后进入新当前库/恢复练习进入库），
   // 且不得塞进 readMap/legacyReviewMap 内部当兜底
   const appSrc2 = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8')
-    + '\n' + fs.readFileSync(path.join(ROOT, 'js/modules/action-router.js'), 'utf8');
+    + '\n' + fs.readFileSync(path.join(ROOT, 'js/modules/action-router.js'), 'utf8')
+    + '\n' + fs.readFileSync(path.join(ROOT, 'js/modules/quiz-session.js'), 'utf8');
   const laSrc2 = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
   const ensureNear = (marker, span) => {
     const i = appSrc2.indexOf(marker);

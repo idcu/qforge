@@ -423,7 +423,8 @@ section('视觉回归：语义文字令牌 / 条形图填充 / 窄屏不裁剪')
   ok(/\.sched-check\s*\{[^}]*min-height:\s*var\(--tap-min\)/.test(CSS),
     '复选框热区由包裹 label 撑到 44px（不改全站表单）');
   ok(!/overflow-x:\s*hidden/.test(CSS), '无 overflow-x:hidden 裁剪（溢出必须从布局根因解决）');
-  const appSrc2 = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8');
+  const appSrc2 = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8')
+    + '\n' + fs.readFileSync(path.join(QB_DIR, 'js/modules/quiz-dialogs.js'), 'utf8');
   ok(!/repeat\(7,1fr\)/.test(appSrc2) && /class="qe-grid sched-grid"/.test(appSrc2) && /class="sched-days"/.test(appSrc2),
     '复习设置弹窗改用作用域类（移除内联 repeat(7,1fr) 网格）');
 }

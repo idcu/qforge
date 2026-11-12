@@ -302,8 +302,8 @@
     syncTabs();
 
     const built = await QB.ViewRouter.build(State, {
-      quizReviewState: quizReviewState,
-      quizReviewHistory: quizReviewHistory
+      quizReviewState: QB.QuizSession.quizReviewState,
+      quizReviewHistory: QB.QuizSession.quizReviewHistory
     });
     let html = built.html;
     let regions = built.regions;
@@ -331,551 +331,27 @@
     }
   }
 
-  /* ---------------- 答题流程 ---------------- */
-
-  function beginQuiz(questions, mode, title, opts) {
-    if (!questions || !questions.length) { UI.toast('没有可作答的题目', 'err'); return; }
-    const engine = new QB.QuizEngine();
-    engine.loadQuestions(questions, 'mixed', opts || {});
-    engine.mode = mode || 'practice';
-    engine.startedAt = Date.now();
-    // 考试截止时间随会话持久化：刷新/崩溃恢复后按剩余时间继续，而不是重新计时
-    if (engine.mode === 'exam' && engine.durationMs > 0) engine.deadlineAt = engine.startedAt + engine.durationMs;
-    State.engine = engine;
-    State.quizMeta = { startTs: engine.startedAt, title: title || '', focusLeaves: 0, locked: false };
-    State.view = 'quiz';
-    startQuizTimer(engine);
-    QB.ProgressSaver.save(State.bankId, engine);
-    hydrateQuizReviewContext(State.bankId, engine);
-    render();
-  }
-
-  /** 按引擎配置启动计时：考试→倒计时（durationMs>0）；练习→可选正计时 */
-  function startQuizTimer(engine) {
-    if (!engine) return stopTimer();
-    if (engine.mode === 'exam') startExamTimer();
-    else if (engine.showTimer) startPracticeTimer();
-    else stopTimer();
-  }
-
-  function startExamTimer() {
-    stopTimer();
-    const eng = State.engine;
-    const total = (eng && eng.durationMs) || 0;
-    if (total <= 0) return; // 0=不限时，不启动倒计时
-    // 剩余时间统一由引擎计算：deadlineAt > startedAt+durationMs > 旧会话整段回退
-    const rem = eng.remainingMs ? eng.remainingMs() : total;
-    State.timerText = QB.Helpers.formatDuration(rem);
-    updateStatus();
-    State.timer = QB.createExamTimer({
-      durationMs: rem,
-      onTick: (rem) => { State.timerText = QB.Helpers.formatDuration(rem); updateStatus(); },
-      onExpire: () => { UI.toast('考试时间到，已自动交卷', 'err'); finishQuiz(); }
-    });
-    State.timer.start();
-  }
-
-  /** 练习模式可选正计时（仅显示用时，不自动结束） */
-  function startPracticeTimer() {
-    stopTimer();
-    State.timerText = QB.Helpers.formatDuration(0);
-    State.timer = QB.createExamTimer({
-      countUp: true,
-      onTick: (elapsed) => { State.timerText = QB.Helpers.formatDuration(elapsed); updateStatus(); }
-    });
-    State.timer.start();
-    updateStatus();
-  }
-
-  function stopTimer() {
-    if (State.timer) { State.timer.stop(); State.timer = null; }
-    State.timerText = '';
-  }
-
-  async function recordWrongs(engine) {
-    // R-02：一次筛出本场错题并整表写一次；禁止逐题 add（旧实现 50 题 → 50 次整表读改写）
-    const wrongs = QB.WrongBook.sessionWrongs(engine.questions, engine.results);
-    if (wrongs.length) await QB.WrongBook.addMany(State.bankId, wrongs);
-  }
-
-  /**
-   * 记录一次「已判定」结果：SRS 调度 + 错题本（练习即时判分与自评共用）。
-   * 材料题聚合仍为 null（还有小问待自评）时 collectGraded 返回空，不会重复记调度。
-   */
-  async function recordGraded(q, r) {
-    const [entry] = QB.SRSStore.collectGraded([{ question: q, result: r }]);
-    invalidateReviewLog(); // 今日额度已变化，首页下次渲染重新推导
-    if (!entry) return null;
-    if (QB.WrongBook.isWrongResult(r)) await QB.WrongBook.add(State.bankId, q);
-    try {
-      await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
-    } catch (e) { notifyBackgroundError('保存复习进度失败', e); }
-    return entry;
-  }
-
-  /** 提交当前题（练习模式），答错则自动进错题本 */
-  async function submitCurrent() {
-    const engine = State.engine;
-    if (!engine || engine.hasAnswered() || !engine.canSubmit()) return;
-    const q = engine.getCurrentQuestion();
-    const r = engine.submitAnswer();
-    await recordGraded(q, r);
-    QB.ProgressSaver.saveDebounced(State.bankId, engine);
-    render();
-  }
-
-  async function finishQuiz() {
-    const engine = State.engine;
-    if (!engine) return;
-    // 防双击/自动交卷与手动交卷并发：入口即上锁，重复调用直接返回；失败时释放锁供重试。
-    State.quizMeta = State.quizMeta || {};
-    if (State.quizMeta.locked || State.quizMeta.finishing) return;
-    State.quizMeta.finishing = true;
-    try {
-      await finishQuizCore(engine);
-    } catch (e) {
-      State.quizMeta.finishing = false;
-      throw e;
-    }
-  }
-
-  async function finishQuizCore(engine) {
-    const isExam = engine.mode === 'exam';
-    stopTimer();
-    if (isExam) {
-      engine.gradeAll();
-      await recordWrongs(engine);
-    }
-    // SRS：把本次已判定但尚未记录的结果批量写入复习调度（练习即时评过的题、简答待自评均跳过）
-    const srsEntries = QB.SRSStore.collectGraded(
-      engine.questions.map((question, i) => ({ question: question, result: engine.results[i] }))
-    );
-    invalidateReviewLog();
-    if (srsEntries.length) {
-      try { await QB.SRSStore.gradeMany(State.bankId, srsEntries); }
-      catch (e) { notifyBackgroundError('保存成绩失败', e); }
-    }
-    const score = engine.getScore();
-    const durationMs = Date.now() - (State.quizMeta.startTs || engine.startedAt || Date.now());
-    const historyRecord = await QB.History.add({
-      bankId: State.bankId,
-      bankName: State.bank ? State.bank.name : '',
-      mode: engine.mode,
-      total: engine.questions.length,
-      correct: score.correct,
-      wrong: score.wrong,
-      pending: score.pending,
-      score: score.score,
-      accuracy: score.accuracy,
-      byType: engine.byType(),
-      durationMs: durationMs,
-      focusLeaves: isExam ? (State.quizMeta.focusLeaves || 0) : 0
-    });
-    State.quizMeta.locked = true;
-    State.quizMeta.finishing = false;
-    await QB.ProgressSaver.clear();
-    State.resultMeta = {
-      title: isExam ? '考试结果' : '练习结果',
-      durationMs: durationMs,
-      focusLeaves: isExam ? (State.quizMeta.focusLeaves || 0) : 0,
-      isExam: isExam,
-      historyId: historyRecord && historyRecord.id
-    };
-    State.view = 'result';
-    render();
-  }
-
-  /**
-   * 结果页自评后把成绩回写到本次历史记录（历史是快照，但待自评计分不应永久缺失）。
-   * 只更新计数/得分/正确率/题型分布，不触碰 id、创建时间与题库名等身份字段。
-   */
-  async function syncResultHistory() {
-    const id = State.resultMeta && State.resultMeta.historyId;
-    if (!id || !State.engine) return;
-    const score = State.engine.getScore();
-    try {
-      await QB.History.update(id, {
-        correct: score.correct,
-        wrong: score.wrong,
-        partial: score.partial,
-        pending: score.pending,
-        score: score.score,
-        accuracy: score.accuracy,
-        byType: State.engine.byType()
-      });
-    } catch (e) {
-      UI.toast('自评已记录，但历史成绩同步失败', 'err');
-    }
-  }
-
-  /** 错题重练：在错题池上可选题型/分类/题量后再练（池=当前错题本） */
-  async function openWrongDialog() {
-    const list = await QB.WrongBook.list(State.bankId);
-    if (!list.length) { UI.toast('错题本是空的', 'err'); return; }
-    const pool = list.map((x) => x.question);
-    openStartDialog('practice', {
-      pool: pool,
-      title: '错题重练（' + pool.length + ' 题）',
-      quizTitle: '错题重练'
-    });
-  }
-
-  /** 结果页「错题重练」：只练本场作答的错题（口径与错题本写入一致：错且非半对） */
-  function startResultWrongQuiz() {
-    const engine = State.engine;
-    if (!engine) return;
-    const wrongs = QB.WrongBook.sessionWrongs(engine.questions, engine.results);
-    if (!wrongs.length) { UI.toast('本次没有错题 🎉', 'ok'); return; }
-    beginQuiz(QB.shuffle(wrongs), 'practice', '本次错题重练（' + wrongs.length + ' 题）');
-  }
-
-  async function startFavoriteQuiz() {
-    const list = await QB.Favorites.list(State.bankId);
-    if (!list.length) { UI.toast('收藏夹是空的', 'err'); return; }
-    beginQuiz(QB.shuffle(list.map((x) => x.question)).slice(0, QB.CONFIG.QUESTIONS_PER_QUIZ), 'practice', '收藏练习');
-  }
-
-  /**
-   * 错题+薄弱一键集训（C010）：错题本 ∪ revlog 薄弱 → 1 次点击直接开练。
-   * 错题页 needsFullQuestions() 为 false，必须显式 loadQuestions，不能依赖 State.allQuestions。
-   */
-  async function startSmartPractice() {
-    if (!State.bankId) { UI.toast('请先打开一个题库', 'err'); return; }
-    const [wrongList, { items }, log] = await Promise.all([
-      QB.WrongBook.list(State.bankId),
-      QB.DB.loadQuestions(State.bankId),
-      reviewLogFor(State.bankId)
-    ]);
-    const built = QB.PracticeBuilder.build({
-      questions: items || [],
-      wrongKeys: (wrongList || []).map((w) => w.questionKey),
-      revlog: log,
-      bankId: State.bankId,
-      limit: QB.CONFIG.LIMITS.QUESTIONS_PER_QUIZ,
-      seed: Date.now() % 2147483647
-    });
-    if (!built.questions.length) {
-      UI.toast('没有错题或薄弱点（薄弱 = 作答≥' + QB.CONFIG.LIMITS.WEAK_MIN_ATTEMPTS +
-        ' 且正确率<' + QB.CONFIG.LIMITS.WEAK_ACCURACY + '%）', 'ok');
-      return;
-    }
-    beginQuiz(built.questions, 'practice',
-      '错题+薄弱集训（' + built.counts.total + ' 题：错题 ' + built.counts.wrong + ' / 薄弱 ' + built.counts.weak + '）');
-  }
-
-  /** 当前题 FSRS 状态（本场开练时快照；无快照返回 null） */
-  function quizReviewState(q) {
-    if (!q || !State.quizMeta.reviewMap) return null;
-    return State.quizMeta.reviewMap[QB.makeQuestionKey(q)] || null;
-  }
-
-  /** 当前题评分历史（本场开练时快照；无快照返回 null） */
-  function quizReviewHistory(q) {
-    if (!q || !State.quizMeta.revlogByHash) return null;
-    return State.quizMeta.revlogByHash[QB.makeQuestionKey(q)] || null;
-  }
-
-  /** 开练时一次性载入本题库的调度状态与 revlog（每题渲染只查内存，api 模式不逐题 GET） */
-  function hydrateQuizReviewContext(bankId, engine) {
-    if (!bankId) return;
-    Promise.all([QB.SRSStore.readMap(bankId), QB.DB.revlog.list()])
-      .then(([map, log]) => {
-        if (State.engine !== engine) return; // 已切场，丢弃旧快照
-        const byHash = {};
-        (log || []).forEach((e) => {
-          if (!e || e.b !== bankId || !e.h) return;
-          (byHash[e.h] = byHash[e.h] || []).push(e);
-        });
-        State.quizMeta.reviewMap = map || {};
-        State.quizMeta.revlogByHash = byHash;
-        render();
-      })
-      .catch((e) => { notifyBackgroundError('加载复习历史失败', e); });
-  }
-
-  /** 今日复习：按题库限额排 learning → 到期 → 新题（不再一次性灌全库） */
-  async function startReview() {
-    const reviewMap = await QB.SRSStore.readMap(State.bankId);
-    const log = await reviewLogFor(State.bankId);
-    const daily = QB.ReviewQueue.dailyFromLog(log, State.bankId, Date.now());
-    const queue = QB.ReviewQueue.build(State.allQuestions, reviewMap, {
-      settings: QB.SchedSettings.ofBank(State.bank),
-      now: Date.now(),
-      daily: daily
-    });
-    if (!queue.questions.length) {
-      UI.toast('今日额度已用完或没有到期题（可在统计页调整复习设置）', 'ok');
-      return;
-    }
-    const c = queue.counts;
-    beginQuiz(queue.questions, 'practice',
-      '今日复习（' + c.total + ' 题：到期 ' + c.duePicked + ' / 新 ' + c.newPicked + ' / 学习中 ' + c.learning + '）');
-  }
 
   /* ---------------- 事件处理 ---------------- */
 
   async function handleAction(el) {
+    const S = QB.QuizSession;
+    const D = QB.QuizDialogs;
     return QB.AppActions.handle(el, {
       State: State, UI: UI,
-      beginQuiz: beginQuiz, downloadBootDiagnostics: downloadBootDiagnostics, finishQuiz: finishQuiz,
+      beginQuiz: S.beginQuiz, downloadBootDiagnostics: QB.BootDiagnostics.downloadBootDiagnostics,
+      finishQuiz: S.finishQuiz,
       invalidateBanks: invalidateBanks, invalidateReviewLog: invalidateReviewLog, loadBankData: loadBankData,
-      openChapterDialog: openChapterDialog, openMixedDialog: openMixedDialog, openSchedDialog: openSchedDialog,
-      openStartDialog: openStartDialog, openWrongDialog: openWrongDialog, recordGraded: recordGraded,
-      render: render, startFavoriteQuiz: startFavoriteQuiz, startResultWrongQuiz: startResultWrongQuiz,
-      startReview: startReview, startSmartPractice: startSmartPractice, submitCurrent: submitCurrent,
-      switchBank: switchBank, syncResultHistory: syncResultHistory
+      openChapterDialog: D.openChapterDialog, openMixedDialog: D.openMixedDialog, openSchedDialog: D.openSchedDialog,
+      openStartDialog: D.openStartDialog, openWrongDialog: D.openWrongDialog, recordGraded: S.recordGraded,
+      render: render, startFavoriteQuiz: S.startFavoriteQuiz, startResultWrongQuiz: S.startResultWrongQuiz,
+      startReview: S.startReview, startSmartPractice: S.startSmartPractice, submitCurrent: S.submitCurrent,
+      switchBank: switchBank, syncResultHistory: S.syncResultHistory
     });
   }
 
 
 
-  /** 章节顺序练习：按分类保持题库原始顺序逐题作答（题目不洗牌，选项乱序仍按设置） */
-  function openChapterDialog() {
-    const cats = QB.SearchFilter.categories(State.allQuestions);
-    const uncategorized = State.allQuestions.filter((q) => !q.category).length;
-    const options = ['<option value="">全部分类（按题库原序）</option>']
-      .concat(cats.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>'));
-    if (uncategorized) options.push('<option value="__none__">（未分类 ' + uncategorized + ' 题）</option>');
-    UI.openModal(
-      '<h3>章节顺序练</h3>' +
-      '<p class="li-meta">按题库中题目的原始顺序逐题作答（不随机抽题、不洗牌），适合系统过一遍教材章节。选项乱序遵循全局设置。</p>' +
-      '<div class="qe-grid"><div><label class="qe-label">选择章节</label><select id="ch-cat">' + options.join('') + '</select></div>' +
-      '<div><label class="qe-label">模式</label><select id="ch-mode"><option value="practice">练习（即时判分）</option>' +
-      '<option value="exam">考试（交卷整卷判分）</option></select></div></div>' +
-      '<div class="checkbox-row"><input type="checkbox" id="ch-limit" /><label for="ch-limit">限制每章题量（0 或不勾=全部）</label>' +
-      '<input type="number" id="ch-n" class="bp-n" min="0" value="0" style="width:80px;margin-left:8px" /></div>' +
-      '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
-      '<button class="btn" data-action="modal-ok">开始</button></div>',
-      (modal) => {
-        modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
-        modal.querySelector('[data-action="modal-ok"]').onclick = () => {
-          const cat = modal.querySelector('#ch-cat').value;
-          const mode = modal.querySelector('#ch-mode').value;
-          const limit = modal.querySelector('#ch-limit').checked ? (parseInt(modal.querySelector('#ch-n').value, 10) || 0) : 0;
-          UI.closeModal();
-          let qs;
-          if (cat === '__none__') {
-            qs = State.allQuestions.filter((q) => !q.category);
-          } else if (cat) {
-            qs = QB.Blueprint.filterPool(State.allQuestions, { category: cat });
-          } else {
-            qs = State.allQuestions.slice();
-          }
-          if (limit > 0) qs = qs.slice(0, limit);
-          if (!qs.length) { UI.toast('该章节没有题目', 'err'); return; }
-          // 不传 shuffleOptions：选项乱序遵循全局 CONFIG.SHUFFLE_OPTIONS；题目本身保持原序（不洗牌）
-          beginQuiz(qs, mode, cat ? ('章节练 · ' + cat) : '全库顺序练');
-        };
-      }
-    );
-  }
-
-  /** 读取弹窗内各题型的「数量 / 每题分值」输入（组卷与练习·考试开始弹窗共用） */
-  function readTypeInputs(modal) {
-    const counts = {};
-    const points = {};
-    Array.prototype.forEach.call(modal.querySelectorAll('[data-bp-type]'), (el) => {
-      counts[el.getAttribute('data-bp-type')] = parseInt(el.value, 10) || 0;
-    });
-    Array.prototype.forEach.call(modal.querySelectorAll('[data-bp-pts]'), (el) => {
-      points[el.getAttribute('data-bp-pts')] = parseInt(el.value, 10) || 0;
-    });
-    return { counts: counts, points: points };
-  }
-
-  function openMixedDialog() {
-    const avail = QB.Blueprint.availability(State.allQuestions, {});
-    const cats = QB.SearchFilter.categories(State.allQuestions);
-    UI.openModal(UI.renderMixDialog(avail, cats), (modal) => {
-      modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
-      modal.querySelector('[data-action="modal-ok"]').onclick = () => {
-        const { counts } = readTypeInputs(modal);
-        const items = QB.CONFIG.TYPES.map((t) => ({ type: t, count: counts[t] || 0 }));
-        const category = modal.querySelector('[data-bp-cat]').value;
-        const minDifficulty = parseInt(modal.querySelector('[data-bp-min]').value, 10) || 0;
-        const maxDifficulty = parseInt(modal.querySelector('[data-bp-max]').value, 10) || 0;
-        const asExam = modal.querySelector('#bp-exam').checked;
-        const shuffleOpts = modal.querySelector('#bp-shuffle').checked;
-        const shuffleChildren = modal.querySelector('#bp-shuffle-child').checked;
-        const orderShuffled = modal.querySelector('#bp-ordshuf').checked;
-        UI.closeModal();
-        const spec = { items: items, category: category || undefined, keepOrder: !orderShuffled };
-        if (minDifficulty) spec.minDifficulty = minDifficulty;
-        if (maxDifficulty) spec.maxDifficulty = maxDifficulty;
-        const { questions, shortages } = QB.Blueprint.compose(State.allQuestions, spec);
-        if (!questions.length) { UI.toast('按当前蓝图没有可组卷的题目', 'err'); return; }
-        if (shortages.length) {
-          UI.toast('部分题型题量不足，实际组卷 ' + questions.length + ' 题', 'err');
-        }
-        beginQuiz(questions, asExam ? 'exam' : 'practice', asExam ? '组卷考试' : '组卷练习', {
-          shuffleOptions: shuffleOpts,
-          shuffleChildren: shuffleChildren
-        });
-      };
-    });
-  }
-
-  /**
-   * 练习/考试开始：按题型设置「抽取数量 + 每题分值」，可再选分类；
-   *   考试模式可设时长；练习模式可选显示正计时。
-   * @param {string} mode 'practice' | 'exam'
-   * @param {Object} [opts]
-   *   pool? 题池（默认 State.allQuestions；错题重练传入错题池）
-   *   title? 弹窗标题；quizTitle? 入场标题
-   */
-  function openStartDialog(mode, opts) {
-    opts = opts || {};
-    if (!State.bank) { UI.toast('请先选择题库或新建题库', 'err'); return; }
-    const pool0 = opts.pool || State.allQuestions;
-    if (!pool0.length) { UI.toast('当前题池没有题目，请先导入或换题库', 'err'); return; }
-    const avail = QB.Blueprint.availability(pool0, {});
-    const cats = QB.SearchFilter.categories(pool0);
-    const quizTitle = opts.quizTitle || (mode === 'exam' ? '考试模式' : '练习模式');
-    const prefs = QB.StartPrefs.load(mode);
-    UI.openModal(UI.renderStartDialog(mode, avail, cats, { title: opts.title, prefs: prefs }), (modal) => {
-      modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
-      modal.querySelector('[data-action="modal-ok"]').onclick = () => {
-        const { counts, points } = readTypeInputs(modal);
-        const items = QB.CONFIG.TYPES.map((t) => ({ type: t, count: counts[t] || 0 }))
-          .filter((it) => it.count > 0);
-        const category = modal.querySelector('[data-st-cat]').value;
-        const shuffleOpts = modal.querySelector('#st-shuffle-opt').checked;
-        const shuffleChildren = modal.querySelector('#st-shuffle-child').checked;
-        let durationMin = 0;
-        let showTimer = false;
-        if (mode === 'exam') {
-          durationMin = parseInt(modal.querySelector('#st-duration').value, 10) || 0;
-        } else {
-          showTimer = modal.querySelector('#st-timer').checked;
-        }
-        UI.closeModal();
-        if (!items.length) { UI.toast('请先为至少一种题型设置抽取数量（0=不选）', 'err'); return; }
-        const { questions, shortages } = QB.Blueprint.compose(pool0, { items: items, category: category || undefined });
-        if (!questions.length) { UI.toast('按当前条件没有可作答的题目', 'err'); return; }
-        if (shortages.length) {
-          UI.toast('部分题型数量不足，实际组卷 ' + questions.length + ' 题', 'err');
-        }
-        // 记住本次可用参数（非关键数据：失败不阻断开始答题）
-        try {
-          QB.StartPrefs.save(mode, {
-            counts: counts,
-            points: points,
-            category: category,
-            durationMin: mode === 'exam' ? durationMin : 0,
-            showTimer: showTimer,
-            shuffleOptions: shuffleOpts,
-            shuffleChildren: shuffleChildren
-          });
-        } catch (e) { /* 配额/存储异常：忽略偏好保存，不影响本次组卷 */ }
-        // 仅显式填写的每题分值才作为本场覆盖；留空=按题目自带分值/默认（M4）
-        const pointsMap = {};
-        items.forEach((it) => {
-          if (points[it.type] > 0) pointsMap[it.type] = points[it.type];
-        });
-        const quizOpts = { shuffleOptions: shuffleOpts, shuffleChildren: shuffleChildren, showTimer: showTimer };
-        if (Object.keys(pointsMap).length) quizOpts.pointsMap = pointsMap;
-        if (mode === 'exam' && durationMin > 0) quizOpts.durationMs = durationMin * 60 * 1000;
-        beginQuiz(questions, mode, quizTitle, quizOpts);
-      };
-    });
-  }
-
-  /** 复习设置弹窗（按题库保存到 bank.sched，随备份/API 同步） */
-  function openSchedDialog() {
-    if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
-    const s = QB.SchedSettings.ofBank(State.bank);
-    const D = QB.SchedSettings.DEFAULTS;
-    UI.openModal(
-      '<h3>复习设置 · ' + esc(State.bank.name) + '</h3>' +
-      '<p class="li-meta">控制「今日复习」每轮最多排入的题量，顺序为：学习中（分钟级）→ 到期复习 → 新题。' +
-      '设为 0 表示该组本轮不排。</p>' +
-      '<div class="qe-grid sched-grid">' +
-      '<div><label class="qe-label">每日新题上限</label>' +
-      '<input type="number" min="0" max="9999" id="sched-new" aria-label="每日新题上限" value="' + s.newPerDay + '" /></div>' +
-      '<div><label class="qe-label">每日复习上限</label>' +
-      '<input type="number" min="0" max="9999" id="sched-rev" aria-label="每日复习上限" value="' + s.reviewPerDay + '" /></div>' +
-      '<div><label class="qe-label">目标保留率（' + QB.SchedSettings.RETENTION_MIN + '–' +
-      QB.SchedSettings.RETENTION_MAX + '）</label>' +
-      '<input type="number" min="' + QB.SchedSettings.RETENTION_MIN + '" max="' +
-      QB.SchedSettings.RETENTION_MAX + '" step="0.01" id="sched-rr" aria-label="目标保留率" value="' + s.requestRetention + '" /></div>' +
-      '<div><label class="qe-label">最大间隔（天）</label>' +
-      '<input type="number" min="' + QB.SchedSettings.MAX_INTERVAL_MIN + '" max="' +
-      QB.SchedSettings.MAX_INTERVAL_MAX + '" id="sched-max" aria-label="最大间隔（天）" value="' + s.maximumIntervalDays + '" /></div>' +
-      '<div><label class="qe-label">学习步骤（秒，逗号分隔 1–4 个）</label>' +
-      '<input type="text" id="sched-steps" aria-label="学习步骤（秒）" value="' + s.learningSteps.join(',') + '" /></div>' +
-      '<div><label class="qe-label">难卡阈值（0=关闭）</label>' +
-      '<input type="number" min="0" max="9999" id="sched-leech" aria-label="难卡阈值" value="' + s.leechThreshold + '" /></div>' +
-      '<div><label class="qe-label">难卡命中后动作</label>' +
-      '<select id="sched-leech-action" aria-label="难卡命中后动作">' +
-      '<option value="none"' + (s.leechAction === 'none' ? ' selected' : '') + '>仅徽标（默认）</option>' +
-      '<option value="tag"' + (s.leechAction === 'tag' ? ' selected' : '') + '>标记为难卡</option>' +
-      '</select></div>' +
-      '<div><label class="qe-label">间隔模糊（默认关闭）</label>' +
-      '<label class="sched-check">' +
-      '<input type="checkbox" id="sched-fuzz"' + (s.fuzz ? ' checked' : '') + ' aria-label="间隔模糊开关" /> 开启</label></div>' +
-      '<div><label class="qe-label">模糊幅度上限（天，0=官方规则）</label>' +
-      '<input type="number" min="0" max="' + QB.SchedSettings.MAX_INTERVAL_MAX + '" step="1" id="sched-fuzzmax" ' +
-      'aria-label="模糊幅度上限（天）" value="' + s.fuzzMaxDays + '" /></div>' +
-      '<div class="sched-days-wrap"><label class="qe-label">轻松日权重（周日→周六，100=不压缩）</label>' +
-      '<div class="sched-days">' +
-      ['日', '一', '二', '三', '四', '五', '六'].map((n, i) =>
-        '<label class="li-meta sched-day">周' + n +
-        '<input type="number" min="0" max="100" step="1" id="sched-ed' + i + '" aria-label="周' + n +
-        '轻松日权重" value="' + s.easyDays[i] + '" /></label>').join('') +
-      '</div></div>' +
-      '</div>' +
-      '<p class="li-meta" id="sched-err" role="alert" style="color:var(--danger);display:none"></p>' +
-      '<p class="li-meta">默认：新题 ' + D.newPerDay + ' / 复习 ' + D.reviewPerDay + ' / 保留率 ' +
-      D.requestRetention + ' / 最大 ' + D.maximumIntervalDays + ' 天 / 步骤 ' + D.learningSteps.join(',') +
-      ' 秒 / 难卡 ' + D.leechThreshold + ' / 模糊 ' + (D.fuzz ? '开' : '关') +
-      ' / 难卡动作 ' + (D.leechAction === 'tag' ? '标记' : '仅徽标') +
-      ' / 轻松日 ' + D.easyDays.join(',') +
-      '。<strong>调度参数只影响之后的评分与到期，不会重排已有到期时间。</strong>' +
-      '设置存于题库记录，local / api / 备份三端一致。</p>' +
-      '<div class="modal-actions"><button class="btn btn-ghost" data-action="modal-cancel">取消</button>' +
-      '<button class="btn" data-action="modal-ok">保存</button></div>',
-      (modal) => {
-        modal.querySelector('[data-action="modal-cancel"]').onclick = () => UI.closeModal();
-        modal.querySelector('[data-action="modal-ok"]').onclick = async () => {
-          try {
-            const stepsRaw = (modal.querySelector('#sched-steps').value || '')
-              .split(/[,，、\s]+/).map(Number).filter((n) => isFinite(n));
-            const patch = {
-              newPerDay: parseInt(modal.querySelector('#sched-new').value, 10),
-              reviewPerDay: parseInt(modal.querySelector('#sched-rev').value, 10),
-              requestRetention: parseFloat(modal.querySelector('#sched-rr').value),
-              maximumIntervalDays: parseInt(modal.querySelector('#sched-max').value, 10),
-              learningSteps: stepsRaw,
-              leechThreshold: parseInt(modal.querySelector('#sched-leech').value, 10),
-              fuzz: modal.querySelector('#sched-fuzz').checked,
-              fuzzMaxDays: parseInt(modal.querySelector('#sched-fuzzmax').value, 10),
-              easyDays: Array.from({ length: 7 }, (_, i) => parseInt(modal.querySelector('#sched-ed' + i).value, 10)),
-              leechAction: modal.querySelector('#sched-leech-action').value
-            };
-            const errEl = modal.querySelector('#sched-err');
-            const problems = QB.SchedSettings.validate(patch);
-            if (problems.length) {
-              errEl.textContent = problems.join('；');
-              errEl.style.display = '';
-              return;
-            }
-            errEl.style.display = 'none';
-            const res = await QB.SchedSettings.save(State.bank, patch);
-            State.bank = res.bank;
-            const i = State.banks.findIndex((b) => b.id === res.bank.id);
-            if (i >= 0) State.banks[i] = res.bank;
-            invalidateReviewLog();
-            UI.closeModal();
-            UI.toast('复习设置已保存（新 ' + res.settings.newPerDay + ' / 复习 ' + res.settings.reviewPerDay +
-              ' / 保留率 ' + res.settings.requestRetention + ' / 最大 ' + res.settings.maximumIntervalDays + ' 天）', 'ok');
-            render();
-          } catch (e) {
-            UI.toast('保存失败：' + e.message, 'err');
-          }
-        };
-      }
-    );
-  }
 
   /* ---------------- 事件委托绑定 ---------------- */
 
@@ -1119,187 +595,34 @@
         return;
       }
       if (State.view !== 'quiz' || !State.engine) return;
-      handleQuizKey(e);
+      QB.QuizSession.handleQuizKey(e);
     });
   }
 
-  function handleQuizKey(e) {
-    const engine = State.engine;
-    const q = engine.getCurrentQuestion();
-    if (!q) return;
-    if (e.key === 'ArrowRight') {
-      if (engine.isLastQuestion()) return;
-      engine.nextQuestion(); QB.ProgressSaver.saveDebounced(State.bankId, engine); render(); e.preventDefault();
-    } else if (e.key === 'ArrowLeft') {
-      if (engine.prevQuestion()) { render(); e.preventDefault(); }
-    } else if (e.key === 'Enter') {
-      if (engine.mode !== 'exam' && !engine.hasAnswered()) {
-        if (engine.canSubmit()) submitCurrent();
-      } else if (engine.isLastQuestion()) {
-        // 考试交卷必须先走「交卷」按钮的未答/半对确认；键盘 Enter 不直接交卷。
-        if (engine.mode !== 'exam') finishQuiz();
-      } else {
-        engine.nextQuestion(); render();
-      }
-      e.preventDefault();
-    } else if (/^[1-8]$/.test(e.key)) {
-      const qNow = State.engine && State.engine.getCurrentQuestion();
-      if (qNow && qNow.type === 'material') return; // 材料题多个子问题共用字母/数字键，快捷键禁用，用鼠标点选
-      selectByIndex(parseInt(e.key, 10) - 1);
-    }
-  }
-
-  function selectByIndex(i) {
-    const engine = State.engine;
-    const q = engine.getCurrentQuestion();
-    if (!q || engine.hasAnswered() || q.type === 'material') return;
-    if (q.type === 'judge') {
-      if (i === 0) engine.selectAnswer(true);
-      else if (i === 1) engine.selectAnswer(false);
-      else return;
-    } else if (q.type === 'single' || q.type === 'multi') {
-      const opt = (q.options || [])[i];
-      if (!opt) return;
-      if (q.type === 'multi') engine.toggleAnswer(opt.letter); else engine.selectAnswer(opt.letter);
-    } else {
-      return;
-    }
-    QB.ProgressSaver.saveDebounced(State.bankId, engine);
-    render();
-  }
-
-  /* ---------------- 进度恢复 ---------------- */
-
-  async function maybeResume() {
-    const s = await QB.ProgressSaver.load();
-    if (!s || !Array.isArray(s.questions) || !s.questions.length) return;
-    if (!(State.banks || []).some((b) => b.id === s.bankId)) { await QB.ProgressSaver.clear(); return; }
-    const answered = (s.results || []).filter(Boolean).length;
-    const isExam = s.mode === 'exam';
-    // 练习：无任何进度直接丢弃；考试：即使停在第 1 题也要恢复（用户刷新不应退出考试）
-    if (!isExam && answered === 0 && (s.currentIndex || 0) === 0) return;
-    if (!isExam) {
-      const ok = await UI.confirmDialog(
-        '检测到未完成的练习进度（第 ' + ((s.currentIndex || 0) + 1) + ' / ' + s.questions.length +
-        ' 题，已答 ' + answered + ' 题）。是否继续？',
-        '继续答题'
-      );
-      if (!ok) { await QB.ProgressSaver.clear(); return; }
-    }
-
-    State.bankId = s.bankId;
-    // 恢复练习会进入保存时的题库：该库可能不是启动时水合的当前库，读复习状态前补前置。
-    await QB.Storage.ensureBank(s.bankId);
-    await QB.DB.setCurrentBankId(s.bankId);
-    const engine = new QB.QuizEngine();
-    engine.restore(s);
-    State.engine = engine;
-    // 考试保留原始开始时间（历史用时含刷新/关闭期间，剩余时间由 deadlineAt 决定）；练习从恢复时刻重新计时
-    State.quizMeta = { startTs: isExam ? (engine.startedAt || Date.now()) : Date.now(), title: '继续上次' };
-    State.view = 'quiz';
-    hydrateQuizReviewContext(State.bankId, engine);
-    if (isExam && engine.durationMs > 0) {
-      const legacyNoTime = !engine.deadlineAt && !engine.startedAt;
-      const rem = engine.remainingMs();
-      if (rem <= 0) {
-        UI.toast('考试时间已到，已自动交卷', 'err');
-        await finishQuiz();
-        return;
-      }
-      UI.toast(legacyNoTime
-        ? '旧考试记录缺少截止时间，已按整段时长重新计时'
-        : '已恢复考试，剩余 ' + QB.Helpers.formatDuration(rem), legacyNoTime ? 'err' : 'ok');
-    }
-    startQuizTimer(engine);
-    render();
-  }
 
   /* ---------------- 启动 ---------------- */
 
-  /**
-   * 启动失败的可见兜底（R-21）：任何一步抛错都不能表现为「白屏/空库无提示」。
-   * 保留原始错误到 State.bootError，渲染错误态并提供「下载诊断信息」；
-   * 本地数据此时尚未被本次启动改动（失败发生在读取或迁移已内部中止之后）。
-   */
-  function renderBootFailure(err) {
-    const msg = err && err.message ? err.message : String(err);
-    const html = '<div class="empty-state" data-boot-failed="1">' +
-      '<h2>启动失败</h2>' +
-      '<p>页面没有完成初始化，本地数据未被本次启动修改。可刷新页面重试；' +
-      '若反复失败，请下载诊断信息后反馈。</p>' +
-      '<p class="muted">错误：' + esc(msg) + '</p>' +
-      '<div class="empty-actions">' +
-      '<button class="btn" type="button" data-action="boot-diagnostics">下载诊断信息</button>' +
-      '</div></div>';
-    const v = view();
-    if (v) v.innerHTML = html;
-    State.storageNotice = '启动失败';
-    const st = document.getElementById('status-text');
-    if (st) st.textContent = '启动失败：' + msg;
-    // 失败可能发生在 bindView 之前（如 DB.init 抛错）：这里补绑一次，保证诊断按钮可点
-    bindView();
-  }
-
-  /** 诊断报告：只读快照，不含任何题库内容/密码，仅错误栈与存储状态 */
-  function bootDiagnosticsReport(err) {
-    const report = {
-      app: 'qforge',
-      ts: new Date().toISOString(),
-      href: typeof location !== 'undefined' ? String(location.href) : '',
-      ua: typeof navigator !== 'undefined' && navigator.userAgent ? navigator.userAgent : '',
-      error: {
-        name: err && err.name ? err.name : '',
-        message: err && err.message ? err.message : String(err),
-        stack: err && err.stack ? String(err.stack) : ''
-      },
-      state: {
-        view: State.view,
-        bankId: State.bankId,
-        banksLoaded: State.banksLoaded,
-        banksCount: (State.banks || []).length
-      }
-    };
-    try {
-      report.backend = QB.DB ? QB.DB.backend : null;
-      report.storage = {
-        mode: QB.Storage ? QB.Storage.mode : null,
-        marker: QB.Store && typeof QB.Store.readMarker === 'function' ? QB.Store.readMarker() : null,
-        fallbackReason: QB.Store && QB.Store.lastInit ? QB.Store.lastInit.fallbackReason || null : null
-      };
-    } catch (e) { /* 诊断本身不能二次抛出 */ }
-    return report;
-  }
-
-  function downloadBootDiagnostics() {
-    const name = 'qforge-boot-' + Date.now() + '.json';
-    try {
-      const blob = new Blob([JSON.stringify(bootDiagnosticsReport(State.bootError), null, 2)],
-        { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ } }, 0);
-      UI.toast('诊断信息已下载：' + name, 'ok');
-      return true;
-    } catch (e) {
-      console.error('[qforge] 诊断信息生成失败：', e);
-      UI.toast('诊断信息生成失败：' + (e && e.message ? e.message : e), 'err');
-      return false;
-    }
-  }
 
   async function boot() {
     try {
+      // 会话流程/入口弹窗/启动诊断：只注入上下文，模块内代码与搬移前逐字一致。
+      // 放在 boot 的 try 里：任一模块缺失走 R-21 可见错误态，而不是加载期白屏。
+      QB.QuizSession.attach({
+        State: State, UI: UI, render: render, updateStatus: updateStatus,
+        notifyBackgroundError: notifyBackgroundError, invalidateReviewLog: invalidateReviewLog,
+        reviewLogFor: reviewLogFor
+      });
+      QB.QuizDialogs.attach({
+        State: State, UI: UI, esc: esc, render: render,
+        invalidateReviewLog: invalidateReviewLog, beginQuiz: QB.QuizSession.beginQuiz
+      });
+      QB.BootDiagnostics.attach({ State: State, UI: UI, esc: esc, view: view, bindView: bindView });
       await startApp();
     } catch (e) {
       // R-21：整体兜底。保留 console.error 的原始栈供调试，同时给用户可见错误态 + 诊断下载。
       console.error('[qforge] 启动失败：', e);
       State.bootError = e;
-      renderBootFailure(e);
+      QB.BootDiagnostics.renderBootFailure(e);
     }
   }
 
@@ -1479,7 +802,7 @@
     State.bankId = await QB.DB.getCurrentBankId();
     State.view = State.bankId ? 'home' : 'banks';
     if (!(await render())) throw new Error('首屏渲染失败');
-    await maybeResume();
+    await QB.QuizSession.maybeResume();
     await handleShareHash();
     registerSW();
     // 运行时 LocalStorage 配额探测放到首屏空闲期（首次约数百 ms，之后命中缓存 ~0.x ms）：
@@ -1524,5 +847,8 @@
     boot();
   }
 
-  QB.App = { State: State, render: render, beginQuiz: beginQuiz, finishQuiz: finishQuiz };
+  QB.App = {
+    State: State, render: render,
+    beginQuiz: QB.QuizSession.beginQuiz, finishQuiz: QB.QuizSession.finishQuiz
+  };
 })(window);
