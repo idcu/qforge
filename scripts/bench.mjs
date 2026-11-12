@@ -1775,10 +1775,58 @@ if (scaleRow) {
 }
 console.log('============================================\n');
 
+/* ---------- 门禁红灯取证 ----------
+ * bench 红过却没留下「哪一项红、读数多少」，等于门禁会静默抖动（docs/BENCH.md 顶部有约定）。
+ * 失败时把失败项、完整门禁清单（含 ✓/✗ 与实测值/阈值原文）、Node/OS/CPU/内存与注入开关
+ * 快照写到 .analysis/bench-failures/（.gitignore 已忽略）。绿时不写任何文件。
+ * 只做记录：不改阈值、不改判据、失败退出码仍由调用处决定。 */
+function writeFailureEvidence(fails, gateLines) {
+  try {
+    const dir = path.join(QB_DIR, '.analysis', 'bench-failures');
+    fs.mkdirSync(dir, { recursive: true });
+    const now = new Date();
+    const stamp = now.toISOString().replace(/[:.]/g, '-');
+    const cpus = os.cpus();
+    const payload = {
+      at: now.toISOString(),
+      uptimeSec: Math.round(process.uptime()),
+      node: process.version,
+      platform: os.platform() + ' ' + os.release() + ' ' + os.arch(),
+      cpu: (cpus[0] && cpus[0].model) || 'unknown',
+      cpuCount: cpus.length,
+      // Windows 的 os.loadavg() 恒为 [0,0,0]（平台限制，不代表空闲）；同机对照看 freemem 与实测值
+      loadavg: os.loadavg(),
+      memMB: {
+        total: +(os.totalmem() / 1048576).toFixed(1),
+        free: +(os.freemem() / 1048576).toFixed(1),
+        heapUsed: +(process.memoryUsage().heapUsed / 1048576).toFixed(1)
+      },
+      inject: {
+        QF_BENCH_INJECT_SLOW: process.env.QF_BENCH_INJECT_SLOW || '',
+        QF_BENCH_INJECT_KEYS_SLOW: process.env.QF_BENCH_INJECT_KEYS_SLOW || '',
+        QF_BENCH_INJECT_IDB_WRITE_SLOW: process.env.QF_BENCH_INJECT_IDB_WRITE_SLOW || ''
+      },
+      fails: fails,
+      gates: gateLines
+    };
+    const file = path.join(dir, stamp + '-bench-failure.json');
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n');
+    return file;
+  } catch (e) {
+    // 取证失败不改变门禁结论（红仍是红），只提示
+    console.log('  取证写入失败：' + e.message);
+    return null;
+  }
+}
+
 /* ---------- 性能门禁（可选 --assert） ----------
  * 阈值取本次基线 × 约 3–10 倍，用于拦截「量级回归」而非机器差异；
  * 绝对值不追求严格，CI 与本地都不会因小波动误报。 */
 if (process.argv.indexOf('--assert') >= 0) {
+  // 收集门禁区输出（只记录，不改变打印内容），失败时原样写进取证
+  const gateLines = [];
+  const printLine = console.log;
+  console.log = (...args) => { gateLines.push(args.join(' ')); printLine(...args); };
   const BUDGETS = [
     ['JSON.parse', 20],
     ['insertMany 落库', 30],
@@ -2045,6 +2093,8 @@ if (process.argv.indexOf('--assert') >= 0) {
   console.log('-------------------------------------------');
   if (fails.length) {
     fails.forEach((f) => console.log('  - ' + f));
+    const evidence = writeFailureEvidence(fails, gateLines);
+    if (evidence) console.log('  取证已写入：' + path.relative(QB_DIR, evidence).split(path.sep).join('/'));
     process.exit(1);
   }
   console.log('性能门禁全部通过 ✅\n');

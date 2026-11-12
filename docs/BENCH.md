@@ -19,6 +19,11 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 > 同一基线 `740512e` 的独立 worktree 实测 **91.07MB**（同样超限），并非代码回归。CI（`.github/workflows/test.yml`）
 > 与 `scripts/docs-check.mjs` 均以 `--expose-gc` 运行。
 
+> **bench 红必须带上取证**：`--assert` 失败时脚本自动把失败项、完整门禁清单（✓/✗ 与实测值/阈值原文）、
+> Node/OS/CPU/内存与注入开关快照写到 `.analysis/bench-failures/<ISO>-bench-failure.json`（`.analysis/`
+> 已在 `.gitignore`）；绿时不产生任何文件。报告性能红灯时**须附上该文件内容**，否则视为无证据——
+> 曾出现过「bench 整体 exit 1 但没记录到哪一项红」，此后不再接受这种报告。
+
 2026-10-19（Node v24.14.0，Windows，`--expose-gc`）实测中位数：
 
 | 打点项 | 中位数 | min / max |
