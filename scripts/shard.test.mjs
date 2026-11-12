@@ -440,5 +440,9 @@ section('C018 题目内存索引：单题 O(1) 定位、merge 去重免全量读
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('题目库分片存储单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('题目库分片存储单元测试全部通过 ✅');
+}

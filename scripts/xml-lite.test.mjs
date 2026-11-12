@@ -130,5 +130,9 @@ section('OOXML 真实片段回归（worksheet / document / rels）');
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('极简 XML 解析器单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('极简 XML 解析器单元测试全部通过 ✅');
+}

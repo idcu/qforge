@@ -1048,5 +1048,9 @@ section('P2-06 reviewMeta v3→v4：逐键一致、迁移失败保留原清单')
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('schema 迁移单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('schema 迁移单元测试全部通过 ✅');
+}

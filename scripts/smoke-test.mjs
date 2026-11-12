@@ -1717,6 +1717,7 @@ console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {
   console.log('失败项:');
   failures.forEach((f) => console.log('  - ' + f));
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log('全部通过 ✅');
 }
-console.log('全部通过 ✅');

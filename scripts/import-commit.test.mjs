@@ -334,5 +334,5 @@ console.log('\n========================================');
 console.log('import-commit 断言: ' + (pass + failures.length) + '，通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {
   failures.forEach((f) => console.log('  - ' + f));
-  process.exit(1);
+  process.exitCode = 1;
 }

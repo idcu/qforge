@@ -561,5 +561,9 @@ section('本地 reviews.patch（B1）与 revlog.revision（B3）');
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('Storage 可靠性单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('Storage 可靠性单元测试全部通过 ✅');
+}

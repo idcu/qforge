@@ -762,5 +762,9 @@ section('C012 作答反馈：本地批注只读展示（含材料题父题批注
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('UI 渲染器弹窗构建单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('UI 渲染器弹窗构建单元测试全部通过 ✅');
+}

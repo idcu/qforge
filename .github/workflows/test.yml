@@ -78,6 +78,19 @@ jobs:
       - name: 性能门禁（Node 24/26 · Asia-Shanghai）
         if: (matrix.node-version == '24' || matrix.node-version == '26') && matrix.tz == 'Asia/Shanghai'
         run: node --expose-gc scripts/bench.mjs --assert
+      # 失败留证：test-all 把逐套件进度与失败摘要写到 .analysis/test-failures/，
+      # bench 把红灯快照写到 .analysis/bench-failures/；job 日志匿名取不到（403），
+      # 这里用 if: always() 保证红绿都走一遍，红了就能直接下载 artifact 看套件名与断言原文。
+      - name: 上传失败取证（${{ matrix.node-version }} / ${{ matrix.tz }}）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-evidence-node${{ matrix.node-version }}-${{ matrix.tz == 'UTC' && 'utc' || 'asia-shanghai' }}
+          path: |
+            .analysis/test-failures/
+            .analysis/bench-failures/
+          if-no-files-found: ignore
+          retention-days: 7
 
   vendor-check:
     name: vendor 接线自检

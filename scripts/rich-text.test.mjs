@@ -201,5 +201,9 @@ eq(QB.escapeHtml(toPlain('x^{2}<b>')), 'x2&lt;b&gt;', 'toPlain 后转义可安�
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('FAILED: ' + f)); process.exit(1); }
-console.log('富文本渲染器单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('FAILED: ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('富文本渲染器单元测试全部通过 ✅');
+}

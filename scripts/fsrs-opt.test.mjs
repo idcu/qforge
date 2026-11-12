@@ -531,5 +531,9 @@ section('增量重训（P1）：训练点记录 + shouldRetrain 增量触发 + �
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('FSRS 优化器单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('FSRS 优化器单元测试全部通过 ✅');
+}

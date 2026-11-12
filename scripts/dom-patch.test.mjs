@@ -152,5 +152,9 @@ section('子区域分组：groupSub 按容器归组、去重、剔除不合法�
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('DOM 增量更新对账单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('DOM 增量更新对账单元测试全部通过 ✅');
+}

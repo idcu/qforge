@@ -114,7 +114,8 @@ section('静态：5 个 L2 模块不再直接引用 UIRenderer');
 if (failures.length) {
   console.error('\n失败 ' + failures.length + ' 项：');
   failures.forEach((f) => console.error('  ✗ ' + f));
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log('通过: ' + pass + '，失败: 0');
+  process.exitCode = 0;
 }
-console.log('通过: ' + pass + '，失败: 0');
-process.exit(0);

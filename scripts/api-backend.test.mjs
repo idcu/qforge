@@ -1012,5 +1012,9 @@ section('api 适配器：429 限流诚实抛出');
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('参考后端 + api 适配器端到端测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('参考后端 + api 适配器端到端测试全部通过 ✅');
+}

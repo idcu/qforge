@@ -598,6 +598,7 @@ console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {
   failures.forEach((f) => console.log('  ✗ ' + f));
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log('FSRS 调度参数化测试全部通过 ✅');
 }
-console.log('FSRS 调度参数化测试全部通过 ✅');

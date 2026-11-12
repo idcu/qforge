@@ -2152,7 +2152,10 @@ if (process.argv.indexOf('--assert') >= 0) {
     fails.forEach((f) => console.log('  - ' + f));
     const evidence = writeFailureEvidence(fails, gateLines);
     if (evidence) console.log('  取证已写入：' + path.relative(QB_DIR, evidence).split(path.sep).join('/'));
-    process.exit(1);
+    // 与 test-all 同因：POSIX 管道的 stdout 是异步的，process.exit(1) 可能在冲刷前掐断
+    // 上面这一整张门禁表与失败清单（CI 单步日志里就等于没有）。
+    process.exitCode = 1;
+  } else {
+    console.log('性能门禁全部通过 ✅\n');
   }
-  console.log('性能门禁全部通过 ✅\n');
 }

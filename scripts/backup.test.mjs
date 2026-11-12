@@ -495,5 +495,9 @@ section('数据层端口注册（R-03：L2 → L1，数据层不反向点名领�
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('  - ' + f)); process.exit(1); }
-console.log('备份恢复单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('  - ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('备份恢复单元测试全部通过 ✅');
+}

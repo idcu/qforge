@@ -816,9 +816,8 @@ if (NEGATIVE) {
   console.log(caught
     ? '[mutate] 预期红 ✅：commitImport 入口被改坏后本套件能抓住（失败 ' + failures.length + ' 项，exit 1）'
     : '[mutate] 未翻红 ❌：变异未被抓住，说明套件没有覆盖该入口');
-  process.exit(caught ? 1 : 2);
-}
-if (failures.length) {
+  process.exitCode = caught ? 1 : 2;
+} else if (failures.length) {
   failures.forEach((f) => console.log('  - ' + f));
-  process.exit(1);
+  process.exitCode = 1;
 }

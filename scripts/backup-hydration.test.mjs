@@ -395,11 +395,11 @@ async function main() {
     + (RED ? '（RED 模式：ensureAll no-op）' : ''));
   if (failures.length) {
     failures.forEach((f) => console.log('  FAIL: ' + f));
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
 main().catch((e) => {
   console.error('套件异常：', e);
-  process.exit(1);
+  process.exitCode = 1;
 });

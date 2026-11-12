@@ -455,9 +455,8 @@ if (MUTATE) {
   console.log(caught
     ? '[mutate] 预期红 ✅：删色对/ARIA 后本套件能抓住（失败 ' + failures.length + ' 项，exit 1）'
     : '[mutate] 未翻红 ❌：色对/ARIA 检查没有牙齿');
-  process.exit(caught ? 1 : 2);
-}
-if (failures.length) {
+  process.exitCode = caught ? 1 : 2;
+} else if (failures.length) {
   console.log('失败项：');
   failures.forEach((f) => console.log('  - ' + f));
   process.exitCode = 1;

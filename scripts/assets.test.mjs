@@ -721,5 +721,9 @@ section('路径级：三选一（真实 UIRenderer + 假 DOM）与 Esc 终态');
 
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
-if (failures.length) { failures.forEach((f) => console.log('FAILED: ' + f)); process.exit(1); }
-console.log('图片资产/题库包单元测试全部通过 ✅');
+if (failures.length) {
+  failures.forEach((f) => console.log('FAILED: ' + f));
+  process.exitCode = 1;
+} else {
+  console.log('图片资产/题库包单元测试全部通过 ✅');
+}
