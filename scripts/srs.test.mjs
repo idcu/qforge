@@ -8,6 +8,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
+import { createMemoryIDB } from './lib/idb-memory.mjs';
 import { createAssert } from './lib/assert.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -264,6 +265,51 @@ section('崩溃/强杀：评分与错题本在写入返回时已落盘（不依�
   eq((await C.QB.DB.progress.wrongList(bank.id)).length, wrongs.length, '重复重启不重复写入错题本');
   const st3 = await C.QB.SRSStore.getState(bank.id, q);
   eq(st3 && st3.last, st.last, '重复重启后评分未被改写');
+}
+
+section('IDB 模式：评分返回时记录已在 IndexedDB 里（守住 await flush 不变量）');
+{
+  // IDB 没有同步写：落盘确认只能靠 grade() 内部的 await flush()。这里把底层批量提交
+  // 推迟一个宏任务（模拟浏览器事务提交不是同步完成），使「resolve 时是否已提交」可观测；
+  // 若将来有人拿掉 confirmPersisted 的 await，下面的直读断言会变红。
+  const idb = createMemoryIDB();
+  const H = await createHarness(ROOT, { indexedDB: idb });
+  H.QB.DB.init();
+  const S = H.QB.Storage;
+  await S.initStore();
+  await H.QB.Store.migrateToIdb(H.QB.Store.lsSource());
+  S.adoptStore({ mode: 'idb', records: await H.QB.Store.readAll(true) });
+  eq(S.mode, 'idb', '测试环境确认走 IDB 后端（否则本段无意义）');
+
+  const bank = await H.QB.DB.banks.create({ name: 'IDB 崩溃复现库' });
+  if (typeof S.ensureBank === 'function') await S.ensureBank(bank.id);
+  await H.QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: 'IDB 崩溃复现题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+  ], { dedupe: false });
+  const q = (await H.QB.DB.questions.list(bank.id, {})).items[0];
+  const key = H.QB.SRSStore.keyFor(q);
+  await S.flush(); // 前置数据正常落盘
+
+  const origBatch = H.QB.Store.batch;
+  H.QB.Store.batch = function (ops) {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => { Promise.resolve(origBatch.call(H.QB.Store, ops)).then(resolve, reject); }, 20);
+    });
+  };
+
+  // 与 recordGraded 同序（错题本 → 评分），然后立即直读底层 IDB（不读 Storage 缓存）
+  await H.QB.WrongBook.add(bank.id, q);
+  const st = await H.QB.SRSStore.grade(bank.id, q, H.QB.SRS.RATINGS.again, T0);
+  const disk = await H.QB.Store.readAll(true, true);
+
+  const wrongDisk = disk.get(H.QB.KEYS.wrong(bank.id)) || [];
+  ok(wrongDisk.some((w) => w.questionKey === key), 'grade 返回即已在 IDB：错题本条目');
+  const chunk = disk.get(H.QB.KEYS.reviewChunkOfHash(bank.id, key)) || {};
+  ok(chunk[key] && chunk[key].last === st.last, 'grade 返回即已在 IDB：评分状态（last 一致）');
+  const segKeys = Array.from(disk.keys()).filter((k) => k.indexOf('user:revlog:') === 0 && k !== 'user:revlogMeta');
+  const logs = segKeys.reduce((acc, k) => acc.concat(Array.isArray(disk.get(k)) ? disk.get(k) : []), []);
+  ok(logs.some((e) => e.h === key), 'grade 返回即已在 IDB：评分日志');
+  H.QB.Store.batch = origBatch;
 }
 
 section('写失败仍可观测：同步落盘失败抛错 + onWriteError 通知（T10 不回归）');
