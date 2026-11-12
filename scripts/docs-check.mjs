@@ -14,7 +14,9 @@
  * 校验口径：
  *   1. 各套件断言数：逐个 spawn 测试文件，取末尾「通过: N」（static 模式取基线）；
  *   2. 合计断言数与套件数：求和 + 文件计数；
- *   3. 性能门禁项数：跑 `bench.mjs --assert`，数「  ✓ 」行（static 模式取基线）；
+ *   3. 性能门禁项数：跑 `bench.mjs --assert`，数「  ✓ 」「  ✗ 」行（static 模式取基线）；
+ *      并与 `bench.mjs` 的 `GATE_TOTAL` 声明、`docs-baseline.json` 的 gateCount 三方对账——
+ *      只比较文档与其中一方，会让「代码加删门禁、基线没刷新」长期存在（2026-11-12 的 66/63 即此）。
  *   4. 首屏静态体积：index.html 引用的 css/script + Worker/sw/manifest/图标，逐文件 gzip -9（始终实测）。
  *
  * **C004 修的两个「静默绿」**：
@@ -93,8 +95,44 @@ function measureGates() {
   const bench = spawnSync(process.execPath, ['--expose-gc', path.join(__dirname, 'bench.mjs'), '--assert'], {
     encoding: 'utf8', cwd: ROOT, maxBuffer: 64 * 1024 * 1024
   });
-  if (bench.status !== 0) problems.push('bench --assert 未通过（exit=' + bench.status + '）');
-  return ((bench.stdout || '').match(/^  ✓ /gm) || []).length;
+  const out = bench.stdout || '';
+  const passed = (out.match(/^  ✓ /gm) || []).length;
+  const failed = (out.match(/^  ✗ /gm) || []).length;
+  if (bench.status !== 0) {
+    problems.push('bench --assert 未通过（exit=' + bench.status + '，✓ ' + passed + ' / ✗ ' + failed + '）');
+  }
+  return { total: passed + failed, passed, failed };
+}
+
+/** bench.mjs 里声明的门禁条数（bench 运行时也会用它核对实跑行数） */
+function declaredGates() {
+  const m = fs.readFileSync(path.join(__dirname, 'bench.mjs'), 'utf8').match(/const GATE_TOTAL = (\d+);/);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * 门禁条数三方对账：`bench.mjs` 声明 = 本次实跑 ✓/✗ 行数 = `docs-baseline.json` 的 gateCount。
+ * 只比其中两方不够：代码加删门禁、基线被手改、文档抄错，都可能只动一方而看着像"一致"。
+ * 2026-11-12 之前这里没有对账，三档 IDB 写入被重复打印成 66 项（实际 63 项），
+ * 而 docs-baseline 一直记 66 没被发现。
+ */
+function gateCountProblems(declared, executed, baseline, mode) {
+  const out = [];
+  if (declared === null) {
+    out.push('scripts/bench.mjs 缺少 `const GATE_TOTAL = N;` 声明，无法核对门禁条数');
+    return out;
+  }
+  if (executed !== null && declared !== executed) {
+    out.push('门禁条数漂移：bench.mjs 声明 ' + declared + ' 项，本次实跑 ' + executed + ' 项');
+  }
+  if (baseline !== null && declared !== baseline) {
+    out.push('门禁条数漂移：bench.mjs 声明 ' + declared + ' 项，docs-baseline.json 记 ' + baseline + ' 项'
+      + '（确认无误后运行 node scripts/docs-check.mjs --write）');
+  }
+  if (mode !== 'write' && baseline !== null && executed !== null && executed !== baseline) {
+    out.push('门禁条数漂移：本次实跑 ' + executed + ' 项，docs-baseline.json 记 ' + baseline + ' 项');
+  }
+  return out;
 }
 
 function loadBaseline() {
@@ -275,6 +313,14 @@ if (SELFTEST) {
         rel: 'FAKE.md',
         text: '## 决策 A\n\n### 现状\n\n## 决策 B\n\n### 现状\n'
       }).length === 0
+    },
+    {
+      name: '门禁条数漂移（声明 63 / 实跑 62 / 基线 66）',
+      hit: () => gateCountProblems(63, 62, 66, 'static').length > 0
+    },
+    {
+      name: '门禁条数一致（不得误杀）',
+      hit: () => gateCountProblems(63, 63, 63, 'write').length === 0
     }
   ];
   let ok = true;
@@ -306,12 +352,17 @@ if (MODE === 'static') {
   baselineProblems(base, runOrder, suiteFiles).forEach((p) => problems.push(p));
   totalAssertions = base.totalAssertions;
   gateCount = base.gateCount;
+  // 静态模式不能跑 bench，但仍能核对「代码声明」与「基线」：bench.mjs 的 GATE_TOTAL 变了下就会红
+  gateCountProblems(declaredGates(), null, base.gateCount, 'static').forEach((p) => problems.push(p));
   console.log('静态模式：' + runOrder.length + ' 个运行项，' + totalAssertions + ' 项断言（基线），'
     + gateCount + ' 项门禁（基线）');
 } else {
   counts = measureSuiteCounts();
   totalAssertions = Object.keys(counts).reduce((n, f) => n + (counts[f] || 0), 0);
-  gateCount = measureGates();
+  const measured = measureGates();
+  gateCount = measured.total;
+  const baseGate = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')).gateCount : null;
+  gateCountProblems(declaredGates(), measured.total, baseGate, MODE).forEach((p) => problems.push(p));
   console.log('实测：' + runOrder.length + ' 个运行项，' + totalAssertions + ' 项断言');
 }
 

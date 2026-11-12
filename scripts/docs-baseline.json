@@ -3,7 +3,7 @@
   "runItems": 38,
   "suiteFiles": 37,
   "totalAssertions": 6009,
-  "gateCount": 66,
+  "gateCount": 63,
   "counts": {
     "smoke-test.mjs": 738,
     "a11y.test.mjs": 103,

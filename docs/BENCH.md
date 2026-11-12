@@ -5,15 +5,24 @@
 > **读数口径**：本文里的数字由 `scripts/docs-check.mjs` 复算校验（它同时读 README / DEVELOPMENT / 本文）。
 
 ```bash
-npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，66 项）
+npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，63 项）
 npm run bench:observe                        # 只观测不判定（记录轮次/容量读数用）
-node --expose-gc scripts/bench.mjs --assert   # 性能门禁：66 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
+node --expose-gc scripts/bench.mjs --assert   # 性能门禁：63 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
 node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
 
 > **默认即门禁（C005）**：`npm run bench` 曾只观测、不判定，且 `npm run verify` 不含 bench——
 > 用 `QF_BENCH_INJECT_SLOW=0.1` 注入 10% 慢化后，旧 `npm run bench` 仍 exit 0（仅 `--assert` 才退 1）。
 > 现在 `bench` 直接带 `--assert`，`verify` 也包含它；只想看读数用 `bench:observe`。
+
+> **门禁条数口径（2026-11-12 更正：63 项，不是 66 项）**：`--assert` 实际执行 **63** 条互不重复的判定，
+> 每条打印一行 `  ✓ ` / `  ✗ `。历史文档写的 66 项是**重复计数**——`IDB 单次评分写入（5000/20000/50000）`
+> 三档同时被 `BUDGETS` 表与独立判定块各判一次（`28f88e8` 起），同一断言打印两行；`4d4ec51` 删掉
+> `BUDGETS` 里的重复三条后实跑降到 63 行，但基线与文档没跟着改。现在做三方对账：
+> `bench.mjs` 的 `const GATE_TOTAL`（声明）＝ 实跑 ✓/✗ 行数 ＝ `docs-baseline.json` 的 `gateCount`
+> ＝ 本文与 README/DEVELOPMENT 的「N 项阈值」，任一方不一致 `bench` 或 `docs-check` 立即红。
+> **目前不存在"声明总数 ≠ 本机执行数"**（63 项全部执行，无跳过、无条件分支）；若将来加入按 Node 版本或
+> 平台跳过的门禁，必须在此写清「声明 N 项、本机执行 M 项、K 项因 X 跳过」，`GATE_TOTAL` 只表示声明总数。
 
 > **`--expose-gc` 是门禁前提**：不带该参数时 `heapUsed` 增量含未回收垃圾，`heapUsed ≤ 40MB` 门禁不可信——
 > 同一基线 `740512e` 的独立 worktree 实测 **91.07MB**（同样超限），并非代码回归。CI（`.github/workflows/test.yml`）
@@ -90,7 +99,7 @@ bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑�
 > - 实测（两次同机复跑）：中位 **8.03 / 10.66 ms**（min 7.24–7.55 / max 9.97–11.81），返回「全局 + 目标库」键 **50,361 个**（与同轮 `keys()` 逻辑键数一致）；两轮差异属机器负载波动，如实并列。
 > - 实现：复用 `keys()` 同一份物化缓存（`_keysRawCached` → `_keysCache`/`_buildKeys`），按 `bankOfKey` 前缀过滤，**不建库索引、不增加常驻内存**；成本随键总数线性（O(键数)），首次调用若恰逢缓存失效会额外付一次 `keys()` 重建（本次测量为命中路径）。
 > - 依赖：`_keysCache`（物化结果）与 `_chunkStates`（复习块展开为逻辑键）；`_pending`（未落盘写入）由 `_buildKeys` 一并合并，所以作用域视图不会漏掉防抖中的新键。
-> - **未进门禁**：该行只观测、不设阈值（跨机器过滤成本波动不稳定）；bench 门禁数仍为 **66 项**。提案估算 3–4 ms 与实测 8.03–10.66 ms 的差异如实记录，未据此调任何阈值。
+> - **未进门禁**：该行只观测、不设阈值（跨机器过滤成本波动不稳定）；当时文档记「门禁数仍为 66 项」，其中含三档 IDB 写入的重复计数，实际互不重复的门禁是 **63 项**（见文首「门禁条数口径」）。提案估算 3–4 ms 与实测 8.03–10.66 ms 的差异如实记录，未据此调任何阈值。
 
 > **导入去重索引与单题定位验收（C018，2026-11-06，同机 `--expose-gc`）**
 > - **T0 旧码（本次改动前）**：10k merge 重复导入 冷 **98.89 ms** / 热 **95.55 ms**（比值 0.97）；空载荷 merge 去重准备（`readAll`+Set）**1.76 ms**；50k IDB `questions.get` P95 **0.19 ms**；1000 个新 hash 写入 `user:reviewMeta` 累计 meta **3346.1 KB**、末次清单 **6919 B**。

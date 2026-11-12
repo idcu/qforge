@@ -1832,6 +1832,10 @@ if (process.argv.indexOf('--assert') >= 0) {
   const gateLines = [];
   const printLine = console.log;
   console.log = (...args) => { gateLines.push(args.join(' ')); printLine(...args); };
+  /* 门禁声明总数：与实跑输出的 ✓/✗ 行数逐条核对（见本块末尾），不一致即红。
+     scripts/docs-check.mjs 也读这个数，并与 docs-baseline.json 的 gateCount、文档里的
+     「N 项阈值」三方对账——所以「加/删门禁忘了同步数字」不再能静默漂移。 */
+  const GATE_TOTAL = 63;
   const BUDGETS = [
     ['JSON.parse', 20],
     ['insertMany 落库', 30],
@@ -2112,6 +2116,16 @@ if (process.argv.indexOf('--assert') >= 0) {
   const r19Ok = r19EstExact === 2;
   console.log((r19Ok ? '  ✓ ' : '  ✗ ') + 'R-19 分享前估算：估算字符数与真实编码一致 ' + r19EstExact + '/2（540 题 / 8MB 边界）');
   if (!r19Ok) fails.push('R-19 分享前估算与真实编码字符数不一致：' + r19EstExact + '/2');
+  // 门禁条数自校验：实跑 ✓/✗ 行数必须等于 GATE_TOTAL。
+  // 正常时只打一条不带 ✓/✗ 的说明行（否则会把自己算进条数，形成自指）。
+  const executedGates = gateLines.filter((l) => /^  [✓✗] /.test(l)).length;
+  if (executedGates !== GATE_TOTAL) {
+    console.log('  ✗ 门禁条数：实跑 ' + executedGates + ' 项 ≠ 声明 ' + GATE_TOTAL + ' 项'
+      + '（增删门禁须同步 GATE_TOTAL、scripts/docs-baseline.json 与文档）');
+    fails.push('门禁条数不一致：实跑 ' + executedGates + ' ≠ 声明 ' + GATE_TOTAL);
+  } else {
+    console.log('  门禁条数：' + executedGates + ' 项（与声明一致）');
+  }
   console.log('-------------------------------------------');
   if (fails.length) {
     fails.forEach((f) => console.log('  - ' + f));
