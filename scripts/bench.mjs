@@ -19,9 +19,12 @@
  *
  * SRS 相对门禁（P1-B 修订，替换历史绝对毫秒基线）：
  *   `SRSStore.grade / gradeMany` 改为「同轮标定比值」判定。每轮在被测样本前后各跑一批
- *   与存储提交（patch）同构的序列化标定工作，判定量 = 本轮被测中位数 / 标定单位耗时。
+ *   与存储提交（patch）同构的序列化标定工作，单轮比值 = 本轮被测中位数 / 标定单位耗时。
  *   机器频率/负载/GC 相位漂移会同向放大两侧、在比值中抵消；真实代码回退只放大分子。
- *   原理、适用边界、负向验证方法见 docs/DEVELOPMENT.md「3-B. SRS 相对门禁」。
+ *   判定量取 21 轮比值的 p25（不是中位数）：负载只会让个别轮变慢，中位数被周期性慢轮抬高，
+ *   跨运行摆动 18%（grade）/ 40%（gradeMany），阈值会压在分布中部；p25 跨 20 次运行只摆 10%。
+ *   标定窗口与样本批次同量级（约 200 ms / 80 ms），避免两者处在不同 CPU 频率斜坡上。
+ *   容差按实测分布推导（非固定常数），见 docs/BENCH.md「3-B」与 scripts/bench-baseline.json。
  *   负向验证：QF_BENCH_INJECT_SLOW=0.1 node --expose-gc scripts/bench.mjs --assert
  *   （只在 scripts 侧给每个被测样本前置一段「样本耗时 × 比例」的 hrtime 忙等，不修改业务代码）。
  *   门禁要求 --expose-gc：每轮前强制 GC，消除堆相位差；无该参数时比值仍输出但波动更大。
@@ -134,7 +137,8 @@ function row(name, timeTriple, extra) {
     p50: timeTriple.p50, p95: timeTriple.p95, runs: timeTriple.runs, samples: timeTriple.samples,
     min: timeTriple.min, max: timeTriple.max,
     // SRS 相对门禁字段（其余打点项为 undefined）
-    ratio: timeTriple.ratio, ratioRounds: timeTriple.ratioRounds, ratioSpread: timeTriple.ratioSpread,
+    ratio: timeTriple.ratio, ratioP25: timeTriple.ratioP25,
+    ratioRounds: timeTriple.ratioRounds, ratioSpread: timeTriple.ratioSpread,
     unitMs: timeTriple.unitMs, injectRatio: timeTriple.injectRatio, injectMs: timeTriple.injectMs,
     extra: extra || ''
   });
@@ -887,6 +891,7 @@ async function calibratedTimed(fn, n, runs, unitsPerSample) {
     p50: percentile(all, 0.5), p95: percentile(all, 0.95),
     runs: runs, samples: all.length, min: min, max: max,
     ratio: median(ratios), ratioRounds: ratios,
+    ratioP25: percentile(ratios, 0.25),
     ratioSpread: Math.max.apply(null, ratios) / Math.min.apply(null, ratios),
     unitMs: median(unitCosts), injectRatio: INJECT_SLOW, injectMs: injectMs
   };
@@ -957,11 +962,11 @@ QB.DB.revlog.append(Array.from({ length: (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.R
 })));
 row('SRSStore.grade 单次评分（本地适配器）', await calibratedTimed(async (i) => {
   await QB.SRSStore.grade(gradeBank.id, gradeQs[i % gradeQs.length], QB.SRS.RATINGS.good, qNow + i * 1000);
-}, 1000, 11, 1), '存储层 stateFor + 一次 patch（状态 + revlog）；11 轮×1000；门禁=同轮标定比值');
+}, 1000, 21, 5), '存储层 stateFor + 一次 patch（状态 + revlog）；21 轮×1000；门禁=同轮标定比值');
 row('SRSStore.gradeMany 批量 20 题（本地适配器）', await calibratedTimed(async (i) => {
   await QB.SRSStore.gradeMany(gradeBank.id,
     gradeQs.map((q) => ({ question: q, rating: QB.SRS.RATINGS.good })), qNow + i * 1000);
-}, 200, 11, 4), '批量读 20 状态 + 一次 patch；11 轮×200；门禁=同轮标定比值');
+}, 200, 21, 10), '批量读 20 状态 + 一次 patch；21 轮×200；门禁=同轮标定比值');
 
 // 合成评分日志（可解释的显著偏离真权重，与 fsrs-opt.test 同一夹具口径）
 const fsSynth = [];
@@ -1932,18 +1937,28 @@ if (process.argv.indexOf('--assert') >= 0) {
   // 改为「同轮标定比值」：ratio = 本轮被测中位数 / 标定单位耗时（标定工作与被测 patch 同构，见 5b）；
   //   机器漂移同向影响两侧、在比值中抵消；真实代码回退只抬高分子 → 比值上升。
   // 基线按 Node 大版本存放（scripts/bench-baseline.json）：Node 26 的 V8 对标定工作优化远大于被测 patch，
-  //   同一份代码在 24 上比值 2.58/4.78、在 26 上 4.99/8.94，而绝对耗时反而更快（0.21→0.14 ms / 0.37→0.24 ms），
+  //   同一份代码在 24 上比值 2.58/4.78、在 26 上更高，而绝对耗时反而更快（0.21→0.14 ms / 0.37→0.24 ms），
   //   属于引擎差异而非代码回退（实测记录见 work/bench-node24.log、work/bench-node26.log）。
-  //   容差 6%：同机连续 6 次运行摆动 ≤2.2%（grade 2.69~2.75，gradeMany 4.94~5.11）；
-  //   6% ≈ 3 倍摆动，留足环境噪声；同时负向注入 +10% 实测 > 基线×1.06 → 必失败。
-  //   容差再放宽会把 10% 级真实回退淹进噪声，再收紧则对未验证机器/负载过于苛刻（见 docs/DEVELOPMENT.md）。
+  // 容差按 2026-11-12 各 20 次实测分布推导（不是固定 6%、也不是凭感觉取数）：判定量改为 21 轮比值的 p25
+  //   （中位数口径跨运行摆 18%/40%，阈值压在分布中部导致反复误红；p25 只摆 10%）。
+  //   容差 = 20 次 p25 的 max / p50 × 1.03 采样余量、向上取两位：Node 26 得 grade 1.08（阈值 5.07）、
+  //   gradeMany 1.07（阈值 8.99）；Node 24 为 1.09 / 1.06。两项分开定，不共用数值。
+  //   两项均 ≈1.03–1.04× 基线，远低于「基线×1.5」硬上限；20% 退化在实测最快态（4.44 / 7.86）仍被判红，
+  //   10% 退化在中位态可抓、最快态抓不到（如实记录）。原始 20 次数值与推导见 docs/BENCH.md 3-B。
   // keys() 首次构建同样改判比值：绝对 40 ms 阈值在整体负载 46% 时会摸到 40.86–45.55 ms，
   //   判定随负载翻转；探针（纯内存 50000 字符串物化/Set/Array.from）与首次构建同性质、同轮前后各测一次，
-  //   负载同向放大两侧、在比值中抵消。容差与 SRS 共用 bench-baseline.json 的 1.06（来源见 docs/BENCH.md 3-B）。
+  //   负载同向放大两侧、在比值中抵消。容差沿用 bench-baseline.json 顶层默认 1.06（见 docs/BENCH.md 3-B-1）。
   const BASELINE = JSON.parse(fs.readFileSync(path.join(__dirname, 'bench-baseline.json'), 'utf8'));
   const NODE_MAJOR = process.versions.node.split('.')[0];
   const nodeBaseline = BASELINE.node && BASELINE.node[NODE_MAJOR];
   const RATIO_TOLERANCE = BASELINE.tolerance || 1.06;
+  // 按指标取容差：优先 node 级 `tolerance[key]`（实测分布推导，见 docs/BENCH.md 3-B），
+  // 未单列时回落到顶层 1.06（keys() 首次构建仍用它）。
+  const toleranceOf = (key) => {
+    const t = nodeBaseline && nodeBaseline.tolerance;
+    if (t && isFinite(t[key])) return t[key];
+    return RATIO_TOLERANCE;
+  };
   [['SRSStore.grade 单次评分', 'grade'], ['SRSStore.gradeMany 批量 20 题', 'gradeMany'],
     ['keys() 首次构建（50000', 'keysBuild']]
     .forEach(([needle, key]) => {
@@ -1957,14 +1972,21 @@ if (process.argv.indexOf('--assert') >= 0) {
         return;
       }
       const base = nodeBaseline[key];
-      const max = base * RATIO_TOLERANCE;
-      const ok = r.ratio <= max;
-      console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：比值 ' + r.ratio.toFixed(2) + ' ≤ ' + max.toFixed(2)
-        + '（Node ' + NODE_MAJOR + ' 基线 ' + base.toFixed(2) + ' ×' + RATIO_TOLERANCE + '；p50 ' + (r.p50 == null ? NaN : r.p50).toFixed(4)
+      const tol = toleranceOf(key);
+      const max = base * tol;
+      // SRS 两条的判定量取「各轮比值的 p25」：负载/GC 只会让个别轮变慢（周期性慢轮），
+      // 轮中位数的中位数会被它们抬高且跨运行摆动 17–40%；p25 取内在成本、跨运行 7–13%。
+      // keys() 首次构建仍用轮中位数的中位数（见 3-B-1）。
+      const isSrs = key !== 'keysBuild' && isFinite(r.ratioP25);
+      const measured = isSrs ? r.ratioP25 : r.ratio;
+      const ok = measured <= max;
+      console.log((ok ? '  ✓ ' : '  ✗ ') + needle + '：比值' + (isSrs ? '(p25) ' : ' ') + measured.toFixed(2) + ' ≤ ' + max.toFixed(2)
+        + '（Node ' + NODE_MAJOR + ' 基线 ' + base.toFixed(2) + ' ×' + tol + '；p50 ' + (r.p50 == null ? NaN : r.p50).toFixed(4)
         + ' ms / 标定 ' + (r.unitMs * 1000).toFixed(1) + ' µs，同机参考；' + r.runs + ' 轮×' + (r.samples && r.runs ? (r.samples / r.runs) : '?')
-        + ' 样本，轮间极差 ' + r.ratioSpread.toFixed(2) + '×'
+        + ' 样本，轮中位 ' + r.ratio.toFixed(2) + '，轮间极差 ' + r.ratioSpread.toFixed(2) + '×'
+        + (r.ratioRounds ? '，各轮 ' + r.ratioRounds.map((v) => v.toFixed(2)).join('/') : '')
         + (r.injectRatio ? '；负向注入 +' + (r.injectRatio * 100).toFixed(0) + '%（' + ((r.injectMs || 0) * 1000).toFixed(1) + ' µs/样本）' : '') + '）');
-      if (!ok) fails.push(needle + ' ratio ' + r.ratio.toFixed(2) + ' > Node ' + NODE_MAJOR + ' 基线×' + RATIO_TOLERANCE + ' ' + max.toFixed(2));
+      if (!ok) fails.push(needle + ' ratio' + (isSrs ? '(p25)' : '') + ' ' + measured.toFixed(2) + ' > Node ' + NODE_MAJOR + ' 基线×' + tol + ' ' + max.toFixed(2));
     });
   const heapDeltaMb = (heapAfter - heapBefore) / 1024 / 1024;
   const heapOk = heapDeltaMb <= 40;
