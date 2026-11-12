@@ -121,6 +121,8 @@ node scripts/e2e-browser.mjs --only=sw       # 单场景复验
 - 启动本机 Edge（CDP）+ 进程内静态服务器，覆盖：C020 跨源 CSP 默认拦截与三处白名单部署模拟、C025 install 预缓存失败/导航 500 不覆盖离线壳/CACHE 版本生效、C007 InPrivate 与 IDB 不可用回落及可恢复标记、C008 双标签并发评分、IDB 50k `storage.estimate` 与渲染帧时间。
 - 证据（`result.json`、`run.log`、截图）写入 `.screenshots/e2e-browser/`，**不入库**；场景无法真机执行时脚本明确标记「未测」并 exit 1，禁止用 Node 替身冒充真机结果。
 
+**浏览器端到端 CI 门禁（`e2e` job）**：独立 job（ubuntu + Node 24 + headless chromium，8 分钟上限），六场景、确定性写法、边界与失败取证见 [E2E-CI.md](E2E-CI.md)。
+
 一键全跑（PowerShell）：
 
 ```powershell

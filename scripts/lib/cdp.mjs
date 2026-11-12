@@ -10,12 +10,52 @@ import path from 'node:path';
 export const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function launchBrowser({ profileDir, port, extraArgs = [] }) {
+/**
+ * 浏览器可执行文件探测（本地与 CI 通用，零依赖）。
+ * 优先级：QFORGE_CHROME / QFORGE_BROWSER 环境变量 → 平台候选列表。
+ * Windows 候选顺序保持 Edge 优先（手动真机门禁的历史行为）；Linux 命中 CI 预装的 Chrome。
+ */
+const BROWSER_CANDIDATES = process.platform === 'win32' ? [
+  EDGE,
+  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+] : [
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/microsoft-edge',
+  '/usr/bin/microsoft-edge-stable'
+];
+
+export function findBrowser() {
+  const env = process.env.QFORGE_CHROME || process.env.QFORGE_BROWSER;
+  if (env) {
+    if (!fs.existsSync(env)) throw new Error('QFORGE_CHROME 指向的浏览器不存在：' + env);
+    return env;
+  }
+  const hit = BROWSER_CANDIDATES.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
+  if (!hit) {
+    throw new Error('未找到 Chromium 系浏览器。请设置 QFORGE_CHROME=/path/to/chrome；候选：'
+      + BROWSER_CANDIDATES.join('、'));
+  }
+  return hit;
+}
+
+export async function launchBrowser({ profileDir, port, extraArgs = [], headless = false, executablePath }) {
   fs.rmSync(profileDir, { recursive: true, force: true });
   fs.mkdirSync(profileDir, { recursive: true });
-  const child = spawn(EDGE, [
+  const bin = executablePath || findBrowser();
+  // headless 只在 CI 门禁显式开启；手动脚本默认有头，行为不变。
+  const headlessArgs = headless
+    ? ['--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+      '--hide-scrollbars', '--window-size=1280,900']
+    : [];
+  const child = spawn(bin, [
     `--user-data-dir=${profileDir}`,
     `--remote-debugging-port=${port}`,
+    ...headlessArgs,
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-networking',
@@ -34,7 +74,7 @@ export async function launchBrowser({ profileDir, port, extraArgs = [] }) {
     } catch (e) { /* 未就绪 */ }
     await sleep(200);
   }
-  if (!wsUrl) { try { child.kill(); } catch (e) { /* ignore */ } throw new Error('Edge CDP 未就绪'); }
+  if (!wsUrl) { try { child.kill(); } catch (e) { /* ignore */ } throw new Error('CDP 未就绪：' + bin); }
   const ws = new WebSocket(wsUrl);
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('CDP WebSocket 连接失败')); });
   let seq = 0;
@@ -69,12 +109,12 @@ export async function launchBrowser({ profileDir, port, extraArgs = [] }) {
   };
 }
 
-export async function openSession(browser, { url = 'about:blank', browserContextId } = {}) {
+export async function openSession(browser, { url = 'about:blank', browserContextId, network = false } = {}) {
   const targetParams = { url };
   if (browserContextId) targetParams.browserContextId = browserContextId;
   const { targetId } = await browser.send('Target.createTarget', targetParams);
   const { sessionId } = await browser.send('Target.attachToTarget', { targetId, flatten: true });
-  const events = { exceptions: [], console: [], logs: [] };
+  const events = { exceptions: [], console: [], logs: [], requests: [], failed: [] };
   browser.on('Runtime.exceptionThrown', (p, sid) => {
     if (sid !== sessionId) return;
     events.exceptions.push({
@@ -100,6 +140,39 @@ export async function openSession(browser, { url = 'about:blank', browserContext
   await send('Runtime.enable');
   await send('Page.enable');
   await send('Log.enable');
+  if (network) {
+    await send('Network.enable');
+    // 页面会话级网络事件（SW 的 install 预缓存在独立 target，不会混进来）：
+    // requests 记录 url/type/initiator/status，failed 记录 requestfailed 语义。
+    browser.on('Network.requestWillBeSent', (p, sid) => {
+      if (sid !== sessionId) return;
+      events.requests.push({
+        at: Date.now(),
+        requestId: p.requestId,
+        url: p.request && p.request.url,
+        method: p.request && p.request.method,
+        type: p.type,
+        initiator: p.initiator && p.initiator.type,
+        status: 0
+      });
+    });
+    browser.on('Network.responseReceived', (p, sid) => {
+      if (sid !== sessionId) return;
+      const rec = events.requests.find((r) => r.requestId === p.requestId);
+      if (rec) rec.status = (p.response && p.response.status) || 0;
+    });
+    browser.on('Network.loadingFailed', (p, sid) => {
+      if (sid !== sessionId) return;
+      const rec = events.requests.find((r) => r.requestId === p.requestId);
+      events.failed.push({
+        at: Date.now(),
+        url: rec ? rec.url : '',
+        type: rec ? rec.type : '',
+        errorText: p.errorText,
+        canceled: !!p.canceled
+      });
+    });
+  }
 
   const ev = async (expression, { awaitPromise = true, timeout } = {}) => {
     const payload = { expression, awaitPromise, returnByValue: true, userGesture: true };

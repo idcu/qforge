@@ -75,6 +75,30 @@ function inspect(text) {
     }
   }
 
+  // 浏览器端到端必须是独立 job（ubuntu + Node 24 + headless chromium），
+  // 且不得混进 logic-tests 的六格矩阵——否则「矩阵 12 格」口径会被悄悄改写。
+  const e2e = jobLines(text, 'e2e');
+  if (!e2e) {
+    problems.push('缺少 e2e job（浏览器端到端门禁需独立进 CI）');
+  } else {
+    const e2eJoined = e2e.join('\n');
+    if (!/runs-on:\s*ubuntu-latest\b/.test(e2eJoined)) {
+      problems.push('e2e job 必须运行在 ubuntu-latest');
+    }
+    if (!/run:\s*node scripts\/e2e-ci\.mjs\b/.test(e2eJoined)) {
+      problems.push('e2e job 未运行 `node scripts/e2e-ci.mjs`');
+    }
+    if (/matrix\./.test(e2eJoined)) {
+      problems.push('e2e job 不得进入六格矩阵（不得引用 matrix.）');
+    }
+    if (!/timeout-minutes:\s*\d+/.test(e2eJoined)) {
+      problems.push('e2e job 缺少 timeout-minutes（必须有超时上限）');
+    }
+    if (!/if:\s*always\(\)/.test(e2eJoined) || !/actions\/upload-artifact/.test(e2eJoined)) {
+      problems.push('e2e job 缺少 `if: always()` 取证上传（截图 / trace）');
+    }
+  }
+
   const onDisk = fs.readdirSync(__dirname).filter((f) => f.endsWith('.test.mjs'));
   const missingOnDisk = ORDER.filter((f) => f !== 'smoke-test.mjs' && !onDisk.includes(f));
   const missingInOrder = onDisk.filter((f) => !ORDER.includes(f));
@@ -99,6 +123,10 @@ if (SELFTEST) {
     {
       name: '删除 a11y 独立 job',
       text: base.replace(/^  a11y:[\s\S]*?(?=^  [A-Za-z0-9_.-]+:)/m, '')
+    },
+    {
+      name: '删除 e2e 独立 job',
+      text: base.replace(/^  e2e:[\s\S]*?(?=^  [A-Za-z0-9_.-]+:)/m, '')
     }
   ];
   let ok = true;
@@ -121,4 +149,5 @@ if (problems.length) {
   process.exit(1);
 }
 console.log('CI 覆盖自检通过 ✅：logic-tests 单步运行，ORDER ' + ORDER.length
-  + ' 项（冒烟 1 + 套件 ' + (ORDER.length - 1) + '），性能门禁限 Node24/26 + Asia-Shanghai');
+  + ' 项（冒烟 1 + 套件 ' + (ORDER.length - 1) + '），性能门禁限 Node24/26 + Asia-Shanghai，'
+  + 'e2e 独立 job（Ubuntu + Node24 + 超时 + always 取证）');

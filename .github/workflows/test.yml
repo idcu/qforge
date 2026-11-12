@@ -53,6 +53,30 @@ jobs:
       - name: 静态无障碍门禁（色对 / ARIA / 焦点约定 / 动效）
         run: node scripts/a11y.test.mjs
 
+  e2e:
+    # 浏览器端到端门禁：独立 job，不进六格矩阵（矩阵口径与耗时都不受影响）。
+    # 真实 Chromium（ubuntu runner 预装 Google Chrome）+ 本地静态服务；
+    # 六场景见 scripts/e2e-ci.mjs 与 docs/TESTING.md，目标 3 分钟、8 分钟硬上限。
+    name: 浏览器端到端门禁
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: 六场景端到端（headless chromium）
+        run: node scripts/e2e-ci.mjs
+      # 红绿都上传：result.json / run.log / trace.json / screenshots / downloads。
+      - name: 上传取证（截图 / trace / result）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-evidence
+          path: .analysis/e2e-ci/
+          if-no-files-found: ignore
+          retention-days: 7
+
   logic-tests:
     runs-on: ubuntu-latest
     strategy:

@@ -16,8 +16,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchBrowser, openSession, sleep } from './lib/cdp.mjs';
-import { resolveSafePath, MIME } from './lib/static-server.mjs';
-import { CSP, securityHeaders } from './lib/security-headers.mjs';
+import { createAppServer } from './lib/app-server.mjs';
+import { CSP } from './lib/security-headers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '.screenshots', 'e2e-browser');
@@ -115,83 +115,8 @@ const cachedShell = (session) => session.ev(
 );
 
 /* ------------------------------------------------------------------ */
-/* 静态服务器：进程内 mode 控制 SW / CSP 场景                            */
+/* 静态服务器：进程内 mode 控制 SW / CSP 场景（实现见 lib/app-server.mjs） */
 /* ------------------------------------------------------------------ */
-function createAppServer(port, { allowlistOrigin = null } = {}) {
-  const state = { mode: 'normal', allowlistOrigin, hits: [] };
-  const cspHeader = allowlistOrigin
-    ? CSP.replace("connect-src 'self'", `connect-src 'self' ${allowlistOrigin}`)
-    : CSP;
-  const server = http.createServer((req, res) => {
-    const urlPath = (req.url || '/').split('?')[0];
-    const isNav = req.headers['sec-fetch-mode'] === 'navigate' || String(req.headers.accept || '').indexOf('text/html') >= 0;
-    const hit = { at: Date.now(), method: req.method, url: urlPath, mode: state.mode };
-    state.hits.push(hit);
-
-    if (state.mode === 'offline') {
-      hit.status = 'offline';
-      try { req.socket.destroy(); } catch (e) { /* ignore */ }
-      return;
-    }
-    if (state.mode === 'nav500' && isNav) {
-      hit.status = 500;
-      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end('<!doctype html><title>SERVER ERROR</title><h1>SERVER ERROR</h1>');
-      return;
-    }
-    if (state.mode === 'failPrecache' && urlPath === '/icons/icon-512.png') {
-      hit.status = 404;
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end('404 pre-cache failure (e2e)');
-      return;
-    }
-
-    const filePath = resolveSafePath(ROOT, req.url);
-    if (!filePath) {
-      hit.status = 403;
-      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('403');
-      return;
-    }
-    let data;
-    try { data = fs.readFileSync(filePath); } catch (e) {
-      hit.status = 404;
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('404');
-      return;
-    }
-    let body = data;
-    const ext = path.extname(filePath).toLowerCase();
-    if (allowlistOrigin && ext === '.html') {
-      body = Buffer.from(data.toString('utf8')
-        .replace("connect-src 'self'", `connect-src 'self' ${allowlistOrigin}`), 'utf8');
-    }
-    if (allowlistOrigin && filePath.endsWith(path.join('js', 'config.js'))) {
-      body = Buffer.from(data.toString('utf8')
-        .replace('CSP_CONNECT_ALLOWLIST: []', `CSP_CONNECT_ALLOWLIST: ['${allowlistOrigin}']`), 'utf8');
-    }
-    if (state.mode === 'swBump' && filePath.endsWith('sw.js')) {
-      body = Buffer.from(data.toString('utf8')
-        .replace(/const CACHE = '[^']+';/, "const CACHE = 'qforge-e2e-bump';"), 'utf8');
-    }
-    const headers = Object.assign({
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': 'no-store'
-    }, securityHeaders(filePath));
-    if (allowlistOrigin && ext === '.html') headers['Content-Security-Policy'] = cspHeader + "; frame-ancestors 'none'";
-    hit.status = 200;
-    res.writeHead(200, headers);
-    res.end(body);
-  });
-  return new Promise((resolve) => {
-    server.listen(port, '127.0.0.1', () => resolve({
-      state,
-      cspHeader,
-      url: `http://127.0.0.1:${port}`,
-      close: () => new Promise((r) => { server.closeAllConnections && server.closeAllConnections(); server.close(() => r()); })
-    }));
-  });
-}
 
 function createCrossServer(port) {
   const server = http.createServer((req, res) => {
@@ -653,8 +578,8 @@ async function main() {
   const want = (id) => !only || only.indexOf(id) >= 0;
 
   log('启动静态服务：' + APP_URL + ' / ' + ALLOW_URL + ' / 跨源 ' + CROSS_ORIGIN);
-  const app = await createAppServer(APP_PORT);
-  const allow = await createAppServer(ALLOW_PORT, { allowlistOrigin: CROSS_ORIGIN });
+  const app = await createAppServer(ROOT, APP_PORT);
+  const allow = await createAppServer(ROOT, ALLOW_PORT, { allowlistOrigin: CROSS_ORIGIN });
   const cross = await createCrossServer(8812);
   const startedAt = new Date().toISOString();
   let fatal = null;
