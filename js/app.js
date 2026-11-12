@@ -452,7 +452,10 @@
    * 全程离线（不 fetch、不需账号），复用 QB.DataIO.commitImport 的 revision/409 语义。
    */
   async function handleShareHash() {
-    if (typeof location === 'undefined' || !QB.ShareLink || !QB.DataIO) return null;
+    if (typeof location === 'undefined' || !QB.ShareLink) return null;
+    if (!QB.ShareLink.readHash(location.hash || '')) return null; // 无需带 code 的普通 hash 不触发加载
+    await QB.Loader.ensure('import');
+    if (!QB.DataIO) return null;
     const code = QB.ShareLink.readHash(location.hash || '');
     if (!code) return null;
     try {
@@ -561,6 +564,7 @@
       if (!State.bank) { UI.toast('请先创建或选择题库', 'err'); return; }
       if (State.engine) { UI.toast('答题中不能导入，请先交卷或退出', 'err'); return; }
       const active = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+      await QB.Loader.ensure('import');
       await QB.DataIO.importFile(State.bank, file, QB.Source.KINDS.DROP, active);
       render();
     });

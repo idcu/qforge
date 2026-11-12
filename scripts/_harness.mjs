@@ -94,6 +94,9 @@ const MODULES = [
   'js/modules/sync-dav.js',
   'js/modules/blueprint.js',
   'js/modules/practice-builder.js',
+  // 按需加载器：生产环境排在 app.js 之前；harness 里所有模块已直接加载，
+  // ensure() 走 READY 快路径（QB[symbol] 已存在即返回），不影响已有用例。
+  'js/modules/loader.js',
   // 从 app.js 拆出的会话流程 / 开练弹窗 / 启动诊断（生产环境排在 app.js 之前）
   'js/modules/quiz-session.js',
   'js/modules/quiz-dialogs.js',

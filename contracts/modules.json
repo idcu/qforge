@@ -1,1470 +1,1489 @@
 {
-  "schemaVersion": 1,
-  "description": "装配清单：index.html 里 classic <script> 的**声明式顺序**。\n这个项目没有打包器，加载顺序就是依赖图；顺序错了不会在启动时报错，\n只在某个功能第一次用到时才 undefined。\n规则：index.html 的 src 序列必须与 modules 数组逐条相等（不多不少、不改变顺序）；\n加脚本、删脚本、调整顺序都要同时改这里，否则 scripts/check-modules.mjs 会红。\nrequires 是显式前置依赖：只登记「加载时就已需要存在」的模块（必须排在本条之前）；\n运行期才用到的后置模块不登记（否则会与真实加载顺序冲突）。\nkeeps 是本模块必须导出的全局符号（静态断言存在赋值），防止误删导出后其它模块静默 undefined；\nvendor 以 UMD/全局别名导出，单独登记。",
-  "layers": [
-    "sample",
-    "config",
-    "data",
-    "utils",
-    "vendor",
-    "modules",
-    "importers",
-    "entry"
-  ],
-  "modules": [
-    {
-      "id": "data.sample-data",
-      "file": "js/data/sample-data.js",
-      "layer": "sample",
-      "tier": "L0",
-      "at": 1,
-      "requires": [],
-      "keeps": [
-        "QB.SAMPLE"
-      ]
-    },
-    {
-      "id": "config",
-      "file": "js/config.js",
-      "layer": "config",
-      "tier": "L0",
-      "at": 2,
-      "requires": [],
-      "keeps": [
-        "QB.CONFIG",
-        "QB.difficultyLabel",
-        "QB.typeBadge",
-        "QB.typeLabel"
-      ]
-    },
-    {
-      "id": "data.store",
-      "file": "js/data/store.js",
-      "layer": "data",
-      "tier": "L1",
-      "at": 3,
-      "requires": [
-        "config"
-      ],
-      "keeps": [
-        "QB.Store"
-      ]
-    },
-    {
-      "id": "utils.helpers",
-      "file": "js/utils/helpers.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 4,
-      "requires": [],
-      "keeps": [
-        "QB.Helpers",
-        "QB.deepEqual",
-        "QB.escapeHtml",
-        "QB.uid"
-      ]
-    },
-    {
-      "id": "vendor.core.util.core",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/util/src/core.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 5,
-      "requires": [],
-      "keeps": [
-        "globalThis.__idcuUtil"
-      ]
-    },
-    {
-      "id": "utils.time",
-      "file": "js/utils/time.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 6,
-      "requires": [],
-      "keeps": [
-        "QB.Time"
-      ]
-    },
-    {
-      "id": "vendor.core.rich-text.core",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/rich-text/src/core.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 7,
-      "requires": [],
-      "keeps": [
-        "globalThis.__idcuRichText"
-      ]
-    },
-    {
-      "id": "utils.rich-text",
-      "file": "js/utils/rich-text.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 8,
-      "requires": [
-        "utils.helpers"
-      ],
-      "keeps": [
-        "QB.RichText"
-      ]
-    },
-    {
-      "id": "utils.storage",
-      "file": "js/utils/storage.js",
-      "layer": "utils",
-      "tier": "L1",
-      "at": 9,
-      "requires": [
+    "schemaVersion": 1,
+    "description": "装配清单：index.html 里 classic <script> 的**声明式顺序**。\n这个项目没有打包器，加载顺序就是依赖图；顺序错了不会在启动时报错，\n只在某个功能第一次用到时才 undefined。\n规则：index.html 的 src 序列必须与「不带 load 字段」的条目逐条相等（不多不少、不改变顺序）；\nload=\"on-demand\" 的条目由 js/modules/loader.js 的 QB.BUNDLES 在用户动作时按序注入，\n不在首屏；它们必须恰好出现在一个按需包里，且包内顺序满足 requires。\nrequires 是显式前置依赖：只登记「加载时就已需要存在」的模块（core 必须排在本条之前，\n按需模块必须排在同包更早位置或是 core）；运行期才用到的后置模块不登记。\nlazyRequires 只用于 core 模块经 QB.Loader.ensure 取用的按需模块（源码里必须出现 ensure 调用）。\nkeeps 是本模块必须导出的全局符号（静态断言存在赋值），防止误删导出后其它模块静默 undefined；\nvendor 以 UMD/全局别名导出，单独登记。",
+    "layers": [
+        "sample",
         "config",
-        "data.store"
-      ],
-      "keeps": [
-        "QB.Storage"
-      ]
-    },
-    {
-      "id": "utils.quota",
-      "file": "js/utils/quota.js",
-      "layer": "utils",
-      "tier": "L1",
-      "at": 10,
-      "requires": [
-        "config",
-        "utils.storage"
-      ],
-      "keeps": [
-        "QB.Quota"
-      ]
-    },
-    {
-      "id": "utils.fnv",
-      "file": "js/utils/fnv.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 11,
-      "requires": [],
-      "keeps": [
-        "QB.FNV"
-      ]
-    },
-    {
-      "id": "utils.random",
-      "file": "js/utils/random.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 12,
-      "requires": [],
-      "keeps": [
-        "QB.mulberry32"
-      ]
-    },
-    {
-      "id": "vendor.core.base64.core",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/base64/src/core.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 13,
-      "requires": [],
-      "keeps": [
-        "globalThis.__idcuBase64"
-      ]
-    },
-    {
-      "id": "utils.base64",
-      "file": "js/utils/base64.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 14,
-      "requires": [],
-      "keeps": [
-        "QB.Base64"
-      ]
-    },
-    {
-      "id": "utils.shuffle",
-      "file": "js/utils/shuffle.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 15,
-      "requires": [
-        "utils.random"
-      ],
-      "keeps": [
-        "QB.sampleN",
-        "QB.shuffle",
-        "QB.shuffleChildren",
-        "QB.shuffleOptions"
-      ]
-    },
-    {
-      "id": "utils.answer-normalize",
-      "file": "js/utils/answer-normalize.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 16,
-      "requires": [],
-      "keeps": [
-        "QB.normalizeAnswer",
-        "QB.normalizeLetters",
-        "QB.parseBoolean"
-      ]
-    },
-    {
-      "id": "utils.answer-text",
-      "file": "js/utils/answer-text.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 17,
-      "requires": [],
-      "keeps": [
-        "QB.AnswerText"
-      ]
-    },
-    {
-      "id": "utils.judge-answer",
-      "file": "js/utils/judge-answer.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 18,
-      "requires": [
-        "config",
-        "utils.answer-normalize",
-        "utils.answer-text"
-      ],
-      "keeps": [
-        "QB.CHILD_SCORE_MAX",
-        "QB.JudgeStrategies",
-        "QB.aggregateMaterial",
-        "QB.childPoints",
-        "QB.judgeAnswer",
-        "QB.needsSelfAssessment",
-        "QB.normalizeChildScore",
-        "QB.resolveJudgeValue"
-      ]
-    },
-    {
-      "id": "utils.result-policy",
-      "file": "js/utils/result-policy.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 19,
-      "requires": [],
-      "keeps": [
-        "QB.ResultPolicy"
-      ]
-    },
-    {
-      "id": "utils.question-id",
-      "file": "js/utils/question-id.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 20,
-      "requires": [
-        "utils.fnv",
-        "utils.answer-normalize",
-        "utils.judge-answer"
-      ],
-      "keeps": [
-        "QB.HASH_VERSION",
-        "QB.hashVersionOf",
-        "QB.isCurrentHash",
-        "QB.isLegacyHash",
-        "QB.makeContentHash",
-        "QB.makeLegacyContentHash",
-        "QB.makeQuestionKey"
-      ]
-    },
-    {
-      "id": "utils.annotation",
-      "file": "js/utils/annotation.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 21,
-      "requires": [
-        "config"
-      ],
-      "keeps": [
-        "QB.Annotation"
-      ]
-    },
-    {
-      "id": "vendor.format.zip.zip",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/zip/src/vendor/zip.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 22,
-      "requires": [],
-      "keeps": [
-        "window.Zip"
-      ]
-    },
-    {
-      "id": "vendor.format.xml-lite.xml-lite",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xml-lite/src/vendor/xml-lite.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 23,
-      "requires": [],
-      "keeps": [
-        "window.XmlLite"
-      ]
-    },
-    {
-      "id": "vendor.format.xlsx-read.xlsx",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 24,
-      "requires": [],
-      "keeps": [
-        "window.Xlsx"
-      ]
-    },
-    {
-      "id": "vendor.format.xlsx-read.core",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 25,
-      "requires": [],
-      "keeps": [
-        "globalThis.__idcuXlsx"
-      ]
-    },
-    {
-      "id": "vendor.core.assets.core",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/assets/src/core.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 26,
-      "requires": [],
-      "keeps": [
-        "globalThis.__idcuAssets"
-      ]
-    },
-    {
-      "id": "vendor.format.dsv.dsv",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/dsv/src/vendor/dsv.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 27,
-      "requires": [],
-      "keeps": [
-        "window.DSV"
-      ]
-    },
-    {
-      "id": "utils.crc32",
-      "file": "js/utils/crc32.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 28,
-      "requires": [],
-      "keeps": [
-        "QB.Crc32"
-      ]
-    },
-    {
-      "id": "utils.zip-reader",
-      "file": "js/utils/zip-reader.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 29,
-      "requires": [],
-      "keeps": [
-        "QB.ZipReader",
-        "QB.decodeUtf8"
-      ]
-    },
-    {
-      "id": "vendor.format.sqlite-read.core",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/sqlite-read/src/core.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 30,
-      "requires": [],
-      "keeps": [
-        "globalThis.__idcuSqliteRead"
-      ]
-    },
-    {
-      "id": "utils.sqlite-reader",
-      "file": "js/utils/sqlite-reader.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 31,
-      "requires": [],
-      "keeps": [
-        "QB.SqliteReader"
-      ]
-    },
-    {
-      "id": "utils.zip-writer",
-      "file": "js/utils/zip-writer.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 32,
-      "requires": [],
-      "keeps": [
-        "QB.ZipWriter"
-      ]
-    },
-    {
-      "id": "utils.xml-lite",
-      "file": "js/utils/xml-lite.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 33,
-      "requires": [],
-      "keeps": [
-        "QB.XmlLite"
-      ]
-    },
-    {
-      "id": "utils.assets",
-      "file": "js/utils/assets.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 34,
-      "requires": [
-        "config"
-      ],
-      "keeps": [
-        "QB.Assets"
-      ]
-    },
-    {
-      "id": "utils.weights",
-      "file": "js/utils/weights.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 35,
-      "requires": [],
-      "keeps": [
-        "QB.Weights"
-      ]
-    },
-    {
-      "id": "utils.review-merge",
-      "file": "js/utils/review-merge.js",
-      "layer": "utils",
-      "tier": "L0",
-      "at": 36,
-      "requires": [],
-      "keeps": [
-        "QB.ReviewMerge"
-      ]
-    },
-    {
-      "id": "utils.hash-remap",
-      "file": "js/utils/hash-remap.js",
-      "layer": "utils",
-      "tier": "L1",
-      "at": 37,
-      "requires": [
-        "utils.storage"
-      ],
-      "keeps": [
-        "QB.HashRemap"
-      ]
-    },
-    {
-      "id": "data.contracts",
-      "file": "js/data/contracts.js",
-      "layer": "data",
-      "tier": "L1",
-      "at": 38,
-      "requires": [],
-      "keeps": [
-        "QB.ASSET_DRIVER_CONTRACT",
-        "QB.CONTRACTS",
-        "QB.KEYS",
-        "QB.assertAdapter",
-        "QB.assertDriver"
-      ]
-    },
-    {
-      "id": "data.wire",
-      "file": "js/data/wire.js",
-      "layer": "data",
-      "tier": "L1",
-      "at": 39,
-      "requires": [
-        "utils.question-id"
-      ],
-      "keeps": [
-        "QB.Wire"
-      ]
-    },
-    {
-      "id": "data.local-adapter",
-      "file": "js/data/local-adapter.js",
-      "layer": "data",
-      "tier": "L1",
-      "at": 40,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.storage",
-        "utils.answer-normalize",
-        "utils.judge-answer",
-        "utils.question-id",
-        "utils.annotation",
-        "utils.weights",
-        "utils.review-merge",
-        "utils.hash-remap",
-        "data.contracts"
-      ],
-      "keeps": [
-        "QB.LocalAdapter",
-        "QB.QuestionShards",
-        "QB.REVIEW_LAYOUT_VERSION",
-        "QB.REVLOG_LAYOUT_VERSION",
-        "QB.ReviewStore",
-        "QB.RevlogStore"
-      ]
-    },
-    {
-      "id": "data.api-adapter",
-      "file": "js/data/api-adapter.js",
-      "layer": "data",
-      "tier": "L1",
-      "at": 41,
-      "requires": [
-        "config",
-        "utils.question-id",
-        "utils.weights",
-        "utils.review-merge",
-        "data.wire"
-      ],
-      "keeps": [
-        "QB.ApiAdapter"
-      ]
-    },
-    {
-      "id": "data.db",
-      "file": "js/data/db.js",
-      "layer": "data",
-      "tier": "L1",
-      "at": 42,
-      "requires": [
-        "config",
-        "utils.storage",
-        "utils.question-id",
-        "utils.assets",
-        "data.contracts",
-        "data.local-adapter",
-        "data.api-adapter"
-      ],
-      "keeps": [
-        "QB.DB"
-      ]
-    },
-    {
-      "id": "modules.package",
-      "file": "js/modules/package.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 43,
-      "requires": [
-        "config",
-        "utils.storage",
-        "utils.fnv",
-        "data.contracts"
-      ],
-      "keeps": [
-        "QB.Package"
-      ]
-    },
-    {
-      "id": "modules.qbk",
-      "file": "js/modules/qbk.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 44,
-      "requires": [
-        "utils.rich-text",
-        "utils.zip-reader",
-        "utils.zip-writer",
-        "utils.assets",
-        "modules.package"
-      ],
-      "keeps": [
-        "QB.Qbk"
-      ]
-    },
-    {
-      "id": "importers.adapters",
-      "file": "js/importers/adapters.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 45,
-      "requires": [
-        "config",
-        "utils.answer-normalize",
-        "utils.answer-text",
-        "utils.judge-answer",
-        "utils.question-id",
-        "utils.annotation"
-      ],
-      "keeps": [
-        "QB.Adapters"
-      ]
-    },
-    {
-      "id": "importers.json-importer",
-      "file": "js/importers/json-importer.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 46,
-      "requires": [
-        "importers.adapters"
-      ],
-      "keeps": [
-        "QB.JsonImporter"
-      ]
-    },
-    {
-      "id": "importers.csv-importer",
-      "file": "js/importers/csv-importer.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 47,
-      "requires": [
-        "importers.adapters"
-      ],
-      "keeps": [
-        "QB.CsvImporter"
-      ]
-    },
-    {
-      "id": "importers.line-parser",
-      "file": "js/importers/line-parser.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 48,
-      "requires": [
-        "utils.answer-normalize",
-        "utils.judge-answer",
-        "importers.adapters"
-      ],
-      "keeps": [
-        "QB.LineParser"
-      ]
-    },
-    {
-      "id": "importers.xlsx-importer",
-      "file": "js/importers/xlsx-importer.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 49,
-      "requires": [
-        "utils.zip-reader",
-        "utils.xml-lite",
-        "importers.adapters"
-      ],
-      "keeps": [
-        "QB.XlsxImporter"
-      ]
-    },
-    {
-      "id": "importers.docx-importer",
-      "file": "js/importers/docx-importer.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 50,
-      "requires": [
-        "utils.zip-reader",
-        "utils.xml-lite",
-        "utils.assets",
-        "importers.line-parser"
-      ],
-      "keeps": [
-        "QB.DocxImporter"
-      ]
-    },
-    {
-      "id": "importers.qbk-importer",
-      "file": "js/importers/qbk-importer.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 51,
-      "requires": [
-        "utils.assets",
-        "modules.package",
-        "modules.qbk",
-        "importers.json-importer"
-      ],
-      "keeps": [
-        "QB.QbkImporter"
-      ]
-    },
-    {
-      "id": "importers.md-importer",
-      "file": "js/importers/md-importer.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 52,
-      "requires": [
-        "importers.line-parser"
-      ],
-      "keeps": [
-        "QB.MdImporter"
-      ]
-    },
-    {
-      "id": "importers.anki-package",
-      "file": "js/importers/anki-package.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 53,
-      "requires": [
-        "utils.zip-reader"
-      ],
-      "keeps": [
-        "QB.AnkiPackage"
-      ]
-    },
-    {
-      "id": "importers.anki-importer",
-      "file": "js/importers/anki-importer.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 54,
-      "requires": [
-        "utils.question-id",
-        "utils.zip-reader",
-        "utils.sqlite-reader",
-        "utils.xml-lite",
-        "utils.assets",
-        "importers.adapters",
-        "importers.anki-package"
-      ],
-      "keeps": [
-        "QB.AnkiImporter"
-      ]
-    },
-    {
-      "id": "importers.quizlet-importer",
-      "file": "js/importers/quizlet-importer.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 55,
-      "requires": [
-        "utils.question-id",
-        "importers.adapters",
-        "importers.csv-importer"
-      ],
-      "keeps": [
-        "QB.QuizletImporter"
-      ]
-    },
-    {
-      "id": "importers.registry",
-      "file": "js/importers/registry.js",
-      "layer": "importers",
-      "tier": "L2",
-      "at": 56,
-      "requires": [
-        "importers.adapters",
-        "importers.json-importer",
-        "importers.csv-importer",
-        "importers.xlsx-importer",
-        "importers.docx-importer",
-        "importers.qbk-importer",
-        "importers.md-importer",
-        "importers.anki-importer",
-        "importers.quizlet-importer"
-      ],
-      "keeps": [
-        "QB.Importers"
-      ]
-    },
-    {
-      "id": "modules.quiz-engine",
-      "file": "js/modules/quiz-engine.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 57,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.shuffle",
-        "utils.judge-answer",
-        "utils.result-policy",
-        "utils.question-id"
-      ],
-      "keeps": [
-        "QB.QuizEngine"
-      ]
-    },
-    {
-      "id": "modules.wrong-book",
-      "file": "js/modules/wrong-book.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 58,
-      "requires": [
-        "utils.result-policy",
-        "data.db"
-      ],
-      "keeps": [
-        "QB.WrongBook"
-      ]
-    },
-    {
-      "id": "modules.favorites",
-      "file": "js/modules/favorites.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 59,
-      "requires": [
-        "utils.question-id",
-        "data.db"
-      ],
-      "keeps": [
-        "QB.Favorites"
-      ]
-    },
-    {
-      "id": "modules.history",
-      "file": "js/modules/history.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 60,
-      "requires": [
-        "data.db"
-      ],
-      "keeps": [
-        "QB.History"
-      ]
-    },
-    {
-      "id": "modules.statistics",
-      "file": "js/modules/statistics.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 61,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.time"
-      ],
-      "keeps": [
-        "QB.Statistics"
-      ]
-    },
-    {
-      "id": "modules.search-filter",
-      "file": "js/modules/search-filter.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 62,
-      "requires": [
-        "utils.helpers",
-        "utils.answer-normalize"
-      ],
-      "keeps": [
-        "QB.SearchFilter"
-      ]
-    },
-    {
-      "id": "vendor.core.fsrs.core",
-      "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/fsrs/src/core.js",
-      "layer": "vendor",
-      "tier": "L0",
-      "at": 63,
-      "requires": [],
-      "keeps": [
-        "globalThis.__idcuFsrs"
-      ]
-    },
-    {
-      "id": "modules.fsrs",
-      "file": "js/modules/fsrs.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 64,
-      "requires": [
-        "utils.random"
-      ],
-      "keeps": [
-        "QB.FSRS"
-      ]
-    },
-    {
-      "id": "modules.fsrs-train-core",
-      "file": "js/modules/fsrs-train-core.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 65,
-      "requires": [
-        "modules.fsrs"
-      ],
-      "keeps": [
-        "QB.FSRSTrainCore"
-      ]
-    },
-    {
-      "id": "modules.fsrs-opt",
-      "file": "js/modules/fsrs-opt.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 66,
-      "requires": [
-        "utils.weights",
-        "data.local-adapter",
-        "data.db",
-        "modules.fsrs",
-        "modules.fsrs-train-core"
-      ],
-      "keeps": [
-        "QB.FSRSOpt"
-      ]
-    },
-    {
-      "id": "modules.fsrs-train-client",
-      "file": "js/modules/fsrs-train-client.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 67,
-      "requires": [
-        "config",
-        "modules.fsrs",
-        "modules.fsrs-train-core"
-      ],
-      "keeps": [
-        "QB.FSRSTrain"
-      ]
-    },
-    {
-      "id": "modules.srs",
-      "file": "js/modules/srs.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 68,
-      "requires": [
-        "utils.question-id"
-      ],
-      "keeps": [
-        "QB.SRS"
-      ]
-    },
-    {
-      "id": "modules.srs-store",
-      "file": "js/modules/srs-store.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 69,
-      "requires": [
-        "utils.time",
-        "utils.fnv",
-        "utils.result-policy",
-        "utils.question-id",
-        "data.db",
-        "modules.fsrs",
-        "modules.fsrs-opt",
-        "modules.srs"
-      ],
-      "keeps": [
-        "QB.SRSStore"
-      ]
-    },
-    {
-      "id": "modules.sched-settings",
-      "file": "js/modules/sched-settings.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 70,
-      "requires": [
-        "config",
-        "utils.storage",
-        "data.contracts",
-        "data.db"
-      ],
-      "keeps": [
-        "QB.SchedSettings"
-      ]
-    },
-    {
-      "id": "modules.start-prefs",
-      "file": "js/modules/start-prefs.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 71,
-      "requires": [
-        "config",
-        "utils.storage",
-        "data.contracts"
-      ],
-      "keeps": [
-        "QB.StartPrefs"
-      ]
-    },
-    {
-      "id": "modules.review-queue",
-      "file": "js/modules/review-queue.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 72,
-      "requires": [
-        "utils.time",
-        "utils.shuffle",
-        "utils.question-id",
-        "modules.sched-settings"
-      ],
-      "keeps": [
-        "QB.ReviewQueue"
-      ]
-    },
-    {
-      "id": "modules.progress-saver",
-      "file": "js/modules/progress-saver.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 73,
-      "requires": [
-        "utils.helpers",
-        "utils.storage",
-        "data.db"
-      ],
-      "keeps": [
-        "QB.ProgressSaver"
-      ]
-    },
-    {
-      "id": "modules.exam-timer",
-      "file": "js/modules/exam-timer.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 74,
-      "requires": [],
-      "keeps": [
-        "QB.createExamTimer"
-      ]
-    },
-    {
-      "id": "modules.ui-renderer",
-      "file": "js/modules/ui-renderer.js",
-      "layer": "modules",
-      "tier": "L3",
-      "at": 75,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.rich-text",
-        "utils.quota",
-        "utils.answer-normalize",
-        "utils.result-policy",
-        "utils.question-id",
-        "utils.annotation",
-        "data.db",
-        "modules.statistics",
-        "modules.search-filter",
-        "modules.sched-settings"
-      ],
-      "keeps": [
-        "QB.UIRenderer"
-      ]
-    },
-    {
-      "id": "modules.dom-patch",
-      "file": "js/modules/dom-patch.js",
-      "layer": "modules",
-      "tier": "L3",
-      "at": 76,
-      "requires": [],
-      "keeps": [
-        "QB.DomPatch"
-      ]
-    },
-    {
-      "id": "modules.bank-manager",
-      "file": "js/modules/bank-manager.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 77,
-      "requires": [
-        "data.sample-data",
-        "utils.helpers",
-        "data.db",
-        "data.contracts"
-      ],
-      "keeps": [
-        "QB.BankManager"
-      ]
-    },
-    {
-      "id": "modules.question-editor",
-      "file": "js/modules/question-editor.js",
-      "layer": "modules",
-      "tier": "L3",
-      "at": 78,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.rich-text",
-        "utils.answer-normalize",
-        "utils.answer-text",
-        "utils.judge-answer",
-        "utils.annotation",
-        "utils.assets",
-        "data.db",
-        "importers.adapters",
-        "modules.search-filter",
-        "modules.ui-renderer"
-      ],
-      "keeps": [
-        "QB.QuestionEditor"
-      ]
-    },
-    {
-      "id": "modules.source",
-      "file": "js/modules/source.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 79,
-      "requires": [
-        "config",
-        "utils.fnv",
-        "importers.registry"
-      ],
-      "keeps": [
-        "QB.Source"
-      ]
-    },
-    {
-      "id": "modules.data-io",
-      "file": "js/modules/data-io.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 80,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.quota",
-        "data.db",
-        "modules.package",
-        "importers.adapters",
-        "importers.md-importer",
-        "importers.registry",
-        "data.contracts",
-        "modules.source"
-      ],
-      "keeps": [
-        "QB.DataIO"
-      ]
-    },
-    {
-      "id": "modules.office-writer",
-      "file": "js/modules/office-writer.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 81,
-      "requires": [
-        "utils.helpers",
-        "utils.zip-writer"
-      ],
-      "keeps": [
-        "QB.OfficeWriter"
-      ]
-    },
-    {
-      "id": "modules.share-page",
-      "file": "js/modules/share-page.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 82,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.rich-text",
-        "utils.base64",
-        "utils.answer-text",
-        "utils.annotation",
-        "utils.assets"
-      ],
-      "keeps": [
-        "QB.SharePage"
-      ]
-    },
-    {
-      "id": "modules.share-link",
-      "file": "js/modules/share-link.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 83,
-      "requires": [
-        "config",
-        "utils.base64"
-      ],
-      "keeps": [
-        "QB.ShareLink"
-      ]
-    },
-    {
-      "id": "modules.exporter",
-      "file": "js/modules/exporter.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 84,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.answer-text",
-        "utils.judge-answer",
-        "utils.annotation",
-        "utils.assets",
-        "data.db",
-        "modules.package",
-        "modules.qbk",
-        "modules.wrong-book",
-        "modules.favorites",
-        "modules.history",
-        "modules.sched-settings",
-        "data.contracts",
-        "modules.source",
-        "modules.office-writer",
-        "modules.share-page",
-        "modules.share-link"
-      ],
-      "keeps": [
-        "QB.Exporters"
-      ]
-    },
-    {
-      "id": "modules.backup",
-      "file": "js/modules/backup.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 85,
-      "requires": [
-        "config",
-        "data.store",
-        "utils.helpers",
-        "utils.storage",
-        "utils.question-id",
-        "utils.zip-reader",
-        "utils.assets",
-        "utils.review-merge",
-        "data.contracts",
-        "data.wire",
-        "data.local-adapter",
-        "data.db",
-        "modules.qbk"
-      ],
-      "keeps": [
-        "QB.Backup"
-      ]
-    },
-    {
-      "id": "modules.migrate",
-      "file": "js/modules/migrate.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 86,
-      "requires": [
-        "data.store",
-        "utils.helpers",
-        "utils.storage",
-        "utils.question-id",
-        "utils.hash-remap",
-        "data.contracts",
-        "data.local-adapter",
-        "data.db",
-        "modules.backup"
-      ],
-      "keeps": [
-        "QB.Migration"
-      ]
-    },
-    {
-      "id": "modules.sync-dav",
-      "file": "js/modules/sync-dav.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 87,
-      "requires": [
-        "utils.helpers",
-        "utils.storage",
-        "data.contracts",
-        "modules.backup"
-      ],
-      "keeps": [
-        "QB.SyncDAV"
-      ]
-    },
-    {
-      "id": "modules.blueprint",
-      "file": "js/modules/blueprint.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 88,
-      "requires": [
-        "config",
-        "utils.shuffle"
-      ],
-      "keeps": [
-        "QB.Blueprint"
-      ]
-    },
-    {
-      "id": "modules.practice-builder",
-      "file": "js/modules/practice-builder.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 89,
-      "requires": [
-        "config",
-        "utils.shuffle",
-        "utils.question-id",
-        "modules.statistics"
-      ],
-      "keeps": [
-        "QB.PracticeBuilder"
-      ]
-    },
-    {
-      "id": "modules.quiz-session",
-      "file": "js/modules/quiz-session.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 90,
-      "requires": [
-        "config",
-        "utils.helpers",
-        "utils.storage",
-        "utils.shuffle",
-        "utils.question-id",
-        "data.db",
-        "modules.quiz-engine",
-        "modules.wrong-book",
-        "modules.favorites",
-        "modules.history",
-        "modules.srs-store",
-        "modules.review-queue",
-        "modules.sched-settings",
-        "modules.progress-saver",
-        "modules.exam-timer",
-        "modules.practice-builder"
-      ],
-      "keeps": [
-        "QB.QuizSession"
-      ]
-    },
-    {
-      "id": "modules.quiz-dialogs",
-      "file": "js/modules/quiz-dialogs.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 91,
-      "requires": [
-        "config",
-        "modules.blueprint",
-        "modules.search-filter",
-        "modules.start-prefs",
-        "modules.sched-settings",
-        "modules.wrong-book",
-        "modules.quiz-session"
-      ],
-      "keeps": [
-        "QB.QuizDialogs"
-      ]
-    },
-    {
-      "id": "modules.boot-diagnostics",
-      "file": "js/modules/boot-diagnostics.js",
-      "layer": "modules",
-      "tier": "L2",
-      "at": 92,
-      "requires": [
-        "data.store",
-        "utils.storage",
-        "data.db"
-      ],
-      "keeps": [
-        "QB.BootDiagnostics"
-      ]
-    },
-    {
-      "id": "app",
-      "file": "js/app.js",
-      "layer": "entry",
-      "tier": "L3",
-      "at": 93,
-      "requires": [
-        "data.sample-data",
-        "config",
-        "data.store",
-        "utils.helpers",
-        "utils.rich-text",
-        "utils.storage",
-        "utils.quota",
-        "utils.shuffle",
-        "utils.question-id",
-        "data.contracts",
-        "data.db",
-        "modules.quiz-engine",
-        "modules.wrong-book",
-        "modules.favorites",
-        "modules.history",
-        "modules.search-filter",
-        "modules.fsrs-opt",
-        "modules.fsrs-train-client",
-        "modules.srs-store",
-        "modules.sched-settings",
-        "modules.start-prefs",
-        "modules.review-queue",
-        "modules.progress-saver",
-        "modules.exam-timer",
-        "modules.ui-renderer",
-        "modules.dom-patch",
-        "modules.bank-manager",
-        "modules.question-editor",
-        "modules.source",
-        "modules.data-io",
-        "modules.share-link",
-        "modules.exporter",
-        "modules.backup",
-        "modules.migrate",
-        "modules.blueprint",
-        "modules.practice-builder"
-      ],
-      "keeps": [
-        "QB.App"
-      ]
-    },
-    {
-      "id": "modules.action-router",
-      "file": "js/modules/action-router.js",
-      "layer": "modules",
-      "tier": "L3",
-      "at": 94,
-      "loadAfterEntry": true,
-      "requires": [
-        "modules.ui-renderer",
-        "data.contracts"
-      ],
-      "keeps": [
-        "QB.AppActions"
-      ]
-    },
-    {
-      "id": "modules.view-router",
-      "file": "js/modules/view-router.js",
-      "layer": "modules",
-      "tier": "L3",
-      "at": 95,
-      "loadAfterEntry": true,
-      "requires": [
-        "modules.ui-renderer",
-        "data.contracts"
-      ],
-      "keeps": [
-        "QB.ViewRouter"
-      ]
-    }
-  ]
+        "data",
+        "utils",
+        "vendor",
+        "modules",
+        "importers",
+        "entry"
+    ],
+    "modules": [
+        {
+            "id": "data.sample-data",
+            "file": "js/data/sample-data.js",
+            "layer": "sample",
+            "tier": "L0",
+            "at": 1,
+            "requires": [],
+            "keeps": [
+                "QB.SAMPLE"
+            ]
+        },
+        {
+            "id": "config",
+            "file": "js/config.js",
+            "layer": "config",
+            "tier": "L0",
+            "at": 2,
+            "requires": [],
+            "keeps": [
+                "QB.CONFIG",
+                "QB.difficultyLabel",
+                "QB.typeBadge",
+                "QB.typeLabel"
+            ]
+        },
+        {
+            "id": "data.store",
+            "file": "js/data/store.js",
+            "layer": "data",
+            "tier": "L1",
+            "at": 3,
+            "requires": [
+                "config"
+            ],
+            "keeps": [
+                "QB.Store"
+            ]
+        },
+        {
+            "id": "utils.helpers",
+            "file": "js/utils/helpers.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 4,
+            "requires": [],
+            "keeps": [
+                "QB.Helpers",
+                "QB.deepEqual",
+                "QB.escapeHtml",
+                "QB.uid"
+            ]
+        },
+        {
+            "id": "vendor.core.util.core",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/util/src/core.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "at": 5,
+            "requires": [],
+            "keeps": [
+                "globalThis.__idcuUtil"
+            ]
+        },
+        {
+            "id": "utils.time",
+            "file": "js/utils/time.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 6,
+            "requires": [],
+            "keeps": [
+                "QB.Time"
+            ]
+        },
+        {
+            "id": "vendor.core.rich-text.core",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/rich-text/src/core.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "at": 7,
+            "requires": [],
+            "keeps": [
+                "globalThis.__idcuRichText"
+            ]
+        },
+        {
+            "id": "utils.rich-text",
+            "file": "js/utils/rich-text.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 8,
+            "requires": [
+                "utils.helpers"
+            ],
+            "keeps": [
+                "QB.RichText"
+            ]
+        },
+        {
+            "id": "utils.storage",
+            "file": "js/utils/storage.js",
+            "layer": "utils",
+            "tier": "L1",
+            "at": 9,
+            "requires": [
+                "config",
+                "data.store"
+            ],
+            "keeps": [
+                "QB.Storage"
+            ]
+        },
+        {
+            "id": "utils.quota",
+            "file": "js/utils/quota.js",
+            "layer": "utils",
+            "tier": "L1",
+            "at": 10,
+            "requires": [
+                "config",
+                "utils.storage"
+            ],
+            "keeps": [
+                "QB.Quota"
+            ]
+        },
+        {
+            "id": "utils.fnv",
+            "file": "js/utils/fnv.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 11,
+            "requires": [],
+            "keeps": [
+                "QB.FNV"
+            ]
+        },
+        {
+            "id": "utils.random",
+            "file": "js/utils/random.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 12,
+            "requires": [],
+            "keeps": [
+                "QB.mulberry32"
+            ]
+        },
+        {
+            "id": "vendor.core.base64.core",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/base64/src/core.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "at": 13,
+            "requires": [],
+            "keeps": [
+                "globalThis.__idcuBase64"
+            ]
+        },
+        {
+            "id": "utils.base64",
+            "file": "js/utils/base64.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 14,
+            "requires": [],
+            "keeps": [
+                "QB.Base64"
+            ]
+        },
+        {
+            "id": "utils.shuffle",
+            "file": "js/utils/shuffle.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 15,
+            "requires": [
+                "utils.random"
+            ],
+            "keeps": [
+                "QB.sampleN",
+                "QB.shuffle",
+                "QB.shuffleChildren",
+                "QB.shuffleOptions"
+            ]
+        },
+        {
+            "id": "utils.answer-normalize",
+            "file": "js/utils/answer-normalize.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 16,
+            "requires": [],
+            "keeps": [
+                "QB.normalizeAnswer",
+                "QB.normalizeLetters",
+                "QB.parseBoolean"
+            ]
+        },
+        {
+            "id": "utils.answer-text",
+            "file": "js/utils/answer-text.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 17,
+            "requires": [],
+            "keeps": [
+                "QB.AnswerText"
+            ]
+        },
+        {
+            "id": "utils.judge-answer",
+            "file": "js/utils/judge-answer.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 18,
+            "requires": [
+                "config",
+                "utils.answer-normalize",
+                "utils.answer-text"
+            ],
+            "keeps": [
+                "QB.CHILD_SCORE_MAX",
+                "QB.JudgeStrategies",
+                "QB.aggregateMaterial",
+                "QB.childPoints",
+                "QB.judgeAnswer",
+                "QB.needsSelfAssessment",
+                "QB.normalizeChildScore",
+                "QB.resolveJudgeValue"
+            ]
+        },
+        {
+            "id": "utils.result-policy",
+            "file": "js/utils/result-policy.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 19,
+            "requires": [],
+            "keeps": [
+                "QB.ResultPolicy"
+            ]
+        },
+        {
+            "id": "utils.question-id",
+            "file": "js/utils/question-id.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 20,
+            "requires": [
+                "utils.fnv",
+                "utils.answer-normalize",
+                "utils.judge-answer"
+            ],
+            "keeps": [
+                "QB.HASH_VERSION",
+                "QB.hashVersionOf",
+                "QB.isCurrentHash",
+                "QB.isLegacyHash",
+                "QB.makeContentHash",
+                "QB.makeLegacyContentHash",
+                "QB.makeQuestionKey"
+            ]
+        },
+        {
+            "id": "utils.annotation",
+            "file": "js/utils/annotation.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 21,
+            "requires": [
+                "config"
+            ],
+            "keeps": [
+                "QB.Annotation"
+            ]
+        },
+        {
+            "id": "vendor.format.zip.zip",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/zip/src/vendor/zip.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "at": 22,
+            "requires": [],
+            "keeps": [
+                "window.Zip"
+            ]
+        },
+        {
+            "id": "vendor.format.xml-lite.xml-lite",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xml-lite/src/vendor/xml-lite.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "at": 23,
+            "requires": [],
+            "keeps": [
+                "window.XmlLite"
+            ]
+        },
+        {
+            "id": "vendor.format.xlsx-read.xlsx",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "requires": [],
+            "keeps": [
+                "window.Xlsx"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "vendor.format.xlsx-read.core",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "requires": [],
+            "keeps": [
+                "globalThis.__idcuXlsx"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "vendor.core.assets.core",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/assets/src/core.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "at": 24,
+            "requires": [],
+            "keeps": [
+                "globalThis.__idcuAssets"
+            ]
+        },
+        {
+            "id": "vendor.format.dsv.dsv",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/dsv/src/vendor/dsv.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "requires": [],
+            "keeps": [
+                "window.DSV"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "utils.crc32",
+            "file": "js/utils/crc32.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 25,
+            "requires": [],
+            "keeps": [
+                "QB.Crc32"
+            ]
+        },
+        {
+            "id": "utils.zip-reader",
+            "file": "js/utils/zip-reader.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 26,
+            "requires": [],
+            "keeps": [
+                "QB.ZipReader",
+                "QB.decodeUtf8"
+            ]
+        },
+        {
+            "id": "vendor.format.sqlite-read.core",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/sqlite-read/src/core.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "requires": [],
+            "keeps": [
+                "globalThis.__idcuSqliteRead"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "utils.sqlite-reader",
+            "file": "js/utils/sqlite-reader.js",
+            "layer": "utils",
+            "tier": "L0",
+            "requires": [],
+            "keeps": [
+                "QB.SqliteReader"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "utils.zip-writer",
+            "file": "js/utils/zip-writer.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 27,
+            "requires": [],
+            "keeps": [
+                "QB.ZipWriter"
+            ]
+        },
+        {
+            "id": "utils.xml-lite",
+            "file": "js/utils/xml-lite.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 28,
+            "requires": [],
+            "keeps": [
+                "QB.XmlLite"
+            ]
+        },
+        {
+            "id": "utils.assets",
+            "file": "js/utils/assets.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 29,
+            "requires": [
+                "config"
+            ],
+            "keeps": [
+                "QB.Assets"
+            ]
+        },
+        {
+            "id": "utils.weights",
+            "file": "js/utils/weights.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 30,
+            "requires": [],
+            "keeps": [
+                "QB.Weights"
+            ]
+        },
+        {
+            "id": "utils.review-merge",
+            "file": "js/utils/review-merge.js",
+            "layer": "utils",
+            "tier": "L0",
+            "at": 31,
+            "requires": [],
+            "keeps": [
+                "QB.ReviewMerge"
+            ]
+        },
+        {
+            "id": "utils.hash-remap",
+            "file": "js/utils/hash-remap.js",
+            "layer": "utils",
+            "tier": "L1",
+            "at": 32,
+            "requires": [
+                "utils.storage"
+            ],
+            "keeps": [
+                "QB.HashRemap"
+            ]
+        },
+        {
+            "id": "data.contracts",
+            "file": "js/data/contracts.js",
+            "layer": "data",
+            "tier": "L1",
+            "at": 33,
+            "requires": [],
+            "keeps": [
+                "QB.ASSET_DRIVER_CONTRACT",
+                "QB.CONTRACTS",
+                "QB.KEYS",
+                "QB.assertAdapter",
+                "QB.assertDriver"
+            ]
+        },
+        {
+            "id": "data.wire",
+            "file": "js/data/wire.js",
+            "layer": "data",
+            "tier": "L1",
+            "at": 34,
+            "requires": [
+                "utils.question-id"
+            ],
+            "keeps": [
+                "QB.Wire"
+            ]
+        },
+        {
+            "id": "data.local-adapter",
+            "file": "js/data/local-adapter.js",
+            "layer": "data",
+            "tier": "L1",
+            "at": 35,
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.storage",
+                "utils.answer-normalize",
+                "utils.judge-answer",
+                "utils.question-id",
+                "utils.annotation",
+                "utils.weights",
+                "utils.review-merge",
+                "utils.hash-remap",
+                "data.contracts"
+            ],
+            "keeps": [
+                "QB.LocalAdapter",
+                "QB.QuestionShards",
+                "QB.REVIEW_LAYOUT_VERSION",
+                "QB.REVLOG_LAYOUT_VERSION",
+                "QB.ReviewStore",
+                "QB.RevlogStore"
+            ]
+        },
+        {
+            "id": "data.api-adapter",
+            "file": "js/data/api-adapter.js",
+            "layer": "data",
+            "tier": "L1",
+            "at": 36,
+            "requires": [
+                "config",
+                "utils.question-id",
+                "utils.weights",
+                "utils.review-merge",
+                "data.wire"
+            ],
+            "keeps": [
+                "QB.ApiAdapter"
+            ]
+        },
+        {
+            "id": "data.db",
+            "file": "js/data/db.js",
+            "layer": "data",
+            "tier": "L1",
+            "at": 37,
+            "requires": [
+                "config",
+                "utils.storage",
+                "utils.question-id",
+                "utils.assets",
+                "data.contracts",
+                "data.local-adapter",
+                "data.api-adapter"
+            ],
+            "keeps": [
+                "QB.DB"
+            ]
+        },
+        {
+            "id": "modules.package",
+            "file": "js/modules/package.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 38,
+            "requires": [
+                "config",
+                "utils.storage",
+                "utils.fnv",
+                "data.contracts"
+            ],
+            "keeps": [
+                "QB.Package"
+            ]
+        },
+        {
+            "id": "modules.qbk",
+            "file": "js/modules/qbk.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 39,
+            "requires": [
+                "utils.rich-text",
+                "utils.zip-reader",
+                "utils.zip-writer",
+                "utils.assets",
+                "modules.package"
+            ],
+            "keeps": [
+                "QB.Qbk"
+            ]
+        },
+        {
+            "id": "importers.adapters",
+            "file": "js/importers/adapters.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "config",
+                "utils.answer-normalize",
+                "utils.answer-text",
+                "utils.judge-answer",
+                "utils.question-id",
+                "utils.annotation"
+            ],
+            "keeps": [
+                "QB.Adapters"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.json-importer",
+            "file": "js/importers/json-importer.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "importers.adapters"
+            ],
+            "keeps": [
+                "QB.JsonImporter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.csv-importer",
+            "file": "js/importers/csv-importer.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "importers.adapters"
+            ],
+            "keeps": [
+                "QB.CsvImporter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.line-parser",
+            "file": "js/importers/line-parser.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "utils.answer-normalize",
+                "utils.judge-answer",
+                "importers.adapters"
+            ],
+            "keeps": [
+                "QB.LineParser"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.xlsx-importer",
+            "file": "js/importers/xlsx-importer.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "utils.zip-reader",
+                "utils.xml-lite",
+                "importers.adapters"
+            ],
+            "keeps": [
+                "QB.XlsxImporter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.docx-importer",
+            "file": "js/importers/docx-importer.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "utils.zip-reader",
+                "utils.xml-lite",
+                "utils.assets",
+                "importers.line-parser"
+            ],
+            "keeps": [
+                "QB.DocxImporter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.qbk-importer",
+            "file": "js/importers/qbk-importer.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "utils.assets",
+                "modules.package",
+                "modules.qbk",
+                "importers.json-importer"
+            ],
+            "keeps": [
+                "QB.QbkImporter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.md-importer",
+            "file": "js/importers/md-importer.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "importers.line-parser"
+            ],
+            "keeps": [
+                "QB.MdImporter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.anki-package",
+            "file": "js/importers/anki-package.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "utils.zip-reader"
+            ],
+            "keeps": [
+                "QB.AnkiPackage"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.anki-importer",
+            "file": "js/importers/anki-importer.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "utils.question-id",
+                "utils.zip-reader",
+                "utils.sqlite-reader",
+                "utils.xml-lite",
+                "utils.assets",
+                "importers.adapters",
+                "importers.anki-package"
+            ],
+            "keeps": [
+                "QB.AnkiImporter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.quizlet-importer",
+            "file": "js/importers/quizlet-importer.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "utils.question-id",
+                "importers.adapters",
+                "importers.csv-importer"
+            ],
+            "keeps": [
+                "QB.QuizletImporter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "importers.registry",
+            "file": "js/importers/registry.js",
+            "layer": "importers",
+            "tier": "L2",
+            "requires": [
+                "importers.adapters",
+                "importers.json-importer",
+                "importers.csv-importer",
+                "importers.xlsx-importer",
+                "importers.docx-importer",
+                "importers.qbk-importer",
+                "importers.md-importer",
+                "importers.anki-importer",
+                "importers.quizlet-importer"
+            ],
+            "keeps": [
+                "QB.Importers"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "modules.quiz-engine",
+            "file": "js/modules/quiz-engine.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 40,
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.shuffle",
+                "utils.judge-answer",
+                "utils.result-policy",
+                "utils.question-id"
+            ],
+            "keeps": [
+                "QB.QuizEngine"
+            ]
+        },
+        {
+            "id": "modules.wrong-book",
+            "file": "js/modules/wrong-book.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 41,
+            "requires": [
+                "utils.result-policy",
+                "data.db"
+            ],
+            "keeps": [
+                "QB.WrongBook"
+            ]
+        },
+        {
+            "id": "modules.favorites",
+            "file": "js/modules/favorites.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 42,
+            "requires": [
+                "utils.question-id",
+                "data.db"
+            ],
+            "keeps": [
+                "QB.Favorites"
+            ]
+        },
+        {
+            "id": "modules.history",
+            "file": "js/modules/history.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 43,
+            "requires": [
+                "data.db"
+            ],
+            "keeps": [
+                "QB.History"
+            ]
+        },
+        {
+            "id": "modules.statistics",
+            "file": "js/modules/statistics.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 44,
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.time"
+            ],
+            "keeps": [
+                "QB.Statistics"
+            ]
+        },
+        {
+            "id": "modules.search-filter",
+            "file": "js/modules/search-filter.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 45,
+            "requires": [
+                "utils.helpers",
+                "utils.answer-normalize"
+            ],
+            "keeps": [
+                "QB.SearchFilter"
+            ]
+        },
+        {
+            "id": "vendor.core.fsrs.core",
+            "file": "ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/fsrs/src/core.js",
+            "layer": "vendor",
+            "tier": "L0",
+            "at": 46,
+            "requires": [],
+            "keeps": [
+                "globalThis.__idcuFsrs"
+            ]
+        },
+        {
+            "id": "modules.fsrs",
+            "file": "js/modules/fsrs.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 47,
+            "requires": [
+                "utils.random"
+            ],
+            "keeps": [
+                "QB.FSRS"
+            ]
+        },
+        {
+            "id": "modules.fsrs-train-core",
+            "file": "js/modules/fsrs-train-core.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 48,
+            "requires": [
+                "modules.fsrs"
+            ],
+            "keeps": [
+                "QB.FSRSTrainCore"
+            ]
+        },
+        {
+            "id": "modules.fsrs-opt",
+            "file": "js/modules/fsrs-opt.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 49,
+            "requires": [
+                "utils.weights",
+                "data.local-adapter",
+                "data.db",
+                "modules.fsrs",
+                "modules.fsrs-train-core"
+            ],
+            "keeps": [
+                "QB.FSRSOpt"
+            ]
+        },
+        {
+            "id": "modules.fsrs-train-client",
+            "file": "js/modules/fsrs-train-client.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 50,
+            "requires": [
+                "config",
+                "modules.fsrs",
+                "modules.fsrs-train-core"
+            ],
+            "keeps": [
+                "QB.FSRSTrain"
+            ]
+        },
+        {
+            "id": "modules.srs",
+            "file": "js/modules/srs.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 51,
+            "requires": [
+                "utils.question-id"
+            ],
+            "keeps": [
+                "QB.SRS"
+            ]
+        },
+        {
+            "id": "modules.srs-store",
+            "file": "js/modules/srs-store.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 52,
+            "requires": [
+                "utils.time",
+                "utils.fnv",
+                "utils.result-policy",
+                "utils.question-id",
+                "data.db",
+                "modules.fsrs",
+                "modules.fsrs-opt",
+                "modules.srs"
+            ],
+            "keeps": [
+                "QB.SRSStore"
+            ]
+        },
+        {
+            "id": "modules.sched-settings",
+            "file": "js/modules/sched-settings.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 53,
+            "requires": [
+                "config",
+                "utils.storage",
+                "data.contracts",
+                "data.db"
+            ],
+            "keeps": [
+                "QB.SchedSettings"
+            ]
+        },
+        {
+            "id": "modules.start-prefs",
+            "file": "js/modules/start-prefs.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 54,
+            "requires": [
+                "config",
+                "utils.storage",
+                "data.contracts"
+            ],
+            "keeps": [
+                "QB.StartPrefs"
+            ]
+        },
+        {
+            "id": "modules.review-queue",
+            "file": "js/modules/review-queue.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 55,
+            "requires": [
+                "utils.time",
+                "utils.shuffle",
+                "utils.question-id",
+                "modules.sched-settings"
+            ],
+            "keeps": [
+                "QB.ReviewQueue"
+            ]
+        },
+        {
+            "id": "modules.progress-saver",
+            "file": "js/modules/progress-saver.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 56,
+            "requires": [
+                "utils.helpers",
+                "utils.storage",
+                "data.db"
+            ],
+            "keeps": [
+                "QB.ProgressSaver"
+            ]
+        },
+        {
+            "id": "modules.exam-timer",
+            "file": "js/modules/exam-timer.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 57,
+            "requires": [],
+            "keeps": [
+                "QB.createExamTimer"
+            ]
+        },
+        {
+            "id": "modules.ui-renderer",
+            "file": "js/modules/ui-renderer.js",
+            "layer": "modules",
+            "tier": "L3",
+            "at": 58,
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.rich-text",
+                "utils.quota",
+                "utils.answer-normalize",
+                "utils.result-policy",
+                "utils.question-id",
+                "utils.annotation",
+                "data.db",
+                "modules.statistics",
+                "modules.search-filter",
+                "modules.sched-settings"
+            ],
+            "keeps": [
+                "QB.UIRenderer"
+            ]
+        },
+        {
+            "id": "modules.dom-patch",
+            "file": "js/modules/dom-patch.js",
+            "layer": "modules",
+            "tier": "L3",
+            "at": 59,
+            "requires": [],
+            "keeps": [
+                "QB.DomPatch"
+            ]
+        },
+        {
+            "id": "modules.bank-manager",
+            "file": "js/modules/bank-manager.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 60,
+            "requires": [
+                "data.sample-data",
+                "utils.helpers",
+                "data.db",
+                "data.contracts"
+            ],
+            "keeps": [
+                "QB.BankManager"
+            ]
+        },
+        {
+            "id": "modules.question-editor",
+            "file": "js/modules/question-editor.js",
+            "layer": "modules",
+            "tier": "L3",
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.rich-text",
+                "utils.answer-normalize",
+                "utils.answer-text",
+                "utils.judge-answer",
+                "utils.annotation",
+                "utils.assets",
+                "data.db",
+                "importers.adapters",
+                "modules.search-filter",
+                "modules.ui-renderer"
+            ],
+            "keeps": [
+                "QB.QuestionEditor"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "modules.source",
+            "file": "js/modules/source.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 61,
+            "requires": [
+                "config",
+                "utils.fnv"
+            ],
+            "keeps": [
+                "QB.Source"
+            ]
+        },
+        {
+            "id": "modules.data-io",
+            "file": "js/modules/data-io.js",
+            "layer": "modules",
+            "tier": "L2",
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.quota",
+                "data.db",
+                "modules.package",
+                "importers.adapters",
+                "importers.md-importer",
+                "importers.registry",
+                "data.contracts",
+                "modules.source"
+            ],
+            "keeps": [
+                "QB.DataIO"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "modules.office-writer",
+            "file": "js/modules/office-writer.js",
+            "layer": "modules",
+            "tier": "L2",
+            "requires": [
+                "utils.helpers",
+                "utils.zip-writer"
+            ],
+            "keeps": [
+                "QB.OfficeWriter"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "modules.share-page",
+            "file": "js/modules/share-page.js",
+            "layer": "modules",
+            "tier": "L2",
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.rich-text",
+                "utils.base64",
+                "utils.answer-text",
+                "utils.annotation",
+                "utils.assets"
+            ],
+            "keeps": [
+                "QB.SharePage"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "modules.share-link",
+            "file": "js/modules/share-link.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 62,
+            "requires": [
+                "config",
+                "utils.base64"
+            ],
+            "keeps": [
+                "QB.ShareLink"
+            ]
+        },
+        {
+            "id": "modules.exporter",
+            "file": "js/modules/exporter.js",
+            "layer": "modules",
+            "tier": "L2",
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.answer-text",
+                "utils.judge-answer",
+                "utils.annotation",
+                "utils.assets",
+                "data.db",
+                "modules.package",
+                "modules.qbk",
+                "modules.wrong-book",
+                "modules.favorites",
+                "modules.history",
+                "modules.sched-settings",
+                "data.contracts",
+                "modules.source",
+                "modules.office-writer",
+                "modules.share-page",
+                "modules.share-link"
+            ],
+            "keeps": [
+                "QB.Exporters"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "modules.backup",
+            "file": "js/modules/backup.js",
+            "layer": "modules",
+            "tier": "L2",
+            "requires": [
+                "config",
+                "data.store",
+                "utils.helpers",
+                "utils.storage",
+                "utils.question-id",
+                "utils.zip-reader",
+                "utils.assets",
+                "utils.review-merge",
+                "data.contracts",
+                "data.wire",
+                "data.local-adapter",
+                "data.db",
+                "modules.qbk"
+            ],
+            "keeps": [
+                "QB.Backup"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "modules.migrate",
+            "file": "js/modules/migrate.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 63,
+            "requires": [
+                "data.store",
+                "utils.helpers",
+                "utils.storage",
+                "utils.question-id",
+                "utils.hash-remap",
+                "data.contracts",
+                "data.local-adapter",
+                "data.db"
+            ],
+            "keeps": [
+                "QB.Migration"
+            ],
+            "lazyRequires": [
+                "modules.backup"
+            ]
+        },
+        {
+            "id": "modules.sync-dav",
+            "file": "js/modules/sync-dav.js",
+            "layer": "modules",
+            "tier": "L2",
+            "requires": [
+                "utils.helpers",
+                "utils.storage",
+                "data.contracts",
+                "modules.backup"
+            ],
+            "keeps": [
+                "QB.SyncDAV"
+            ],
+            "load": "on-demand"
+        },
+        {
+            "id": "modules.blueprint",
+            "file": "js/modules/blueprint.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 64,
+            "requires": [
+                "config",
+                "utils.shuffle"
+            ],
+            "keeps": [
+                "QB.Blueprint"
+            ]
+        },
+        {
+            "id": "modules.practice-builder",
+            "file": "js/modules/practice-builder.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 65,
+            "requires": [
+                "config",
+                "utils.shuffle",
+                "utils.question-id",
+                "modules.statistics"
+            ],
+            "keeps": [
+                "QB.PracticeBuilder"
+            ]
+        },
+        {
+            "id": "modules.quiz-session",
+            "file": "js/modules/quiz-session.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 66,
+            "requires": [
+                "config",
+                "utils.helpers",
+                "utils.storage",
+                "utils.shuffle",
+                "utils.question-id",
+                "data.db",
+                "modules.quiz-engine",
+                "modules.wrong-book",
+                "modules.favorites",
+                "modules.history",
+                "modules.srs-store",
+                "modules.review-queue",
+                "modules.sched-settings",
+                "modules.progress-saver",
+                "modules.exam-timer",
+                "modules.practice-builder"
+            ],
+            "keeps": [
+                "QB.QuizSession"
+            ]
+        },
+        {
+            "id": "modules.quiz-dialogs",
+            "file": "js/modules/quiz-dialogs.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 67,
+            "requires": [
+                "config",
+                "modules.blueprint",
+                "modules.search-filter",
+                "modules.start-prefs",
+                "modules.sched-settings",
+                "modules.wrong-book",
+                "modules.quiz-session"
+            ],
+            "keeps": [
+                "QB.QuizDialogs"
+            ]
+        },
+        {
+            "id": "modules.boot-diagnostics",
+            "file": "js/modules/boot-diagnostics.js",
+            "layer": "modules",
+            "tier": "L2",
+            "at": 68,
+            "requires": [
+                "data.store",
+                "utils.storage",
+                "data.db"
+            ],
+            "keeps": [
+                "QB.BootDiagnostics"
+            ]
+        },
+        {
+            "id": "modules.loader",
+            "file": "js/modules/loader.js",
+            "layer": "modules",
+            "tier": "L2",
+            "requires": [],
+            "keeps": [
+                "QB.Loader",
+                "QB.BUNDLES"
+            ],
+            "at": 69
+        },
+        {
+            "id": "app",
+            "file": "js/app.js",
+            "layer": "entry",
+            "tier": "L3",
+            "at": 70,
+            "requires": [
+                "data.sample-data",
+                "config",
+                "data.store",
+                "utils.helpers",
+                "utils.rich-text",
+                "utils.storage",
+                "utils.quota",
+                "utils.shuffle",
+                "utils.question-id",
+                "data.contracts",
+                "data.db",
+                "modules.quiz-engine",
+                "modules.wrong-book",
+                "modules.favorites",
+                "modules.history",
+                "modules.search-filter",
+                "modules.fsrs-opt",
+                "modules.fsrs-train-client",
+                "modules.srs-store",
+                "modules.sched-settings",
+                "modules.start-prefs",
+                "modules.review-queue",
+                "modules.progress-saver",
+                "modules.exam-timer",
+                "modules.ui-renderer",
+                "modules.dom-patch",
+                "modules.bank-manager",
+                "modules.source",
+                "modules.share-link",
+                "modules.migrate",
+                "modules.blueprint",
+                "modules.practice-builder",
+                "modules.quiz-session",
+                "modules.quiz-dialogs",
+                "modules.boot-diagnostics",
+                "modules.loader"
+            ],
+            "lazyRequires": [
+                "modules.question-editor",
+                "modules.data-io",
+                "modules.exporter",
+                "modules.backup"
+            ],
+            "keeps": [
+                "QB.App"
+            ]
+        },
+        {
+            "id": "modules.action-router",
+            "file": "js/modules/action-router.js",
+            "layer": "modules",
+            "tier": "L3",
+            "at": 71,
+            "loadAfterEntry": true,
+            "requires": [
+                "modules.ui-renderer",
+                "data.contracts"
+            ],
+            "keeps": [
+                "QB.AppActions"
+            ]
+        },
+        {
+            "id": "modules.view-router",
+            "file": "js/modules/view-router.js",
+            "layer": "modules",
+            "tier": "L3",
+            "at": 72,
+            "loadAfterEntry": true,
+            "requires": [
+                "modules.ui-renderer",
+                "data.contracts"
+            ],
+            "keeps": [
+                "QB.ViewRouter"
+            ]
+        }
+    ]
 }

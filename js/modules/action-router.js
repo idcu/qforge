@@ -37,6 +37,20 @@
     const switchBank = ctx.switchBank;
     const syncResultHistory = ctx.syncResultHistory;
 
+    /**
+     * 功能级按需加载：能力包在用户真正触发时才注入（见 QB.BUNDLES）。
+     * 失败即 toast 并中止本次动作；调用方元素未被替换，按钮自然复原。
+     */
+    async function ensureBundle(name) {
+      try {
+        await QB.Loader.ensure(name);
+        return true;
+      } catch (e) {
+        UI.toast('功能加载失败：' + ((e && e.message) || e) + '（请联网后重试）', 'err');
+        return false;
+      }
+    }
+
     switch (action) {
       /* —— 启动兜底（R-21）—— */
       case 'boot-diagnostics':
@@ -84,6 +98,7 @@
       }
       case 'bank-import': {
         if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
+        if (!await ensureBundle('import')) return;
         // 取消/跳过导入时没有数据变化：不重渲染，避免把 closeModal 刚归还焦点的触发按钮替换掉
         const res = await QB.DataIO.importFlow(State.bank, trigger);
         if (res) return render();
@@ -91,43 +106,52 @@
       }
       case 'bank-import-text': {
         if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
+        if (!await ensureBundle('import')) return;
         const res = await QB.DataIO.importTextFlow(State.bank, trigger);
         if (res) return render();
         return;
       }
       case 'bank-import-url': {
         if (!State.bank) { UI.toast('请先创建一个题库', 'err'); return; }
+        if (!await ensureBundle('import')) return;
         const res = await QB.DataIO.importUrlFlow(State.bank, undefined, trigger);
         if (res) return render();
         return;
       }
       case 'bank-refresh-url': {
+        if (!await ensureBundle('import')) return;
         const res = await QB.DataIO.refreshUrlFlow(State.bank, trigger);
         if (res) return render();
         return;
       }
       case 'bank-export': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        if (!await ensureBundle('export')) return;
         return QB.Exporters.openFlow({ kind: 'bank', bank: State.bank, trigger: trigger });
       }
       case 'bank-package': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        if (!await ensureBundle('export')) return;
         return QB.Exporters.distributeFlow({ kind: 'bank', bank: State.bank, trigger: trigger });
       }
       case 'bank-share': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        if (!await ensureBundle('export')) return;
         return QB.Exporters.shareFlow({ kind: 'bank', bank: State.bank, trigger: trigger });
       }
       case 'export-wrong': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        if (!await ensureBundle('export')) return;
         return QB.Exporters.openFlow({ kind: 'wrong', bank: State.bank, trigger: trigger });
       }
       case 'export-fav': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        if (!await ensureBundle('export')) return;
         return QB.Exporters.openFlow({ kind: 'favorites', bank: State.bank, trigger: trigger });
       }
       case 'export-history': {
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        if (!await ensureBundle('export')) return;
         return QB.Exporters.openFlow({ kind: 'history', bank: State.bank, trigger: trigger });
       }
       case 'import-sample': {
@@ -150,8 +174,10 @@
       }
       case 'questions-manage':
         if (!State.bank) { UI.toast('请先选择题库', 'err'); return; }
+        if (!await ensureBundle('editor')) return;
         return QB.QuestionEditor.openManager(State.bank).then(() => loadBankData());
       case 'backup-manage':
+        if (!await ensureBundle('backup')) return;
         return QB.Backup.openFlow();
 
       /* —— 练习入口 —— */

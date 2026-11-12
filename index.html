@@ -74,14 +74,9 @@
   <!-- ngm 公共模块（XML / ZIP / XLSX 基础实现），本地同名文件只做 QB 适配 -->
   <script src="ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/zip/src/vendor/zip.js"></script>
   <script src="ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xml-lite/src/vendor/xml-lite.js"></script>
-  <script src="ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js"></script>
-  <script src="ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js"></script>
   <script src="ngm.vendor/gitee.com/idcu/ngm-repo/packages/core/assets/src/core.js"></script>
-  <script src="ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/dsv/src/vendor/dsv.js"></script>
   <script src="js/utils/crc32.js"></script>
   <script src="js/utils/zip-reader.js"></script>
-  <script src="ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/sqlite-read/src/core.js"></script>
-  <script src="js/utils/sqlite-reader.js"></script>
   <script src="js/utils/zip-writer.js"></script>
   <script src="js/utils/xml-lite.js"></script>
   <script src="js/utils/assets.js"></script>
@@ -98,19 +93,7 @@
   <script src="js/modules/package.js"></script>
   <script src="js/modules/qbk.js"></script>
 
-  <!-- 导入器 -->
-  <script src="js/importers/adapters.js"></script>
-  <script src="js/importers/json-importer.js"></script>
-  <script src="js/importers/csv-importer.js"></script>
-  <script src="js/importers/line-parser.js"></script>
-  <script src="js/importers/xlsx-importer.js"></script>
-  <script src="js/importers/docx-importer.js"></script>
-  <script src="js/importers/qbk-importer.js"></script>
-  <script src="js/importers/md-importer.js"></script>
-  <script src="js/importers/anki-package.js"></script>
-  <script src="js/importers/anki-importer.js"></script>
-  <script src="js/importers/quizlet-importer.js"></script>
-  <script src="js/importers/registry.js"></script>
+  <!-- 导入器 → 按需包 import（js/modules/loader.js 的 QB.BUNDLES） -->
 
   <!-- 业务模块 -->
   <script src="js/modules/quiz-engine.js"></script>
@@ -134,16 +117,9 @@
   <script src="js/modules/ui-renderer.js"></script>
   <script src="js/modules/dom-patch.js"></script>
   <script src="js/modules/bank-manager.js"></script>
-  <script src="js/modules/question-editor.js"></script>
   <script src="js/modules/source.js"></script>
-  <script src="js/modules/data-io.js"></script>
-  <script src="js/modules/office-writer.js"></script>
-  <script src="js/modules/share-page.js"></script>
   <script src="js/modules/share-link.js"></script>
-  <script src="js/modules/exporter.js"></script>
-  <script src="js/modules/backup.js"></script>
   <script src="js/modules/migrate.js"></script>
-  <script src="js/modules/sync-dav.js"></script>
   <script src="js/modules/blueprint.js"></script>
   <script src="js/modules/practice-builder.js"></script>
 
@@ -152,9 +128,12 @@
   <script src="js/modules/quiz-dialogs.js"></script>
   <script src="js/modules/boot-diagnostics.js"></script>
 
+  <!-- 功能级按需加载（首屏只留启动集；按需包见 QB.BUNDLES） -->
+  <script src="js/modules/loader.js"></script>
+
   <!-- 主应用 -->
   <script src="js/app.js"></script>
-  <!-- 事件/视图路由（运行时才被 app.js 调用，按清单 at=87/88 排在入口之后） -->
+  <!-- 事件/视图路由（运行时才被 app.js 调用，按清单排在入口之后） -->
   <script src="js/modules/action-router.js"></script>
   <script src="js/modules/view-router.js"></script>
 </body>

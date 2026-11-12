@@ -711,6 +711,8 @@
       }
 
       // F1：迁移写入前先落全量自动备份；备份失败即中止（不进入任何数据改写）
+      // 备份模块按需加载：这里显式 ensure，失败会抛出并被上面的中止逻辑兜住。
+      if (QB.Loader) await QB.Loader.ensure('backup');
       const backup = QB.Backup;
       if (!backup || typeof backup.saveAutoBackup !== 'function') {
         releaseLock(owner);

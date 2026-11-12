@@ -112,14 +112,17 @@ function inspect() {
     }
   }
 
-  /* 5. index.html 脚本数 = 清单模块数 */
+  /* 5. index.html 脚本数 = 清单 core 模块数（load:"on-demand" 的按需包不在首屏） */
   const html = read('index.html') || '';
   const scriptSrcs = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
   const manifest = readJson('contracts/modules.json');
   const modules = manifest && Array.isArray(manifest.modules) ? manifest.modules : null;
+  const core = modules ? modules.filter((m) => m.load !== 'on-demand') : null;
   if (!modules) bad('contracts/modules.json 缺失或 modules 数组无效');
-  else if (scriptSrcs.length !== modules.length) bad('index.html 脚本数 ' + scriptSrcs.length + ' ≠ 清单模块数 ' + modules.length);
-  else okLine('index.html 脚本数 = 清单模块数 = ' + modules.length);
+  else if (scriptSrcs.length !== core.length) {
+    bad('index.html 脚本数 ' + scriptSrcs.length + ' ≠ 清单 core 模块数 ' + core.length +
+      '（清单总数 ' + modules.length + '，按需 ' + (modules.length - core.length) + '）');
+  } else okLine('index.html 脚本数 = 清单 core 模块数 = ' + core.length + '（另有按需 ' + (modules.length - core.length) + '）');
 
   return { errors, lines };
 }

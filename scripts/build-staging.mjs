@@ -3,7 +3,9 @@
  *
  * 改写内容：
  *   1. index.html 所有 `<script src="js/...">` 与 `css/style.css` 追加 `?v=<version>`；
- *   2. sw.js 的 `CACHE` 改为 `qforge-<version>`（不依赖仓库里的手写版本号）。
+ *   2. js/modules/loader.js 的 QB.BUNDLES 里每个按需脚本路径同样追加 `?v=<version>`
+ *      （按需脚本不在 HTML 里，漏掉会被浏览器缓存住旧版本）；
+ *   3. sw.js 的 `CACHE` 改为 `qforge-<version>`（不依赖仓库里的手写版本号）。
  *
  * 仓库工作区永不被改写；`file://` 直接打开的用法也不受影响（只有产物带查询串）。
  *
@@ -75,6 +77,27 @@ export function versionizeSw(src, version) {
   return next;
 }
 
+/**
+ * 给 loader.js 的按需包路径加 `?v=`（只改 QB.BUNDLES 块内的字面量，注释不动）。
+ * 按需脚本不在 index.html 里，不能靠 HTML 改写覆盖；漏掉它们会让产物里的动态脚本
+ * 拿到旧缓存（SW 用 ignoreSearch 匹配预缓存，版本号仅用于破浏览器 HTTP 缓存）。
+ * @returns {{src:string, files:number, tagged:number}}
+ */
+export function versionizeLoader(src, version) {
+  const start = src.indexOf('const BUNDLES = {');
+  if (start < 0) throw new Error('loader.js 中未找到 const BUNDLES = {');
+  const end = src.indexOf('\n  };', start);
+  if (end < 0) throw new Error('loader.js 的 BUNDLES 块未正常闭合');
+  let files = 0;
+  let tagged = 0;
+  const block = src.slice(start, end).replace(/'((?:js|ngm\.vendor)\/[^']+\.js)(\?[^']*)?'/g, (m, p, q) => {
+    files++;
+    tagged++;
+    return "'" + p + (q || '') + (q ? '&' : '?') + 'v=' + encodeURIComponent(version) + "'";
+  });
+  return { src: src.slice(0, start) + block + src.slice(end), files: files, tagged: tagged };
+}
+
 function build(outDir, version) {
   const out = path.resolve(outDir);
   fs.rmSync(out, { recursive: true, force: true });
@@ -93,11 +116,21 @@ function build(outDir, version) {
   const swPath = path.join(out, 'sw.js');
   fs.writeFileSync(swPath, versionizeSw(fs.readFileSync(swPath, 'utf8'), version));
 
+  const loaderPath = path.join(out, 'js', 'modules', 'loader.js');
+  const l = versionizeLoader(fs.readFileSync(loaderPath, 'utf8'), version);
+  fs.writeFileSync(loaderPath, l.src);
+
   if (v.scripts !== v.tagged) {
     throw new Error('有 ' + (v.scripts - v.tagged) + ' 个 <script src> 未被版本化');
   }
   if (!v.cssTagged) throw new Error('未找到 css/style.css 的 <link>');
-  return { out, version, scripts: v.scripts, tagged: v.tagged, cssTagged: v.cssTagged };
+  if (l.files !== l.tagged) {
+    throw new Error('有 ' + (l.files - l.tagged) + ' 个按需脚本路径未被版本化');
+  }
+  return {
+    out, version, scripts: v.scripts, tagged: v.tagged, cssTagged: v.cssTagged,
+    bundleFiles: l.files, bundleTagged: l.tagged
+  };
 }
 
 function verify(outDir, version) {
@@ -108,8 +141,18 @@ function verify(outDir, version) {
   const sw = fs.readFileSync(path.join(outDir, 'sw.js'), 'utf8');
   const cache = (/const CACHE = '([^']+)';/.exec(sw) || [])[1];
   const want = 'qforge-' + version;
-  const ok = scripts === tagged && cssTagged === 1 && cache === want;
-  return { ok, scripts, tagged, cssTagged, cache, want };
+  // 按需脚本：产物里的 loader.js 每个路径字面量都必须带 ?v=
+  const loader = fs.readFileSync(path.join(outDir, 'js', 'modules', 'loader.js'), 'utf8');
+  const block = (() => {
+    const s = loader.indexOf('const BUNDLES = {');
+    const e = loader.indexOf('\n  };', s);
+    return s >= 0 && e > s ? loader.slice(s, e) : '';
+  })();
+  const bundlePaths = [...block.matchAll(/'((?:js|ngm\.vendor)\/[^']+\.js(?:\?[^']*)?)'/g)].map((m) => m[1]);
+  const bundleTagged = bundlePaths.filter((p) => p.indexOf('?v=') >= 0).length;
+  const ok = scripts === tagged && cssTagged === 1 && cache === want &&
+    bundlePaths.length > 0 && bundlePaths.length === bundleTagged;
+  return { ok, scripts, tagged, cssTagged, cache, want, bundlePaths: bundlePaths.length, bundleTagged };
 }
 
 function selftest() {
@@ -124,7 +167,16 @@ function selftest() {
   let threw = false;
   try { versionizeSw('const X = 1;', 'v1'); } catch (e) { threw = true; }
   if (!threw) throw new Error('selftest: 缺失 CACHE 未报错');
-  console.log('build-staging selftest: 5/5 通过');
+
+  const loaderSrc = "  const BUNDLES = {\n    a: ['js/a.js', 'ngm.vendor/x/b.js'],\n    b: ['js/c.js?v=1']\n  };";
+  const l = versionizeLoader(loaderSrc, 'v9.9.9');
+  if (l.files !== 3 || l.tagged !== 3) throw new Error('selftest: 按需路径计数错');
+  if (l.src.indexOf("'js/a.js?v=v9.9.9'") < 0) throw new Error('selftest: 按需路径未加版本');
+  if (l.src.indexOf("'js/c.js?v=1&v=v9.9.9'") < 0) throw new Error('selftest: 已有查询串未用 & 续接');
+  let threw2 = false;
+  try { versionizeLoader('const X = 1;', 'v1'); } catch (e) { threw2 = true; }
+  if (!threw2) throw new Error('selftest: 缺失 BUNDLES 未报错');
+  console.log('build-staging selftest: 9/9 通过');
 }
 
 function main() {

@@ -12,7 +12,7 @@
  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
  */
-const CACHE = 'qforge-v58';
+const CACHE = 'qforge-v59';
 // 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
 const CACHE_PREFIX = 'qforge-';
 const CORE = [
@@ -21,7 +21,34 @@ const CORE = [
   // FSRS 训练 Worker 链（Worker 不经 <script> 加载，需显式预缓存以支持离线训练）
   './js/workers/fsrs-worker.js',
   './js/modules/fsrs.js',
-  './js/modules/fsrs-train-core.js'
+  './js/modules/fsrs-train-core.js',
+  // 功能级按需包（QB.BUNDLES）：首屏不加载，但必须预缓存，
+  // 否则「联网用过一次之前断网」时这些功能会因脚本未缓存而不可用。
+  // 与 js/modules/loader.js 的清单逐项对应（check-modules / sw 预缓存覆盖断言会核对）。
+  './js/importers/adapters.js',
+  './js/importers/line-parser.js',
+  './js/importers/json-importer.js',
+  './js/importers/csv-importer.js',
+  './ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/dsv/src/vendor/dsv.js',
+  './ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js',
+  './ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js',
+  './js/importers/xlsx-importer.js',
+  './ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/sqlite-read/src/core.js',
+  './js/utils/sqlite-reader.js',
+  './js/importers/docx-importer.js',
+  './js/importers/qbk-importer.js',
+  './js/importers/md-importer.js',
+  './js/importers/anki-package.js',
+  './js/importers/anki-importer.js',
+  './js/importers/quizlet-importer.js',
+  './js/importers/registry.js',
+  './js/modules/data-io.js',
+  './js/modules/office-writer.js',
+  './js/modules/share-page.js',
+  './js/modules/exporter.js',
+  './js/modules/question-editor.js',
+  './js/modules/backup.js',
+  './js/modules/sync-dav.js'
 ];
 
 self.addEventListener('install', (event) => {
@@ -72,8 +99,10 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 静态资源：缓存优先 + 后台更新
+  // ignoreSearch：staging 产物给脚本加 ?v=<version>，而预缓存键是无查询串的相对路径；
+  // 不忽略查询串会让版本化请求在离线时全部落空（按需包尤其致命：它不在首屏请求过）。
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.match(req, { ignoreSearch: true }).then((cached) => {
       const network = fetch(req)
         .then((res) => {
           if (res && res.status === 200) {
