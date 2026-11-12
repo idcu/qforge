@@ -15,6 +15,8 @@ $env:QFORGE_E2E_HARD_LIMIT_MS='3000'; npm run e2e         # 缩短硬超时，�
 
 - 浏览器探测顺序：`QFORGE_CHROME` / `QFORGE_BROWSER` → Windows（Edge 优先）→ Linux（google-chrome / chromium）。
   找不到时脚本直接报错退出，不静默跳过。
+- 复验/重跑用 GitHub Actions 的 `workflow_dispatch`（`test` workflow 的 “Run workflow”），
+  **不要往 main 扔空提交**来触发 CI；历史里的空提交只作记录，不再新增。
 - CI：`ubuntu-latest` + Node 24 + runner 预装 Google Chrome，`timeout-minutes: 8`，
   常规耗时约 5–10 秒（本机 20 次实测见文末「稳定性」）。脚本自身还有 180s 硬超时，先写取证再退出。
 
