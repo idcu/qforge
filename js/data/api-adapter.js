@@ -193,6 +193,8 @@
    */
   const reviewCache = new Map();
   const reviewRevCache = new Map(); // 按库服务端版本号（与 reviewCache 同步失效）
+  // 409 冲突重放上限：每轮按最新 current + rev 重新合并；上限只防「持续并发」时的无限重试。
+  const REVIEW_CONFLICT_REPLAYS = 3;
 
   /* ---------------- revlog 写修订号（供统计页缓存失效，B3） ----------------
    * 同步数值：append/record/patch 与 backup.import 后自增，调用方据此判断缓存的
@@ -405,8 +407,10 @@
    * reviews 写入公共实现（PUT 整表 / PATCH 增量共用，避免两份 409 重试逻辑漂移）：
    * - full=true：body.items 为完整 map，成功后整表覆盖缓存；
    * - full=false：body.items 为增量，成功后与缓存按键合并；
-   * - 409：用 conflictMerge(items, current) 得到重试载荷（整表用 mergeMaps；增量只保留我方 last 更大的键），
-   *   带服务端 rev 重试一次，二次失败清缓存并抛出。
+   * - 409：按**最新** payload.current 重新合并（整表用 mergeMaps；增量只保留我方 last 更大的键），
+   *   带服务端 rev 重放，最多 REVIEW_CONFLICT_REPLAYS 轮；每轮都从原载荷重新算，
+   *   多端并发时不会在第二次冲突就放弃，也会在对方更新更快时丢弃我方过期键。
+   *   超上限或非冲突错误：清缓存并抛出（错误上带 replays 供诊断）。
    */
   async function writeReviews(method, bankId, items, entries, opts) {
     opts = opts || {};
@@ -423,28 +427,31 @@
         logged: r && typeof r.logged === 'number' ? r.logged : (Array.isArray(entries) ? entries.length : 0)
       };
     };
-    try {
-      return ok(await send(body), body.items);
-    } catch (e) {
-      const payload = e && e.payload;
-      if (e && e.status === 409 && e.code === 'CONFLICT' && payload &&
-          payload.current && typeof payload.rev === 'number') {
-        const merged = opts.conflictMerge
-          ? opts.conflictMerge(body.items, payload.current)
-          : QB.ReviewMerge.mergeMaps(body.items, payload.current);
-        let r2 = null;
-        try {
-          r2 = await send({ items: merged, revlog: body.revlog, base_rev: payload.rev });
-        } catch (e2) {
+    const mergeFor = (current) => (opts.conflictMerge
+      ? opts.conflictMerge(body.items, current)
+      : QB.ReviewMerge.mergeMaps(body.items, current));
+    let attempt = body;
+    let used = body.items;
+    let replays = 0;
+    for (;;) {
+      try {
+        const r = await send(attempt);
+        const out = ok(r, used);
+        if (replays) { out.merged = true; out.replays = replays; }
+        return out;
+      } catch (e) {
+        const conflict = e && e.status === 409 && e.code === 'CONFLICT' && e.payload &&
+          e.payload.current && typeof e.payload.rev === 'number';
+        if (!conflict || replays >= REVIEW_CONFLICT_REPLAYS) {
           reviewCache.delete(bankId);
           reviewRevCache.delete(bankId);
-          throw e2;
+          if (replays) { try { e.replays = replays; } catch (_) { /* 只读错误对象时忽略 */ } }
+          throw e;
         }
-        return Object.assign(ok(r2, merged), { merged: true });
+        used = mergeFor(e.payload.current);
+        attempt = { items: used, revlog: body.revlog, base_rev: e.payload.rev };
+        replays++;
       }
-      reviewCache.delete(bankId);
-      reviewRevCache.delete(bankId);
-      throw e;
     }
   }
 

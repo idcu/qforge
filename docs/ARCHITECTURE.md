@@ -39,7 +39,7 @@
 | `QB.mulberry32` | 确定性 PRNG（种子化） | `QB.shuffle`/`shuffleOptions`、FSRS fuzz |
 | `QB.AnswerText` | 填空多空拼接/旧 answer 回退、按题型答案行 | 导出、分享页、编辑器预览、导入、判分反馈 |
 | `QB.Weights.normalizeStore` | FSRS 权重仓归一（旧单组→global） | local-adapter、api-adapter、fsrs-opt |
-| `QB.ReviewMerge` | 多端/多标签复习合并（纯函数）：`mergeMaps` 同键保留 `last` 更大者；`mergeMeta` 清单 `keys` 并集、`count`=并集长度（C008，消除孤儿 hash） | api-adapter 409 合并重试、local-adapter 写前合并、Storage 跨标签合并、migrate/backup、storage 双标签回归 |
+| `QB.ReviewMerge` | 多端/多标签复习合并（纯函数）：`mergeMaps` 同键保留 `last` 更大者；`mergeMeta` 清单 `keys` 并集、`count`=并集长度（C008，消除孤儿 hash） | api-adapter 409 合并重放（按最新 current/rev，最多 3 轮）、local-adapter 写前合并、Storage 跨标签合并、migrate/backup、storage 双标签回归 |
 | `QB.Annotation` | 题目批注归一唯一实现（C012）：`normalize`（CRLF→LF、trim、`MAX_LENGTH` 截断）、`present`（非空判定）；**C026 总量预算**：`byteLength`（UTF-8 字节）、`totalBytes`（只算顶层批注）、`checkTotal`（`{ok,bytes,limit,overflow}`）、`overflowText`（统一超限文案）；`MAX_LENGTH` / `TOTAL_MAX_BYTES` 分别取自 `CONFIG.LIMITS.ANNOTATION_MAX_LENGTH` / `ANNOTATION_TOTAL_MAX_BYTES` | 本地适配器写入、导入器（普通题/材料题父题）、导出器、题目编辑器、练习反馈、分享页；C026：编辑器保存预检、`DataIO.commitImport` 导入闸门、`Exporters.ensureAnnotationBudget` 导出闸门 |
 | `QB.Statistics.reviewStats(revlog, bankId)` | **C010 逐题作答聚合（纯函数）**：只读现有 revlog，按 `e.b===bankId` 过滤；`r>=FSRS.RATINGS.good`（good/easy）计正确，hard 计作答不计正确；返回 `Map<hash,{answered,correct,accuracy}>` | PracticeBuilder、统计/测试；不新增进度键 |
 | `QB.PracticeBuilder` | **C010 错题/薄弱一键组卷（纯函数）**：`weakKeys`（<60% 且作答≥2）、`build({questions,wrongKeys,revlog,bankId,limit,seed})` → 候选并集/内容键去重/种子洗牌/裁剪；零写入 | app.js `startSmartPractice`（首页与错题页共用 action）；阈值读 `CONFIG.LIMITS` |

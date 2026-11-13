@@ -782,6 +782,80 @@ section('多端复习进度冲突：409 + 按 last 合并重试');
   await QB.DB.banks.remove(bank.id);
 }
 
+section('409 可重放冲突解决：连续冲突按最新 current 重新合并');
+{
+  const ctx = await createHarness(path.resolve(__dirname, '..'));
+  const { QB } = ctx;
+  QB.CONFIG.DATA_BACKEND = 'api';
+  QB.CONFIG.API_BASE_URL = base;
+  const calls = [];
+  const scripted = []; // 依次消费的脚本化 409/200 响应；空则透传真实服务端
+  let forever = null; // { current, rev }：每次都 409，用于验证重放上限
+  const realFetch = fetch;
+  QB.ApiAdapter.useFetch((url, opts) => {
+    const method = (opts && opts.method) || 'GET';
+    if (method === 'PATCH' && String(url).indexOf('/reviews') >= 0) {
+      calls.push(opts.body ? JSON.parse(opts.body) : null);
+      const hit = scripted.shift();
+      if (hit) {
+        return Promise.resolve(new Response(JSON.stringify(hit.body), {
+          status: hit.status, headers: { 'content-type': 'application/json' }
+        }));
+      }
+      if (forever) {
+        forever.rev += 1;
+        return Promise.resolve(new Response(JSON.stringify({
+          error: { code: 'CONFLICT', message: 'rev 过期' }, current: forever.current, rev: forever.rev
+        }), { status: 409, headers: { 'content-type': 'application/json' } }));
+      }
+    }
+    return realFetch(url, opts);
+  });
+  QB.DB.init();
+  const bank = await QB.DB.banks.create({ name: '重放冲突库' });
+  await QB.DB.reviews.list(bank.id); // 本端 rev=0
+
+  // 1) 连续两次 409，第三轮成功：每轮都必须用**最新** rev 作为 base_rev
+  scripted.push(
+    { status: 409, body: { error: { code: 'CONFLICT', message: 'rev 过期' }, current: { z1: { algo: 'fsrs', last: 300 } }, rev: 1 } },
+    { status: 409, body: { error: { code: 'CONFLICT', message: 'rev 过期' }, current: { z1: { algo: 'fsrs', last: 300 }, z2: { algo: 'fsrs', last: 400 } }, rev: 2 } },
+    { status: 200, body: { saved: 1, logged: 0, rev: 3 } }
+  );
+  const rec = await QB.DB.reviews.patch(bank.id, { a1: { algo: 'fsrs', last: 100 } }, []);
+  eq(rec.merged, true, '连续 409 后仍合并成功');
+  eq(rec.replays, 2, '重放 2 轮后成功');
+  eq(calls.length, 3, '共发出 3 次 PATCH');
+  eq(calls[1].base_rev, 1, '第一轮重放用 409 返回的 rev=1');
+  eq(calls[2].base_rev, 2, '第二轮重放用最新 rev=2（不复用旧 rev）');
+  ok(calls[2].items.a1 && calls[2].items.z1 === undefined, '重放载荷只含我方键，服务端键不回流');
+
+  // 2) 对方更新更快：重放时丢弃过期键，载荷收敛为空，不覆盖对方
+  scripted.push(
+    { status: 409, body: { error: { code: 'CONFLICT', message: 'rev 过期' }, current: { a2: { algo: 'fsrs', last: 900 } }, rev: 7 } },
+    { status: 200, body: { saved: 0, logged: 0, rev: 8 } }
+  );
+  const baseIdx = calls.length;
+  const rec2 = await QB.DB.reviews.patch(bank.id, { a2: { algo: 'fsrs', last: 200 } }, []);
+  eq(calls[baseIdx].items.a2.last, 200, '首轮带上我方 a2');
+  eq(Object.keys(calls[baseIdx + 1].items).length, 0, '重放时对方 last 更大 → 收敛为空载荷');
+  eq(rec2.replays, 1, '收敛重放 1 轮');
+
+  // 3) 持续冲突超过重放上限：抛错（带 replays）并清缓存，下次读必须回源
+  forever = { current: { zz: { algo: 'fsrs', last: 1 } }, rev: 20 };
+  const base3 = calls.length;
+  let thrown = null;
+  try {
+    await QB.DB.reviews.patch(bank.id, { a3: { algo: 'fsrs', last: 500 } }, []);
+  } catch (e) { thrown = e; }
+  eq(thrown && thrown.status, 409, '超上限时抛出最后一次 409');
+  eq(thrown && thrown.replays, 3, '重放次数 = 上限 3');
+  eq(calls.length - base3, 4, '首次 + 3 轮重放共 4 次 PATCH');
+  forever = null;
+  const reread = await QB.DB.reviews.list(bank.id);
+  eq(Object.keys(reread).length, 0, '失败后缓存已清（重新回源，返回服务端空表）');
+  await QB.DB.banks.remove(bank.id);
+}
+
 section('后端数据边界回归（A1 updated_at / A2 reviews 污染 / A3 权威 hash）');
 {
   // A1/A3 的脏数据场景需要直接改盘上的 JSON（API 不允许写非法版本号）

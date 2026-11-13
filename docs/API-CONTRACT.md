@@ -185,9 +185,9 @@
 | `progress.favoriteList/favoriteToggle/favoriteClear` | Progress 的 favorites 端点 |
 | `progress.historyList/historyAdd/historyUpdate/historyRemove/historyClear` | history 端点（`historyUpdate` → `PATCH /api/history/{id}`） |
 | `progress.sessionSave/sessionLoad/sessionClear` | session 端点 |
-| `reviews.list(bankId)` / `reviews.save(bankId, map)` / `reviews.remove(bankId)` / `reviews.record(bankId, map, entries)` | `GET`/`PUT`/`DELETE` `§6 /api/banks/{id}/reviews`；`record` 复用 `PUT`（body 携 `revlog`，状态+日志一次提交，并带缓存来的 `base_rev`）；`save`/`remove` 为整表写，成功或失败后都失效 reviews/rev 缓存；`record` 遇 409 按 `QB.ReviewMerge.mergeMaps`（同键保留 `last` 更大者）合并后重试一次 |
+| `reviews.list(bankId)` / `reviews.save(bankId, map)` / `reviews.remove(bankId)` / `reviews.record(bankId, map, entries)` | `GET`/`PUT`/`DELETE` `§6 /api/banks/{id}/reviews`；`record` 复用 `PUT`（body 携 `revlog`，状态+日志一次提交，并带缓存来的 `base_rev`）；`save`/`remove` 为整表写，成功或失败后都失效 reviews/rev 缓存；`record` 遇 409 按 `QB.ReviewMerge.mergeMaps`（同键保留 `last` 更大者）**按最新 `current` + `rev` 重放，最多 3 轮**，超限才清缓存抛错（错误带 `replays`），返回 `{merged:true, replays}` 供诊断 |
 | `reviews.get(bankId, hash)`（可选） | 前端单题 O(1) 读取；REST 无单键端点，故 `api-adapter` 不实现 → `SRSStore` 回退整表 `GET` |
-| `reviews.patch(bankId, delta, entries)`（可选，B1） | `PATCH §6 /api/banks/{id}/reviews`；仅上行 `delta` 改动键；409 时只重试我方 `last` 更大的键；适配器未实现时 `SRSStore` 回退 `record` 整表 |
+| `reviews.patch(bankId, delta, entries)`（可选，B1） | `PATCH §6 /api/banks/{id}/reviews`；仅上行 `delta` 改动键；409 时**每轮用最新 `current` 重新合并**，只保留我方 `last` 更大（对方更新更快时该键收敛掉，不覆盖对方），最多重放 3 轮；适配器未实现时 `SRSStore` 回退 `record` 整表 |
 | `revlog.list()` / `revlog.append(entries)` / `revlog.revision()`（`revision` 可选） | `GET`/`POST` `§6 /api/revlog`；`revision()` 为同步本地写修订号（append/record/backup 后自增，供统计页派生数据缓存失效，B3） |
 | `weights.read()` / `weights.write(store)` / `weights.remove(scope)` | `GET`/`PUT`/`DELETE` `§6 /api/fsrs-weights[/{scope}]` |
 | `backup.export()` / `backup.import({data}, mode)` | `GET`/`POST` `§7 /api/backup?mode=` |
