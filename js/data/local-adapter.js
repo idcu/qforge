@@ -1823,7 +1823,7 @@
   };
 
   /**
-   * 删库级联清理（唯一入口）：题目分片 + 错题/收藏/复习计划/评分日志/权重 preset/历史/当前库。
+   * 删库级联清理（唯一入口）：题目分片 + 错题/收藏/复习计划/评分日志/权重 preset/历史/当前库/导入历史。
    * 服务端 DELETE /api/banks/{id}?cascade=true 实现同一语义（见 docs/API-CONTRACT.md §2），
    * E2E parity 测试断言两侧一致，防语义漂移。
    */
@@ -1841,6 +1841,17 @@
     Storage.setSync(K.history, hist);
     const cur = Storage.get(K.metaCurrentBank, null);
     if (cur === id) Storage.setSync(K.metaCurrentBank, null);
+    // BL-1：题包导入历史（meta:pkgHistory）按库删除。该键是「bankId → 最近 20 条导入记录」的整值映射，
+    // 与 recordImport 一样是整值读改写；删到只剩空对象时移除整键，避免留下不可达的空壳。
+    // 备份 readAllData 会带上该键：恢复删除前的备份会连同题库一起恢复导入历史，语义自洽。
+    const pkgHist = Storage.get(K.metaPkgHistory, null);
+    if (pkgHist && typeof pkgHist === 'object' && !Array.isArray(pkgHist)
+      && Object.prototype.hasOwnProperty.call(pkgHist, id)) {
+      const next = Object.assign({}, pkgHist);
+      delete next[id];
+      if (Object.keys(next).length) Storage.setSync(K.metaPkgHistory, next);
+      else Storage.remove(K.metaPkgHistory);
+    }
   }
 
   /* ---------------- 跨标签合并策略（多标签并发不丢评分进度） ----------------

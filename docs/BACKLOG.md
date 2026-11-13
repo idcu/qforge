@@ -3,7 +3,13 @@
 > 仓库内长期可查阅的待办清单。**只登记，不代表已排期**；实现时另开任务与 spec。
 > 每条写清现象、影响与验收思路，避免"记得有这么个坑但说不清"。
 
-## BL-1 meta:pkgHistory 缺少删除入口（登记于 2026-11-13）
+## BL-1 meta:pkgHistory 缺少删除入口（登记于 2026-11-13，同日已实现）
+
+**状态：已关闭（2026-11-13）**
+
+`cascadeDelete` 现按库删除 `meta:pkgHistory` 条目；删到空对象时移除整键，避免留下空壳。
+实现保持与 `recordImport` 相同的整值读改写语义；备份 `readAllData` 会带上该键，
+恢复删除前的备份会连同题库一起恢复导入历史，语义自洽。
 
 **现象**
 
@@ -21,13 +27,13 @@
   只占字节，不泄露题库内容，也不影响其余功能。
 - 不构成正确性缺陷；长期频繁建库/删库会让该键缓慢增长（每条几十字节）。
 
-**验收思路（本轮不实现）**
+**验收（已落地）**
 
-1. 回归用例：建库 → 导入（写入 pkgHistory）→ `banks.remove` → 断言 `history(bankId)` 为空
-   （或键内无该 bankId）；同时断言 assets 行为不变，防止误删在用图片。
-2. 若只在 `cascadeDelete` 内补一句删除，注意 `Storage.setSync` 是整值写、跨标签以最后写入为准；
-   还需确认与备份导入历史的语义（已删库的导入记录是否应随备份保留）。
-3. 验收命令：`node scripts/test-all.mjs`（新增断言后先 `node scripts/docs-check.mjs --write` 刷新基线）；
-   若改动 `js/**`，必须 bump `sw.js` 的 `CACHE` 并刷新 `scripts/sw-baseline.json`。
+1. `scripts/contract.test.mjs` 删库级联段新增 5 项：两库前置各 1 条导入历史 → 删 A 后
+   `history(A)` 为空、`history(B)` 保留、键内仅剩 B；只剩待删库一条时整键移除。
+2. `Storage.setSync` 整值写与跨标签语义与 `recordImport` 一致，未引入新的合并策略；
+   备份/恢复语义未改（`readAllData` 本来就包含该键）。
+3. 已 bump `sw.js` 的 `CACHE`（v67 → v68）并刷新 `scripts/sw-baseline.json`；
+   `node scripts/test-all.mjs` 与 `npm run verify` 全绿。
 
 **出处**：[审计补充-2](rounds/2026-11-13/audit-supplement.md)（`cascadeDelete` 的资产与 pkgHistory 清理链路）。

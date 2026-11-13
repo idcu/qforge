@@ -219,10 +219,13 @@ async function main() {
   // 2026-11-13 阶段 2C：backup.js 新增 2 处全局键读取（P1-12 `existingUnconsumedBackup` 的
   // `getFresh(metaMigrationBackup)`、P1-13 merge 分支的旧值快照 `get`），均在 saveAutoBackup/
   // applyData 的 `ensureAll()` 之后执行，属全局引导/备份键口径：backup 10 → 12，合计 93 → 95。
+  // 2026-11-13 BL-1：`cascadeDelete` 增加 `meta:pkgHistory` 读取（整值映射，删除该库条目），
+  // 与同函数既有的 `history` / `metaCurrentBank` 读取同口径（删库入口由上层先水合）：
+  // local-adapter 53 → 54，合计 95 → 96。
   const EXPECTED_SITES = {
     'js/app.js': 2,
     'js/data/db.js': 1,
-    'js/data/local-adapter.js': 53,
+    'js/data/local-adapter.js': 54,
     'js/modules/backup.js': 12,
     'js/modules/migrate.js': 20,
     'js/modules/package.js': 1,
@@ -231,7 +234,7 @@ async function main() {
     'js/utils/hash-remap.js': 1
   };
   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
-  A.eq(scan.total, 95, '可执行调用点合计 95（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
+  A.eq(scan.total, 96, '可执行调用点合计 96（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
 
   // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
   A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');

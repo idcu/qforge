@@ -322,6 +322,12 @@ section('删库级联（唯一入口 cascadeDelete）');
   await QB.DB.progress.historyAdd({ bankId: B.id, bankName: '级联B', total: 1, correct: 1 });
   await QB.DB.setCurrentBankId(A.id);
 
+  // BL-1：题包导入历史（meta:pkgHistory）——删库时按库清理，他库保留
+  QB.Package.recordImport(A.id, { packageId: 'pkg-cascade-a', version: '1.0.0', title: '级联题包A' });
+  QB.Package.recordImport(B.id, { packageId: 'pkg-cascade-b', version: '1.0.0', title: '级联题包B' });
+  ok(QB.Package.history(A.id).length === 1 && QB.Package.history(B.id).length === 1,
+    '前置：两库各有 1 条导入历史');
+
   await QB.DB.banks.remove(A.id);
 
   ok(!(await QB.DB.banks.get(A.id)), '题库条目被删除');
@@ -338,6 +344,16 @@ section('删库级联（唯一入口 cascadeDelete）');
   eq(histA, 0, '该库历史记录被清除');
   ok((await QB.DB.progress.historyList(B.id)).length === 1, '他库历史记录保留');
   eq(QB.Storage.get(QB.KEYS.metaCurrentBank, null), null, '当前库指针被清空');
+  eq(QB.Package.history(A.id).length, 0, '该库导入历史（meta:pkgHistory）被清除');
+  eq(QB.Package.history(B.id).length, 1, '他库导入历史保留');
+  const pkgHistAll = QB.Storage.get(QB.KEYS.metaPkgHistory, null);
+  ok(pkgHistAll && Object.keys(pkgHistAll).join(',') === B.id, 'meta:pkgHistory 仅剩他库条目（整值写未误删）');
+  // 空则删键：只剩待删库一条时，整键移除而不是留下空对象
+  QB.Storage.remove(QB.KEYS.metaPkgHistory);
+  const C = await QB.DB.banks.create({ name: '级联C' });
+  QB.Package.recordImport(C.id, { packageId: 'pkg-cascade-c', version: '1.0.0', title: '级联题包C' });
+  await QB.DB.banks.remove(C.id);
+  eq(QB.Storage.get(QB.KEYS.metaPkgHistory, null), null, '导入历史删空后整键移除');
 
   // 非级联：仅删条目，保留用户数据
   await QB.DB.progress.wrongAdd(B.id, (await QB.DB.questions.list(B.id, {})).items[0]);
