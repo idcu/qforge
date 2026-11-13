@@ -64,7 +64,7 @@
 
 ### perf(bench): 方向 F 50k IDB 热点夹具 + `dailyFromLog` 单遍化
 
-**Commit Hash**：`<本轮工作区，未提交>`
+**Commit Hash**：`f5c962f`
 
 **核心改动**
 - `scripts/bench.mjs`：新增 opt-in `--hotspots`（50k 题 / 250 分片 + 50k per-hash 状态 + 20k revlog，
