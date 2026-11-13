@@ -7,13 +7,18 @@
  *                         也没接 .catch/.then，也没有赋给变量。
  *
  * 为什么不用 ESLint：仓库是零依赖纯静态站点，为两条规则引入 devDependency 与锁文件
- * 的代价，比一个 150 行的脚本高得多；而且这两条规则的误报面很小，脚本足够。
+ * 的代价，比一个 200 行的脚本高得多；而且这两条规则的误报面很小，脚本足够。
+ *
+ * 覆盖形态（v2，2026-11-13 扩充）：
+ *   - 单行语句级调用；
+ *   - **跨行语句级调用**（按逻辑语句切分、括号配平，不再只看单行）；
+ *   - **别名调用**：`const db = QB.DB` / `const { DB } = QB` /
+ *     `const { list } = QB.WrongBook` 三种声明产生的别名。
+ * 已知边界：不做作用域分析（同一文件内同名按别名处理）；不做类型推断；
+ * 参数位置/回调形式的调用（如 `arr.map(QB.DB.fn)`）不在此规则内。
  *
  * 豁免：scripts/hygiene-baseline.json。每条必须写 reason 与 expires；
  * **到期未清零即失败**——否则“先豁免、以后再说”会变成永久豁免。
- *
- * 已知边界：floating-promise 只识别「单行语句级」调用；跨行调用、动态属性访问不在此规则内。
- * 这是刻意的：轻量门禁宁可少报，也不要为了全报而写半个类型系统。
  *
  * 用法：
  *   node scripts/check-async-hygiene.mjs                 # 门禁
@@ -35,10 +40,16 @@ const RULES = {
   'floating-promise': '未处理的 Promise：加 await / return / void，或接 .catch(...) 记录错误'
 };
 const MIN_COMMENT = 6;
-const FLOATING_RE = /^QB\.(?:DB|SRSStore|History|Backup|SyncDAV|WrongBook|Favorites)\.[\w$]+\s*\(/;
-const FLOATING_PS_RE = /^QB\.ProgressSaver\.(?:save|flush)\s*\(/;
+// 这些命名空间的方法是异步的（与旧版集合一致，不放宽也不额外扩大）。
+const ASYNC_NS = new Set(['DB', 'SRSStore', 'History', 'Backup', 'SyncDAV', 'WrongBook', 'Favorites', 'ProgressSaver']);
 // SRSStore 里这几个是同步纯函数（不做 I/O），语句级调用不产生 Promise。
-const SYNC_OK_RE = /^QB\.SRSStore\.(?:unmarkGraded|collectGraded|keyFor|ratingForResult|fuzzSeedFor)\s*\(/;
+const SRS_SYNC_OK = new Set(['unmarkGraded', 'collectGraded', 'keyFor', 'ratingForResult', 'fuzzSeedFor']);
+
+function isAsyncMethod(ns, method) {
+  if (ns === 'ProgressSaver') return method === 'save' || method === 'flush';
+  if (ns === 'SRSStore') return !SRS_SYNC_OK.has(method);
+  return ASYNC_NS.has(ns);
+}
 
 /** 扫描目录下所有 .js（只扫产品代码，避免脚本自身的 catch 噪声） */
 function jsFiles(dir, out = []) {
@@ -50,7 +61,44 @@ function jsFiles(dir, out = []) {
   return out;
 }
 
-/** 取 catch 块的 body（按花括号配对；源码均为合法 JS，注释中的花括号极少见） */
+/**
+ * 把注释与字符串/模板内容替换为空格（保留换行与下标一一对应）。
+ * 语句切分与括号配平只依赖代码结构，避免字符串里的 `(`、`catch` 干扰。
+ */
+function maskSource(src) {
+  const out = src.split('');
+  const n = src.length;
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') {
+      while (i < n && src[i] !== '\n') { out[i] = ' '; i++; }
+    } else if (c === '/' && src[i + 1] === '*') {
+      out[i] = ' '; out[i + 1] = ' '; i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) {
+        if (src[i] !== '\n') out[i] = ' ';
+        i++;
+      }
+      if (i < n) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
+    } else if (c === '"' || c === "'" || c === '`') {
+      const q = c; i++;
+      while (i < n) {
+        if (src[i] === '\\') {
+          if (src[i] !== '\n') out[i] = ' ';
+          i++;
+          if (i < n) { if (src[i] !== '\n') out[i] = ' '; i++; }
+          continue;
+        }
+        if (src[i] === q) { i++; break; }
+        if (src[i] !== '\n') out[i] = ' ';
+        i++;
+      }
+    } else i++;
+  }
+  return out.join('');
+}
+
+/** 取 catch 块的 body（按花括号配对；入参应为 masked 源码，注释/字符串已抹平） */
 function catchBodies(src) {
   const out = [];
   const re = /catch\s*(?:\([^)]*\))?\s*\{/g;
@@ -68,9 +116,90 @@ function catchBodies(src) {
   return out;
 }
 
+/** 按顶层 `;`、块边界 `{`/`}` 切逻辑语句；返回 [{ text, start, end }]（masked 坐标） */
+function statementsOf(masked) {
+  const out = [];
+  let start = 0;
+  let depth = 0;
+  const push = (s, e) => { if (e > s) out.push({ start: s, end: e }); };
+  for (let i = 0; i < masked.length; i++) {
+    const c = masked[i];
+    if (c === '(' || c === '[' || c === '{') {
+      if (c === '{' && depth === 0) { push(start, i); start = i + 1; }
+      depth++;
+    } else if (c === ')' || c === ']' || c === '}') {
+      depth = Math.max(0, depth - 1);
+      if (c === '}' && depth === 0) { push(start, i + 1); start = i + 1; }
+    } else if (c === ';' && depth === 0) {
+      push(start, i + 1);
+      start = i + 1;
+    }
+  }
+  push(start, masked.length);
+  return out;
+}
+
+/** 收集文件级别名：命名空间别名与方法别名（不做作用域分析，见文首边界） */
+function collectAliases(masked) {
+  const nsAlias = new Map();
+  const methodAlias = new Map();
+  const addNs = (name, ns) => { if (name && ns !== 'QB') nsAlias.set(name, ns); };
+  const addMethods = (list, ns) => {
+    list.split(',').forEach((part) => {
+      const seg = part.trim();
+      if (!seg) return;
+      const m = /^([\w$]+)\s*(?::\s*([\w$]+))?$/.exec(seg);
+      if (!m) return;
+      methodAlias.set(m[2] || m[1], { ns, method: m[1] });
+    });
+  };
+
+  let m;
+  // const db = QB.DB; / let hist = QB.History;
+  const reNs = /(?:\bconst|\blet|\bvar)\s+([\w$]+)\s*=\s*QB\s*\.\s*([\w$]+)\s*(?=[;,)\n])/g;
+  while ((m = reNs.exec(masked)) !== null) {
+    if (ASYNC_NS.has(m[2])) addNs(m[1], m[2]);
+  }
+  // const { DB, History } = QB;
+  const reAll = /(?:\bconst|\blet|\bvar)\s*\{([^}]*)\}\s*=\s*QB\s*(?=[;,\n])/g;
+  while ((m = reAll.exec(masked)) !== null) {
+    m[1].split(',').forEach((part) => {
+      const seg = part.trim();
+      const mm = /^([\w$]+)\s*(?::\s*([\w$]+))?$/.exec(seg);
+      if (mm && ASYNC_NS.has(mm[1])) addNs(mm[2] || mm[1], mm[1]);
+    });
+  }
+  // const { list } = QB.WrongBook;
+  const reMethods = /(?:\bconst|\blet|\bvar)\s*\{([^}]*)\}\s*=\s*QB\s*\.\s*([\w$]+)\s*(?=[;,\n])/g;
+  while ((m = reMethods.exec(masked)) !== null) {
+    if (ASYNC_NS.has(m[2])) addMethods(m[1], m[2]);
+  }
+  return { nsAlias, methodAlias };
+}
+
+/** 语句是否以「已知异步调用的左括号」开头；返回左括号下标或 -1 */
+function asyncCallOpen(text, aliases) {
+  let m = /^QB\s*\.\s*([\w$]+)\s*\.\s*([\w$]+)\s*\(/.exec(text);
+  if (m) return isAsyncMethod(m[1], m[2]) ? m[0].length - 1 : -1;
+
+  m = /^([\w$]+)\s*\.\s*([\w$]+)\s*\(/.exec(text);
+  if (m && aliases.nsAlias.has(m[1])) {
+    return isAsyncMethod(aliases.nsAlias.get(m[1]), m[2]) ? m[0].length - 1 : -1;
+  }
+
+  m = /^([\w$]+)\s*\(/.exec(text);
+  if (m && aliases.methodAlias.has(m[1])) {
+    const a = aliases.methodAlias.get(m[1]);
+    return isAsyncMethod(a.ns, a.method) ? m[0].length - 1 : -1;
+  }
+  return -1;
+}
+
 /** 返回 [{rule, snippet}]，按出现顺序 */
 function scanSource(src) {
+  const masked = maskSource(src);
   const found = [];
+  // empty-catch 用原始源码：需要区分“只有占位注释”与“有 ≥6 字说明的注释”。
   for (const { body } of catchBodies(src)) {
     const code = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').trim();
     if (code !== '') continue;
@@ -78,14 +207,29 @@ function scanSource(src) {
     if (comment.length >= MIN_COMMENT) continue;
     found.push({ rule: 'empty-catch', snippet: body.trim().replace(/\s+/g, ' ') });
   }
-  for (const raw of src.split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('//') || line.startsWith('*') || line.startsWith('/*')) continue;
-    if (SYNC_OK_RE.test(line)) continue;
-    if (!(FLOATING_RE.test(line) || FLOATING_PS_RE.test(line))) continue;
-    if (!line.replace(/;\s*$/, '').endsWith(')')) continue; // 跨行调用不在本规则内
-    if (/\.(?:catch|then|finally)\(/.test(line)) continue;
-    found.push({ rule: 'floating-promise', snippet: line });
+
+  const aliases = collectAliases(masked);
+  for (const { start, end } of statementsOf(masked)) {
+    const stmt = masked.slice(start, end);
+    const text = stmt.trim();
+    if (!text) continue;
+    const open = asyncCallOpen(text, aliases);
+    if (open < 0) continue;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < text.length; i++) {
+      if (text[i] === '(') depth++;
+      else if (text[i] === ')') {
+        depth--;
+        if (depth === 0) { close = i; break; }
+      }
+    }
+    if (close < 0) continue;
+    const rest = text.slice(close + 1).trim();
+    // 只有「调用本身就是整条语句」才算 floating；表达式的一部分交给使用者判断。
+    if (!(rest === '' || rest === ';')) continue;
+    if (/\.(?:catch|then|finally)\s*\(/.test(text)) continue;
+    found.push({ rule: 'floating-promise', snippet: text.replace(/\s+/g, ' ').slice(0, 160) });
   }
   return found;
 }
@@ -154,14 +298,31 @@ function readBaseline() {
 if (SELFTEST) {
   const cases = [];
   const check = (name, hit) => cases.push({ name, hit });
-  check('catch 完全为空 → 违规', scanSource('try { a(); } catch (e) {}').length === 1);
-  check('catch 只有占位注释 → 违规', scanSource('try { a(); } catch (e) { /* 忽略 */ }').length === 1);
-  check('catch 有原因注释 → 放行', scanSource('try { a(); } catch (e) { /* 清理失败不阻断 */ }').length === 0);
-  check('catch 有语句 → 放行', scanSource('try { a(); } catch (e) { log(e); }').length === 0);
-  check('未处理的 Promise → 违规', scanSource('QB.DB.init();').length === 1);
-  check('await 后放行', scanSource('await QB.DB.init();').length === 0);
-  check('接 .catch 后放行', scanSource('QB.DB.init().catch(report);').length === 0);
-  check('赋值后放行', scanSource('const p = QB.DB.init();').length === 0);
+  const count = (src, rule) => scanSource(src).filter((v) => v.rule === rule).length;
+  check('catch 完全为空 → 违规', count('try { a(); } catch (e) {}', 'empty-catch') === 1);
+  check('catch 只有占位注释 → 违规', count('try { a(); } catch (e) { /* 忽略 */ }', 'empty-catch') === 1);
+  check('catch 有原因注释 → 放行', count('try { a(); } catch (e) { /* 清理失败不阻断 */ }', 'empty-catch') === 0);
+  check('catch 有语句 → 放行', count('try { a(); } catch (e) { log(e); }', 'empty-catch') === 0);
+  check('未处理的 Promise → 违规', count('QB.DB.init();', 'floating-promise') === 1);
+  check('await 后放行', count('await QB.DB.init();', 'floating-promise') === 0);
+  check('接 .catch 后放行', count('QB.DB.init().catch(report);', 'floating-promise') === 0);
+  check('赋值后放行', count('const p = QB.DB.init();', 'floating-promise') === 0);
+
+  // 多行语句（此前只看单行会漏掉）
+  check('多行语句级调用 → 违规', count('QB.DB.init(\n  a,\n  b\n);', 'floating-promise') === 1);
+  check('多行调用接 .catch → 放行', count('QB.DB.init(\n  a\n).catch(report);', 'floating-promise') === 0);
+  check('多行赋值 → 放行', count('const p = QB.DB.init(\n  a\n);', 'floating-promise') === 0);
+  check('数组元素里的调用 → 放行', count('const all = await Promise.all([\n  QB.WrongBook.list(id),\n  QB.DB.loadQuestions(id)\n]);', 'floating-promise') === 0);
+  check('多行同步纯函数 → 放行', count('QB.SRSStore.unmarkGraded(\n  list\n);', 'floating-promise') === 0);
+
+  // 别名调用（此前只认 QB.Ns.method 前缀）
+  check('命名空间别名调用 → 违规', count('const db = QB.DB;\ndb.init();', 'floating-promise') === 1);
+  check('命名空间别名 await → 放行', count('const db = QB.DB;\nawait db.init();', 'floating-promise') === 0);
+  check('解构命名空间调用 → 违规', count('const { DB } = QB;\nDB.init();', 'floating-promise') === 1);
+  check('解构方法调用 → 违规', count('const { list } = QB.WrongBook;\nlist(id);', 'floating-promise') === 1);
+  check('解构方法 await → 放行', count('const { list } = QB.WrongBook;\nawait list(id);', 'floating-promise') === 0);
+  check('表达式的一部分 → 放行', count('QB.DB.init() && flag;', 'floating-promise') === 0);
+
   const found = [{ file: 'a.js', rule: 'empty-catch', snippet: '{}' }];
   check('过期豁免 → 失败', classify(found, {
     entries: [{ file: 'a.js', rule: 'empty-catch', snippet: '{}', index: 0, expires: '2000-01-01' }]
@@ -175,6 +336,7 @@ if (SELFTEST) {
     console.log('[selftest] ' + c.name + ' → ' + (c.hit ? '符合预期' : '判据失效'));
     if (!c.hit) ok = false;
   });
+  console.log('[selftest] 用例数 ' + cases.length + '，' + (ok ? '全部符合预期 ✅' : '存在判据失效 ❌'));
   process.exit(ok ? 0 : 1);
 }
 
