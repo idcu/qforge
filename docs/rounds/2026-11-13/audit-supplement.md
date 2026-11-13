@@ -30,7 +30,8 @@ DOC 子节点数: 1
 是否出现 INI 特征串 [fonts]: false
 ```
 
-即 `<!ENTITY xxe SYSTEM "file:///C:/Windows/win.ini">` 未被解析，`&xxe;` 以字面量保留。
+即 `<!ENTITY xxe SYSTEM "file:///<盘符>/Windows/win.ini">` 未被解析，`&xxe;` 以字面量保留
+（完整 URI 见 `tools/xxe-probe.mjs`）。
 **残余风险**：实体不展开意味着"实体炸弹"也不成立；但未知实体不报错会静默保留原文（导入畸形 XML 时可能带进字面量），属行为约定而非安全问题。
 
 ## 审计补充-2 cascadeDelete 后 assets 与 meta:pkgHistory 的清理链路（原 §13-2）

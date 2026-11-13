@@ -1,6 +1,6 @@
 # 阶段 2B 规格：判分与统计口径（P1-7 / P1-8 / P1-9）
 
-日期：2026-11-13　工作区：d:\os\proj\js\qforge
+日期：2026-11-13　工作区：仓库根目录（本机绝对路径略）
 上游：`2026-11-13/dev-plan-from-audit/outputs/qforge-任务卡清单-2026-11-13.md` 批次 2B。
 约束：不 commit/push/分支/stash；不装依赖；不改 package.json 与 lock；不为了变绿改断言或放宽阈值；
 触碰 `js/**` 必须 bump `sw.js` CACHE（起点 v63 → v64）；单轮工具调用 ≤30；每卡先红后绿。
