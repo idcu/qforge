@@ -933,7 +933,7 @@ const gradeQs = (await QB.DB.questions.list(gradeBank.id, {})).items;
 /* 固定 revlog 稳态：先把全局日志灌到 FIFO 上限，使 11 轮样本全部落在「尾段写 + 满段裁剪」的同一稳态。
  * 否则测量窗口会跨越 cap（前段慢/后段快两段成本），p50 取决于越界落在第几轮，不可复现。
  * 只改测量前置条件，不改业务路径；后续迁移段 buildLegacyBank 会 Storage.clearAll()，不会污染其口径。 */
-QB.DB.revlog.append(Array.from({ length: (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000 }, (_, i) => ({
+await QB.DB.revlog.append(Array.from({ length: (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.REVLOG_MAX) || 20000 }, (_, i) => ({
   t: qNow + i, h: 'bench-cap-' + (i % 20), r: 3, b: 'bench-cap'
 })));
 row('SRSStore.grade 单次评分（本地适配器）', await calibratedTimed(async (i) => {

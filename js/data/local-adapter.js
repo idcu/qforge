@@ -55,6 +55,9 @@
       createdAt: q.createdAt || t,
       updatedAt: t
     };
+    // 顶层分值（可选）：仅显式正分值落库；缺失不写字段（判分继续按题型/默认分）
+    const score = QB.normalizeChildScore(q.score);
+    if (score > 0) item.score = score;
     // C012：批注是可选本地字段；不参与 contentHash（写批注不改错题/收藏/复习键）
     if (QB.Annotation) {
       const annotation = QB.Annotation.normalize(q.annotation);
@@ -457,6 +460,16 @@
     }
   );
 
+  /* P1-4b：其它标签改动题目键 → 推进写修订号并失效 id/哈希索引。
+     QB.DB.loadQuestions 以 revision() 判定读缓存，故随即重建，不再返回旧题。 */
+  if (typeof Storage.registerExternalChange === 'function') {
+    Storage.registerExternalChange((keys) => {
+      if (!keys || !keys.some((k) => k.indexOf('questions:') === 0)) return;
+      bumpRev();
+      invalidateQuestionIndex();
+    });
+  }
+
   /* ---------------- BankRepository ---------------- */
   const banks = {
     async list() {
@@ -473,6 +486,8 @@
         name: (data && data.name) || '未命名题库',
         description: (data && data.description) || '',
         category: (data && data.category) || '',
+        // 来源溯源（file/paste/drop/url）：与 api 的 wire.bank.from 同语义，缺省 null
+        source: (data && data.source) || null,
         createdAt: t,
         updatedAt: t
       };
@@ -481,10 +496,19 @@
       Storage.set(K.banks, list);
       return bank;
     },
-    async update(id, patch) {
+    async update(id, patch, opts) {
       const list = await banks.list();
       const idx = list.findIndex((b) => b.id === id);
       if (idx < 0) throw new Error('题库不存在: ' + id);
+      // 乐观并发（与 api 的 baseUpdatedAt → 409 同语义）：仅调用方显式提供基准时校验
+      if (opts && opts.baseUpdatedAt !== undefined && opts.baseUpdatedAt !== null) {
+        if (Number(list[idx].updatedAt) !== Number(opts.baseUpdatedAt)) {
+          const e = new Error('题库已被其它端修改，请刷新后重试');
+          e.status = 409;
+          e.code = 'CONFLICT';
+          throw e;
+        }
+      }
       list[idx] = Object.assign({}, list[idx], patch, { id: id, updatedAt: now() });
       Storage.set(K.banks, list);
       if (patch && patch.sched !== undefined) invalidateSchedCache(id); // C019：调度设置直改库
@@ -1605,7 +1629,7 @@
       return list;
     },
     /** 追加并返回整表（对外契约不变；内部热路径不调用，避免 O(n) 物化） */
-    append(entries) {
+    async append(entries) {
       RevlogStore.appendInternal(entries);
       return RevlogStore.list();
     }
@@ -1691,7 +1715,7 @@
     /** 单题状态 O(1)（迁移后）；无记录 null */
     get(bankId, hash) { return ReviewStore.get(bankId, hash); },
     /** 整表落盘（替换该库全部状态），失败即抛；本地版本号随之递增 */
-    save(bankId, map) {
+    async save(bankId, map) {
       const prev = ReviewStore.readMap(bankId);
       const prevMeta = Storage.getFresh(K.reviewMeta(bankId), null);
       const prevLegacy = Storage.getFresh(K.review(bankId), null);
@@ -1717,7 +1741,7 @@
         throw e;
       }
     },
-    remove(bankId) {
+    async remove(bankId) {
       ReviewStore.clear(bankId);
       bumpReviewRev(bankId);
     },
@@ -1725,34 +1749,41 @@
      * 作答热路径（整表）：调度状态 + 评分日志一次提交（等价 save + revlog.append）。
      * api 适配器对应 PUT /reviews（body 可携 revlog），把两次网络请求收敛为一次。
      */
-    record(bankId, map, entries) {
+    async record(bankId, map, entries) {
       return commitReview(bankId, map, entries, true);
     },
     /**
      * 作答热路径（增量，B1）：只提交本批改动的 content_hash 状态。
      * schema v5 起本地也只写改动键（O(1)），不再整表序列化。
      */
-    patch(bankId, delta, entries) {
+    async patch(bankId, delta, entries) {
       return commitReview(bankId, delta, entries, false);
     }
   };
 
+  /* 权重读写同步实现：公开方法统一返回 Promise（与 api 对齐），内部同步路径复用这里。 */
+  function weightsReadSync() {
+    return QB.Weights.normalizeStore(Storage.get(K.metaFsrsWeights, null));
+  }
+  function weightsWriteSync(store) {
+    const s = QB.Weights.normalizeStore(store);
+    if (!s.global && !Object.keys(s.banks).length) Storage.remove(K.metaFsrsWeights); // 回到纯默认状态
+    else Storage.setSync(K.metaFsrsWeights, s);
+  }
+  function weightsRemoveSync(scope) {
+    const s = weightsReadSync();
+    const banks = Object.assign({}, s.banks);
+    let global = s.global;
+    if (scope) delete banks[scope]; else global = null;
+    weightsWriteSync({ global: global, banks: banks });
+  }
+
   const weights = {
     /** 全局 + 按题库 preset（归一为 { global, banks }；归一逻辑见 utils/weights.js） */
-    read() { return QB.Weights.normalizeStore(Storage.get(K.metaFsrsWeights, null)); },
-    write(store) {
-      const s = QB.Weights.normalizeStore(store);
-      if (!s.global && !Object.keys(s.banks).length) Storage.remove(K.metaFsrsWeights); // 回到纯默认状态
-      else Storage.setSync(K.metaFsrsWeights, s);
-    },
+    async read() { return weightsReadSync(); },
+    async write(store) { weightsWriteSync(store); },
     /** 删除某作用域（scope 为空/缺省 = 全局），回到官方默认 */
-    remove(scope) {
-      const s = weights.read();
-      const banks = Object.assign({}, s.banks);
-      let global = s.global;
-      if (scope) delete banks[scope]; else global = null;
-      weights.write({ global: global, banks: banks });
-    }
+    async remove(scope) { weightsRemoveSync(scope); }
   };
 
   const backup = {
@@ -1798,13 +1829,13 @@
    */
   function cascadeDelete(id) {
     QuestionShards.clear(id); // 题目分片 + 清单 + 旧单 blob 一并清除
+    Storage.remove(K.metaHashMap(id)); // 该库内容哈希映射（派生缓存，备份已排除）
     bumpRev();
     Storage.remove(K.wrong(id));
     Storage.remove(K.favorite(id));
-    reviews.remove(id); // 评估报告中优先级#6：旧实现残留 user:review:<bankId>
+    ReviewStore.clear(id); // 旧实现残留 user:review:<bankId>（同步路径，避免未 await 的 Promise）
     Storage.remove(K.reviewRev(id)); // 本地复习版本号随库删除一并清理
-    weights.remove(id); // 该库 FSRS preset（meta:fsrsWeights.banks[bankId]）
-    // 该库评分日志（revlog 条目 b=bankId，F4 起记录；旧无 b 日志保留）
+    weightsRemoveSync(id); // 该库 FSRS preset（meta:fsrsWeights.banks[bankId]）    // 该库评分日志（revlog 条目 b=bankId，F4 起记录；旧无 b 日志保留）
     RevlogStore.removeBank(id);
     const hist = Storage.get(K.history, []).filter((h) => h.bankId !== id);
     Storage.setSync(K.history, hist);

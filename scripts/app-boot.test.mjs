@@ -824,7 +824,7 @@ section('统计页 forecast 缓存（P-6）：同修订重复进入 0 次重算�
   eq(calls, 1, '首次进入统计页：forecast 调用 1 次');
   await QB.App.render();
   eq(calls, 1, '题库/日志未变再次渲染：forecast 0 次（缓存命中）');
-  QB.DB.revlog.append([{ id: 'p6l1', t: 1, h: '2:deadbeef', r: 3 }]);
+  await QB.DB.revlog.append([{ id: 'p6l1', t: 1, h: '2:deadbeef', r: 3 }]);
   await QB.App.render();
   eq(calls, 2, '评分日志 revision 变化后：forecast 重新计算 1 次');
   QB.App.State.view = 'home';

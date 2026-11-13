@@ -2029,7 +2029,8 @@ section('C 步骤4 收尾：评分写路径 6 处 + removeHash（22/22）');
     '红→绿 removeHash：未水合库删除必须先撞单题状态守卫（旧行为先读宽松 getFresh）',
     '（实测 ' + (nRemove ? nRemove.name + ' key=' + nRemove.key : '未抛错') + '）');
 
-  const nRecord = errOf(() => Q2.DB.reviews.record(B.id, { [bHash]: { last: 1, due: 2, stability: 1, difficulty: 1 } }, []));
+  const errOfAsync = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
+  const nRecord = await errOfAsync(() => Q2.DB.reviews.record(B.id, { [bHash]: { last: 1, due: 2, stability: 1, difficulty: 1 } }, []));
   ok(isNotHydrated(nRecord, B.id) && nRecord.key === Q2.KEYS.reviewRev(B.id),
     '红→绿 record：评分写路径首个读取点 reviewRevOf 必须 fail-loud（旧行为返回 0 后继续半写）',
     '（实测 ' + (nRecord ? nRecord.name + ' key=' + nRecord.key : '未抛错') + '）');
@@ -2055,7 +2056,7 @@ section('C 步骤4 收尾：评分写路径 6 处 + removeHash（22/22）');
     inScoped++;
     try { return origScoped.apply(S2, a); } finally { inScoped--; }
   };
-  const recA = Q2.DB.reviews.record(A.id, { [aHash]: { last: NOW + 100, due: NOW + 200, stability: 6, difficulty: 4 } },
+  const recA = await Q2.DB.reviews.record(A.id, { [aHash]: { last: NOW + 100, due: NOW + 200, stability: 6, difficulty: 4 } },
     [{ t: NOW + 100, h: aHash, r: 3, b: A.id }]);
   S2.getFresh = origFresh;
   S2.get = origGet;

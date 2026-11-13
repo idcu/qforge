@@ -249,8 +249,9 @@ section('SRSStore：唯一解析点（整批只读一次 bank / 缓存 / 保存�
     QB.DB.banks.get = origGet;
   }
 
-  // 保存后缓存同步：改保留率立即生效
-  await S.save(bank, { maximumIntervalDays: 1 });
+  // 保存后缓存同步：改保留率立即生效（用最新 bank，避免乐观并发校验命中过期 updatedAt）
+  const latest = await QB.DB.banks.get(bank.id);
+  await S.save(latest, { maximumIntervalDays: 1 });
   eq((await S.ofBankId(bank.id)).maximumIntervalDays, 1, 'save 后 ofBankId 立即反映新值（缓存失效）');
 }
 
@@ -358,8 +359,8 @@ section('二期 fuzz：题库开关 / 幅度上限 / 确定性（默认关闭）
   const ivlDays = Math.round((g1.due - (T0 + 30 * DAY)) / DAY);
   const baseDays = Math.round((QB.FSRS.review(learned, R.good, T0 + 30 * DAY, W).due - (T0 + 30 * DAY)) / DAY);
   ok(Math.abs(ivlDays - baseDays) <= 2, 'SRSStore fuzz 幅度受 fuzzMaxDays=2 收紧（' + baseDays + ' → ' + ivlDays + ' 天）');
-  // 关闭时与默认完全一致（先复位到同一起点，排除上一轮已写入的状态）
-  await S.save(fb, { fuzz: false });
+  // 关闭时与默认完全一致（先复位到同一起点，排除上一轮已写入的状态；用最新 bank 满足乐观并发）
+  await S.save(await QB.DB.banks.get(fb.id), { fuzz: false });
   await QB.SRSStore.writeMap(fb.id, { [QB.SRSStore.keyFor(fq1)]: learned });
   const off = await QB.SRSStore.grade(fb.id, fq1, QB.SRS.RATINGS.good, T0 + 30 * DAY);
   deep(snap2(off), snap2(QB.FSRS.review(learned, R.good, T0 + 30 * DAY, W)), 'fuzz 关闭：与默认逐字段一致');
@@ -493,7 +494,7 @@ section('二期 leech 动作：默认仅徽标 / tag 可配置');
   await QB.SRSStore.writeMap(bank.id, { [key]: start });
   const g1 = await QB.SRSStore.grade(bank.id, qq, QB.SRS.RATINGS.again, T0);
   eq(g1.leech, true, 'tag：lapses 达阈值时写入 leech=true');
-  await S.save(bank, { leechThreshold: 2, leechAction: 'none' });
+  await S.save(await QB.DB.banks.get(bank.id), { leechThreshold: 2, leechAction: 'none' });
   await QB.SRSStore.writeMap(bank.id, { [key]: start });
   const g2 = await QB.SRSStore.grade(bank.id, qq, QB.SRS.RATINGS.again, T0);
   eq(g2.leech, undefined, 'none：不写 leech 字段（默认行为不变）');

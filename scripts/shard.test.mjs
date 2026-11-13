@@ -503,6 +503,34 @@ section('P0-4 insertMany 失败原子回退：不误删并发新增、去重索�
   eq((await H4.QB.DB.questions.list(b.id, {})).items.length, 3, '最终并集 3 题');
 }
 
+section('P1-4b 跨标签题目变更：读缓存随信号失效');
+{
+  const raw = new Map();
+  const ROOT = path.resolve(__dirname, '..');
+  const H1 = await createHarness(ROOT, { raw: raw });
+  H1.QB.DB.init();
+  const b = await H1.QB.DB.banks.create({ name: '跨标签读缓存库' });
+  const H2 = await createHarness(ROOT, { raw: raw });
+  H2.QB.DB.init();
+  await H1.QB.DB.questions.insertMany(b.id, [mkQ(301)], { dedupe: false });
+  // 预热 H2 的 loadQuestions 读缓存
+  eq((await H2.QB.DB.loadQuestions(b.id)).items.length, 1, '预热：H2 读缓存 1 题');
+  const revBefore = H2.QB.DB.questions.revision();
+
+  await H1.QB.DB.questions.insertMany(b.id, [mkQ(302)], { dedupe: false });
+  // 模拟另一标签的 storage 事件（分片 + 清单同轮到达）
+  const shardVal = H1.QB.Storage.get(K.questionShard(b.id, 0));
+  const metaVal = H1.QB.Storage.get(K.questionsMeta(b.id));
+  H2.QB.Storage._handleExternalChange({ key: 'qb:' + K.questionShard(b.id, 0), newValue: JSON.stringify(shardVal) });
+  H2.QB.Storage._handleExternalChange({ key: 'qb:' + K.questionsMeta(b.id), newValue: JSON.stringify(metaVal) });
+  await Promise.resolve(); // 信号按微任务合并派发
+
+  ok(H2.QB.DB.questions.revision() > revBefore, '收到题目变更信号后写修订号推进（缓存失效）');
+  const loaded = await H2.QB.DB.loadQuestions(b.id);
+  eq(loaded.items.length, 2, '不再命中旧读缓存，读到新题');
+  eq(loaded.total, 2, 'total 与磁盘一致');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

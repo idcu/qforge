@@ -77,7 +77,7 @@
 > **存量兼容**：既有行不批量重写；导入去重对老行采用「原 `content_hash` + 按现算法重算」双读比对，旧版裸 hash（v1）或历史伪造 hash 不会导致同内容题被重复插入；旧行在下次 `PATCH` 或重新导入时转为 v2 hash。
 
 **批量返回字段**
-- `op=add`：`{ inserted, duplicates, skipped, total }`（`mode=overwrite` 表示先清空该库再写入）
+- `op=add`：`{ inserted, duplicates, skipped, total }`（`mode=overwrite` 表示先清空该库再写入）；`local-adapter.insertMany` 返回**同一结构**（同名字段、同语义），上层无需区分后端。
 - `op=delete`：`{ removed }`
 
 ## 4. 资源：用户学习数据（Progress）

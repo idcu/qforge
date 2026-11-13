@@ -102,6 +102,24 @@ section('跨标签 storage 事件');
   S.clearAll();
 }
 
+section('P1-4a 跨标签变更信号：同轮合并、无变更不发、可注销');
+{
+  const batches = [];
+  const off = S.registerExternalChange((keys) => batches.push(keys.slice()));
+  await Promise.resolve();
+  eq(batches.length, 0, '无外部变更时不发信号');
+  S._handleExternalChange({ key: 'qb:questions:b1:0', newValue: '[]' });
+  S._handleExternalChange({ key: 'qb:questions:b1:1', newValue: '[]' });
+  await Promise.resolve();
+  eq(batches.length, 1, '同轮两个题目键只发一次信号');
+  eq(batches[0].join(','), 'questions:b1:0,questions:b1:1', '信号携带本轮全部变更键');
+  off();
+  S._handleExternalChange({ key: 'qb:questions:b1:2', newValue: '[]' });
+  await Promise.resolve();
+  eq(batches.length, 1, '注销后不再收到信号');
+  S.clearAll();
+}
+
 section('keys 合并磁盘与待写键');
 {
   S.clearAll();
@@ -513,7 +531,7 @@ section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
   const rk = QB.KEYS.review(b);
   // 另一标签已落盘 h2；本标签手头是过期快照（只有 h1）
   S.setSync(rk, { h2: { last: 200 } });
-  const r = QB.DB.reviews.record(b, { h1: { last: 100 } }, [{ t: 100, h: 'h1', r: 2, b: b }]);
+  const r = await QB.DB.reviews.record(b, { h1: { last: 100 } }, [{ t: 100, h: 'h1', r: 2, b: b }]);
   const map = QB.DB.reviews.list(b);
   ok(map.h1 && map.h2, '过期整表写不会覆盖另一标签的键');
   eq(r.saved, 2, '回执 saved 为合并后的键数');
@@ -531,7 +549,7 @@ section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
     return rawSet(k, v);
   };
   let threw = null;
-  try { QB.DB.reviews.record(b, { h3: { last: 300 } }, [{ t: 300, h: 'h3', r: 3, b: b }]); } catch (e) { threw = e; }
+  try { await QB.DB.reviews.record(b, { h3: { last: 300 } }, [{ t: 300, h: 'h3', r: 3, b: b }]); } catch (e) { threw = e; }
   ls.setItem = rawSet;
   ok(threw !== null, '日志写失败时 record 抛错（不假成功）');
   const after = QB.DB.reviews.list(b);
@@ -547,13 +565,13 @@ section('本地 reviews.patch（B1）与 revlog.revision（B3）');
   const b = 'b-patch';
   S.setSync(QB.KEYS.review(b), { keep1: { last: 10 }, keep2: { last: 20 } });
   const rev0 = QB.DB.revlog.revision();
-  const r = QB.DB.reviews.patch(b, { add1: { last: 100 } }, [{ t: 100, h: 'add1', r: 3, b: b }]);
+  const r = await QB.DB.reviews.patch(b, { add1: { last: 100 } }, [{ t: 100, h: 'add1', r: 3, b: b }]);
   const map = QB.DB.reviews.list(b);
   ok(map.keep1 && map.keep2 && map.add1, 'patch 只合并增量，其它键保留');
   eq(r.saved, 1, 'patch 回执 saved 为本次改动键数');
   ok(QB.DB.revlog.revision() > rev0, 'revlog.revision 随追加自增');
   const rev1 = QB.DB.revlog.revision();
-  QB.DB.reviews.patch(b, { keep1: null }, []);
+  await QB.DB.reviews.patch(b, { keep1: null }, []);
   ok(!QB.DB.reviews.list(b).keep1 && QB.DB.reviews.list(b).keep2, 'patch null 删除指定键');
   eq(QB.DB.revlog.revision(), rev1, '无日志的 patch 不递增 revlog.revision');
   S.clearAll();

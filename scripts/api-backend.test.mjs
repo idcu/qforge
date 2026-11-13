@@ -477,10 +477,20 @@ section('适配器 parity：DATA_BACKEND=api 与 local 逐项一致（UI 零改�
   const rereadBank = await QB.DB.banks.get(bank.id);
   eq(rereadBank.sched.newPerDay, 7, 'api：sched 经 PATCH 落库并回读 newPerDay');
   eq(rereadBank.sched.reviewPerDay, 12, 'api：sched 回读 reviewPerDay');
-  await QB.DB.questions.insertMany(bank.id, [
+  const batchRes = await QB.DB.questions.insertMany(bank.id, [
     { type: 'single', question: 'parity 题1', options: [{ letter: 'A', text: '对' }], answer: 'A' },
     { type: 'judge', question: 'parity 题2', answer: '正确' }
   ], { dedupe: false });
+  eq(Object.keys(batchRes).sort().join(','), 'duplicates,inserted,skipped,total', 'api：insertMany 返回四键（与 local 同形）');
+  eq(batchRes.inserted, 2, 'api：insertMany inserted=2');
+  const dupRes = await QB.DB.questions.insertMany(bank.id, [
+    { type: 'judge', question: 'parity 题2', answer: '正确' },
+    { type: 'judge', question: '   ', answer: '正确' }
+  ], { dedupe: true });
+  eq(dupRes.inserted, 0, 'api：重复题干不新增');
+  eq(dupRes.duplicates, 1, 'api：重复题干计 duplicates');
+  eq(dupRes.skipped, 1, 'api：空题干计 skipped');
+  eq(dupRes.total, 2, 'api：total 为该库总数（与 local 同语义）');
   eq(await QB.DB.questions.count(bank.id), 2, 'api：insertMany 后 count=2');
   const listed = await QB.DB.questions.list(bank.id, {});
   eq(listed.total, 2, 'api：questions.list total=2');

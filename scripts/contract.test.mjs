@@ -208,34 +208,34 @@ section('错题批量写（R-02）：一次读改写 + 降级');
 section('reviews 仓库（本地）');
 {
   const b = 'ct-bank-reviews';
-  QB.DB.reviews.remove(b);
+  await QB.DB.reviews.remove(b);
   eq(JSON.stringify(QB.DB.reviews.list(b)), '{}', '无记录返回空 map');
   const map = { 'hash1': { algo: 'fsrs', stability: 2.3065, due: 1 } };
-  QB.DB.reviews.save(b, map);
+  await QB.DB.reviews.save(b, map);
   eq(QB.DB.reviews.list(b)['hash1'].stability, 2.3065, 'save 后 list 回读同一状态');
   eq((await QB.SRSStore.getState(b, { contentHash: 'hash1' })).stability, 2.3065, '仓库与领域模块同源（readMap 经 DB.reviews.list）');
-  QB.DB.reviews.remove(b);
+  await QB.DB.reviews.remove(b);
   eq(JSON.stringify(QB.DB.reviews.list(b)), '{}', 'remove 后回到空 map');
 
   // record：一次调用同时落调度状态与评分日志（作答热路径）
   const rb = 'ct-bank-record';
-  QB.DB.reviews.remove(rb);
+  await QB.DB.reviews.remove(rb);
   clearRevlog();
   const map2 = { hash2: { algo: 'fsrs', stability: 3.1 } };
-  const rec = QB.DB.reviews.record(rb, map2, [{ t: 200, h: 'hash2', r: 3, b: rb }]);
+  const rec = await QB.DB.reviews.record(rb, map2, [{ t: 200, h: 'hash2', r: 3, b: rb }]);
   eq(QB.DB.reviews.list(rb).hash2.stability, 3.1, 'record 落调度状态（与 save 同源）');
   eq(QB.DB.revlog.list().length, 1, 'record 同时追加评分日志');
   eq(QB.DB.revlog.list()[0].b, rb, 'record 保留日志题库归属');
   eq(rec.logged, 1, 'record 返回 logged 条数');
   eq(rec.saved, 1, 'record 返回 saved 状态数');
-  QB.DB.reviews.remove(rb);
+  await QB.DB.reviews.remove(rb);
   clearRevlog();
 }
 
 section('revlog 仓库（本地，委托 fsrs-opt）');
 {
   clearRevlog();
-  const out = QB.DB.revlog.append([{ t: 100, h: 'h1', r: 3 }, { h: 'h2', r: 1 }]);
+  const out = await QB.DB.revlog.append([{ t: 100, h: 'h1', r: 3 }, { h: 'h2', r: 1 }]);
   eq(out.length, 2, 'append 返回追加后的完整日志');
   ok(out[0].id && out[0].t === 100, '条目自动补 id，显式 t 保留');
   ok(out[1].id && typeof out[1].t === 'number', '缺省 t 补当前时间戳');
@@ -245,28 +245,28 @@ section('revlog 仓库（本地，委托 fsrs-opt）');
 section('weights 仓库（本地）');
 {
   QB.Storage.remove(QB.KEYS.metaFsrsWeights);
-  const empty = QB.DB.weights.read();
+  const empty = await QB.DB.weights.read();
   eq(empty.global, null, '初始 global 为 null');
   eq(Object.keys(empty.banks).length, 0, '初始 banks 为空');
   const w = QB.FSRS.DEFAULT_W.map((v, i) => (i === 0 ? v + 0.5 : v));
-  QB.DB.weights.write({ global: { w: w, trainedAt: 1 }, banks: {} });
-  eq(QB.DB.weights.read().global.w.length, 21, 'write 后 read 回读 21 维权重');
-  eq(QB.DB.weights.read().global.w[0], w[0], '权重值逐项保留');
-  QB.DB.weights.write({ global: { w: w, trainedAt: 2 }, banks: { bankA: { w: w, trainedAt: 3 } } });
-  eq(Object.keys(QB.DB.weights.read().banks).join(','), 'bankA', '支持按题库 preset');
-  QB.DB.weights.remove('bankA');
-  eq(Object.keys(QB.DB.weights.read().banks).length, 0, 'remove(scope) 删题库 preset');
-  ok(!!QB.DB.weights.read().global, '删题库 preset 不影响全局');
-  QB.DB.weights.remove();
-  eq(QB.DB.weights.read().global, null, 'remove() 清全局');
+  await QB.DB.weights.write({ global: { w: w, trainedAt: 1 }, banks: {} });
+  eq((await QB.DB.weights.read()).global.w.length, 21, 'write 后 read 回读 21 维权重');
+  eq((await QB.DB.weights.read()).global.w[0], w[0], '权重值逐项保留');
+  await QB.DB.weights.write({ global: { w: w, trainedAt: 2 }, banks: { bankA: { w: w, trainedAt: 3 } } });
+  eq(Object.keys((await QB.DB.weights.read()).banks).join(','), 'bankA', '支持按题库 preset');
+  await QB.DB.weights.remove('bankA');
+  eq(Object.keys((await QB.DB.weights.read()).banks).length, 0, 'remove(scope) 删题库 preset');
+  ok(!!(await QB.DB.weights.read()).global, '删题库 preset 不影响全局');
+  await QB.DB.weights.remove();
+  eq((await QB.DB.weights.read()).global, null, 'remove() 清全局');
   eq(QB.Storage.get(QB.KEYS.metaFsrsWeights, null), null, '空存储时删除整键（回到纯默认）');
 
   // 旧单组 {w,...} 读取归一为 global（数据层直接用 QB.Weights，不再反向依赖 FSRSOpt）
   const legacyW = QB.FSRS.DEFAULT_W.map((v, i) => (i === 0 ? v + 1 : v));
   QB.Storage.setSync(QB.KEYS.metaFsrsWeights, { w: legacyW, trainedAt: 9 });
-  eq(QB.DB.weights.read().global.w[0], legacyW[0], '旧单组权重读取归一为 global');
-  eq(Object.keys(QB.DB.weights.read().banks).length, 0, '旧单组权重 banks 为空');
-  QB.DB.weights.remove();
+  eq((await QB.DB.weights.read()).global.w[0], legacyW[0], '旧单组权重读取归一为 global');
+  eq(Object.keys((await QB.DB.weights.read()).banks).length, 0, '旧单组权重 banks 为空');
+  await QB.DB.weights.remove();
 
   const localSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'data', 'local-adapter.js'), 'utf8');
   ok(localSrc.indexOf('QB.FSRSOpt') < 0, 'local-adapter 不再反向依赖应用层 FSRSOpt');
@@ -329,7 +329,7 @@ section('删库级联（唯一入口 cascadeDelete）');
   eq((await QB.DB.progress.wrongList(A.id)).length, 0, '错题被清除');
   eq((await QB.DB.progress.favoriteList(A.id)).length, 0, '收藏被清除');
   eq(JSON.stringify(QB.DB.reviews.list(A.id)), '{}', '复习计划被清除');
-  eq(Object.keys(QB.DB.weights.read().banks).length, 0, 'FSRS preset 被清除');
+  eq(Object.keys((await QB.DB.weights.read()).banks).length, 0, 'FSRS preset 被清除');
   const log = QB.DB.revlog.list();
   ok(!log.some((e) => e.b === A.id), '该库评分日志被清除');
   ok(log.some((e) => e.b === B.id), '他库评分日志保留');
@@ -350,6 +350,92 @@ section('删库级联（唯一入口 cascadeDelete）');
   QB.Storage.remove(QB.KEYS.history);
   clearRevlog();
   QB.Storage.remove(QB.KEYS.metaFsrsWeights);
+}
+
+section('阶段 2A 适配器语义对等');
+{
+  // P1-1a：banks.create 保留 source（与 api wire 缺省 null 一致）
+  const srcBank = await QB.DB.banks.create({ name: '2A 来源库', source: { kind: 'url', uri: 'https://example.com/a.json' } });
+  eq(srcBank.source && srcBank.source.kind, 'url', 'local：banks.create 保留 source.kind');
+  const reread = await QB.DB.banks.get(srcBank.id);
+  eq(reread.source && reread.source.uri, 'https://example.com/a.json', 'local：source.uri 回读一致');
+  const plainBank = await QB.DB.banks.create({ name: '2A 无来源库' });
+  eq(plainBank.source, null, 'local：未提供 source 时为 null（与 api wire 缺省一致）');
+
+  // P1-1b：banks.update 乐观并发（baseUpdatedAt）
+  const base = reread.updatedAt;
+  const list = QB.Storage.get(QB.KEYS.banks).slice();
+  const pos = list.findIndex((b) => b.id === srcBank.id);
+  list[pos] = Object.assign({}, list[pos], { updatedAt: base + 1000 }); // 模拟他端已更新
+  QB.Storage.set(QB.KEYS.banks, list);
+  let conflict = null;
+  try { await QB.DB.banks.update(srcBank.id, { name: '2A 过期写' }, { baseUpdatedAt: base }); } catch (e) { conflict = e; }
+  ok(!!conflict, 'local：过期 baseUpdatedAt 被拒绝');
+  eq(conflict && conflict.status, 409, 'local：冲突错误 status=409');
+  eq(conflict && conflict.code, 'CONFLICT', 'local：冲突错误 code=CONFLICT');
+  const upOk = await QB.DB.banks.update(srcBank.id, { name: '2A 匹配写' }, { baseUpdatedAt: base + 1000 });
+  eq(upOk.name, '2A 匹配写', 'local：匹配 baseUpdatedAt 更新成功');
+  const upNoBase = await QB.DB.banks.update(srcBank.id, { name: '2A 无基准写' });
+  eq(upNoBase.name, '2A 无基准写', 'local：未传 baseUpdatedAt 保持旧行为');
+
+  // P1-3：stampQuestion 保留顶层 score（缺失不写字段）
+  const scored = await QB.DB.questions.create(srcBank.id, { type: 'essay', question: '2A 有分值题', answer: '略', score: 25 });
+  eq(scored.score, 25, 'local：questions.create 保留顶层 score');
+  const plainQ = await QB.DB.questions.create(srcBank.id, { type: 'judge', question: '2A 无分值题', answer: '正确' });
+  ok(!('score' in plainQ), 'local：未提供 score 时不写该字段');
+  await QB.DB.questions.insertMany(srcBank.id, [{ type: 'essay', question: '2A 批量分值题', answer: '略', score: 12 }], { dedupe: false });
+  const scoredBatch = (await QB.DB.questions.list(srcBank.id, {})).items.find((q) => q.question === '2A 批量分值题');
+  eq(scoredBatch && scoredBatch.score, 12, 'local：insertMany 保留顶层 score');
+
+  // P1-1c：insertMany 返回四键（与 api/serve-api 同形）
+  const beforeCount = await QB.DB.questions.count(srcBank.id);
+  const shape = await QB.DB.questions.insertMany(srcBank.id, [
+    { type: 'judge', question: '2A 重复题', answer: '正确' },
+    { type: 'judge', question: '2A 重复题', answer: '正确' },
+    { type: 'judge', question: '   ', answer: '正确' }
+  ], { dedupe: true });
+  eq(Object.keys(shape).sort().join(','), 'duplicates,inserted,skipped,total', 'local：insertMany 返回 inserted/duplicates/skipped/total');
+  eq(shape.inserted, 1, 'local：insertMany inserted=1');
+  eq(shape.duplicates, 1, 'local：insertMany duplicates=1');
+  eq(shape.skipped, 1, 'local：insertMany skipped=1');
+  eq(shape.total, beforeCount + shape.inserted, 'local：insertMany total=既有+新增');
+
+  // P1-2：删库级联清理 meta:hashMap:<bankId>
+  QB.Storage.set(QB.KEYS.metaHashMap(srcBank.id), { h1: 1 });
+  QB.Storage.set(QB.KEYS.metaHashMap(plainBank.id), { h2: 2 });
+  await QB.DB.banks.remove(srcBank.id);
+  eq(QB.Storage.get(QB.KEYS.metaHashMap(srcBank.id), null), null, '删库清理 meta:hashMap:<bankId>');
+  ok(QB.Storage.get(QB.KEYS.metaHashMap(plainBank.id), null) != null, '其它库 hashMap 不受影响');
+  await QB.DB.banks.remove(plainBank.id);
+
+  // P1-1d：可等待性统一（local 与 api 一样返回 Promise）
+  const thenable = (x) => !!x && typeof x.then === 'function';
+  const pBank = await QB.DB.banks.create({ name: '2A Promise 库' });
+  const pSave = QB.DB.reviews.save(pBank.id, {});
+  ok(thenable(pSave), 'local：reviews.save 返回 Promise');
+  await pSave;
+  const pRecord = QB.DB.reviews.record(pBank.id, {}, []);
+  ok(thenable(pRecord), 'local：reviews.record 返回 Promise');
+  await pRecord;
+  const pPatch = QB.DB.reviews.patch(pBank.id, {}, []);
+  ok(thenable(pPatch), 'local：reviews.patch 返回 Promise');
+  await pPatch;
+  const pRemove = QB.DB.reviews.remove(pBank.id);
+  ok(thenable(pRemove), 'local：reviews.remove 返回 Promise');
+  await pRemove;
+  const pRevlog = QB.DB.revlog.append([]);
+  ok(thenable(pRevlog), 'local：revlog.append 返回 Promise');
+  await pRevlog;
+  const pRead = QB.DB.weights.read();
+  ok(thenable(pRead), 'local：weights.read 返回 Promise');
+  await pRead;
+  const pWrite = QB.DB.weights.write({ global: null, banks: {} });
+  ok(thenable(pWrite), 'local：weights.write 返回 Promise');
+  await pWrite;
+  const pWeightRemove = QB.DB.weights.remove();
+  ok(thenable(pWeightRemove), 'local：weights.remove 返回 Promise');
+  await pWeightRemove;
+  await QB.DB.banks.remove(pBank.id);
 }
 
 console.log('\n================ 汇总 ================');

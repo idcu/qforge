@@ -29,6 +29,35 @@
     return !!(QB.Store && typeof QB.Store.isBootstrap === 'function' && QB.Store.isBootstrap(key));
   }
 
+  /* ---------------- 跨标签变更信号（P1-4a） ----------------
+   * 其他标签写入后的外部变更只同步本页缓存；上层（如 DB.loadQuestions）另有读缓存，
+   * 需要「题目/题库已变更」信号才能失效。同轮多键合并为一次回调，避免批量导入时信号风暴。
+   */
+  const externalListeners = new Set();
+  let pendingExternalKeys = null;
+  let pendingExternalFns = null;
+  function flushExternal() {
+    if (!pendingExternalKeys) return;
+    const keys = Array.from(pendingExternalKeys);
+    const fns = pendingExternalFns || [];
+    pendingExternalKeys = null;
+    pendingExternalFns = null;
+    fns.forEach((fn) => {
+      try { fn(keys); } catch (_) { /* 监听器异常不影响主流程 */ }
+    });
+  }
+  function emitExternal(keys) {
+    if (!externalListeners.size || !keys || !keys.length) return;
+    if (!pendingExternalKeys) {
+      pendingExternalKeys = new Set();
+      // 快照本轮监听器：之后注册的监听不应收到已发生的变更
+      pendingExternalFns = Array.from(externalListeners);
+      if (typeof queueMicrotask === 'function') queueMicrotask(flushExternal);
+      else setTimeout(flushExternal, 0);
+    }
+    keys.forEach((k) => pendingExternalKeys.add(k));
+  }
+
   /** 题库作用域键前缀（唯一清单：新增带 bankId 的键必须同步追加到此）。 */
   const BANK_SCOPED_PREFIXES = [
     'questions:', 'user:wrong:', 'user:fav:', 'user:review:', 'user:reviewMeta:',
@@ -865,6 +894,7 @@
         if (beforeVisible !== this._logicalKeyVisible(k)) changed = true;
       });
       if (changed) this._invalidateKeys();
+      emitExternal(keys);
     },
 
     /* ---------------- 错误通知与待写落盘 ---------------- */
@@ -1211,6 +1241,17 @@
       }
       // beforeVisible=null 表示视图已过期：下一次 keys() 必然重建，无需再推版本
       if (beforeVisible !== null) this._invalidateKeysIfChanged(key, beforeVisible);
+      emitExternal([key]);
+    },
+
+    /**
+     * 注册跨标签变更监听（P1-4a）：fn(keys) 收到本轮合并后的键列表；
+     * 返回注销函数。传非函数（null 等）时清空全部监听。
+     */
+    registerExternalChange(fn) {
+      if (typeof fn !== 'function') { externalListeners.clear(); return function () {}; }
+      externalListeners.add(fn);
+      return function () { externalListeners.delete(fn); };
     },
 
     /**
