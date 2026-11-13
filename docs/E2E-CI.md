@@ -1,7 +1,7 @@
 # 浏览器端到端 CI 门禁（E2E-CI）
 
-> 入口脚本：`scripts/e2e-ci.mjs`（`npm run e2e`）。CI 中是独立 `e2e` job，
-> **不进** `logic-tests` 的六格矩阵。手动真机取证仍是 `scripts/e2e-browser.mjs`。
+> **这份文件是什么**：在真实 Chromium 里跑完整产品链路的六个场景，回答「改完还能不能用」。逻辑层套件见 [TESTING.md](TESTING.md)；真机手动取证（CSP / 多标签 / IDB 50k）仍是 `scripts/e2e-browser.mjs`。
+> 入口 `scripts/e2e-ci.mjs`（`npm run e2e`）；CI 中是独立的 `e2e` job（`timeout-minutes: 8`），**不进** `logic-tests` 的六格矩阵，也不计入 38 个运行项。
 
 ## 怎么跑
 
@@ -51,7 +51,7 @@ $env:QFORGE_E2E_HARD_LIMIT_MS='3000'; npm run e2e         # 缩短硬超时，�
 - 只覆盖 Chromium 内核（Edge/Chrome），不替代 Firefox/Safari 与真机无障碍。
 - SW install 的预缓存请求属于 Service Worker target，不计入「页面按需请求」口径。
 - 不重复 `e2e-browser.mjs` 的 CSP / 多标签 / IDB50k 真机场景；那些仍是手动门禁。
-- 3 分钟是常规耗时目标，不是断言；超时由 job 的 8 分钟与脚本的 180s 双层兜底。
+- 常规实测 5–11 秒；3 分钟是宽松目标、不是断言；超时由 job 的 8 分钟与脚本的 180s 双层兜底。
 
 ## 硬超时取证
 

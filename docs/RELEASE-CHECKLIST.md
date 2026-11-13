@@ -5,9 +5,10 @@
 
 ## 0. 发布前须知
 
+- 当前已发布 **1.0.2**（`docs/release-ledger.json` 的 `lastReleased`），下一版必须严格大于它，起点 **1.0.3**；SW 缓存当前为 **qforge-v74**（以 `sw.js` 实读为准）。
 - 发布只允许手改两个数值：`package.json` 的 `version`、`sw.js` 的 `CACHE`。其余数字（断言数、模块数、脚本数）由门禁复算，不得手改。
 - 本仓库零运行时依赖；不要引入 `npm install`、打包器或 TypeScript。
-- `js/`、`css/` 任一文件变更后 **必须** bump `sw.js` 的 `CACHE`，否则老用户会继续命中旧缓存。
+- `js/`、`css/`、`index.html` 任一文件变更后 **必须** bump `sw.js` 的 `CACHE`，否则老用户会继续命中旧缓存；**回滚也要用更大的新号**，不能退回旧号。
 - 提交按主题切分时，中间提交是同一已验证工作区的切片，单独 checkout 可能 `docs-check` 红；以 HEAD 上跑通的 `npm run verify` 为准。
 
 ## 1. 版本一致
@@ -112,7 +113,7 @@ await d.saveAs('.analysis/dl/' + d.suggestedFilename());
 再用应用自己的导入器读回：`QB.JsonImporter.parse({ text })`，断言题数一致、
 `meta.checksumOk === true`、`warnings` 为空。
 
-**v1.0.1 实证**：本机 Edge（`channel: 'msedge'`、`acceptDownloads: true`）走真实 UI 导出，
+**历史实证（v1.0.1）**：本机 Edge（`channel: 'msedge'`、`acceptDownloads: true`）走真实 UI 导出，
 得到 `导出冒烟库-题库-18题-20261111-181603-461.json`，**10539 字节**，18 题、11 个单题字段、
 `checksum: 3:0884ab3d249726a9`；导入器读回 18 题、`checksumOk: true`、`warnings: []`，页面 console 报错 0。
 脚本与产物在 `.analysis/`（已 gitignore，不入库）。

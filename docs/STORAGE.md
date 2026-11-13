@@ -1,6 +1,7 @@
 # 存储底座：LocalStorage → IndexedDB（schema v6）
 
 > **这份文件是什么**：`ARCHITECTURE.md` 原 §9 —— 后端选择、v6 迁移十步、回滚路径。
+> **版本边界**：当前 `SCHEMA_VERSION` 为 **7**。本文主体讲 v6（LocalStorage → IndexedDB 底座）；v7 只把复习状态改为物理分块、不动逻辑键与备份格式，见 §9.7。
 > **为什么单独成文**：这一节是全文档最长的一块，且每次迁移修复都会追加。
 > **谁能改**：改 `js/data/store.js` 或 `js/modules/migrate.js` 的同一提交里改这里。
 > 分层见 [ARCHITECTURE.md](ARCHITECTURE.md)；表结构与迁移版本见 [DATABASE.md](DATABASE.md)。

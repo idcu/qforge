@@ -17,7 +17,7 @@
 
 ## 2. 状态模型
 
-每道题在每个题库下维护一条状态（schema v5 起为单键 `qb:user:review:<bankId>:<hash>`，见 §9；旧整表 `qb:user:review:<bankId>` 仍兼容读）：
+每道题在每个题库下维护一条状态（schema v5 起逻辑键为 `qb:user:review:<bankId>:<hash>`；**schema v7 起物理落在 `qb:user:reviewChunk:<bankId>:<bucket>`（256 桶），逻辑键与读写契约不变**，见 §9；旧整表 `qb:user:review:<bankId>` 仍兼容读）：
 
 ```js
 {

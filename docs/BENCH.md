@@ -3,7 +3,15 @@
 > **这份文件是什么**：`DEVELOPMENT.md` 原 §3。
 > **为什么单独成文**：它是读数档案 + 红线，随每次复测追加，与"怎么装环境"无关。
 > **读数口径**：本文里的数字由 `scripts/docs-check.mjs` 复算校验（它同时读 README / DEVELOPMENT / 本文 / BENCH-DATA）。
-> **实测数据**：历史实测读数与实验记录见 [BENCH-DATA.md](BENCH-DATA.md)。
+> **实测数据**：历史实测读数与实验记录见 [BENCH-DATA.md](BENCH-DATA.md)（只存读数、只增不改，口径以本文为准）。
+
+## 0. 接管速览
+
+- 门禁总量 **63** 项：`GATE_TOTAL`（声明）＝ 实跑 ✓/✗ 行数 ＝ `docs-baseline.json` 的 `gateCount` ＝ README / DEVELOPMENT / 本文的「63 项阈值」，任一不一致即红。
+- 判定量分三类：绝对毫秒（单轮或三轮中位数）、**最小样本**（IDB 写入、keys 首次构建）、**同轮标定/同进程自比值**（SRS grade/gradeMany、merge、keys 写入后）。哪项用哪种、为什么，见 §3-B / §3-B-1 / §3-B-2 / §3-C。
+- 必须 `--expose-gc`；红灯必须附 `.analysis/bench-failures/<ISO>-bench-failure.json`——**不给证据的性能红灯视为无证据**。
+- `--hotspots` 是 50k 题/状态/日志夹具的 12 条 `[H]` 红线，**不计入** 63 项（见 §3-D）。
+- 门禁标签里的「schema v5 迁移」是历史命名：固定测「旧 v2 hash + 整表布局 → per-hash」这一步；v5→v6（底座搬 IDB）与 v6→v7（复习状态分桶）由 migrate 套件覆盖。改标签会牵动基线与 `GATE_TOTAL`，故保留。
 
 ```bash
 npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，63 项）

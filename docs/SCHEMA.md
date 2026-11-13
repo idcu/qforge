@@ -148,7 +148,7 @@ CREATE TABLE review_schedule (
   UNIQUE INDEX uq_review_user_bank_hash (user_id, bank_id, content_hash)
 );
 ```
-> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last,learning?,leech?}`；`leech` 仅在 `sched.leechAction='tag'` 命中阈值时写入（只置位、不清除；后端 `review` 表无该列，api 模式保留性**未验证**）；`learning={step,mode:'new'|'review'}` 表示新卡/遗忘卡处于 1m/10m 学习步骤（分钟级 due，毕业后续长期间隔）。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。**本地布局（schema v5；reviewMeta 子布局 v4）**：按 hash 独立键 `user:review:<bankId>:<hash>`（单次评分只写改动题）+ 紧凑标记 `user:reviewMeta:<bankId>`=`{v:4}`（键集合由物理键前缀枚举，不再存清单），旧整表 `user:review:<bankId>` 仅兼容读（`QB.ReviewStore` 双读合并、per-hash 优先）；旧 v3 清单 `{v:3,count,keys}` 在启动期由 `Migration.run` 幂等压缩，压缩失败保留原清单且不影响读取。后端仍落本表单行，映射时把 per-hash 键展开为行。
+> 前端状态 `{algo,due,stability,difficulty,reps,lapses,last,learning?,leech?}`；`leech` 仅在 `sched.leechAction='tag'` 命中阈值时写入（只置位、不清除；后端 `review` 表无该列，api 模式保留性**未验证**）；`learning={step,mode:'new'|'review'}` 表示新卡/遗忘卡处于 1m/10m 学习步骤（分钟级 due，毕业后续长期间隔）。旧 SM-2 字段 `interval/ease` 不入库后端；本地遗留行无 `algo/stability`，首次 FSRS 评分时按新卡初始化（见 `fsrs.js`）。**本地布局（schema v5；reviewMeta 子布局 v4）**：按 hash 独立键 `user:review:<bankId>:<hash>`（单次评分只写改动题）+ 紧凑标记 `user:reviewMeta:<bankId>`=`{v:4}`（键集合由物理键前缀枚举，不再存清单），旧整表 `user:review:<bankId>` 仅兼容读（`QB.ReviewStore` 双读合并、per-hash 优先）；**schema v7 起物理落 `user:reviewChunk:<bankId>:<bucket>`（每库 256 桶），上面的逻辑键与读写契约不变**；旧 v3 清单 `{v:3,count,keys}` 在启动期由 `Migration.run` 幂等压缩，压缩失败保留原清单且不影响读取。后端仍落本表单行，映射时把 per-hash 键展开为行。
 
 ### 2.8 review_log（FSRS 评分日志，参数优化用）
 ```sql
