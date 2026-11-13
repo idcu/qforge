@@ -863,14 +863,29 @@
     return true;
   }
 
+  /**
+   * 导出前校验资产包体积（与导入端同一上限）。
+   * 不变量：凡被允许导出的文件必须能被导入端接受，不允许产出「能导出但导不回」的备份。
+   */
+  function assertExportableBundle(bundle) {
+    const limit = backupLimits().maxBytes;
+    const bytes = bundle && bundle.content ? (bundle.content.byteLength || 0) : 0;
+    if (bytes > limit) {
+      throw new Error('备份包体积约 ' + Math.round(bytes / 1024 / 1024) + ' MB，超过上限 ' +
+        Math.round(limit / 1024 / 1024) + ' MB；请分库导出，或先压缩/删除部分图片资产后重试');
+    }
+    return true;
+  }
+
   /** 解析备份文件：自动识别 ZIP 包（PK 头）或 JSON */
   async function parseBackupFile(buffer) {
     const limit = backupLimits();
     const size = buffer && typeof buffer.byteLength === 'number' ? buffer.byteLength : 0;
-    // 先按字节数拒绝，再做 Uint8Array 转换（不为超大文件分配内存）
+    // 先按字节数拒绝，再做 Uint8Array 转换（不为超大文件分配内存）。
+    // 此处无法区分 ZIP/JSON，文案必须同时给出两类文件的可执行下一步，且不得建议改回同一条路。
     if (size > limit.maxBytes) {
-      throw new Error('备份文件约 ' + Math.round(size / 1024 / 1024) + ' MB，超过上限 ' +
-        Math.round(limit.maxBytes / 1024 / 1024) + ' MB；请改用 .qfbk 包或分库导出');
+      throw new Error('备份文件约 ' + Math.round(size / 1024 / 1024) + ' MB，超过导入上限 ' +
+        Math.round(limit.maxBytes / 1024 / 1024) + ' MB；请分库导出，或先压缩/删除部分图片资产后重试');
     }
     const bytes = new Uint8Array(buffer);
     if (QB.Qbk.isZipBytes(bytes)) {
@@ -899,6 +914,8 @@
     const suffix = legacy ? '-legacy' : '';
     let blob, name;
     if (bundle) {
+      // 与导入端同一上限：超限直接拒绝，避免产出永远无法恢复的 .qfbk
+      assertExportableBundle(bundle);
       blob = new Blob([bundle.content], { type: 'application/zip' });
       name = filename || ('qforge-backup' + suffix + '-' + new Date().toISOString().slice(0, 10) + '.qfbk');
     } else {

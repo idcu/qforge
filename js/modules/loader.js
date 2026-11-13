@@ -38,7 +38,11 @@
       'js/modules/data-io.js'
     ],
     // 导出/分享链路：题包、Office、分享页
+    // DSV/XLSX vendor 是 exporter（CSV）与 office-writer（XLSX）的直接依赖，必须同包且先注入
     export: [
+      'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/dsv/src/vendor/dsv.js',
+      'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/vendor/xlsx.js',
+      'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js',
       'js/modules/office-writer.js',
       'js/modules/share-page.js',
       'js/modules/exporter.js'

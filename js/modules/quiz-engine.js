@@ -468,7 +468,10 @@
       showTimer: this.showTimer,
       startedAt: this.startedAt || 0,
       deadlineAt: this.deadlineAt || 0,
-      composeSeed: this.composeSeed || 0
+      composeSeed: this.composeSeed || 0,
+      // #5 交卷幂等：会话标识与已写历史 id 随会话持久化，重载后不重复写历史
+      sessionId: this.sessionId || '',
+      historyId: this.historyId || ''
     };
   };
 
@@ -486,6 +489,8 @@
     this.startedAt = Number(state.startedAt) > 0 ? Number(state.startedAt) : 0;
     this.deadlineAt = Number(state.deadlineAt) > 0 ? Number(state.deadlineAt) : 0;
     this.composeSeed = Number(state.composeSeed) > 0 ? Number(state.composeSeed) : 0;
+    this.sessionId = state.sessionId || '';
+    this.historyId = state.historyId || '';
     // 旧版会话只有 startedAt、没有 deadlineAt：用 startedAt + durationMs 推导截止时间，避免恢复后重新计时
     if (this.durationMs > 0 && !this.deadlineAt && this.startedAt > 0) {
       this.deadlineAt = this.startedAt + this.durationMs;

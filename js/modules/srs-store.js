@@ -120,11 +120,16 @@
       : QB.SRS.RATINGS.again;
   }
 
+  /* 本页内「已收集、尚未确认落盘」的结果。WeakSet 不参与序列化，pagehide 不会带走，
+     因此恢复后的新结果对象不会继承任何 pending 状态（#10：宁可崩溃窗口多记一次，也不漏记）。 */
+  const inFlight = new WeakSet();
+
   /**
-   * 从「题目+判分结果」对中收集尚未写入 SRS 的条目，消费即标记 result.srsRecorded。
-   * 练习提交即时收集、交卷批量收集、材料题自评后收集共用此入口——
-   * 同一结果不会被第二次收集，从根上保证一次作答只写一条评分/一条 revlog
-   * （待自评结果不收集也不标记，材料题多步自评在聚合定论后才计入）。
+   * 从「题目+判分结果」对中收集尚未写入 SRS 的条目。
+   * 收集阶段只暂存到内存 in-flight 集合，**不**写 result.srsRecorded：
+   * 置位必须发生在写盘成功之后（markGraded），否则 pagehide 在「收集→落盘」之间
+   * 把 srsRecorded=true 持久化进会话，恢复后该结果将永久漏记。
+   * 练习提交即时收集、交卷批量收集、材料题自评后收集共用此入口。
    * @param {Array<{question:Object, result:Object}>} pairs
    * @returns {Array<{question:Object, rating:number, result:Object}>}
    */
@@ -132,23 +137,36 @@
     const out = [];
     (pairs || []).forEach((p) => {
       const r = p && p.result;
-      if (!r || r.srsRecorded) return;
+      if (!r || r.srsRecorded || inFlight.has(r)) return;
       const rating = ratingForResult(r);
       if (rating === null) return;
-      r.srsRecorded = true;
+      inFlight.add(r);
       out.push({ question: p.question, rating: rating, result: r });
     });
     return out;
   }
 
+  /** 写盘成功：清除 in-flight 并置位 srsRecorded（此后不再重复收集） */
+  function markGraded(entries) {
+    (entries || []).forEach((e) => {
+      const r = e && e.result;
+      if (!r) return;
+      inFlight.delete(r);
+      r.srsRecorded = true;
+    });
+  }
+
   /**
-   * 写盘失败时回滚收集置位（P0-5）：把本次收集的 result 恢复为「待记录」，
+   * 写盘失败时回滚收集置位（P0-5）：清除 in-flight 并把 result 恢复为「待记录」，
    * 交卷/重试会再次收集，避免一次瞬时写失败导致该题永久丢失复习进度。
    * @param {Array<{result?:Object}>} entries collectGraded 的返回值
    */
   function unmarkGraded(entries) {
     (entries || []).forEach((e) => {
-      if (e && e.result) e.result.srsRecorded = false;
+      const r = e && e.result;
+      if (!r) return;
+      inFlight.delete(r);
+      r.srsRecorded = false;
     });
   }
 
@@ -292,6 +310,6 @@
 
   QB.SRSStore = {
     getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear,
-    keyFor, ratingForResult, collectGraded, unmarkGraded, readMap, writeMap, fuzzSeedFor
+    keyFor, ratingForResult, collectGraded, markGraded, unmarkGraded, readMap, writeMap, fuzzSeedFor
   };
 })(window);

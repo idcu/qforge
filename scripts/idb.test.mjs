@@ -2235,6 +2235,70 @@ section('T10：IDB 写失败可由调用点捕获（评分/编辑保存）');
     'app 启动订阅 onWriteError 并复用后台错误提示（去重在 notifyBackgroundError）');
 }
 
+section('缺陷①：分阶段水合下全局题目索引不抛 NotHydratedError（红→绿）');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+
+  // H1（全量会话）：A=当前库，B=其它库；两库各 2 题且物理数据都在同一 IDB
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  Q1.Store.writeMarker('idb');
+  await Q1.Storage.initStore();
+  await Q1.Storage.ensureAll();
+  const A1 = await Q1.DB.banks.create({ name: '索引当前库' });
+  const B1 = await Q1.DB.banks.create({ name: '索引其它库' });
+  const mkQ = (tag) => [0, 1].map((i) => ({
+    type: 'single', question: tag + '题' + i,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }));
+  await Q1.DB.questions.insertMany(A1.id, mkQ('索引A'), { dedupe: false, mode: 'overwrite' });
+  await Q1.DB.questions.insertMany(B1.id, mkQ('索引B'), { dedupe: false, mode: 'overwrite' });
+  const aQ = (await Q1.DB.questions.list(A1.id, {})).items;
+  const bQ = (await Q1.DB.questions.list(B1.id, {})).items;
+  const aId = aQ[0].id;
+  const bId = bQ[0].id;
+  Q1.Storage.setSync(Q1.KEYS.metaCurrentBank, A1.id);
+  await Q1.Storage.flush();
+
+  // H2（真实启动视图）：只水合当前库 A，B 未水合但其数据仍在同一 IDB
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const attempt = async (fn) => {
+    try { return { value: await fn() }; } catch (e) { return { error: e }; }
+  };
+  eq(S.isBankHydrated(A1.id), true, '前置：当前库 A 已水合');
+  eq(S.isBankHydrated(B1.id), false, '前置：其它库 B 未水合但物理数据存在');
+
+  // 红：修复前 questions.get/update/insertMany 都因 buildQuestionIndex 遍历 B 而抛 NotHydratedError
+  const g = await attempt(() => Q2.DB.questions.get(aId));
+  ok(!g.error && g.value && g.value.id === aId,
+    '分阶段水合：某库未水合时 questions.get 仍返回当前库题目（红：旧实现抛 NotHydratedError）',
+    '（实测 ' + (g.error ? g.error.name : JSON.stringify(g.value && g.value.id)) + '）');
+
+  const u = await attempt(() => Q2.DB.questions.update(aId, { question: '索引A题0（改）' }));
+  ok(!u.error && u.value && u.value.question === '索引A题0（改）',
+    '分阶段水合：questions.update 可用（红：旧实现抛 NotHydratedError）',
+    '（实测 ' + (u.error ? u.error.name : JSON.stringify(u.value && u.value.question)) + '）');
+
+  const ins = await attempt(() => Q2.DB.questions.insertMany(B1.id, [{
+    type: 'single', question: '索引B题0',
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  }], { dedupe: true }));
+  ok(!ins.error && ins.value && ins.value.duplicates === 1 && ins.value.inserted === 0,
+    '分阶段水合：insertMany 跨库去重可用（红：旧实现抛 NotHydratedError）',
+    '（实测 ' + (ins.error ? ins.error.name : JSON.stringify(ins.value)) + '）');
+
+  const gb = await attempt(() => Q2.DB.questions.get(bId));
+  ok(!gb.error && gb.value && gb.value.id === bId,
+    '分阶段水合：ensureAll 后可按 id 定位非当前库题目',
+    '（实测 ' + (gb.error ? gb.error.name : JSON.stringify(gb.value && gb.value.id)) + '）');
+}
+
 /* ============================================================ */
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);

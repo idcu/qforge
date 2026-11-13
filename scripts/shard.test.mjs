@@ -531,6 +531,59 @@ section('P1-4b 跨标签题目变更：读缓存随信号失效');
   eq(loaded.total, 2, 'total 与磁盘一致');
 }
 
+section('#8 本地题目更新遵循 baseUpdatedAt（与 api 409 同形）');
+{
+  QB.Storage.clearAll();
+  const b = await QB.DB.banks.create({ name: '乐观并发库' });
+  await QB.DB.questions.insertMany(b.id, [mkQ(401)], { dedupe: false });
+  const q = (await QB.DB.questions.list(b.id, {})).items[0];
+  let err = null;
+  try {
+    await QB.DB.questions.update(q.id, { question: '旧基准覆盖' }, { baseUpdatedAt: Number(q.updatedAt) - 1 });
+  } catch (e) { err = e; }
+  ok(!!err && err.status === 409 && err.code === 'CONFLICT', '过期 baseUpdatedAt 被拒绝为 409 CONFLICT');
+  eq((await QB.DB.questions.get(q.id)).question, q.question, '冲突时未写入题干');
+  const updated = await QB.DB.questions.update(q.id, { question: '新基准写入' }, { baseUpdatedAt: q.updatedAt });
+  eq(updated.question, '新基准写入', '基准一致时正常更新');
+}
+
+section('#11 双标签更新/删除同一分片不丢改动');
+{
+  const root = path.resolve(__dirname, '..');
+  const raw = new Map(); // 两个 harness 共享底层存储 = 两个标签
+  const H1 = await createHarness(root, { raw });
+  H1.QB.DB.init();
+  const H2 = await createHarness(root, { raw });
+  H2.QB.DB.init();
+  const H3 = await createHarness(root, { raw }); // 第三方只读，验证磁盘权威值
+  H3.QB.DB.init();
+
+  const b = await H1.QB.DB.banks.create({ name: '双标签库' });
+  await H1.QB.DB.questions.insertMany(b.id, [mkQ(501), mkQ(502)], { dedupe: false });
+  // H2 先读一次，建立本页分片缓存（此后 H1 的写入不会自动进入 H2 缓存）
+  H2.QB.Storage.get(K.questionShard(b.id, 0), []);
+
+  await H1.QB.DB.questions.update('q-501', { question: 'A改' });
+  await H2.QB.DB.questions.update('q-502', { question: 'B改' });
+  const afterUpdate = await H3.QB.DB.questions.list(b.id, {});
+  const u501 = afterUpdate.items.find((q) => q.id === 'q-501');
+  const u502 = afterUpdate.items.find((q) => q.id === 'q-502');
+  eq(u501 && u501.question, 'A改', 'A 的更新未被 B 的过期分片覆盖');
+  eq(u502 && u502.question, 'B改', 'B 自己的更新正常落盘');
+
+  // 删除：H2 缓存已包含 A 的修改；H1 再改 q-502 后，H2 删除 q-501 不得回滚 q-502
+  await H1.QB.DB.questions.update('q-502', { question: 'A二次改' });
+  H2.QB.Storage.get(K.questionShard(b.id, 0), []); // 仍是 A 二次改之前的缓存
+  const removed = await H2.QB.DB.questions.remove('q-501');
+  ok(!!removed && removed.id === 'q-501', '删除命中目标题');
+  const H4 = await createHarness(root, { raw }); // H3 缓存已过期：删除后再开一个只读视图验权威值
+  H4.QB.DB.init();
+  const afterRemove = await H4.QB.DB.questions.list(b.id, {});
+  eq(afterRemove.items.filter((q) => q.id === 'q-501').length, 0, 'q-501 已删除');
+  const r502 = afterRemove.items.find((q) => q.id === 'q-502');
+  eq(r502 && r502.question, 'A二次改', '删除时未把他人更新回滚掉');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

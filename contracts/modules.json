@@ -1172,7 +1172,9 @@
       "tier": "L2",
       "requires": [
         "utils.helpers",
-        "utils.zip-writer"
+        "utils.zip-writer",
+        "vendor.format.xlsx-read.xlsx",
+        "vendor.format.xlsx-read.core"
       ],
       "keeps": [
         "QB.OfficeWriter"
@@ -1235,7 +1237,8 @@
         "modules.source",
         "modules.office-writer",
         "modules.share-page",
-        "modules.share-link"
+        "modules.share-link",
+        "vendor.format.dsv.dsv"
       ],
       "keeps": [
         "QB.Exporters"

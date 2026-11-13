@@ -371,6 +371,66 @@ const c1 = await makeQB({});
   eq(res.inserted, 1, '退化为原有写入路径，导入成功');
 }
 
+/* ================= 11. 粘贴入口保留致命 errors ================= */
+{
+  section('粘贴入口保留致命 errors（整包拒绝不被绕过）');
+  const h = await createHarness(ROOT, {});
+  // 粘贴弹窗需要真正的「解析预览」点击与 textarea 值；makeModalUI 只自动点「导入预览」，故单独构造
+  const ui = {
+    toasts: [], modals: [],
+    renderImportChecksum() { return ''; },
+    closeModal() { },
+    toast(msg, kind) { ui.toasts.push({ msg: msg, kind: kind }); },
+    openModal(html, setup) {
+      ui.modals.push(html);
+      const nodes = new Map();
+      const node = (sel) => {
+        if (!nodes.has(sel)) {
+          nodes.set(sel, {
+            onclick: null, checked: false,
+            value: sel === '#paste-area' ? '{"questions":[]}' : '',
+            appendChild() { }, insertBefore() { }, setAttribute() { },
+            parentNode: null
+          });
+        }
+        return nodes.get(sel);
+      };
+      const modal = { querySelector(sel) { return node(sel); }, appendChild() { } };
+      if (setup) setup(modal);
+      const okBtn = nodes.get('[data-action="modal-ok"]');
+      // 先点「解析预览」；若进入预览弹窗，再点「导入」完成落库（修复前会走到这一步）
+      if (okBtn && typeof okBtn.onclick === 'function' &&
+          (html.indexOf('解析预览') >= 0 || html.indexOf('导入预览') >= 0)) okBtn.onclick();
+    }
+  };
+  h.window.QB.UIRenderer = ui;
+  const code = fs.readFileSync(path.join(ROOT, 'js', 'modules', 'data-io.js'), 'utf8');
+  new Function('window', 'globalThis', 'indexedDB', 'BroadcastChannel', code)(
+    h.window, h.window, h.window.indexedDB, h.window.BroadcastChannel);
+  const QB = h.QB;
+  QB.DB.init();
+  const bank = await QB.DB.banks.create({ name: '粘贴 errors 库' });
+  // 解析层报告致命 errors，但同包仍有 1 道正常题：commitImport 必须整包拒绝（0 写入）
+  const origRunImport = QB.Importers.runImport;
+  QB.Importers.runImport = async () => ({
+    questions: [{ type: 'single', question: '正常题', options: [{ letter: 'A', text: '甲' }], answer: 'A' }],
+    warnings: [],
+    errors: ['材料题至少需要 2 个小问'],
+    format: 'json',
+    stats: { byType: { single: 1 }, total: 1 },
+    meta: null
+  });
+  let res;
+  try {
+    res = await QB.DataIO.importTextFlow(bank);
+  } finally {
+    QB.Importers.runImport = origRunImport;
+  }
+  eq(res, null, '有致命 errors 时 importTextFlow 返回 null（整包拒绝）');
+  eq((await QB.DB.questions.list(bank.id, {})).items.length, 0, '拒绝时 0 题落库（errors 未被丢弃）');
+  ok(ui.modals.some((html) => html.indexOf('导入未完成') >= 0), '拒绝原因可见（弹窗含「导入未完成」）');
+}
+
 /* ================= 汇总 ================= */
 console.log('\n========================================');
 console.log('import-commit 断言: ' + (pass + failures.length) + '，通过: ' + pass + '，失败: ' + failures.length);

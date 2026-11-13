@@ -11,6 +11,7 @@
  * 运行：node scripts/exporter.test.mjs
  */
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHarness } from './_harness.mjs';
 import { createAssert } from './lib/assert.mjs';
@@ -498,6 +499,31 @@ eq(Object.keys(QB.Exporters.KINDS).length, 4, '已注册对象数 = 4（bank/wro
 await throwsAsync(() => QB.Exporters.collect('cards', bank), '未注册 kind（cards）抛错');
 ok(QB.Exporters.buildContent('xlsx', payload).content instanceof ArrayBuffer, 'xlsx 已注册（二进制往返详见 office-export.test）');
 throws(() => QB.Exporters.buildContent('pdf', payload), '未注册格式（pdf）抛错');
+
+/* ================= 11. export 按需包依赖完整（缺陷②回归） ================= */
+section('export 按需包依赖完整');
+{
+  // 直接执行 loader.js（无 DOM 依赖）取其唯一事实源 BUNDLES，避免复制一份清单
+  const loaderSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/loader.js'), 'utf8');
+  const sandbox = { QB: {} };
+  new Function('window', 'globalThis', loaderSrc)(sandbox, sandbox);
+  const bundle = (sandbox.QB.BUNDLES && sandbox.QB.BUNDLES.export) || [];
+  const at = (part) => bundle.findIndex((f) => String(f).indexOf(part) >= 0);
+  const dsv = at('/format/dsv/src/vendor/dsv.js');
+  const xlsx = at('/format/xlsx-read/src/vendor/xlsx.js');
+  const xlsxCore = at('/format/xlsx-read/src/core.js');
+  const office = at('js/modules/office-writer.js');
+  const exporter = at('js/modules/exporter.js');
+  ok(dsv >= 0,
+    'export 包含 DSV 格式化器（红：旧包缺 dsv.js，首次 CSV 导出 ReferenceError）',
+    '（实测下标 ' + dsv + '）');
+  ok(xlsx >= 0 && xlsxCore >= 0,
+    'export 包含 XLSX vendor/core（红：旧包缺 Xlsx，首次 XLSX 导出 ReferenceError）',
+    '（实测下标 ' + xlsx + '/' + xlsxCore + '）');
+  ok(dsv >= 0 && dsv < exporter && xlsx >= 0 && xlsx < office && xlsxCore < office,
+    'DSV/XLSX 注入顺序先于使用者（exporter / office-writer）',
+    '（实测 dsv=' + dsv + ' xlsx=' + xlsx + '/' + xlsxCore + ' office=' + office + ' exporter=' + exporter + '）');
+}
 
 /* ================= 汇总 ================= */
 console.log('\n================ 汇总 ================');

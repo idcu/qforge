@@ -33,6 +33,9 @@
     engine.loadQuestions(questions, 'mixed', opts || {});
     engine.mode = mode || 'practice';
     engine.startedAt = Date.now();
+    // #5：会话标识随会话持久化；historyId 在首次成功写历史后回填，用于重载后幂等
+    engine.sessionId = QB.uid('s');
+    engine.historyId = '';
     // 考试截止时间随会话持久化：刷新/崩溃恢复后按剩余时间继续，而不是重新计时
     if (engine.mode === 'exam' && engine.durationMs > 0) engine.deadlineAt = engine.startedAt + engine.durationMs;
     State.engine = engine;
@@ -109,6 +112,7 @@
     }
     try {
       await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
+      QB.SRSStore.markGraded([entry]); // #10：写盘成功后才置位
     } catch (e) {
       // P0-5：写盘失败必须把「已记录」置位回滚，否则该题本场永久不再收集
       QB.SRSStore.unmarkGraded([entry]);
@@ -156,8 +160,10 @@
     );
     invalidateReviewLog();
     if (srsEntries.length) {
-      try { await QB.SRSStore.gradeMany(State.bankId, srsEntries); }
-      catch (e) {
+      try {
+        await QB.SRSStore.gradeMany(State.bankId, srsEntries);
+        QB.SRSStore.markGraded(srsEntries); // #10：整批落盘成功后才置位
+      } catch (e) {
         // P0-5：整批写失败时回滚置位，下一次交卷/重试仍会收集这批结果
         QB.SRSStore.unmarkGraded(srsEntries);
         notifyBackgroundError('保存成绩失败', e);
@@ -165,24 +171,39 @@
     }
     const score = engine.getScore();
     const durationMs = Date.now() - (State.quizMeta.startTs || engine.startedAt || Date.now());
-    const historyRecord = await QB.History.add({
-      bankId: State.bankId,
-      bankName: State.bank ? State.bank.name : '',
-      mode: engine.mode,
-      total: engine.questions.length,
-      correct: score.correct,
-      wrong: score.wrong,
-      partial: score.partial,
-      pending: score.pending,
-      score: score.score,
-      accuracy: score.accuracy,
-      byType: engine.byType(),
-      durationMs: durationMs,
-      focusLeaves: isExam ? (State.quizMeta.focusLeaves || 0) : 0
-    });
+    let historyRecord;
+    if (engine.historyId) {
+      // #5 幂等：上次交卷历史已写入、仅清会话失败；重载后再次交卷不得重复写历史
+      historyRecord = { id: engine.historyId };
+    } else {
+      historyRecord = await QB.History.add({
+        bankId: State.bankId,
+        bankName: State.bank ? State.bank.name : '',
+        sessionId: engine.sessionId || '',
+        mode: engine.mode,
+        total: engine.questions.length,
+        correct: score.correct,
+        wrong: score.wrong,
+        partial: score.partial,
+        pending: score.pending,
+        score: score.score,
+        accuracy: score.accuracy,
+        byType: engine.byType(),
+        durationMs: durationMs,
+        focusLeaves: isExam ? (State.quizMeta.focusLeaves || 0) : 0
+      });
+      engine.historyId = (historyRecord && historyRecord.id) || '';
+      // 先持久化幂等标记：若随后清会话失败/页面崩溃，重载后据此跳过重复写历史
+      try { await QB.ProgressSaver.save(State.bankId, engine); }
+      catch (e) { notifyBackgroundError('保存交卷标记失败', e); }
+    }
     State.quizMeta.locked = true;
     State.quizMeta.finishing = false;
-    await QB.ProgressSaver.clear();
+    try { await QB.ProgressSaver.clear(); }
+    catch (e) {
+      // 会话清理不是交卷成功的前置条件：历史已落盘，继续进结果页；残留会话由幂等标记兜底
+      notifyBackgroundError('清理会话失败', e);
+    }
     State.resultMeta = {
       title: isExam ? '考试结果' : '练习结果',
       durationMs: durationMs,

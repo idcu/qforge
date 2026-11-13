@@ -105,17 +105,28 @@
     return await QB.DB.weights.write(store);
   }
 
-  async function saveWeights(w, meta, bankId) {
-    const store = await readStore();
-    const entry = Object.assign({ w: w.slice(), trainedAt: Date.now() }, meta || {});
-    if (bankId) store.banks[bankId] = entry;
-    else store.global = entry;
-    await writeStore(store);
+  /* 权重整表读改写必须串行：两个 scope 并发训练时，后写若用旧快照会覆盖先写的 preset。
+     队列只保证同页内顺序（跨标签仍未原子，见 ARCHITECTURE §8 #9 的残留说明）。 */
+  let writeQueue = Promise.resolve();
+  function enqueueWrite(task) {
+    const run = writeQueue.then(task, task);
+    writeQueue = run.then(() => undefined, () => undefined);
+    return run;
   }
 
-  /** 删除某题库 preset；省略 bankId 时清除全局权重 */
-  async function resetWeights(bankId) {
-    return await QB.DB.weights.remove(bankId);
+  function saveWeights(w, meta, bankId) {
+    return enqueueWrite(async () => {
+      const store = await readStore();
+      const entry = Object.assign({ w: w.slice(), trainedAt: Date.now() }, meta || {});
+      if (bankId) store.banks[bankId] = entry;
+      else store.global = entry;
+      await writeStore(store);
+    });
+  }
+
+  /** 删除某题库 preset；省略 bankId 时清除全局权重（与保存同队列，避免读改写交错） */
+  function resetWeights(bankId) {
+    return enqueueWrite(() => QB.DB.weights.remove(bankId));
   }
 
   /* ---------------- 一键训练 ---------------- */

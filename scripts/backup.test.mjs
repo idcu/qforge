@@ -596,6 +596,37 @@ section('P1-14 JSON 备份体积/条目上限');
   ok(QB.Backup.assertExportablePayload({ app: 'qforge-backup', data: { a: 1 } }) === true, '正常载荷通过导出校验');
 }
 
+section('#7 资产包导出与导入共用同一上限（不允许自产不可恢复备份）');
+{
+  const L = QB.CONFIG.LIMITS;
+  const origMax = L.BACKUP_JSON_MAX_BYTES;
+  const origAll = QB.Assets.allEntries;
+  const origDoc = globalThis.document;
+  L.BACKUP_JSON_MAX_BYTES = 1024;
+  QB.Assets.allEntries = async () => ([{ id: 'big1', bytes: new Uint8Array(4096), mime: 'image/png' }]);
+  const clicks = [];
+  globalThis.document = {
+    createElement: () => ({ href: '', download: '', click() { clicks.push(1); } }),
+    body: { appendChild() { }, removeChild() { } }
+  };
+  let err = null;
+  let res = null;
+  try { res = await QB.Backup.download('overflow.qfbk'); } catch (e) { err = e; }
+  L.BACKUP_JSON_MAX_BYTES = origMax;
+  QB.Assets.allEntries = origAll;
+  globalThis.document = origDoc;
+  ok(!!err && /超过上限/.test(err.message),
+    '资产包超过导入上限时导出被拒绝（' + ((err && err.message) || '未抛错') + '）');
+  ok(!!err && /分库/.test(err.message), '拒绝文案给出可执行下一步（分库/压缩图片）');
+  eq(clicks.length, 0, '拒绝发生在生成下载之前（0 次点击）');
+  eq(res, null, '超限时不返回可下载产物');
+  let zipErr = null;
+  try { await QB.Backup.parseBackupFile({ byteLength: (L.BACKUP_JSON_MAX_BYTES || 0) + 1 }); } catch (e) { zipErr = e; }
+  ok(!!zipErr && !/改用 \.qfbk/.test(zipErr.message),
+    '超限导入文案不再误导「改用 .qfbk」（' + ((zipErr && zipErr.message) || '') + '）');
+  ok(!!zipErr && /分库|压缩|删除部分图片/.test(zipErr.message), '超限导入文案含可执行下一步');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

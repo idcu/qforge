@@ -577,6 +577,74 @@ section('本地 reviews.patch（B1）与 revlog.revision（B3）');
   S.clearAll();
 }
 
+section('#5 交卷幂等：清会话失败不产生重复历史');
+{
+  S.clearAll();
+  const bank = await QB.DB.banks.create({ name: '交卷幂等库' });
+  await QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: '交卷题', options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A' }
+  ], { dedupe: false });
+  const q = (await QB.DB.questions.list(bank.id, {})).items[0];
+
+  function makeEngine() {
+    const eng = new QB.QuizEngine();
+    eng.loadQuestions([q], 'mixed', {});
+    eng.mode = 'practice';
+    eng.startedAt = Date.now();
+    eng.sessionId = 'sess-5';
+    eng.historyId = '';
+    eng.results[0] = { isCorrect: true, partial: false, srsRecorded: false };
+    return eng;
+  }
+  function makeState() {
+    return {
+      bankId: bank.id, bank: bank, engine: makeEngine(),
+      quizMeta: { startTs: Date.now(), locked: false, finishing: false },
+      view: 'quiz', resultMeta: null
+    };
+  }
+  const ui = {
+    toast() { }, render() { }, updateStatus() { },
+    notifyBackgroundError() { }, invalidateReviewLog() { },
+    reviewLogFor() { return Promise.resolve({ items: [] }); }
+  };
+  const State = makeState();
+  QB.QuizSession.attach(Object.assign({ State: State }, ui));
+
+  const origAdd = QB.History.add;
+  const origClear = QB.ProgressSaver.clear;
+  let adds = 0;
+  QB.History.add = async (rec) => { adds++; return origAdd.call(QB.History, rec); };
+  await QB.ProgressSaver.save(State.bankId, State.engine); // beginQuiz 的会话落盘
+
+  let firstThrew = false;
+  QB.ProgressSaver.clear = async () => { throw new Error('注入：清会话失败'); };
+  try { await QB.QuizSession.finishQuiz(); } catch (e) { firstThrew = true; }
+  eq(firstThrew, false, '清会话失败不向上抛（历史已写入，交卷算成功）');
+  eq(adds, 1, '首次交卷写入 1 条历史');
+  eq(State.view, 'result', '清会话失败仍进入结果页（不卡在 locked 的答题页）');
+  eq((await QB.History.list(bank.id)).length, 1, '库内历史 1 条');
+
+  // 模拟重载：清会话失败 → 残留会话仍在 → 恢复后再交卷
+  const saved = await QB.ProgressSaver.load();
+  ok(!!saved, '清会话失败后残留会话可恢复（幂等回归的场景）');
+  const State2 = makeState();
+  const eng2 = new QB.QuizEngine();
+  ok(eng2.restore(saved), '从残留会话恢复引擎');
+  State2.engine = eng2;
+  QB.QuizSession.attach(Object.assign({ State: State2 }, ui));
+  QB.ProgressSaver.clear = async () => { };
+  let secondThrew = false;
+  try { await QB.QuizSession.finishQuiz(); } catch (e) { secondThrew = true; }
+  eq(secondThrew, false, '重载后再交卷不抛');
+  eq(adds, 1, '同一场会话只产生一条历史（修复前为 2）');
+  eq((await QB.History.list(bank.id)).length, 1, '库内历史仍为 1 条');
+  eq(State2.view, 'result', '重载交卷也进入结果页');
+
+  QB.History.add = origAdd;
+  QB.ProgressSaver.clear = origClear;
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

@@ -529,6 +529,37 @@ section('增量重训（P1）：训练点记录 + shouldRetrain 增量触发 + �
   clearOpt();
 }
 
+section('#9 权重保存串行化（并发 scope 不互相覆盖）');
+{
+  const origRead = QB.DB.weights.read;
+  const origWrite = QB.DB.weights.write;
+  let store = { global: null, banks: {} };
+  // 模拟「两个 scope 同时读到同一旧快照」：读延迟一拍，写也延迟一拍
+  QB.DB.weights.read = async () => {
+    const snap = JSON.parse(JSON.stringify(store));
+    await new Promise((r) => setTimeout(r, 5));
+    return snap;
+  };
+  QB.DB.weights.write = async (s) => {
+    store = JSON.parse(JSON.stringify(s));
+    await new Promise((r) => setTimeout(r, 5));
+  };
+  const w = QB.FSRS.DEFAULT_W.map((x) => x + 0.01);
+  try {
+    await Promise.all([
+      O.saveWeights(w, { tag: 'G' }),
+      O.saveWeights(w, { tag: 'A' }, 'bankA'),
+      O.saveWeights(w, { tag: 'B' }, 'bankB')
+    ]);
+  } finally {
+    QB.DB.weights.read = origRead;
+    QB.DB.weights.write = origWrite;
+  }
+  ok(!!store.global, '并发保存后全局权重仍在');
+  ok(!!store.banks.bankA, '并发保存后 bankA preset 仍在（修复前被后写覆盖）');
+  ok(!!store.banks.bankB, '并发保存后 bankB preset 仍在');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

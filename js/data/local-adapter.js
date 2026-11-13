@@ -313,6 +313,20 @@
       return null;
     },
 
+    /** 定位题目（磁盘权威读取，绕过本页缓存；#11 update/remove 的写入前基线） */
+    locateFresh(bankId, id) {
+      const meta = QuestionShards.metaOfFresh(bankId);
+      if (!meta) {
+        const pos = QuestionShards.legacyOf(bankId).findIndex((q) => q && q.id === id);
+        return pos >= 0 ? { legacy: true, pos: pos } : null;
+      }
+      for (let i = 0; i < meta.sizes.length; i++) {
+        const pos = QuestionShards.shardOfFresh(bankId, i).findIndex((q) => q && q.id === id);
+        if (pos >= 0) return { legacy: false, idx: i, pos: pos };
+      }
+      return null;
+    },
+
     /** 清除某库全部分片与清单（含旧单 blob 与高位孤儿分片），删库级联/重写用 */
     clear(bankId) {
       invalidateQuestionIndex(); // C018：清库 → 索引失效
@@ -395,6 +409,20 @@
   let questionIndex = null;
 
   function invalidateQuestionIndex() { questionIndex = null; }
+
+  /**
+   * 全局题目索引的可见性前置（分阶段水合）：索引按 id/hash 跨库定位，必须覆盖全部库。
+   * 有未水合库时先 ensureAll（失败照常上抛，不退回部分索引）；水合完成后同步视图为全量，
+   * 后续调用只做 O(库数) 的已水合判定，不重复读盘。
+   */
+  async function ensureIndexBanksHydrated() {
+    if (Storage.mode !== 'idb' || typeof Storage.ensureAll !== 'function') return;
+    const list = await banks.list();
+    for (let i = 0; i < list.length; i += 1) {
+      const id = list[i] && list[i].id;
+      if (id && !Storage.isBankHydrated(id)) { await Storage.ensureAll(); return; }
+    }
+  }
 
   function buildQuestionIndex() {
     const byId = new Map();
@@ -530,6 +558,20 @@
     }
   };
 
+  /**
+   * 乐观并发校验（与 api 的 base_updated_at → 409、banks.update 同形）。
+   * 仅调用方显式提供基准时启用；校验必须先于任何写操作。
+   */
+  function assertQuestionVersion(current, opts) {
+    if (!current || !opts || opts.baseUpdatedAt === undefined || opts.baseUpdatedAt === null) return;
+    if (Number(current.updatedAt) !== Number(opts.baseUpdatedAt)) {
+      const e = new Error('题目已被其它端修改，请刷新后重试');
+      e.status = 409;
+      e.code = 'CONFLICT';
+      throw e;
+    }
+  }
+
   /* ---------------- QuestionRepository ---------------- */
   const questions = {
     /**
@@ -586,6 +628,7 @@
 
     /** 单题读取：内存索引命中 O(1)；失配（外部改键/位置漂移）回落逐库 locate 并修正索引 */
     async get(id) {
+      await ensureIndexBanksHydrated();
       const idx = questionIndexOf();
       const loc = idx.byId.get(id);
       if (loc) {
@@ -612,8 +655,9 @@
       return item;
     },
 
-    async update(id, patch) {
+    async update(id, patch, opts) {
       // C018：优先用内存索引定位（O(1)）；未命中回落逐库 locate 并回填索引。
+      await ensureIndexBanksHydrated();
       const idx = questionIndexOf();
       const known = idx.byId.get(id);
       let bankId = null;
@@ -640,36 +684,61 @@
       }
       if (!loc) throw new Error('题目不存在: ' + id);
 
-      if (loc.legacy) {
-        const list = QuestionShards.readAll(bankId);
-        const oldHash = list[loc.pos].contentHash;
-        const merged = Object.assign({}, list[loc.pos], patch, { id: id, bankId: bankId, updatedAt: now() });
+      // #11：写入前以磁盘权威值重新定位（另一标签可能已改同片或重编号），
+      // 写后回读校验；被覆盖则重试，仍冲突显式报错（不静默丢改动）。
+      const ATTEMPTS = 3;
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        const found = QuestionShards.locateFresh(bankId, id);
+        if (!found) throw new Error('题目不存在: ' + id);
+        if (found.legacy) {
+          const list = QuestionShards.readAllFresh(bankId);
+          const pos = list.findIndex((q) => q && q.id === id);
+          if (pos < 0) throw new Error('题目不存在: ' + id);
+          assertQuestionVersion(list[pos], opts);
+          const oldHash = list[pos].contentHash;
+          const merged = Object.assign({}, list[pos], patch, { id: id, bankId: bankId, updatedAt: now() });
+          merged.contentHash = QB.makeContentHash(merged);
+          list[pos] = merged;
+          QuestionShards.writeAll(bankId, list); // 旧单 blob：一次性迁移为分片
+          bumpRev();
+          if (oldHash && oldHash !== merged.contentHash) remapUserData(bankId, oldHash, merged.contentHash);
+          return merged;
+        }
+        const shard = QuestionShards.shardOfFresh(bankId, found.idx);
+        assertQuestionVersion(shard[found.pos], opts);
+        const oldHash = shard[found.pos].contentHash;
+        const merged = Object.assign({}, shard[found.pos], patch, { id: id, bankId: bankId, updatedAt: now() });
         merged.contentHash = QB.makeContentHash(merged);
-        list[loc.pos] = merged;
-        QuestionShards.writeAll(bankId, list); // 旧单 blob：一次性迁移为分片
-        bumpRev();
-        if (oldHash && oldHash !== merged.contentHash) remapUserData(bankId, oldHash, merged.contentHash);
-        return merged;
+        shard[found.pos] = merged;
+        QuestionShards.setShard(bankId, found.idx, shard); // 只重写所在分片
+        // LS 模式立即落盘，保证回读校验看到磁盘权威值（与 append 同口径）
+        try {
+          const flushing = Storage.forceSync();
+          if (flushing && typeof flushing.catch === 'function') flushing.catch(() => {});
+        } catch (e) { throw e; }
+        const check = QuestionShards.shardOfFresh(bankId, found.idx).find((q) => q && q.id === id);
+        if (check && check.updatedAt === merged.updatedAt && check.contentHash === merged.contentHash) {
+          // 位置未变：索引可继续命中，仅同步该库哈希集（去重仍准确）
+          const hashes = idx.hashesByBank.get(bankId);
+          if (hashes) {
+            if (oldHash) hashes.delete(oldHash);
+            if (merged.contentHash) hashes.add(merged.contentHash);
+          }
+          bumpRev();
+          if (oldHash && oldHash !== merged.contentHash) remapUserData(bankId, oldHash, merged.contentHash);
+          return merged;
+        }
       }
-      const shard = QuestionShards.shardOf(bankId, loc.idx);
-      const oldHash = shard[loc.pos].contentHash;
-      const merged = Object.assign({}, shard[loc.pos], patch, { id: id, bankId: bankId, updatedAt: now() });
-      merged.contentHash = QB.makeContentHash(merged);
-      shard[loc.pos] = merged;
-      QuestionShards.setShard(bankId, loc.idx, shard); // 只重写所在分片
-      // 位置未变：索引可继续命中，仅同步该库哈希集（去重仍准确）
-      const hashes = idx.hashesByBank.get(bankId);
-      if (hashes) {
-        if (oldHash) hashes.delete(oldHash);
-        if (merged.contentHash) hashes.add(merged.contentHash);
+      {
+        const e = new Error('题目更新冲突：检测到其它标签页并发写入，重试 ' + ATTEMPTS + ' 次仍未合并');
+        e.code = 'UPDATE_CONFLICT';
+        throw e;
       }
-      bumpRev();
-      if (oldHash && oldHash !== merged.contentHash) remapUserData(bankId, oldHash, merged.contentHash);
-      return merged;
     },
 
     async remove(id) {
       // C018：索引定位（O(1) 命中）；删除会改变同片位置 → 删除后整表失效。
+      await ensureIndexBanksHydrated();
       const idx = questionIndexOf();
       const known = idx.byId.get(id);
       let bankId = null;
@@ -690,29 +759,54 @@
       }
       if (!loc) { invalidateQuestionIndex(); return null; }
 
-      if (loc.legacy) {
-        const list = QuestionShards.readAll(bankId);
-        const [removed] = list.splice(loc.pos, 1);
-        QuestionShards.writeAll(bankId, list);
-        bumpRev();
-        return removed;
+      // #11：与 update 同口径——写入前 fresh 定位，写后回读校验并重试
+      const ATTEMPTS = 3;
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        const found = QuestionShards.locateFresh(bankId, id);
+        if (!found) { invalidateQuestionIndex(); return null; }
+        if (found.legacy) {
+          const list = QuestionShards.readAllFresh(bankId);
+          const pos = list.findIndex((q) => q && q.id === id);
+          if (pos < 0) { invalidateQuestionIndex(); return null; }
+          const [removed] = list.splice(pos, 1);
+          QuestionShards.writeAll(bankId, list);
+          invalidateQuestionIndex();
+          bumpRev();
+          return removed;
+        }
+        const meta = QuestionShards.metaOfFresh(bankId);
+        if (!meta) continue; // 竞态：清单消失，下一轮重新定位
+        const shard = QuestionShards.shardOfFresh(bankId, found.idx);
+        const [removed] = shard.splice(found.pos, 1);
+        if (!removed) continue;
+        const expected = shard.map((q) => q && q.id).filter(Boolean);
+        if (!shard.length) {
+          // 中间分片被清空：删键后用权威数据整体重写（等价 compact，但不读本页缓存）
+          QuestionShards.removeShard(bankId, found.idx);
+          QuestionShards.writeAll(bankId, QuestionShards.readAllFresh(bankId));
+        } else {
+          QuestionShards.setShard(bankId, found.idx, shard);
+          meta.sizes[found.idx] = shard.length;
+          meta.count -= 1;
+          QuestionShards.setMeta(bankId, meta);
+        }
+        try {
+          const flushing = Storage.forceSync();
+          if (flushing && typeof flushing.catch === 'function') flushing.catch(() => {});
+        } catch (e) { throw e; }
+        const ids = QuestionShards.readAllFresh(bankId).map((q) => q && q.id);
+        if (ids.indexOf(id) < 0 && expected.every((x) => ids.indexOf(x) >= 0)) {
+          invalidateQuestionIndex(); // 同片后续题目位置前移，索引必须重建
+          bumpRev();
+          return removed;
+        }
       }
-      const meta = QuestionShards.metaOf(bankId);
-      const shard = QuestionShards.shardOf(bankId, loc.idx);
-      const [removed] = shard.splice(loc.pos, 1);
-      if (!shard.length) {
-        // 中间分片被清空：必须重编号，否则后续分片索引错位、余题不可读（见 shard.test 中间片用例）
-        QuestionShards.removeShard(bankId, loc.idx);
-        QuestionShards.compact(bankId);
-      } else {
-        QuestionShards.setShard(bankId, loc.idx, shard);
-        meta.sizes[loc.idx] = shard.length;
-        meta.count -= 1;
-        QuestionShards.setMeta(bankId, meta);
+      invalidateQuestionIndex();
+      {
+        const e = new Error('题目删除冲突：检测到其它标签页并发写入，重试 ' + ATTEMPTS + ' 次仍未合并');
+        e.code = 'REMOVE_CONFLICT';
+        throw e;
       }
-      invalidateQuestionIndex(); // 同片后续题目位置前移，索引必须重建
-      bumpRev();
-      return removed;
     },
 
     /**
@@ -725,6 +819,8 @@
       const dedupe = options.dedupe !== false;
       const mode = options.mode || 'merge'; // 'merge' | 'overwrite'
       const overwrite = mode === 'overwrite';
+      // 分阶段水合：读写目标库分片与跨库去重索引都需要全量可见性（ensureAll 失败上抛）
+      await ensureIndexBanksHydrated();
 
       // P0-6：IDB 模式同步上限为 Infinity（浏览器引擎管理磁盘配额），这里用 estimate 做写入前预检；
       // 放不下就整包拒绝、不写任何键，避免「写到一半失败 + 回滚」把半批数据暴露给并发读者。
@@ -987,6 +1083,12 @@
     },
     async historyAdd(record) {
       const all = Storage.get(K.history, []).slice();
+      // #5 第二层幂等：同一场会话（sessionId 相同）只保留一条历史。
+      // 客户端 engine.historyId 已覆盖常规重载路径；这里兜底「标记落盘失败但历史已写」的重复提交。
+      if (record && record.sessionId) {
+        const dup = all.find((h) => h && h.sessionId === record.sessionId);
+        if (dup) return dup;
+      }
       const item = Object.assign({ id: QB.uid('h'), createdAt: now() }, record);
       all.unshift(item);
       Storage.setSync(K.history, all.slice(0, (QB.CONFIG.LIMITS && QB.CONFIG.LIMITS.HISTORY_MAX) || 500)); // FIFO 上限见 config.LIMITS

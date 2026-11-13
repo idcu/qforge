@@ -762,8 +762,8 @@
       const fcBars = forecastData.days.map((d) =>
         '<div class="fc-col"><span class="fc-bar" style="height:' + Math.max(2, Math.round(d.count / max * 52)) + 'px" title="' + d.label + ' ' + d.count + ' 题"></span>' +
         '<span class="fc-n">' + d.count + '</span><span class="fc-l">' + shortLabel(d.label) + '</span></div>').join('');
-      // 不能直接覆盖 prefix：否则有预测数据时「今日复习计划 / 调整复习设置」入口被吞掉
-      prefix = renderReviewPlan(reviewPlan) +
+      // 不能直接覆盖 prefix：否则有预测数据时「今日复习计划 / FSRS 个性化参数」入口被吞掉
+      prefix = renderReviewPlan(reviewPlan) + renderFsrsCard(fsrsInfo) +
         '<div class="card"><h3 class="card-title">复习调度（FSRS）</h3>' +
         '<div class="li-meta">已学 ' + forecastData.learned + ' / ' + forecastData.tracked +
         ' 题有调度记录，未学新题 ' + forecastData.newCount + ' 道</div>' +

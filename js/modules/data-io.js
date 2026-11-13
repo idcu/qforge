@@ -419,6 +419,9 @@
             resolve(await commitImport(bank, {
               questions: parsed.questions,
               warnings: parsed.warnings || [],
+              // 致命校验错误（如材料题 <2 小问）必须随结果透传：commitImport 据此整包拒绝，
+              // 否则粘贴/分享码会绕过校验写入半批数据（与文件/URL 入口一致）。
+              errors: parsed.errors || [],
               format: '粘贴·' + (parsed.format || 'text'),
               stats: parsed.stats,
               meta: parsed.meta || null

@@ -159,7 +159,8 @@ section('一次作答仅一条评分（评估报告高优先级#2 回归契约�
   const first = QB.SRSStore.collectGraded([{ question: q, result }]);
   eq(first.length, 1, '提交时收集到 1 条待记录');
   await QB.SRSStore.grade(bank.id, first[0].question, first[0].rating, T0);
-  eq(result.srsRecorded, true, '收集后标记 srsRecorded');
+  QB.SRSStore.markGraded(first);
+  eq(result.srsRecorded, true, '写盘成功后标记 srsRecorded');
 
   // 模拟交卷：同一结果再次收集 → 0 条，gradeMany 空转
   const second = QB.SRSStore.collectGraded([{ question: q, result }]);
@@ -354,13 +355,16 @@ section('P0-5 评分置位与落盘顺序：写失败不永久丢失');
   try { await H.QB.SRSStore.grade(bank.id, entry.question, entry.rating, T0); } catch (e) { threw = true; }
   H.controls.failWrites = false;
   ok(threw, '注入写失败：grade 抛错（不假成功）');
-  eq(result.srsRecorded, true, '写失败时置位暂留（等待调用方回滚）');
+  eq(result.srsRecorded, false, '写失败时不置位（避免失败态被 pagehide 持久化）');
+  eq(H.QB.SRSStore.collectGraded([{ question: q, result }]).length, 0,
+    '回滚前仍处于 in-flight，暂不重复收集');
   ok(typeof H.QB.SRSStore.unmarkGraded === 'function', '提供 unmarkGraded 回滚入口');
   if (typeof H.QB.SRSStore.unmarkGraded === 'function') H.QB.SRSStore.unmarkGraded([entry]);
   eq(result.srsRecorded, false, '回滚后恢复为待记录');
   const again = H.QB.SRSStore.collectGraded([{ question: q, result }]);
   eq(again.length, 1, '同一结果可再次收集（不永久丢失）');
   await H.QB.SRSStore.grade(bank.id, again[0].question, again[0].rating, T0);
+  H.QB.SRSStore.markGraded(again);
   eq(result.srsRecorded, true, '重试写入成功后置位');
   const logs = (await H.QB.FSRSOpt.readLog()).filter((e) => e.h === key);
   eq(logs.length, 1, '重试后 revlog 恰 1 条（无重复）');
@@ -406,6 +410,23 @@ section('P1-10 无 patch 适配器：提交前按 last 合并，不覆盖其他�
   ok(!!out, '本批改动已提交到适配器');
   eq(out && out.stability, 42, '其他标签较新的状态胜出（不被本批结果覆盖）');
   eq(out && out.last, newerState.last, '合并按 last 取大者');
+}
+
+section('#10 srsRecorded 不早于落盘（pagehide 快照可重新收集）');
+{
+  const q = { id: 'q10', type: 'single', question: '幂等题', options: [], answer: 'A' };
+  const r = { isCorrect: false, partial: false, srsRecorded: false };
+  const first = QB.SRSStore.collectGraded([{ question: q, result: r }]);
+  eq(first.length, 1, '收集 1 条待记录');
+  eq(r.srsRecorded, false, '收集阶段不置位（修复前为 true，pagehide 会永久漏记）');
+  // pagehide：会话只做 JSON 序列化；模拟恢复后的新对象
+  const restored = JSON.parse(JSON.stringify({ results: [r] })).results[0];
+  eq(QB.SRSStore.collectGraded([{ question: q, result: restored }]).length, 1,
+    '页面恢复后仍可收集（修复前因 srsRecorded 落盘而为 0）');
+  ok(typeof QB.SRSStore.markGraded === 'function', '提供 markGraded 写后置位入口');
+  if (typeof QB.SRSStore.markGraded === 'function') QB.SRSStore.markGraded(first);
+  eq(r.srsRecorded, true, '写盘成功后置位');
+  eq(QB.SRSStore.collectGraded([{ question: q, result: r }]).length, 0, '置位后不重复收集');
 }
 
 console.log('\n================ 汇总 ================');

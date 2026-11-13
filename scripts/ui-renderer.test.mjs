@@ -763,6 +763,25 @@ section('C012 作答反馈：本地批注只读展示（含材料题父题批注
   ok(UI.renderQuiz(mEngine, {}).indexOf('父题批注XYZ') >= 0, '材料题总评展示父题批注');
 }
 
+section('缺陷③：有预测数据时 renderStats 仍保留 FSRS 个性化入口');
+{
+  const fsrsInfo = {
+    samples: 120, threshold: 100,
+    trained: { improvement: 0.12, samples: 120 },
+    scopes: [{ id: '', label: '全局', active: true }], scopeLabel: '全局'
+  };
+  const forecast = {
+    days: [{ label: '今天', count: 3 }, { label: '1天后', count: 2 }],
+    learned: 10, tracked: 20, newCount: 5
+  };
+  const plan = { settings: { newPerDay: 20, reviewPerDay: 100 } };
+  const html = UI.renderStats([], forecast, fsrsInfo, plan);
+  ok(html.indexOf('data-action="fsrs-train"') >= 0 && html.indexOf('FSRS 个性化参数') >= 0,
+    '有预测数据时仍渲染 FSRS 个性化参数卡与训练入口（红：旧实现被 forecast 分支覆盖）');
+  ok(html.indexOf('复习调度（FSRS）') >= 0 && html.indexOf('data-action="review-settings"') >= 0,
+    '有预测数据时预测卡与「调整复习设置」入口同时在（两张卡不互斥）');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {
