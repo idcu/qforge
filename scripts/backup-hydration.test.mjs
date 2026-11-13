@@ -216,11 +216,14 @@ async function main() {
   // local-adapter 51 → 53。
   // 2026-11-13 P0-1：`migrate.run` 读取引导键 `meta:migrationPending`（全局键，非库作用域）；
   // migrate 19 → 20，与既有 meta:schemaVersion 读取同类。
+  // 2026-11-13 阶段 2C：backup.js 新增 2 处全局键读取（P1-12 `existingUnconsumedBackup` 的
+  // `getFresh(metaMigrationBackup)`、P1-13 merge 分支的旧值快照 `get`），均在 saveAutoBackup/
+  // applyData 的 `ensureAll()` 之后执行，属全局引导/备份键口径：backup 10 → 12，合计 93 → 95。
   const EXPECTED_SITES = {
     'js/app.js': 2,
     'js/data/db.js': 1,
     'js/data/local-adapter.js': 53,
-    'js/modules/backup.js': 10,
+    'js/modules/backup.js': 12,
     'js/modules/migrate.js': 20,
     'js/modules/package.js': 1,
     'js/modules/start-prefs.js': 2,
@@ -228,7 +231,7 @@ async function main() {
     'js/utils/hash-remap.js': 1
   };
   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
-  A.eq(scan.total, 93, '可执行调用点合计 93（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
+  A.eq(scan.total, 95, '可执行调用点合计 95（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
 
   // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
   A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');
@@ -245,6 +248,11 @@ async function main() {
   const applySlice = bkSrc.slice(at(bkSrc, 'async function applyData'), at(bkSrc, 'async function applyBackup'));
   A.ok(at(applySlice, 'await QB.Storage.ensureAll()') < at(applySlice, 'const oldKeys = QB.Storage.keys()'),
     'A5/A6 applyData：ensureAll 早于旧键快照（replace 才能删到载荷外库）');
+  A.ok(at(applySlice, 'await QB.Storage.ensureAll()') < at(applySlice, 'const prior = new Map(keys.map'),
+    'P1-13 merge：旧值快照（Storage.get）在 ensureAll 之后，只读全量视图');
+  const autoSlice = bkSrc.slice(at(bkSrc, 'async function saveAutoBackup'), at(bkSrc, 'async function markAutoBackupDone'));
+  A.ok(at(autoSlice, 'await QB.Storage.ensureAll()') < at(autoSlice, 'await existingUnconsumedBackup()'),
+    'P1-12 复用判定（getFresh metaMigrationBackup）在 ensureAll 之后');
   const localOnly = /const LOCAL_ONLY_META_KEYS = \[([\s\S]*?)\];/.exec(bkSrc);
   A.ok(!!localOnly && /metaDav/.test(localOnly[1]) && !/review|questions:|wrong|favorite/i.test(localOnly[1]),
     'A7 applyBackup：读取的 LOCAL_ONLY_META_KEYS 全为全局偏好键（无库作用域键，无需水合）');

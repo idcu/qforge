@@ -74,7 +74,14 @@
     // 备份弹窗：LocalStorage 模式已用空间告警阈值（超过提示受 ~5MB 限制；不阻断导出）
     BACKUP_LS_WARN_BYTES: 4 * 1024 * 1024,
     // Quizlet .txt 接管上限：按 text.length（UTF-16 单元）比较，超过视为非 Quizlet，交回其他导入器
-    QUIZLET_MAX_TEXT_LENGTH: 4 * 1024 * 1024
+    QUIZLET_MAX_TEXT_LENGTH: 4 * 1024 * 1024,
+    // 纯 JSON 备份（无图）读取/导出上限（P1-14）：与 zip-reader 的总量/条目上限对齐，
+    // 超限时导出前拒绝并建议改用 .qfbk 或分库，避免产出读不回来的备份。
+    BACKUP_JSON_MAX_BYTES: 64 * 1024 * 1024,
+    BACKUP_MAX_KEYS: 10000,
+    // xlsx 解析行列上限（P1-17）：由解析内核在解析前拒绝，避免超大表把标签页内存打满
+    XLSX_MAX_ROWS: 200000,
+    XLSX_MAX_COLS: 1000
   };
 
   // 题目图片资产（IndexedDB；改库名等于换存储实例，不会迁移旧图）

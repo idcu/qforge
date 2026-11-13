@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-13T02:43:03.273Z",
+  "generatedAt": "2026-11-13T02:46:14.236Z",
   "runItems": 38,
   "suiteFiles": 37,
-  "totalAssertions": 6114,
+  "totalAssertions": 6170,
   "gateCount": 63,
   "counts": {
     "smoke-test.mjs": 746,
@@ -11,8 +11,8 @@
     "api-backend.test.mjs": 328,
     "app-boot.test.mjs": 149,
     "assets.test.mjs": 182,
-    "backup-hydration.test.mjs": 56,
-    "backup.test.mjs": 155,
+    "backup-hydration.test.mjs": 58,
+    "backup.test.mjs": 175,
     "blueprint.test.mjs": 18,
     "contract.test.mjs": 124,
     "dom-patch.test.mjs": 40,
@@ -24,7 +24,7 @@
     "import-commit.test.mjs": 64,
     "importers-anki.test.mjs": 148,
     "importers-quizlet.test.mjs": 75,
-    "migrate.test.mjs": 332,
+    "migrate.test.mjs": 339,
     "office-export.test.mjs": 1150,
     "practice-builder.test.mjs": 28,
     "pwa.test.mjs": 93,
@@ -34,12 +34,12 @@
     "sched.test.mjs": 221,
     "shard.test.mjs": 145,
     "share-link.test.mjs": 93,
-    "source.test.mjs": 41,
-    "srs.test.mjs": 87,
+    "source.test.mjs": 47,
+    "srs.test.mjs": 92,
     "static-server.test.mjs": 29,
     "storage.test.mjs": 113,
     "sw-runtime.test.mjs": 34,
-    "sync-dav.test.mjs": 69,
+    "sync-dav.test.mjs": 85,
     "ui-port.test.mjs": 25,
     "ui-renderer.test.mjs": 218,
     "xml-lite.test.mjs": 39
@@ -47,7 +47,7 @@
   "firstScreen": {
     "scripts": 69,
     "files": 77,
-    "rawKB": "808.4",
-    "gzipKB": "294.5"
+    "rawKB": "810.0",
+    "gzipKB": "295.2"
   }
 }

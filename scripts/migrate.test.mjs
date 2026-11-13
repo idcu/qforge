@@ -1080,6 +1080,30 @@ section('P0-1 迁移提交顺序：落盘失败不提前提交版本，重启自
   ok(!H.QB.Storage.getFresh(H.QB.KEYS.metaMigrationLock, null), '自愈完成后迁移锁已释放');
 }
 
+section('P1-15 回滚不静默删键：不可解析快照项保留当前值并报错');
+{
+  const Hl = await createHarness(ROOT); // 独立环境：restoreAll 会清理快照外键
+  Hl.QB.DB.init();
+  Hl.QB.Storage.set('rl:keep', { v: 'old' });
+  Hl.QB.Storage.set('rl:bad', { v: 'live' });
+  Hl.QB.Storage.forceSync();
+  let err = null;
+  try {
+    Hl.QB.Migration.restoreAll({
+      keys: ['rl:keep', 'rl:bad'],
+      raws: [['rl:keep', '{"v":"snap"}'], ['rl:bad', '{broken']]
+    });
+  } catch (e) { err = e; }
+  ok(!!err && err.code === 'ROLLBACK_PARTIAL', '回滚部分失败 → 抛出可识别错误');
+  ok(!!err && err.failed && err.failed.indexOf('rl:bad') >= 0, '错误携带无法解析的键清单');
+  eq(Hl.QB.Storage.get('rl:keep').v, 'snap', '可解析项正常回滚到快照值');
+  ok(!!Hl.QB.Storage.get('rl:bad', null), '不可解析项仍存在（未被静默删除）');
+  eq(Hl.QB.Storage.get('rl:bad').v, 'live', '不可解析项保留回滚前当前值');
+  const r = Hl.QB.Migration.restoreAll({ keys: ['rl:keep'], raws: [['rl:keep', '{"v":"ok"}']] });
+  ok(r && r.failed.length === 0, '正常快照回滚返回空失败清单');
+  eq(Hl.QB.Storage.get('rl:keep').v, 'ok', '正常回滚写入快照值');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

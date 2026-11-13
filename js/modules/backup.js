@@ -394,6 +394,30 @@
   }
 
   /**
+   * 现有「未被消费」的迁移前快照（P1-12）。
+   * 上次迁移中止/失败（phase='captured'）后重试时，不得用可能半迁移的数据覆盖原始迁移前快照；
+   * 仅当上一次迁移已成功提交（phase='migrated'）或快照不完整时才允许重新采集。
+   * @returns {Promise<Object|null>} IDB 路径返回元信息、LS 路径返回完整信封；不可用返回 null
+   */
+  async function existingUnconsumedBackup() {
+    if (hasIdb()) {
+      let meta = null;
+      try { meta = await idbRequest('readonly', (store) => store.get(AUTO_ID)); } catch (_) { return null; }
+      if (!isRawMeta(meta) || !meta.progress || meta.progress.phase === 'migrated') return null;
+      let recs = [];
+      try { recs = await idbRequest('readonly', (store) => store.getAll()); } catch (_) { return null; }
+      const chunks = (recs || []).filter((r) => r && typeof r.i === 'number'
+        && Array.isArray(r.keys) && Array.isArray(r.raws));
+      const total = chunks.reduce((n, c) => n + c.keys.length, 0);
+      if (chunks.length !== meta.dataChunks || total !== meta.dataKeys) return null; // 不完整 → 允许重建
+      return meta;
+    }
+    const back = QB.Storage.getFresh(QB.KEYS.metaMigrationBackup, null);
+    if (!isBackup(back) || !back.progress || back.progress.phase === 'migrated') return null;
+    return back;
+  }
+
+  /**
    * 写迁移前自动备份；**写失败即抛错**（调用方须中止迁移）。
    * IDB 路径：分块保存原始 JSON 串（每 100 键一条记录），不把全库解析成对象；
    *   写后回读逐串比对，保证「备份可用」才让迁移继续。
@@ -406,6 +430,9 @@
     // 分阶段水合（Phase 0 批次2）：自动备份是全量导出，先补齐全部物理记录；
     // 失败即中止（迁移据此不进入任何数据改写）。
     if (QB.Storage && typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
+    // P1-12：迁移中止后重试不覆盖原始迁移前快照（已完成迁移的快照允许滚动更新）
+    const kept = await existingUnconsumedBackup();
+    if (kept) return kept;
     if (hasIdb()) {
       const items = collectRawData();
       const meta = autoMeta(info, startedAt, items.length);
@@ -525,9 +552,35 @@
     if (QB.Storage && typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
 
     if (m === 'merge') {
-      Object.keys(data).forEach((k) => QB.Storage.set(k, data[k]));
-      await QB.Storage.forceSync();
-      return { keys: Object.keys(data).length, mode: m };
+      const keys = Object.keys(data);
+      // 合并是逐键写入、非事务：先记旧值，失败时回滚已写键并给出清单（P1-13）
+      const prior = new Map(keys.map((k) => [k, QB.Storage.get(k, null)]));
+      const written = [];
+      try {
+        keys.forEach((k) => { QB.Storage.set(k, data[k]); written.push(k); });
+        await QB.Storage.forceSync();
+        return { keys: keys.length, mode: m };
+      } catch (e) {
+        try {
+          written.forEach((k) => {
+            const old = prior.get(k);
+            if (old === null || old === undefined) QB.Storage.remove(k);
+            else QB.Storage.set(k, old);
+          });
+          await QB.Storage.forceSync();
+        } catch (rollbackErr) {
+          console.error('[Backup] 合并回滚也失败：', rollbackErr);
+        }
+        const failedKey = keys[written.length] || keys[keys.length - 1] || '';
+        const listed = written.slice(0, 10).join(', ') + (written.length > 10 ? ' 等共 ' + written.length + ' 个' : '');
+        const err = new Error('合并恢复中断：写入「' + failedKey + '」时失败（' +
+          ((e && e.message) || String(e)) + '）。已写入的键' +
+          (written.length ? '（' + listed + '）' : '') + '已尝试回滚；可重试或改用覆盖恢复。');
+        err.partial = true;
+        err.written = written.slice();
+        err.cause = e;
+        throw err;
+      }
     }
 
     const oldKeys = QB.Storage.keys();
@@ -754,15 +807,82 @@
     return list.length;
   }
 
+  /**
+   * 恢复资产前的结构校验（P1-13）：id 非空、bytes 非空。
+   * 不合规时在「数据恢复之前」拒绝，避免出现「数据已改写、图片没恢复」的半套状态。
+   * @param {Array<{id:string, bytes:ArrayBuffer|Uint8Array}>} assets
+   * @returns {{ok:boolean, ids:Array<string>, error:string}}
+   */
+  function validateAssets(assets) {
+    const list = assets || [];
+    const ids = [];
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || typeof a.id !== 'string' || !a.id) {
+        return { ok: false, ids: ids, error: '第 ' + (i + 1) + ' 个资产缺少 id' };
+      }
+      const n = a.bytes && (a.bytes.byteLength != null ? a.bytes.byteLength : (a.bytes.length || 0));
+      if (!n) return { ok: false, ids: ids, error: '资产 ' + a.id + ' 缺少内容（bytes 为空）' };
+      ids.push(a.id);
+    }
+    return { ok: true, ids: ids, error: '' };
+  }
+
+  /** 备份体积/条目上限（P1-14，取值见 CONFIG.LIMITS，与 zip-reader 上限对齐） */
+  function backupLimits() {
+    const L = (QB.CONFIG && QB.CONFIG.LIMITS) || {};
+    return {
+      maxBytes: Number(L.BACKUP_JSON_MAX_BYTES) || 64 * 1024 * 1024,
+      maxKeys: Number(L.BACKUP_MAX_KEYS) || 10000
+    };
+  }
+
+  function byteLengthOf(text) {
+    try { if (typeof Blob !== 'undefined') return new Blob([text]).size; } catch (_) { /* 退化 */ }
+    try { return new TextEncoder().encode(text).byteLength; } catch (_) { return text.length; }
+  }
+
+  function assertKeyLimit(backup) {
+    const limit = backupLimits();
+    const n = Object.keys((backup && backup.data) || {}).length;
+    if (n > limit.maxKeys) {
+      throw new Error('备份包含 ' + n + ' 个数据键，超过上限 ' + limit.maxKeys +
+        '；请分库导出或改用 .qfbk 包');
+    }
+  }
+
+  /** 导出前校验载荷规模（超限明确拒绝，不产出读不回来的备份） */
+  function assertExportablePayload(payload) {
+    const limit = backupLimits();
+    assertKeyLimit(payload);
+    const bytes = byteLengthOf(JSON.stringify(payload));
+    if (bytes > limit.maxBytes) {
+      throw new Error('备份体积约 ' + Math.round(bytes / 1024 / 1024) + ' MB，超过上限 ' +
+        Math.round(limit.maxBytes / 1024 / 1024) + ' MB；请分库导出或改用 .qfbk 包');
+    }
+    return true;
+  }
+
   /** 解析备份文件：自动识别 ZIP 包（PK 头）或 JSON */
   async function parseBackupFile(buffer) {
+    const limit = backupLimits();
+    const size = buffer && typeof buffer.byteLength === 'number' ? buffer.byteLength : 0;
+    // 先按字节数拒绝，再做 Uint8Array 转换（不为超大文件分配内存）
+    if (size > limit.maxBytes) {
+      throw new Error('备份文件约 ' + Math.round(size / 1024 / 1024) + ' MB，超过上限 ' +
+        Math.round(limit.maxBytes / 1024 / 1024) + ' MB；请改用 .qfbk 包或分库导出');
+    }
     const bytes = new Uint8Array(buffer);
     if (QB.Qbk.isZipBytes(bytes)) {
       const bundle = await QB.Qbk.parseBundle(buffer, { jsonName: 'backup.json' });
-      return { backup: JSON.parse(bundle.text), assets: bundle.assets };
+      const backup = JSON.parse(bundle.text);
+      assertKeyLimit(backup);
+      return { backup: backup, assets: bundle.assets };
     }
     const text = QB.decodeUtf8(bytes);
-    return { backup: JSON.parse(text), assets: [] };
+    const backup = JSON.parse(text);
+    assertKeyLimit(backup);
+    return { backup: backup, assets: [] };
   }
 
   /* ---------------- 浏览器外壳 ---------------- */
@@ -782,6 +902,7 @@
       blob = new Blob([bundle.content], { type: 'application/zip' });
       name = filename || ('qforge-backup' + suffix + '-' + new Date().toISOString().slice(0, 10) + '.qfbk');
     } else {
+      assertExportablePayload(payload); // P1-14：JSON 路径超限直接拒绝（建议 .qfbk/分库）
       blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
       name = filename || ('qforge-backup' + suffix + '-' + new Date().toISOString().slice(0, 10) + '.json');
     }
@@ -822,6 +943,9 @@
             modal.querySelector('[data-bk="ok"]').onclick = async () => {
               const mode = modal.querySelector('#bk-merge').checked ? 'merge' : 'replace';
               try {
+                // P1-13：资产结构先校验；不合规时不触碰数据（避免半套恢复）
+                const assetCheck = validateAssets(parsed.assets);
+                if (!assetCheck.ok) throw new Error('资产校验失败：' + assetCheck.error);
                 const r = await applyBackup(backup, { mode: mode });
                 const imgCount = await restoreAssets(parsed.assets, mode);
                 QB.UIPort.closeModal();
@@ -997,7 +1121,8 @@
     toLegacyPayload,
     isServerFormat, isLocalFormat, serverToLocal, localToServer,
     assertCompatible, saveAutoBackup, readAutoBackup, markAutoBackupDone, clearAutoBackup,
-    buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,
+    buildAssetBundle, parseBackupFile, restoreAssets, validateAssets, assertExportablePayload,
+    globallyReferencedAssetIds,
     confirmRestore,
     download, pickAndRestore, openFlow
   };

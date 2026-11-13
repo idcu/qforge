@@ -43,11 +43,16 @@
     let res;
     if (QB.hasCapability(QB.DB, 'reviews', 'patch')) res = await repo.patch(bankId, delta, entries);
     else {
-      // 旧第三方适配器：无 patch 时读整表、加上本批改动后整表提交（行为不变）
+      // 旧第三方适配器：无 patch 时读整表、按 ReviewMerge 合并本批改动后整表提交。
+      // 读与写之间另一标签可能已写入更新的状态：逐键按 last 大者合并（平局保留落盘值），
+      // 不得用本批计算结果直接整值覆盖（P1-10）。
       const map = await readMap(bankId);
+      const merge = QB.ReviewMerge && typeof QB.ReviewMerge.mergeMaps === 'function'
+        ? QB.ReviewMerge.mergeMaps : null;
       Object.keys(delta || {}).forEach((k) => {
         if (delta[k] === null) delete map[k];
-        else map[k] = delta[k];
+        else if (!map[k]) map[k] = delta[k];
+        else map[k] = merge ? merge({ s: delta[k] }, { s: map[k] }).s : delta[k];
       });
       res = await repo.record(bankId, map, entries);
     }

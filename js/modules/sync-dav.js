@@ -142,6 +142,7 @@
       lastAt: raw.lastAt,
       lastName: raw.lastName,
       lastSize: raw.lastSize,
+      lastEtag: raw.lastEtag || '',
       hasPass: !!(raw.passEnc || (typeof raw.pass === 'string' && raw.pass)),
       v: raw.v || 1
     };
@@ -162,6 +163,7 @@
       lastAt: raw.lastAt,
       lastName: raw.lastName,
       lastSize: raw.lastSize,
+      lastEtag: raw.lastEtag || '',
       hasPass: true,
       v: raw.v || 1
     };
@@ -180,7 +182,7 @@
         if (verify.pass === raw.pass) {
           QB.Storage.set(QB.KEYS.metaDav, {
             v: 2, baseUrl: out.baseUrl, user: out.user, passEnc: enc.enc,
-            lastAt: out.lastAt, lastName: out.lastName, lastSize: out.lastSize
+            lastAt: out.lastAt, lastName: out.lastName, lastSize: out.lastSize, lastEtag: out.lastEtag
           });
           out.migrated = true;
           out.v = 2;
@@ -192,7 +194,7 @@
       // Web Crypto / 密钥不可用：明文不能继续留在 localStorage；移除明文，保元数据，密码仅本次会话可用
       QB.Storage.set(QB.KEYS.metaDav, {
         v: 2, baseUrl: out.baseUrl, user: out.user,
-        lastAt: out.lastAt, lastName: out.lastName, lastSize: out.lastSize
+        lastAt: out.lastAt, lastName: out.lastName, lastSize: out.lastSize, lastEtag: out.lastEtag
       });
       out.migrated = true;
       out.passPersisted = false;
@@ -215,7 +217,8 @@
       user: String((cfg.user !== undefined ? cfg.user : raw.user) || '').trim(),
       lastAt: cfg.lastAt !== undefined ? cfg.lastAt : raw.lastAt,
       lastName: cfg.lastName !== undefined ? cfg.lastName : raw.lastName,
-      lastSize: cfg.lastSize !== undefined ? cfg.lastSize : raw.lastSize
+      lastSize: cfg.lastSize !== undefined ? cfg.lastSize : raw.lastSize,
+      lastEtag: cfg.lastEtag !== undefined ? cfg.lastEtag : (raw.lastEtag || '')
     };
     let passText = '';
     let warning = '';
@@ -282,9 +285,106 @@
     return fetch;
   }
 
+  /* ---------------- 超时 / 冲突（P1-11） ---------------- */
+
+  const DEFAULT_TIMEOUT_MS = 30000;
+
+  /** 超时统一错误（可识别 code，调用方不必解析文案） */
+  function timeoutError(ms) {
+    const e = new Error('WebDAV 请求超时（' + Math.max(1, Math.round(ms / 1000)) + ' 秒），已中止');
+    e.code = 'DAV_TIMEOUT';
+    return e;
+  }
+
   /**
-   * 上传当前全量备份
-   * @param {{config?:Object, fetch?:Function}} [opts] fetch 可注入（测试）
+   * 带超时与中止的 fetch 封装：黑洞网络/无响应的 WebDAV 服务不能永久挂起上传/下载。
+   * timeout<=0 或环境无 AbortController 时退化为普通请求（老浏览器不阻断功能）。
+   */
+  async function request(fetchImpl, url, init, timeoutMs) {
+    const ms = timeoutMs == null ? DEFAULT_TIMEOUT_MS : Number(timeoutMs);
+    if (!(ms > 0) || typeof AbortController !== 'function') return await fetchImpl(url, init);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => { try { ctrl.abort(); } catch (_) { /* 已结束 */ } }, ms);
+    try {
+      return await fetchImpl(url, Object.assign({}, init, { signal: ctrl.signal }));
+    } catch (e) {
+      if (ctrl.signal && ctrl.signal.aborted) throw timeoutError(ms);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function headerOf(res, name) {
+    const h = res && res.headers;
+    if (!h) return '';
+    if (typeof h.get === 'function') return h.get(name) || '';
+    return h[name] || h[name.toLowerCase()] || '';
+  }
+
+  /**
+   * 上传前远端变更检测（D-2C-2）：HEAD 取 ETag / Last-Modified / Content-Length。
+   * - 有 ETag：与上次上传记录的 lastEtag 比较（本机从未上传过则不判冲突）。
+   * - 无 ETag：Last-Modified 晚于上次上传时间，或（无 Last-Modified 时）大小与记录不一致 → 冲突。
+   * - 服务端不支持 HEAD（405/501）或 HEAD 异常：返回 {supported:false}，不阻断上传，由调用方提示。
+   */
+  async function checkRemote(checked, cfg, fetchImpl, timeoutMs) {
+    try {
+      const res = await request(fetchImpl, checked.url, {
+        method: 'HEAD',
+        headers: { Authorization: authHeader(checked.user, checked.pass) }
+      }, timeoutMs);
+      try { if (res && typeof res.arrayBuffer === 'function') await res.arrayBuffer(); } catch (_) { /* 消费响应体 */ }
+      if (!res) return { supported: false };
+      if (res.status === 401 || res.status === 403) throw new Error('WebDAV 认证失败（401/403）：检查账号与应用密码');
+      if (res.status === 404) return { supported: true, exists: false };
+      if (res.status === 405 || res.status === 501) return { supported: false };
+      if (res.status < 200 || res.status >= 400) return { supported: false };
+      const etag = headerOf(res, 'ETag');
+      const lastMod = headerOf(res, 'Last-Modified');
+      const len = headerOf(res, 'Content-Length');
+      return {
+        supported: true,
+        exists: true,
+        etag: etag || '',
+        lastModified: lastMod ? (Date.parse(lastMod) || 0) : 0,
+        size: len === '' ? null : Number(len)
+      };
+    } catch (e) {
+      if (e && e.code === 'DAV_TIMEOUT') throw e; // 超时是明确失败，不降级为「无冲突」
+      return { supported: false, error: e };
+    }
+  }
+
+  /** 远端相对本机上次上传是否已变更；返回原因文案或 null */
+  function conflictOf(remote, cfg) {
+    if (!remote || !remote.supported || !remote.exists) return null;
+    cfg = cfg || {};
+    if (remote.etag) {
+      if (cfg.lastEtag && remote.etag !== cfg.lastEtag) return '云端备份已被其他设备更新（ETag 不一致）';
+      return null;
+    }
+    const lastAt = Number(cfg.lastAt) || 0;
+    if (remote.lastModified && lastAt && remote.lastModified > lastAt + 1000) {
+      return '云端备份的修改时间晚于本机上次上传';
+    }
+    const lastSize = Number(cfg.lastSize);
+    if (!remote.lastModified && remote.size != null && isFinite(lastSize) && lastSize > 0 && remote.size !== lastSize) {
+      return '云端备份大小与本机上次上传不一致';
+    }
+    return null;
+  }
+
+  function conflictError(reason) {
+    const e = new Error('上传已取消：' + reason + '。确认要覆盖云端备份时请选择「仍要上传」。');
+    e.code = 'DAV_CONFLICT';
+    return e;
+  }
+
+  /**
+   * 上传当前全量备份（P1-11：上传前检测远端变更、请求可超时中止）
+   * @param {{config?:Object, fetch?:Function, timeout?:number, force?:boolean}} [opts]
+   *   fetch 可注入（测试）；timeout 毫秒（0=不超时）；force 跳过冲突检测（用户确认覆盖）
    */
   async function upload(opts) {
     opts = opts || {};
@@ -297,31 +397,45 @@
       body = bundle.content; mime = 'application/zip'; assetCount = bundle.assetCount;
     } else {
       QB.Storage.forceSync();
-      body = JSON.stringify(await QB.Backup.buildBackup());
+      const payload = await QB.Backup.buildBackup();
+      if (QB.Backup.assertExportablePayload) QB.Backup.assertExportablePayload(payload); // P1-14：超限导出前拒绝
+      body = JSON.stringify(payload);
       mime = 'application/json;charset=utf-8';
       assetCount = 0;
     }
     const fetchImpl = opts.fetch || defaultFetch();
-    const res = await fetchImpl(checked.url, {
-      method: 'PUT',
-      headers: { Authorization: authHeader(checked.user, checked.pass), 'Content-Type': mime },
-      body: body
-    });
+    let conflictCheck = 'unsupported';
+    let remote = null;
+    if (!opts.force) {
+      remote = await checkRemote(checked, cfg, fetchImpl, opts.timeout);
+      conflictCheck = remote.supported ? 'checked' : 'unsupported';
+      const reason = conflictOf(remote, cfg);
+      if (reason) throw conflictError(reason);
+    }
+    const headers = { Authorization: authHeader(checked.user, checked.pass), 'Content-Type': mime };
+    if (!opts.force && remote && remote.etag) headers['If-Match'] = remote.etag;
+    const res = await request(fetchImpl, checked.url, { method: 'PUT', headers: headers, body: body }, opts.timeout);
     // 消费响应体（WebDAV/代理可能回非空 body）：未消费的 Response 被释放时浏览器会记
     // `net::ERR_ABORTED`——请求其实已成功（与 api-adapter.req 同一类噪声，见 CHANGELOG.internal.md）。
     try { await res.arrayBuffer(); } catch (e) { /* 消费失败不影响状态判定 */ }
     if (!res || OK_STATUS.indexOf(res.status) < 0) {
       const status = res && res.status;
+      if (status === 412) throw conflictError('云端备份在检测后被其他设备更新（HTTP 412）');
       throw new Error(status === 401 || status === 403
         ? 'WebDAV 认证失败（401/403）：检查账号与应用密码'
         : 'WebDAV 上传失败（HTTP ' + (status || '无响应') + '）');
     }
     const size = body instanceof ArrayBuffer ? body.byteLength : body.length;
     const saved = await saveConfig(Object.assign({}, cfg, {
-      pass: checked.pass, lastAt: Date.now(), lastName: FILE_NAME, lastSize: size
+      pass: checked.pass, lastAt: Date.now(), lastName: FILE_NAME, lastSize: size,
+      lastEtag: headerOf(res, 'ETag') || (remote && remote.etag) || ''
     }));
-    return { ok: true, status: res.status, url: checked.url, size: size, assetCount: assetCount, config: saved };
+    return {
+      ok: true, status: res.status, url: checked.url, size: size, assetCount: assetCount,
+      conflictCheck: conflictCheck, config: saved
+    };
   }
+
 
   /**
    * 下载云端备份并解析（不直接恢复，交给 Backup.confirmRestore 让用户选覆盖/合并）
@@ -333,10 +447,10 @@
     if (!opts.config && cfg.passError) throw new Error(cfg.passError);
     const checked = validateConfig(cfg);
     const fetchImpl = opts.fetch || defaultFetch();
-    const res = await fetchImpl(checked.url, {
+    const res = await request(fetchImpl, checked.url, {
       method: 'GET',
       headers: { Authorization: authHeader(checked.user, checked.pass) }
-    });
+    }, opts.timeout);
     if (!res || res.status !== 200) {
       const status = res && res.status;
       if (res) { try { await res.arrayBuffer(); } catch (e) { /* 同上：消费以免记 ERR_ABORTED */ } }
@@ -358,6 +472,10 @@
     const last = cfg.lastAt ? QB.Helpers.formatDate(cfg.lastAt) + '（' + Math.round((cfg.lastSize || 0) / 1024) + ' KB）' : '尚未上传';
     const passError = cfg.passError
       ? '<p class="li-meta" style="color:#c62828">' + esc(cfg.passError) + '</p>' : '';
+    // D4：允许 http，但必须显式提示明文传输风险（不做地址分类/拦截逻辑）
+    const insecureNote = /^http:/i.test(String(cfg.baseUrl || ''))
+      ? '<p class="li-meta" style="color:#c62828">当前使用 http:// 明文传输：账号与应用密码可能在网络中被截获，请优先改用 https://。</p>'
+      : '';
     QB.UIPort.openModal(
       '<h3>WebDAV 云备份</h3>' +
       '<div class="qe-form">' +
@@ -367,6 +485,7 @@
       '<label class="qe-label">密码 / 应用密码（AES-GCM 加密保存在本机，密钥不可导出）</label>' +
       '<input type="password" data-dav="pass" style="width:100%">' +
       passError +
+      insecureNote +
       '<p class="li-meta">加密边界（不夸大）：密码不再以明文写入 localStorage，能防「只拿到 localStorage 备份/截图」的泄露；但不能防同源 XSS、恶意浏览器扩展、同机读盘或整浏览器配置拷贝，也不能替代应用专用密码。建议使用应用专用密码，共享设备用完点「清除配置」。跨域 WebDAV 还需在 CSP connect-src 白名单放行该域。</p>' +
       '<p class="li-meta">上次上传：' + esc(last) + '　固定对象 ' + esc(FILE_NAME) + '</p>' +
       '<p class="li-meta">需要 WebDAV 服务允许本站 CORS 跨域访问；坚果云等公共服务默认可能被浏览器拦截，自建/Nextcloud 通常可配置。</p>' +
@@ -381,7 +500,7 @@
           baseUrl: modal.querySelector('[data-dav="url"]').value,
           user: modal.querySelector('[data-dav="user"]').value,
           pass: modal.querySelector('[data-dav="pass"]').value,
-          lastAt: cfg.lastAt, lastName: cfg.lastName, lastSize: cfg.lastSize
+          lastAt: cfg.lastAt, lastName: cfg.lastName, lastSize: cfg.lastSize, lastEtag: cfg.lastEtag || ''
         });
         // R-14：密码只经 DOM value 回填，绝不写入 HTML 属性（避免随 innerHTML/截图/序列化泄露）
         const passInput = modal.querySelector('[data-dav="pass"]');
@@ -395,13 +514,28 @@
         modal.querySelector('[data-dav="clear"]').onclick = () => { clearConfig(); QB.UIPort.toast('已清除 WebDAV 配置', 'ok'); QB.UIPort.closeModal(); };
         modal.querySelector('[data-dav="up"]').onclick = async () => {
           const conf = read();
+          const doUpload = async (force) => {
+            const r = await upload({ config: conf, force: force });
+            const extra = r.conflictCheck === 'unsupported'
+              ? '；服务端不支持变更检测，未能确认云端是否被其他设备更新' : '';
+            QB.UIPort.toast('已上传到 WebDAV（' + Math.round(r.size / 1024) + ' KB' +
+              (r.assetCount ? '，含图 ' + r.assetCount + ' 张' : '') + extra + '）', 'ok');
+            QB.UIPort.closeModal();
+          };
           try {
             await persist(conf);
             QB.UIPort.toast('正在上传备份…');
-            const r = await upload({ config: conf });
-            QB.UIPort.toast('已上传到 WebDAV（' + Math.round(r.size / 1024) + ' KB' + (r.assetCount ? '，含图 ' + r.assetCount + ' 张' : '') + '）', 'ok');
-            QB.UIPort.closeModal();
-          } catch (e) { QB.UIPort.toast('上传失败：' + e.message, 'err'); }
+            await doUpload(false);
+          } catch (e) {
+            if (e && e.code === 'DAV_CONFLICT') {
+              // 不盲覆盖：先让用户确认；确认后带 force 重传（不再做第二次检测）
+              const go = await QB.UIPort.confirm('云端备份可能已被其他设备更新。仍要用本机数据覆盖云端吗？', '仍要上传');
+              if (!go) return;
+              try { await doUpload(true); } catch (e2) { QB.UIPort.toast('上传失败：' + e2.message, 'err'); }
+              return;
+            }
+            QB.UIPort.toast('上传失败：' + e.message, 'err');
+          }
         };
         modal.querySelector('[data-dav="down"]').onclick = async () => {
           try {

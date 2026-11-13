@@ -106,8 +106,14 @@
     };
   }
 
+  /**
+   * 按迁移前快照回滚。
+   * P1-15：某键快照串无法解析时**保留当前值**（不 set、不 remove）并记录，最后抛
+   * ROLLBACK_PARTIAL——旧实现 remove 该键，等于把用户数据静默删掉。
+   * @returns {{failed:Array<string>}} 全部成功时 failed 为空
+   */
   function restoreAll(snap) {
-    if (!snap) return;
+    if (!snap) return { failed: [] };
     const current = QB.Storage.keys();
     // 引导标记（后端选择/迁移标记/schema 版本/锁）不参与「快照外删除」：
     // 它们描述「当前该用哪个后端」，回滚旧业务数据不应把后端选择也退回去。
@@ -118,13 +124,22 @@
     });
     // 先恢复内存/待写队列再统一落盘：迁移失败常因配额，逐个 setSync 会在第一个键再次抛错
     // 导致后续键没回滚；set 不立即落盘，最后 forceSync 一次性提交（仍失败则待写队列保留旧值重试）。
+    const failed = [];
     snap.raws.forEach((pair) => {
       if (pair[1] === null || pair[1] === undefined) { QB.Storage.remove(pair[0]); return; }
       let value;
-      try { value = JSON.parse(pair[1]); } catch (_) { QB.Storage.remove(pair[0]); return; }
+      try { value = JSON.parse(pair[1]); } catch (_) { failed.push(pair[0]); return; }
       QB.Storage.set(pair[0], value);
     });
     QB.Storage.forceSync();
+    if (failed.length) {
+      const e = new Error('回滚未完成：' + failed.length + ' 个快照键无法解析，已保留当前值（' +
+        failed.slice(0, 5).join(', ') + (failed.length > 5 ? ' 等' : '') + '）');
+      e.code = 'ROLLBACK_PARTIAL';
+      e.failed = failed;
+      throw e;
+    }
+    return { failed: failed };
   }
 
   /* ---------------- v1 → v2（历史；hash 升到当前版本） ---------------- */
@@ -799,7 +814,7 @@
   }
 
   QB.Migration = {
-    SCHEMA_VERSION, run, currentVersion, ensureLayout,
+    SCHEMA_VERSION, run, currentVersion, ensureLayout, restoreAll,
     migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7,
     LOCK_TTL_MS
   };

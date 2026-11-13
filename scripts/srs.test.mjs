@@ -366,6 +366,48 @@ section('P0-5 评分置位与落盘顺序：写失败不永久丢失');
   eq(logs.length, 1, '重试后 revlog 恰 1 条（无重复）');
 }
 
+section('P1-10 无 patch 适配器：提交前按 last 合并，不覆盖其他标签新状态');
+{
+  const raw = new Map(); // 独立 harness，避免污染前序断言
+  const H = await createHarness(ROOT, { raw });
+  H.QB.DB.init();
+  const bank = await H.QB.DB.banks.create({ name: '回退合并库' });
+  await H.QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: '回退合并题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+  ], { dedupe: false });
+  const q = (await H.QB.DB.questions.list(bank.id, {})).items[0];
+  const key = H.QB.SRSStore.keyFor(q);
+  const older = { algo: 'fsrs', due: T0 + DAY, stability: 3, difficulty: 5, reps: 2, lapses: 0, last: T0 - DAY };
+  const newerState = { algo: 'fsrs', due: T0 + 5 * DAY, stability: 42, difficulty: 7, reps: 9, lapses: 1, last: T0 + 5000 };
+  let listCalls = 0;
+  const stored = {};
+  const fake = {
+    // 第一次读取（评分算状态）返回旧值；第二次（提交前重读）模拟另一标签已写入更新状态
+    list() {
+      listCalls++;
+      const map = {};
+      map[key] = listCalls === 1 ? older : newerState;
+      return map;
+    },
+    async record(bankId, map) {
+      stored[bankId] = Object.assign({}, map);
+      return { saved: Object.keys(map || {}).length };
+    },
+    async remove(bankId) { delete stored[bankId]; }
+  };
+  const realReviews = H.QB.DB.reviews;
+  H.QB.DB.reviews = fake; // 无 get/patch 能力 → 走 record 整表回退路径
+  let gradeErr = null;
+  try { await H.QB.SRSStore.grade(bank.id, q, H.QB.SRS.RATINGS.good, T0); } catch (e) { gradeErr = e; }
+  H.QB.DB.reviews = realReviews;
+  eq(gradeErr, null, '回退路径评分不抛错');
+  ok(listCalls >= 2, '回退路径写入前重读整表（实际读取 ' + listCalls + ' 次）');
+  const out = stored[bank.id] && stored[bank.id][key];
+  ok(!!out, '本批改动已提交到适配器');
+  eq(out && out.stability, 42, '其他标签较新的状态胜出（不被本批结果覆盖）');
+  eq(out && out.last, newerState.last, '合并按 last 取大者');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

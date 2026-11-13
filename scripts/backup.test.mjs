@@ -524,6 +524,78 @@ section('数据层端口注册（R-03：L2 → L1，数据层不反向点名领�
   ok(!!(await QB.LocalAdapter.backup.export()).data, '恢复端口后 export 正常返回 { data }');
 }
 
+section('P1-12 迁移前自动备份：未消费快照不被覆盖');
+clearAll();
+{
+  const b1 = await QB.Backup.saveAutoBackup({ fromVersion: 5, toVersion: 7 });
+  const at1 = b1.progress && b1.progress.startedAt;
+  ok(!!at1, '首次采集得到快照（' + at1 + '）');
+  // 模拟迁移过程中数据已被改写：此时不得用新数据覆盖尚未消费的迁移前快照
+  QB.Storage.set('p1x:probe', { changed: true });
+  QB.Storage.forceSync();
+  const b2 = await QB.Backup.saveAutoBackup({ fromVersion: 5, toVersion: 7 });
+  eq(b2.progress && b2.progress.startedAt, at1, '未消费（captured）快照复用，不覆盖');
+  ok(!b2.data || b2.data['p1x:probe'] === undefined, '复用快照不含迁移中新增的数据（仍是迁移前视图）');
+  await QB.Backup.markAutoBackupDone();
+  const b3 = await QB.Backup.saveAutoBackup({ fromVersion: 6, toVersion: 7 });
+  ok(b3.data && b3.data['p1x:probe'] !== undefined, '上次迁移已提交（migrated）后允许重新采集当前数据');
+  const read = await QB.Backup.readAutoBackup();
+  eq(read && read.progress && read.progress.startedAt, b3.progress.startedAt, '新快照可读（覆盖后仍可用）');
+}
+clearAll();
+
+section('P1-13 合并恢复中途失败：回滚已写键并给出清单');
+clearAll();
+{
+  QB.Storage.setSync('mg:a', { v: 'old' });
+  QB.Storage.setSync('mg:b', { v: 'old' });
+  const origSet = QB.Storage.set.bind(QB.Storage);
+  QB.Storage.set = (k, v) => {
+    if (k === 'mg:c') throw new Error('模拟合并第 3 个键写入失败');
+    return origSet(k, v);
+  };
+  let mgErr = null;
+  try {
+    await QB.Backup.applyData({ 'mg:a': { v: 'new' }, 'mg:b': { v: 'new' }, 'mg:c': { v: 'new' } }, 'merge');
+  } catch (e) { mgErr = e; }
+  QB.Storage.set = origSet;
+  ok(!!mgErr, '合并中途失败时错误上抛（不假成功）');
+  eq(mgErr && mgErr.partial, true, '错误标记 partial（可恢复提示）');
+  ok(/mg:a|mg:b/.test((mgErr && mgErr.message) || ''), '错误提示列出已写入键清单');
+  eq(QB.Storage.get('mg:a').v, 'old', '已写键 a 回滚旧值');
+  eq(QB.Storage.get('mg:b').v, 'old', '已写键 b 回滚旧值');
+  eq(QB.Storage.get('mg:c', null), null, '失败键未被写入');
+}
+{
+  const v1 = QB.Backup.validateAssets([]);
+  ok(v1 && v1.ok, '空资产列表校验通过');
+  const v2 = QB.Backup.validateAssets([{ id: 'a1', bytes: new Uint8Array([1, 2]), mime: 'image/png' }]);
+  ok(v2 && v2.ok && v2.ids[0] === 'a1', '合法资产校验通过');
+  const v3 = QB.Backup.validateAssets([{ id: 'a2' }]);
+  ok(v3 && v3.ok === false && /缺少内容/.test(v3.error), '缺 bytes 的资产在恢复前被拒绝');
+  const v4 = QB.Backup.validateAssets([{ bytes: new Uint8Array([1]) }]);
+  ok(v4 && v4.ok === false && /缺少 id/.test(v4.error), '缺 id 的资产在恢复前被拒绝');
+}
+clearAll();
+
+section('P1-14 JSON 备份体积/条目上限');
+{
+  const L = QB.CONFIG.LIMITS;
+  ok(typeof L.BACKUP_JSON_MAX_BYTES === 'number' && L.BACKUP_JSON_MAX_BYTES > 0, '配置含 JSON 备份字节上限');
+  ok(typeof L.BACKUP_MAX_KEYS === 'number' && L.BACKUP_MAX_KEYS > 0, '配置含 JSON 备份条目上限');
+  // 伪造 byteLength：必须在 Uint8Array 转换前拒绝，避免先分配 64MB
+  let sizeErr = null;
+  try { await QB.Backup.parseBackupFile({ byteLength: (L.BACKUP_JSON_MAX_BYTES || 0) + 1 }); } catch (e) { sizeErr = e; }
+  ok(!!sizeErr && /上限/.test(sizeErr.message), '超限 JSON 在解析前被拒绝（' + (sizeErr && sizeErr.message) + '）');
+  const bigData = {};
+  const n = (L.BACKUP_MAX_KEYS || 10000) + 1;
+  for (let i = 0; i < n; i++) bigData['k' + i] = 1;
+  let keyErr = null;
+  try { QB.Backup.assertExportablePayload({ app: 'qforge-backup', data: bigData }); } catch (e) { keyErr = e; }
+  ok(!!keyErr && /数据键/.test(keyErr.message), '导出前按条目上限拒绝（' + (keyErr && keyErr.message) + '）');
+  ok(QB.Backup.assertExportablePayload({ app: 'qforge-backup', data: { a: 1 } }) === true, '正常载荷通过导出校验');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

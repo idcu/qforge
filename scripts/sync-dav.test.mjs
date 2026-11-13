@@ -243,6 +243,117 @@ section('真实 HTTP 集成：本地 CORS WebDAV 验证端点（预检 / PUT / G
   await QB.Assets.clear();
 }
 
+section('P1-11 上传前冲突检测（ETag / If-Match / 降级）');
+{
+  const headersOf = (map) => ({ get: (n) => (map && map[n] != null ? String(map[n]) : null) });
+  const routeFetch = (routes, calls) => (url, opts) => {
+    const m = (opts && opts.method) || 'GET';
+    calls.push({ method: m, headers: opts && opts.headers });
+    const r = typeof routes[m] === 'function' ? routes[m](url, opts) : routes[m];
+    if (!r) return Promise.resolve({ status: 404, headers: headersOf({}), arrayBuffer: async () => new ArrayBuffer(0) });
+    return Promise.resolve({
+      status: r.status, headers: headersOf(r.headers),
+      arrayBuffer: async () => new ArrayBuffer(0)
+    });
+  };
+  QB.Storage.set('banks', []);
+  QB.Storage.set('user:history', []);
+
+  // 远端 ETag 与本机上次记录不一致 → 冲突，且不得发出 PUT
+  {
+    const calls = [];
+    const f = routeFetch({
+      HEAD: { status: 200, headers: { ETag: '"remote-v2"' } },
+      PUT: { status: 201, headers: {} }
+    }, calls);
+    let err = null;
+    try { await D.upload({ config: Object.assign({}, CONF, { lastEtag: '"local-v1"', lastAt: 1, lastSize: 10 }), fetch: f }); }
+    catch (e) { err = e; }
+    ok(!!err && err.code === 'DAV_CONFLICT', 'ETag 不一致 → DAV_CONFLICT');
+    ok(/已被其他设备更新/.test(err.message), '冲突提示可读（' + err.message + '）');
+    ok(!calls.some((c) => c.method === 'PUT'), '冲突时不盲覆盖（未发出 PUT）');
+  }
+
+  // force=true 跳过检测，且不带 If-Match
+  {
+    const calls = [];
+    const f = routeFetch({ HEAD: { status: 200, headers: { ETag: '"remote-v2"' } }, PUT: { status: 201, headers: {} } }, calls);
+    const r = await D.upload({ config: CONF, fetch: f, force: true });
+    ok(r.ok, 'force 上传成功');
+    ok(!calls.some((c) => c.method === 'HEAD'), 'force 跳过 HEAD 检测');
+    const put = calls.find((c) => c.method === 'PUT');
+    ok(put && !put.headers['If-Match'], 'force 上传不带 If-Match');
+  }
+
+  // ETag 一致 → 携带 If-Match，成功后记录 lastEtag
+  {
+    const calls = [];
+    const f = routeFetch({
+      HEAD: { status: 200, headers: { ETag: '"same"' } },
+      PUT: { status: 201, headers: { ETag: '"after"' } }
+    }, calls);
+    const r = await D.upload({ config: Object.assign({}, CONF, { lastEtag: '"same"' }), fetch: f });
+    const put = calls.find((c) => c.method === 'PUT');
+    eq(put && put.headers['If-Match'], '"same"', 'ETag 一致 → 条件上传带上 If-Match');
+    eq(r.conflictCheck, 'checked', '返回冲突检测状态 checked');
+    eq(D.getConfig().lastEtag, '"after"', '上传成功后记录最新 ETag');
+  }
+
+  // 服务端在检测后被改写 → 412 → 冲突错误
+  {
+    const calls = [];
+    const f = routeFetch({ HEAD: { status: 200, headers: { ETag: '"same"' } }, PUT: { status: 412, headers: {} } }, calls);
+    let err = null;
+    try { await D.upload({ config: Object.assign({}, CONF, { lastEtag: '"same"' }), fetch: f }); } catch (e) { err = e; }
+    ok(!!err && err.code === 'DAV_CONFLICT', '412 → DAV_CONFLICT（检测后被改写）');
+  }
+
+  // 服务端不支持 HEAD（405）→ 降级上传并标注 unsupported
+  {
+    const calls = [];
+    const f = routeFetch({ HEAD: { status: 405, headers: {} }, PUT: { status: 201, headers: {} } }, calls);
+    const r = await D.upload({ config: CONF, fetch: f });
+    eq(r.conflictCheck, 'unsupported', 'HEAD 405 → 降级（不阻断上传）');
+  }
+
+  // 无 ETag 时按 Last-Modified 判断：远端更新晚于本机上次上传 → 冲突
+  {
+    const calls = [];
+    const f = routeFetch({ HEAD: { status: 200, headers: {} }, PUT: { status: 201, headers: {} } }, calls);
+    let err = null;
+    const conf = Object.assign({}, CONF, { lastAt: Date.parse('2026-01-01T00:00:00Z'), lastSize: 0 });
+    const f2 = routeFetch({ HEAD: { status: 200, headers: { 'Last-Modified': 'Tue, 02 Jun 2026 00:00:00 GMT' } }, PUT: { status: 201, headers: {} } }, calls);
+    try { await D.upload({ config: conf, fetch: f2 }); } catch (e) { err = e; }
+    ok(!!err && err.code === 'DAV_CONFLICT', 'Last-Modified 晚于上次上传 → 冲突');
+  }
+}
+
+section('P1-11 请求超时可中止（黑洞服务不永久挂起）');
+{
+  const hang = (url, opts) => new Promise((resolve, reject) => {
+    const s = opts && opts.signal;
+    if (!s) return; // 无信号：真的挂起（超时机制必须自己中止）
+    s.addEventListener('abort', () => {
+      const e = new Error('aborted');
+      e.name = 'AbortError';
+      reject(e);
+    });
+  });
+  let err = null;
+  try { await D.fetchBackup({ config: CONF, fetch: hang, timeout: 20 }); } catch (e) { err = e; }
+  ok(!!err && err.code === 'DAV_TIMEOUT', '超时抛 DAV_TIMEOUT（实际：' + (err && err.message) + '）');
+  ok(/超时/.test((err && err.message) || ''), '超时提示可读');
+}
+
+section('P1-11/D4 允许 http 但界面显式提示明文风险（源码级）');
+{
+  const src = fs.readFileSync(path.join(__dirname, '..', 'js/modules/sync-dav.js'), 'utf8');
+  ok(src.indexOf('明文传输') >= 0, '设置弹窗含 http 明文传输风险提示');
+  let httpOk = true;
+  try { D.validateConfig({ baseUrl: 'http://dav.example.com/dav/', user: 'u', pass: 'p' }); } catch (e) { httpOk = false; }
+  ok(httpOk, 'http 地址仍被允许（D4：不拦截，只提示）');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

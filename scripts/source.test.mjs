@@ -175,6 +175,18 @@ section('开始弹窗参数记忆接线（源码级回归）');
   ok(indexSrc.indexOf('js/modules/start-prefs.js') >= 0, 'index.html 加载 start-prefs.js');
 }
 
+section('P1-17 xlsx 读取行列上限（源码级回归）');
+{
+  const src = fs.readFileSync(path.join(QB_DIR, 'js/importers/xlsx-importer.js'), 'utf8');
+  ok(src.indexOf('XLSX_MAX_ROWS') >= 0, 'readSheets 使用 CONFIG.LIMITS.XLSX_MAX_ROWS');
+  ok(src.indexOf('XLSX_MAX_COLS') >= 0, 'readSheets 使用 CONFIG.LIMITS.XLSX_MAX_COLS');
+  ok(src.indexOf('maxRows: Infinity') < 0, 'maxRows 不再无限制');
+  ok(src.indexOf('maxCols: Infinity') < 0, 'maxCols 不再无限制');
+  const L = QB.CONFIG.LIMITS;
+  eq(L.XLSX_MAX_ROWS, 200000, '行上限常量');
+  eq(L.XLSX_MAX_COLS, 1000, '列上限常量');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

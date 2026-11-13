@@ -46,9 +46,14 @@
   async function parse(input) {
     const buf = input.arrayBuffer;
     if (!buf) throw new Error('未读取到文件内容');
-    /* qforge 历史上不限制表数/行列数（zip 层已有 10000 条 / 64MB 上限），这里显式放开模块默认值 */
+    /* P1-17：行列上限来自 CONFIG.LIMITS，由解析内核在解析前拒绝超大表（表数仍放开；
+     * zip 层已有 10000 条 / 64MB 上限）。超限会整表拒绝，不产生部分导入。 */
+    const limits = (QB.CONFIG && QB.CONFIG.LIMITS) || {};
     const sheets = await reader().readSheets(buf, {
-      allowEmpty: true, maxSheets: Infinity, maxRows: Infinity, maxCols: Infinity
+      allowEmpty: true,
+      maxSheets: Infinity,
+      maxRows: Number(limits.XLSX_MAX_ROWS) > 0 ? Number(limits.XLSX_MAX_ROWS) : 200000,
+      maxCols: Number(limits.XLSX_MAX_COLS) > 0 ? Number(limits.XLSX_MAX_COLS) : 1000
     });
     if (!sheets.length) throw new Error('未找到工作表');
     // 逐工作表解析（每张表首行须为同一套表头；空表自动跳过），按工作簿顺序合并
