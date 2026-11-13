@@ -1,0 +1,918 @@
+diff --git a/docs/BENCH-DATA.md b/docs/BENCH-DATA.md
+index a9a8ef2a754a7c05424723edd6905a43d15258a8..3de19dce6fd758925539ef3e2d4b53ef6a5e0f96 100644
+--- a/docs/BENCH-DATA.md
++++ b/docs/BENCH-DATA.md
+@@ -63,7 +63,7 @@
+ 
+ ### D-3. C 系列、存储与阶段 0/2/3 验收读数
+ 
+-bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw）：**290.2 KB gzip / 795.4 KB raw**；按需包 23 个脚本另行随用随取（**跨包去重**合计 323.9 KB raw / 111.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
++bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw）：**293.0 KB gzip / 803.6 KB raw**；按需包 23 个脚本另行随用随取（**跨包去重**合计 323.9 KB raw / 111.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
+ 
+ > **逻辑键视图（C1）新增两行门禁（2026-11-07，50k/IDB 档，同机 `--expose-gc`，各 5/20 采样）**
+ > - `keys()` 首次构建（50000 题 · IDB）：中位 **15.08–17.38 ms**（三次门禁最小 11.89–14.22 / 最大 32.83–40.61，门禁按中位数判定），门禁 **≤40 ms**；逻辑键 **5.0 万级（本次 50361 个字符串物化，随夹具哈希去重略有浮动）**。（**2026-11-12 起口径已变更**：判定改为 10 轮最小样本 ≤ Node 大版本基线×1.35，见 **3-B-1**；本行保留为历史读数。）
+diff --git a/docs/DEVELOPMENT.md b/docs/DEVELOPMENT.md
+index 672161ee3711393d6bafb7f7e620f599f92d9769..91b79c3e32be3de12741c17fb808afa1a9cef9a8 100644
+--- a/docs/DEVELOPMENT.md
++++ b/docs/DEVELOPMENT.md
+@@ -10,7 +10,7 @@
+ 
+ | 读数 | 当前值 | 事实源 |
+ | --- | --- | --- |
+-| SW 缓存版本 | qforge-v61 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
++| SW 缓存版本 | qforge-v62 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+ | 数据 schemaVersion | 7 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
+ | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
+ 
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index 27b92ad1fd63563b35a2b4a70e2edaa913a1503e..a4a8f7a579b659edf39fcf880cae1ab138a6f24a 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -64,7 +64,7 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红
+ 
+ | 套件 | 断言数（2026-11-06 本机实跑；UTC 由 CI 矩阵覆盖） | 覆盖 |
+ | --- | --- | --- |
+-| `scripts/smoke-test.mjs` | **731** | **公共抽象黄金值（18 项：FNV 字符串/字节、mulberry32 序列、答案文本、权重仓归一、FSRSOpt 同源）**、**复习状态合并 ReviewMerge（9 项：双方独有键保留、last 相同保留远端、local/remote 更大 last、缺失/负 last 归零、不修改入参）**、**开始弹窗参数记忆 StartPrefs（20 项：默认/钳制/往返/模式隔离）**、全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v3（64 位）**、**解析类多列/多标记合并（15 项）**、**真实多列解题思路材料题（72 项）**、**真实问卷星 425/30 题（56 项）**、**按题型分值（15 项）**、**考试时长与练习正计时（8 项）**、**考试简答待自评（7 项）**、**`selfAssessAt` 按下标自评（材料小问改判/得分回算/普通简答，5 项）**、**M4 小问乱序与子问分值（22 项：contentHash 不变/同种子可复现/按新下标判分、score 1–100 归一/满分 20+30/本场显式覆盖/导入与 wire 保留）**、**填空空位/答案数不一致（9 项：按较大值保留、缺失补空、警告、一致不警告、splitFillAnswers）**、内置样例、xlsx/docx 解析、DOCX 图片、选项乱序、三格式 540 题往返、多题库隔离/级联删除、答题卡、**结果页错题重练（7 项）**；**搜索覆盖选项/填空/参考答案/材料正文与子问题（6 项）**、**考试会话恢复（7 项：startedAt/deadlineAt 保存与 restore、remainingMs 截止计算、旧会话 startedAt+durationMs 推导、极旧会话整段回退）**；**C019 判断题非法答案（5 项：题干答案非法→pending、作答非法→pending、未作答仍判错、文本对/错合法、pending 不计入 ResultPolicy 已判定/错误）** |
++| `scripts/smoke-test.mjs` | **738** | **公共抽象黄金值（18 项：FNV 字符串/字节、mulberry32 序列、答案文本、权重仓归一、FSRSOpt 同源）**、**复习状态合并 ReviewMerge（9 项：双方独有键保留、last 相同保留远端、local/remote 更大 last、缺失/负 last 归零、不修改入参）**、**开始弹窗参数记忆 StartPrefs（20 项：默认/钳制/往返/模式隔离）**、全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v3（64 位）**、**解析类多列/多标记合并（15 项）**、**真实多列解题思路材料题（72 项）**、**真实问卷星 425/30 题（56 项）**、**按题型分值（15 项）**、**考试时长与练习正计时（8 项）**、**考试简答待自评（7 项）**、**`selfAssessAt` 按下标自评（材料小问改判/得分回算/普通简答，5 项）**、**M4 小问乱序与子问分值（22 项：contentHash 不变/同种子可复现/按新下标判分、score 1–100 归一/满分 20+30/本场显式覆盖/导入与 wire 保留）**、**填空空位/答案数不一致（9 项：按较大值保留、缺失补空、警告、一致不警告、splitFillAnswers）**、内置样例、xlsx/docx 解析、DOCX 图片、选项乱序、三格式 540 题往返、多题库隔离/级联删除、答题卡、**结果页错题重练（7 项）**；**搜索覆盖选项/填空/参考答案/材料正文与子问题（6 项）**、**考试会话恢复（7 项：startedAt/deadlineAt 保存与 restore、remainingMs 截止计算、旧会话 startedAt+durationMs 推导、极旧会话整段回退）**；**C019 判断题非法答案（5 项：题干答案非法→pending、作答非法→pending、未作答仍判错、文本对/错合法、pending 不计入 ResultPolicy 已判定/错误）** |
+ | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
+ | `scripts/exporter.test.mjs` | **204** | 七格式注册（含 html 分享页）、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、**合并解析文本 CSV 往返**、**材料题五格式分流/18·19 列多行块/三格式 hash 往返/JSON 嵌套 material+children 往返/小问分值 MD·DOCX·CSV·XLSX·JSON 往返（M4，12 项）**、**JSON 内容校验和（导出/一致/篡改警告，4 项）**、**JSON 可选 `bank.sched`（已设置才写入/未设置与旧包同构，4 项）**、错题 wrongCount、乱序隔离、历史记录四格式；**只读分享页（23 项）：完整文档/UTF-8/标题描述/答案与解析/无脚本/XSS 转义/缺图占位/data URL 内嵌/材料父子编号/历史拒绝/kind 白名单** |
+ | `scripts/office-export.test.mjs` | **1150** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
+@@ -78,12 +78,12 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红
+ | `scripts/source.test.mjs` | **39** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入）；**无响应文案不出现 undefined（运算符优先级回归）**；**考试倒计时/刷新恢复关键接线（5 项）：timerText 传入、#quiz-timer 渲染与每秒更新、pagehide flush、remainingMs 统一口径**；**开始弹窗参数记忆接线（4 项）：load/save、无题库守卫、index 加载 start-prefs** |
+ | `scripts/fsrs.test.mjs` | **136** | py-fsrs 6.3.2 黄金对照（S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f 1.391987、同日 S′_s 3.051249/10/10/15.534308）、衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term 阈值、1m/10m learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz（区间/分布/确定性） |
+ | `scripts/fsrs-opt.test.mjs` | **114** | revlog/FIFO/作用域隔离、四门控、**留出门控（holdout 20%/gateBasis）+历史最佳权重-loss 自洽**、合成日志留出 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；**增量重训（P1，23 项）：`trainedLogLen` 训练点、`shouldRetrain` 阈值与 `minNew` 可调、热启动 `warmStarted`、Worker 透传 `startWeights`/`WARM_ITERATIONS`**；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
+-| `scripts/srs.test.mjs` | **79** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项）；**崩溃/强杀不丢评分（16 项）：返回即落盘、重启补全+幂等、失败可观测（T10）、IDB 模式直读断言已提交** |
++| `scripts/srs.test.mjs` | **87** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项）；**崩溃/强杀不丢评分（16 项）：返回即落盘、重启补全+幂等、失败可观测（T10）、IDB 模式直读断言已提交** |
+ | `scripts/storage.test.mjs` | **109** | **C1 keys 精准失效（23 项，LS + IDB 双模式）：更新已存在键不推进 `_keysRev`、`keys()` 不整体重建（命中 <1ms）；真正删除/新增各重建一次后回到命中路径；`_awaitDeletes` 待删键不可见；LS 跨标签事件下仅新增/删除才失效（更新已存在键不合入视图）；IDB 侧 tombstone（值 undefined）不可见、`_chunkLookup` 物理块内键展开、对端 `values[k]` 前后可见性比较（已存在键更新 0 失效 / 新增与删除各 1 次 / 幽灵键 0 失效）；`keys()` 返回副本**；**R-08 跨标签错题合并（5 项）：本地/远端错题并集不整值覆盖、同题 `wrongCount`/`lastAt` 取较大值、本地独有题保留、收藏保持整值覆盖（防误改）**；setSync 即落盘/配额抛错+onError+待写重试、forceSync、跨标签 storage 事件、keys 合并 pending；**`Helpers.debounce().cancel`（丢弃挂起调用）+ 会话清空压过挂起防抖保存的竞态回归（交卷后不再「继续上次」）**；**pagehide flush 立即落盘/clear 后 flush 不复活会话（3 项）**；**跨标签复习状态按 ReviewMerge 合订（8 项）+ 本地 record/patch 单快照/失败回滚（3 项）**；**C008 双标签复习状态（8 项）：两个独立 harness 共享底层存储，A/B 各走真实 `put` → 逐键状态事件后 `stateKeys`/`readMap` 均覆盖双方、meta 为 v4 标记且 ≤16B 不含 keys、重复/非法载荷不破坏状态**；**P2-06 reviewMeta 写入字节（8 项）：拦截底层写入，1000 个新 hash → meta 写入 1 次 / 累计 7B / 末次 7B，物理键/统计/整表均 1000**；**C009 用量快照（6 项）：`Quota.reset` + 快照与 `refresh()` 全量估算误差 ≤0.1%（5 组固定种子）、覆盖/删除后增量同步、`clearAll` 后快照失效**；**R-07 字节口径唯一化（6 项）：`Storage.fullKeyOf` / `Quota.bytesOfValue` 已导出、物理键与 CONFIG 前缀一致、`usageBytes` 增量 = Σ `bytesOfValue`（5 种夹具 152B）、公式固定、`diskBytes` 复用同一物理键** |
+-| `scripts/backup.test.mjs` | **151** | 全量备份、覆盖/合并恢复、**恢复后题目缓存失效（C016/P2-01，4 项）：缓存先装载旧题 → 恢复 → 题目写修订号递增、`DB.loadQuestions` 不命中旧缓存返回新题**、**资产先写后切（C017/P2-11，7 项）：注入资产写失败 → 抛错、旧资产数量与内容不变；成功后新资产在、旧资产才被清理**、**forceSync（C017，8 项）：IDB 返回可等待 Promise、事务完成前不 resolve、完成后值落盘、flush 失败上抛**、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项）、**备份载荷两布局识别与双向转换（65 项）：`isServerFormat`/`isLocalFormat`、`serverToLocal`（题目映射 → 分片+清单、题目/进度/历史 snake→camel、本地专有 meta 直通）、`localToServer`（分片重组 → `{bankId:[题]}`、往返一致）、`applyBackup` 按 `QB.DB.backend` 自动转换（真机缺陷回归：后端载荷在 local 模式下恢复出 3 题而非 0 题；api 模式反向转换 + 已是后端布局则透传）**、**F3 跨版本降级（29 项）：默认 v5 备份被旧客户端明确拒绝（错误可读、未写入）、兼容导出 schema 4 + v2 hash + 旧单 blob/整表布局、清空恢复后 Migration 归一为 v3 且题库/题目/SRS/错题/收藏/日志逐项回位、32 位 hash 冲突拒绝导出**、**R-03 数据层端口（4 项）：sched/backup 端口已由领域模块注册、备份端口缺失抛可读错误（不静默返回空数据）、恢复端口后 export 正常返回 `{ data }`** |
++| `scripts/backup.test.mjs` | **155** | 全量备份、覆盖/合并恢复、**恢复后题目缓存失效（C016/P2-01，4 项）：缓存先装载旧题 → 恢复 → 题目写修订号递增、`DB.loadQuestions` 不命中旧缓存返回新题**、**资产先写后切（C017/P2-11，7 项）：注入资产写失败 → 抛错、旧资产数量与内容不变；成功后新资产在、旧资产才被清理**、**forceSync（C017，8 项）：IDB 返回可等待 Promise、事务完成前不 resolve、完成后值落盘、flush 失败上抛**、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项）、**备份载荷两布局识别与双向转换（65 项）：`isServerFormat`/`isLocalFormat`、`serverToLocal`（题目映射 → 分片+清单、题目/进度/历史 snake→camel、本地专有 meta 直通）、`localToServer`（分片重组 → `{bankId:[题]}`、往返一致）、`applyBackup` 按 `QB.DB.backend` 自动转换（真机缺陷回归：后端载荷在 local 模式下恢复出 3 题而非 0 题；api 模式反向转换 + 已是后端布局则透传）**、**F3 跨版本降级（29 项）：默认 v5 备份被旧客户端明确拒绝（错误可读、未写入）、兼容导出 schema 4 + v2 hash + 旧单 blob/整表布局、清空恢复后 Migration 归一为 v3 且题库/题目/SRS/错题/收藏/日志逐项回位、32 位 hash 冲突拒绝导出**、**R-03 数据层端口（4 项）：sched/backup 端口已由领域模块注册、备份端口缺失抛可读错误（不静默返回空数据）、恢复端口后 export 正常返回 `{ data }`** |
+ | `scripts/backup-hydration.test.mjs` | **56** | **Phase 0 收尾硬证据（分阶段水合）**：50k/4 库真实写路径播种（`insertMany` + `reviews.record`）；新页面懒启动仅水合当前库（12,500 逻辑键 + 64 题目键）；**三条备份路径完整性**——`Backup.buildBackup`（记录计数 50,000 / 按键计数 256，4 库逐库 12,500）、`saveAutoBackup`+`readAutoBackup`（同口径，原始键数 ≥50,256）、`applyData(replace)` 快照（未水合库 E 的题目分片与复习块物理删除、记录 50,000 / 键 256、banks=4）；**未水合读取语义 (b)**——`Storage.get/getFresh` 返回 defaultValue 不抛错、`ensureBank` 后可见；**静态护栏**——去注释后 `Storage.keys|get|getFresh|keysScoped|getScoped|getScopedFresh` 89 处逐文件冻结，新增调用点即红；**C 步骤2（9 项）**——A 段前置静态护栏（`backup.export`/`saveAutoBackup`/`applyData` 的 ensureAll 早于读取、`applyBackup` 全局键、`migrate.run` ensureAll 早于 `migrate*` 且仅 IDB 目标）+ `bankIds` 运行时证据（未水合库状态键不在视图、库 id 经全局 `banks` 补全）；**路径3 严格前置（4 项）**：`__strictReads=true`、库B/E 未水合、部分视图 `keys()` 被严格守卫拒绝（50k 恢复必须依赖 `applyData` 内 `ensureAll`）；红例 `QFORGE_HYDRATION_RED=1` 退化为 12,500/64 且 E 残留（35 通过 / 14 失败） |
+-| `scripts/migrate.test.mjs` | **322** | v1→v5 全链路（contentHash v1/v2→v3（64 位）重映射、review/wrong/fav/revlog 键重映射、revlog 回填 b、分片化与一致修复）；**v4→v5 布局迁移（整表复习 → per-hash + v4 标记、整表日志 → 200 条/段追加、逐条完整性）**；**P2-06 reviewMeta v3→v4（启动期幂等压缩；迁移前后 `readMap` 逐键 Deep-equal、计数不变、错题/收藏逐字节未变、二次运行 0 写入、注入 meta 写失败保留原 v3 清单与全部状态）**；双读（旧整表与 per-hash 合并、旧日志清单缺失回退）；幂等（`force` 重跑逐字节不变、同题干异答案共存）；**断点重入/中断回滚（注入失败后 snapshot 恢复）、多标签共享存储仅迁移一次、`ensureLayout` 归一**；**F1 迁移前自动备份（写入前落盘、进度标记、备份恢复逐键一致、备份失败即中止且无半写、IDB `open()` 抛 `SecurityError` 回落 LS 且业务快照不变）**；**F2 多标签败者等待切换并补写（等待期 raw LS 不增键、切换后收藏 21→21、旧 LS 收藏被清理、重启仍 21）**；**F2b 持锁标签崩溃（锁过期）后等待者重抢锁接管：等待期收藏 21/22 回放、`takeover` 有值、`takeoverMs`、`_awaiting` 复位、锁释放、重启仍 22**；**F2c 胜者只是慢：锁 2s 心跳续租（`at` 前进、owner 不变）、等待者重抢返回 `locked`、实际迁移调用 0，最终 21 且无双迁移**；**P1 迁移期零 LS 业务写入（旧整表→IDB，raw.set 业务键 0、IDB 2 题/2 状态/2 日志逐键一致）**；**P2/P3/P4 容量预检（充足静默、IDB 不可用+不足写入前 `LS_CAPACITY` 无残留、≥85% nearLimit、IDB 可用超预算放行）**；**C007 回归：无旧整表日志时 `RevlogStore.convertLegacy` 不写空清单（避免启动期业务键令回落标记误降级）** |
+-| `scripts/shard.test.mjs` | **131** | 题目库分片存储：切分与清单、追加只写尾分片、按需单页只解析覆盖分片（冷读调用捕获）、越界零读、跨分片边界、单题 update/remove 只写所在分片、空分片回收、overwrite 高位回收、removeMany 跨分片、旧单 blob 兼容与写时迁移、删库级联清分片；**删除一致性（33 项）：单删清空中间分片后重编号且余题可读、removeMany 整片删除后余题可读、孤儿分片 `invariant` 检出与 `compact` 修复、迁移 v3→v4 启动自检修复坏清单并幂等**；**UI 级按需装载（阶段 A）：`count` 直读清单零分片解析、`loadQuestions` 缓存命中同一数组实例、`buildIndex` 复用缓存、create/update/remove 使修订号 +1 并令缓存失效重读、refresh 强制重读、空 bankId 安全返回**；**C018 内存索引（16 项）：预热后 `get` 0 次 `locate`（旧实现每次 ≥1 次）、merge 重复导入 0 次 `readAll`（旧实现 2 次）、全量重复判重/不新增/总数不变、merge 新增后再导入仍判重、update 后索引位置有效且哈希集同步、删除/removeMany 后同片位置前移仍读取正确** |
++| `scripts/migrate.test.mjs` | **332** | v1→v5 全链路（contentHash v1/v2→v3（64 位）重映射、review/wrong/fav/revlog 键重映射、revlog 回填 b、分片化与一致修复）；**v4→v5 布局迁移（整表复习 → per-hash + v4 标记、整表日志 → 200 条/段追加、逐条完整性）**；**P2-06 reviewMeta v3→v4（启动期幂等压缩；迁移前后 `readMap` 逐键 Deep-equal、计数不变、错题/收藏逐字节未变、二次运行 0 写入、注入 meta 写失败保留原 v3 清单与全部状态）**；双读（旧整表与 per-hash 合并、旧日志清单缺失回退）；幂等（`force` 重跑逐字节不变、同题干异答案共存）；**断点重入/中断回滚（注入失败后 snapshot 恢复）、多标签共享存储仅迁移一次、`ensureLayout` 归一**；**F1 迁移前自动备份（写入前落盘、进度标记、备份恢复逐键一致、备份失败即中止且无半写、IDB `open()` 抛 `SecurityError` 回落 LS 且业务快照不变）**；**F2 多标签败者等待切换并补写（等待期 raw LS 不增键、切换后收藏 21→21、旧 LS 收藏被清理、重启仍 21）**；**F2b 持锁标签崩溃（锁过期）后等待者重抢锁接管：等待期收藏 21/22 回放、`takeover` 有值、`takeoverMs`、`_awaiting` 复位、锁释放、重启仍 22**；**F2c 胜者只是慢：锁 2s 心跳续租（`at` 前进、owner 不变）、等待者重抢返回 `locked`、实际迁移调用 0，最终 21 且无双迁移**；**P1 迁移期零 LS 业务写入（旧整表→IDB，raw.set 业务键 0、IDB 2 题/2 状态/2 日志逐键一致）**；**P2/P3/P4 容量预检（充足静默、IDB 不可用+不足写入前 `LS_CAPACITY` 无残留、≥85% nearLimit、IDB 可用超预算放行）**；**C007 回归：无旧整表日志时 `RevlogStore.convertLegacy` 不写空清单（避免启动期业务键令回落标记误降级）** |
++| `scripts/shard.test.mjs` | **141** | 题目库分片存储：切分与清单、追加只写尾分片、按需单页只解析覆盖分片（冷读调用捕获）、越界零读、跨分片边界、单题 update/remove 只写所在分片、空分片回收、overwrite 高位回收、removeMany 跨分片、旧单 blob 兼容与写时迁移、删库级联清分片；**删除一致性（33 项）：单删清空中间分片后重编号且余题可读、removeMany 整片删除后余题可读、孤儿分片 `invariant` 检出与 `compact` 修复、迁移 v3→v4 启动自检修复坏清单并幂等**；**UI 级按需装载（阶段 A）：`count` 直读清单零分片解析、`loadQuestions` 缓存命中同一数组实例、`buildIndex` 复用缓存、create/update/remove 使修订号 +1 并令缓存失效重读、refresh 强制重读、空 bankId 安全返回**；**C018 内存索引（16 项）：预热后 `get` 0 次 `locate`（旧实现每次 ≥1 次）、merge 重复导入 0 次 `readAll`（旧实现 2 次）、全量重复判重/不新增/总数不变、merge 新增后再导入仍判重、update 后索引位置有效且哈希集同步、删除/removeMany 后同片位置前移仍读取正确** |
+ | `scripts/sync-dav.test.mjs` | **69** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404；**真实 HTTP 集成（本地 CORS WebDAV 验证端点 `serve-webdav.mjs`）：预检 OPTIONS 204 + 放行 Authorization + 回显 Origin、真实 PUT 201 并落盘可解析 JSON、错误密码 401、含图 PUT → 端点收 ZIP（PK 头）、真实 GET 下载解析、无对象 404（12 项）**；**C027 密码加密（20 项）：落盘 v2 无 `pass` 明文、密文含 alg/iv/data、随机 IV 两次密文不同、`loadConfig` 解密还原、`getConfig` 只报 `hasPass`、clearConfig；旧明文迁移（加密→回读校验→覆盖、删明文、二次读取幂等）、篡改首字节 → 空密码 + 可见错误、清空密码移除密文；上传使用解密密码（Basic 头还原 `u:s3cret-pw`）**；**R-14 密码不进 HTML 属性（4 项）：含引号/尖括号/& 的密码原文与转义形态均不出现在 `openModal` HTML、`data-dav="pass"` 无 `value` 属性、密码经回调里的 DOM `value` 回填且上传仍可用** |
+ | `scripts/sw-runtime.test.mjs` | **34** | Service Worker 运行时门禁（Node VM 加载 `sw.js`，内存 CacheStorage/fetch 替身）：install 预缓存清单与 CORE 逐项一致、**预缓存失败必须 reject 且不 skipWaiting**、导航仅 2xx 回写 `index.html`（500 不覆盖离线壳）、离线导航回退、静态资源缓存优先+仅 2xx 后台更新、非 GET/跨源/`/api` 不接管、**activate 只删本站 `qforge-*` 前缀内非当前版本并 claim（R-11：同源其他应用 `other-app-v1` 不被删除且内容保留，2 项）**、**缓存版本基线（`scripts/sw-baseline.json` 记录 CACHE + 93 个 js/css 摘要，改资源未 bump 即红）**；变异 `--mutate` 改摘要不动版本 → 33 通过 / 1 失败（exit 1） |
+ | `scripts/pwa.test.mjs` | **93** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**悬浮滚动按钮（11 项）**、**细节样式修复（7 项）**、**SW 不拦截同源 `/api` 前缀 + 缓存名换代（`qforge-v32`，断言 ≥ v4）+ 缓存前缀与 CACHE 一致 + activate 只删本站前缀缓存（R-11，4 项）**、**F1 迁移失败 try/catch 与回退提示、F3 `registerSW` 直接 `register`（不依赖 `load`，注册调用在 boot 内）**、**可访问性/移动端基础（6 项）**、**交卷末栏分栏（2 项）**、**192/512 PNG 图标（PNG 签名/manifest 192·512/maskable/apple-touch-icon/SW 预缓存，8 项）**、**CSP 基线（17 项）：meta 存在且位于样式/脚本之前、与 `security-headers.mjs` 逐字符一致、script-src 仅 self+file:（无 unsafe-inline/eval）、style-src 允许内联、img-src data/blob/file:、connect-src 仅 `'self'` 且不含 http(s)/file:/*/ws、`CSP_CONNECT_ALLOWLIST` 默认空、default-src/worker-src 含 file:、object-src/base-uri/form-action 收紧、meta 不写 frame-ancestors、无内联/跨源 script** |
+@@ -100,9 +100,9 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红
+ | `scripts/api-backend.test.mjs` | **322** | **R-09 列表 ETag（10 项）：服务端 ETag / no-store / 304 空体 / 写后旧 ETag 回 200；适配器第二次 GET 命中 304 复用、写后刷新、题目列表 304**；**参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；**CORS 默认关闭、显式放行来源预检 204、未放行不带 ACAO**；**content_hash 按合并后完整题目重算、仅改解析不变**；**筛选查询不污染 count 缓存**；**historyAdd 返回形状与 local 一致**、**historyUpdate PATCH（保留 id/created_at、未知 id 404、api 回写得分，6 项）**；**bank.sched 创建/保存/回读**；**题目与题库元数据乐观并发（13+13 项）：base_updated_at 匹配成功/updated_at 单调递增/过期 409 CONFLICT+current/冲突不覆盖；api 适配器 baseUpdatedAt → 409 错误码与消息**；**复习进度多端冲突（12 项）：服务端 `review_rev` 初始 0、PUT 后 +1、`base_rev` 匹配成功、过期 409 CONFLICT + current 且不覆盖；客户端 409 后按 `last` 合并重试一次（merged=true、双方键保留、服务端 rev 递增、revlog 只 1 条）**；**B1 增量写入与 B3 revlog 版本（12 项）：PATCH 只合并增量键、其余键保留、`null` 删除、`rev` 递增、缺 `items` 400、`base_rev` 过期 409 返回 current/rev、本地缓存与 `revlog.revision()` 同步**；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、**`count`/`reviews` 按库缓存命中与写·级联·`backup.import` 后失效（5 项）**、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错（注入 fetch 走**真实网络失败**路径）；**跨布局整链 E2E（33 项）：本地模式造数 → 本地布局备份 → api 模式 `applyBackup` 经 `localToServer` + 真实 `POST /api/backup?mode=replace` → 直读 `GET /api/backup` 核对接管后端口径（snake_case、按库归集、id 保留）→ 再恢复到另一 local 上下文，题库/题目/错题/历史/revlog/权重逐项等价（闭环）**；**可选 Bearer 令牌鉴权（12 项）**；**静态安全头（6 项）**；**作答热路径（16 项）：首次作答 4 请求（含按库读取调度设置，后续缓存命中）、热态 PATCH 1 请求、gradeMany 1 请求；错题额外 1；权重 write 后读缓存命中、remove 后重新 GET；revlog 非数组 400 BAD_REQUEST**；**按 IP 限流（24 项）：窗口限额/429+Retry-After/静态与 health 不受限/窗口重置/trustProxy 分桶/rateLimit:false 关闭，适配器 429 诚实抛出**；**API 模式删库严格守卫（2026-11-10，2 项）：`__strictReads=true` 下 `banks.remove` 不抛错、本地 `Storage.keys()` 调用 0 次（级联全在服务端，不回落本地 revlog 清理）** |
+ | `scripts/importers-anki.test.mjs` | **148** | 最小 SQLite 只读（页大小/UTF-16LE/freelist/被删记录/内部页递归/overflow 80KB/rowid 别名/`--` 注释剥离/坏库）、`.apkg` 包识别（Legacy1/Legacy2 取 anki21/缺 anki21 回退/Latest 拒绝并指引导出旧版/损坏 ZIP）、note 粒度导入（Front/Back 字段名映射、judge/single/essay 判定、`1`/`0` 不误判、cloze 降级 essay、媒体入库与缺失占位、多卡丢失项警告、HTML 剥离）、Legacy1/UTF-16/深分页全量、落库去重与 v3 contentHash、首次评分 revlog 写入；**D2：0 题拒绝原因在 UI 可见（.anki21b Legacy 指引 / 坏 SQLite 原因，不再只提示「未解析出任何题目」），错误弹窗挂 `.import-error` 类且无内联颜色** |
+ | `scripts/importers-quizlet.test.mjs` | **75** | 分隔符自动识别（Tab/逗号/分号/竖线）与显式自定义覆盖、`Term/Definition` 表头跳过、非两列/空 term/重复行跳过与警告、空文件明确报错、全部落 essay（term 题干 + definition 参考答案）、明确「无选项/无图片/无在线进度」提示、与既有 CSV 的路由边界（表头 CSV 不被劫持）；**D1：粘贴入口复用注册表（Tab/逗号/全角逗号与文件入口结果全等，Markdown/JSON/无法识别分支不回归）** |
+-| `scripts/import-commit.test.mjs` | **57** | **C006 导入事务（P1-02）**：容量预检拒绝时 0 次写且原因可见（先于预览）、写入中途超配额回滚到导入前（题数与占用字符数复原、无「导入完成」toast）、正常导入落盘回读一致与内容去重、四条入口共用 `commitImport` 且 `data-io` 只有 1 处 `insertMany`、IDB `flush` 失败不报成功并回滚；**C015 单小问材料题（P2-03/D5=A）：`runImport` 返回 1 条致命错误 → `commitImport` 返回 null、写入 0 次、题数不变（同包正常题也不落库）、弹窗含「至少 2 个」且未打开预览**；**C026 批注总量超限（7 项）：540 题满长汉字 8,100,000B > 2 MiB → 返回 null、写入 0 次、题数不变、弹窗含「批注总量/超过上限/删减批注」且未打开预览**；**R-20 导入体积预检（17 项）：上限常量 16 MiB；File-like 超限 → `FileReader` 构造 0 次、`Storage.set` 0 次、返回 null、弹窗含 `.import-error`/「超过导入上限」/「未读取文件」且未开预览；二进制快照按 `arrayBuffer.byteLength` 同样拒收；边界为开区间（=上限放行、+1 拒收），拒收结构标记 `migration.supported=false`；落盘顺序：成功 toast 严格晚于 `forceSync`/`flush`** |
++| `scripts/import-commit.test.mjs` | **64** | **C006 导入事务（P1-02）**：容量预检拒绝时 0 次写且原因可见（先于预览）、写入中途超配额回滚到导入前（题数与占用字符数复原、无「导入完成」toast）、正常导入落盘回读一致与内容去重、四条入口共用 `commitImport` 且 `data-io` 只有 1 处 `insertMany`、IDB `flush` 失败不报成功并回滚；**C015 单小问材料题（P2-03/D5=A）：`runImport` 返回 1 条致命错误 → `commitImport` 返回 null、写入 0 次、题数不变（同包正常题也不落库）、弹窗含「至少 2 个」且未打开预览**；**C026 批注总量超限（7 项）：540 题满长汉字 8,100,000B > 2 MiB → 返回 null、写入 0 次、题数不变、弹窗含「批注总量/超过上限/删减批注」且未打开预览**；**R-20 导入体积预检（17 项）：上限常量 16 MiB；File-like 超限 → `FileReader` 构造 0 次、`Storage.set` 0 次、返回 null、弹窗含 `.import-error`/「超过导入上限」/「未读取文件」且未开预览；二进制快照按 `arrayBuffer.byteLength` 同样拒收；边界为开区间（=上限放行、+1 拒收），拒收结构标记 `migration.supported=false`；落盘顺序：成功 toast 严格晚于 `forceSync`/`flush`** |
+ | `scripts/a11y.test.mjs` | **103** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、**弹窗快照注册自检（每个导出的 `render*Dialog` 必须至少登记一份快照，新增弹窗漏登记即转红）**、全仓禁止 tabindex>0、模态焦点进入/异步回位链路/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖、**14 项视觉结构回归（含 `.import-error` 10 项：规则唯一、danger 前景/弱底/边框/圆角/换行均为语义令牌、无硬编码色值、两处失败弹窗共用该类且 JS 无内联样式）**；**变异 `--mutate`：删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked` → 95 通过 / 8 失败（exit 1）**；CI 以独立 `a11y` job 运行本命令 |
+-| **合计** | **6025 / 6025 通过 · 38 个运行项**（2026-11-12 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
++| **合计** | **6064 / 6064 通过 · 38 个运行项**（2026-11-12 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+ 
+ **真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**：
+ - 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。
+diff --git a/js/data/contracts.js b/js/data/contracts.js
+index ad953ec22c195c207ad7ffbc5404637956495daf..879a5dfaf327712bfe3b615aa5905582e7130541 100644
+--- a/js/data/contracts.js
++++ b/js/data/contracts.js
+@@ -66,6 +66,9 @@
+     metaMigrationLock: 'meta:migrationLock',
+     // 迁移前自动备份（schema/时间戳/进度标记；只在 IndexedDB 不可用时回落本键，运行期元数据，不进备份）
+     metaMigrationBackup: 'meta:migrationBackup',
++    // 迁移进行中标记（P0-1）：进入业务键改写前写入，成功后清除；残留即表示上次迁移未提交完成，
++    // 启动时据此跳过「版本已最新」的快速路径并重跑幂等迁移（自愈）。
++    metaMigrationPending: 'meta:migrationPending',
+     metaHashMap: (bankId) => 'meta:hashMap:' + bankId
+   };
+ 
+diff --git a/js/data/local-adapter.js b/js/data/local-adapter.js
+index 03083dd29890c82b2cf13998402a696e0befda1c..ed3a84337fa8bff2ea58bd1255eaf16983fb45bb 100644
+--- a/js/data/local-adapter.js
++++ b/js/data/local-adapter.js
+@@ -123,12 +123,21 @@
+     metaOf(bankId) {
+       return QuestionShards.parseMeta(Storage.getScoped(K.questionsMeta(bankId), bankId, null));
+     },
++    /** 磁盘权威清单（跨标签并发时绕过本页缓存；append 的读-改-写基线） */
++    metaOfFresh(bankId) {
++      return QuestionShards.parseMeta(Storage.getScopedFresh(K.questionsMeta(bankId), bankId, null));
++    },
+     setMeta(bankId, meta) { Storage.set(K.questionsMeta(bankId), meta); },
+ 
+     shardOf(bankId, i) {
+       const s = Storage.getScoped(K.questionShard(bankId, i), bankId, []);
+       return Array.isArray(s) ? s : [];
+     },
++    /** 磁盘权威分片（绕过本页缓存） */
++    shardOfFresh(bankId, i) {
++      const s = Storage.getScopedFresh(K.questionShard(bankId, i), bankId, []);
++      return Array.isArray(s) ? s : [];
++    },
+     setShard(bankId, i, arr) { Storage.set(K.questionShard(bankId, i), arr); },
+     removeShard(bankId, i) { Storage.remove(K.questionShard(bankId, i)); },
+ 
+@@ -174,6 +183,13 @@
+       return QuestionShards.concatShards(meta, (i) => QuestionShards.shardOf(bankId, i));
+     },
+ 
++    /** 全量题目（绕过本页缓存，读磁盘权威分片；回滚与并发校验用） */
++    readAllFresh(bankId) {
++      const meta = QuestionShards.metaOfFresh(bankId);
++      if (!meta) return QuestionShards.legacyOf(bankId).slice();
++      return QuestionShards.concatShards(meta, (i) => QuestionShards.shardOfFresh(bankId, i));
++    },
++
+     /** 按需读取 [start,end)：只解析覆盖该区间的分片，前置分片仅按清单长度跳过 */
+     readRange(bankId, start, end) {
+       const meta = QuestionShards.metaOf(bankId);
+@@ -226,27 +242,58 @@
+       QuestionShards.setMeta(bankId, p.meta);
+     },
+ 
+-    /** 追加题目到尾部：只重写尾分片与新增分片，前置分片零写入 */
++    /**
++     * 追加题目到尾部：只重写尾分片与新增分片，前置分片零写入。
++     * P0-3：并发安全 = 以磁盘权威清单/尾分片为基线（不用本页可能过期的缓存），
++     * 按 id 取并集后写入，写后回读校验；被其它标签覆盖则重试，仍冲突则显式报错（不静默丢题）。
++     */
+     append(bankId, items) {
+       if (!items || !items.length) return;
+-      const meta = QuestionShards.metaOf(bankId);
+-      if (!meta) { QuestionShards.writeAll(bankId, QuestionShards.readAll(bankId).concat(items)); return; }
+-      let idx = meta.sizes.length ? meta.sizes.length - 1 : 0;
+-      let shard = meta.sizes.length ? QuestionShards.shardOf(bankId, idx) : [];
+-      items.forEach((it) => {
+-        if (shard.length >= SHARD_SIZE) {
+-          QuestionShards.setShard(bankId, idx, shard);
+-          meta.sizes[idx] = shard.length;
+-          idx += 1;
+-          shard = [];
++      const ATTEMPTS = 3;
++      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
++        const meta = QuestionShards.metaOfFresh(bankId);
++        if (!meta) {
++          // 旧单 blob 或空库：权威读取后整表写入（writeAll 内部按分片重建）
++          QuestionShards.writeAll(bankId, QuestionShards.legacyOf(bankId).concat(items));
++          return;
+         }
+-        shard.push(it);
+-      });
+-      QuestionShards.setShard(bankId, idx, shard);
+-      meta.sizes[idx] = shard.length;
+-      meta.count += items.length;
+-      QuestionShards.setMeta(bankId, meta);
+-      invalidateQuestionIndex(); // C018：追加改变位置 → 索引失效（下次按需重建）
++        let idx = meta.sizes.length ? meta.sizes.length - 1 : 0;
++        let shard = meta.sizes.length ? QuestionShards.shardOfFresh(bankId, idx) : [];
++        const present = new Set();
++        shard.forEach((q) => { if (q && q.id) present.add(q.id); });
++        const pending = items.filter((it) => !(it && it.id && present.has(it.id)));
++        if (!pending.length) { invalidateQuestionIndex(); return; }
++        const sizes = meta.sizes.slice();
++        pending.forEach((it) => {
++          if (shard.length >= SHARD_SIZE) {
++            QuestionShards.setShard(bankId, idx, shard);
++            sizes[idx] = shard.length;
++            idx += 1;
++            shard = [];
++          }
++          shard.push(it);
++        });
++        QuestionShards.setShard(bankId, idx, shard);
++        sizes[idx] = shard.length;
++        const nextMeta = { v: META_VERSION, shardSize: SHARD_SIZE, count: meta.count + pending.length, sizes: sizes };
++        QuestionShards.setMeta(bankId, nextMeta);
++        // LS 模式立即落盘，保证回读校验看到的是磁盘权威值（IDB 模式由持久化层排队）
++        try {
++          const flushing = Storage.forceSync();
++          if (flushing && typeof flushing.catch === 'function') flushing.catch(() => {});
++        } catch (e) { throw e; }
++        // 回读校验：期间若有其它标签覆盖，重新以权威值合并（并集保证幂等）
++        const checkMeta = QuestionShards.metaOfFresh(bankId);
++        const checkTail = QuestionShards.shardOfFresh(bankId, idx);
++        const metaOk = checkMeta && checkMeta.count === nextMeta.count &&
++          checkMeta.sizes.length === nextMeta.sizes.length && checkMeta.sizes[idx] === sizes[idx];
++        const tailOk = JSON.stringify(checkTail) === JSON.stringify(shard);
++        if (metaOk && tailOk) { invalidateQuestionIndex(); return; }
++      }
++      invalidateQuestionIndex();
++      const e = new Error('题目追加冲突：检测到其它标签页并发写入，重试 ' + ATTEMPTS + ' 次仍未合并');
++      e.code = 'APPEND_CONFLICT';
++      throw e;
+     },
+ 
+     /** 定位题目所在分片（逐分片读取，命中即止）：{legacy} | {idx,pos} | null */
+@@ -381,10 +428,33 @@
+     return questionIndex;
+   }
+ 
+-  /** 外部（另一标签页）写题目键：任何 questions:* 合并后整表失效（返回 incoming 保持覆盖语义） */
++  /**
++   * 外部（另一标签页）写题目键：P0-3 合并策略
++   * - 清单键：取 count 较大者（分片内容各自并集合并，避免直接覆盖丢条目）
++   * - 分片键：按题目 id 并集（保留本地顺序，追加 incoming 中缺失项），跨标签追加不互相覆盖
++   */
++  Storage.registerMerge(
++    (key) => key.indexOf('questions:') === 0 && /:meta$/.test(key),
++    (local, incoming) => {
++      invalidateQuestionIndex();
++      const a = QuestionShards.parseMeta(local);
++      const b = QuestionShards.parseMeta(incoming);
++      if (!a) return incoming;
++      if (!b) return local;
++      return a.count >= b.count ? a : b;
++    }
++  );
+   Storage.registerMerge(
+     (key) => key.indexOf('questions:') === 0,
+-    (local, incoming) => { invalidateQuestionIndex(); return incoming; }
++    (local, incoming) => {
++      invalidateQuestionIndex();
++      if (!Array.isArray(local) || !Array.isArray(incoming)) return incoming;
++      const seen = new Set();
++      local.forEach((q) => { if (q && q.id) seen.add(q.id); });
++      const out = local.slice();
++      incoming.forEach((q) => { if (!(q && q.id && seen.has(q.id))) out.push(q); });
++      return out;
++    }
+   );
+ 
+   /* ---------------- BankRepository ---------------- */
+@@ -632,6 +702,19 @@
+       const mode = options.mode || 'merge'; // 'merge' | 'overwrite'
+       const overwrite = mode === 'overwrite';
+ 
++      // P0-6：IDB 模式同步上限为 Infinity（浏览器引擎管理磁盘配额），这里用 estimate 做写入前预检；
++      // 放不下就整包拒绝、不写任何键，避免「写到一半失败 + 回滚」把半批数据暴露给并发读者。
++      if (QB.Quota && typeof QB.Quota.canFitQuestionsAsync === 'function') {
++        const fit = await QB.Quota.canFitQuestionsAsync(incoming || []);
++        if (fit.checked && !fit.ok) {
++          const e = new Error('可用空间不足：本题库约需 ' +
++            QB.Quota.formatBytes(fit.need) + '，当前仅剩 ' + QB.Quota.formatBytes(fit.available) + '');
++          e.name = 'QuotaExceededError';
++          e.code = 'QUOTA_PRECHECK';
++          throw e;
++        }
++      }
++
+       // 回滚基线（C006）：overwrite 必须保留原库全量（失败时整库恢复）；
+       // merge 只追加尾部分片，失败时用「索引前的总数」截断即可，无需预先 readAll（C018）。
+       const before = overwrite ? QuestionShards.readAll(bankId) : null;
+@@ -655,6 +738,8 @@
+       let duplicates = 0;
+       let skipped = 0;
+       const fresh = [];
++      /** P0-4：本次真正新增的去重 hash（失败时只回退这些，不动索引中既有项） */
++      const addedHashes = [];
+ 
+       (incoming || []).forEach((raw) => {
+         const item = stampQuestion(raw, bankId);
+@@ -666,6 +751,7 @@
+           duplicates++;
+           return;
+         }
++        if (!seen.has(item.contentHash)) addedHashes.push(item.contentHash);
+         seen.add(item.contentHash);
+         fresh.push(item);
+         inserted++;
+@@ -691,14 +777,17 @@
+           if (actual !== total) throw new Error('导入落盘校验失败：期望 ' + total + ' 题，回读 ' + actual + ' 题');
+           return;
+         }
+-        const meta = QuestionShards.metaOf(bankId);
++        // P0-3：并发追加下并集可能大于本批预期，只能断言「不少于本批总数」；
++        // 同时校验清单自洽（sizes 之和 == count），仍能发现落盘丢失/清单损坏。
++        const meta = QuestionShards.metaOfFresh(bankId);
+         const actualCount = meta ? meta.count : QuestionShards.legacyOf(bankId).length;
+-        if (actualCount !== total) throw new Error('导入落盘校验失败：期望 ' + total + ' 题，清单回读 ' + actualCount + ' 题');
+-        if (meta && meta.sizes.length) {
+-          const lastIdx = meta.sizes.length - 1;
+-          const actualTail = QuestionShards.shardOf(bankId, lastIdx).length;
+-          if (actualTail !== meta.sizes[lastIdx]) {
+-            throw new Error('导入落盘校验失败：尾分片期望 ' + meta.sizes[lastIdx] + ' 题，回读 ' + actualTail + ' 题');
++        if (actualCount < total) {
++          throw new Error('导入落盘校验失败：期望至少 ' + total + ' 题，清单回读 ' + actualCount + ' 题');
++        }
++        if (meta) {
++          const sum = meta.sizes.reduce((n, x) => n + (Number(x) || 0), 0);
++          if (sum !== meta.count) {
++            throw new Error('导入落盘校验失败：清单总数 ' + meta.count + ' 与分片长度合计 ' + sum + ' 不一致');
+           }
+         }
+       };
+@@ -712,10 +801,17 @@
+         await persist();
+         verify();
+       } catch (e) {
++        // P0-4：先回退本批新增的去重 hash，避免失败批次污染索引导致重试被判重复
++        addedHashes.forEach((h) => { seen.delete(h); });
+         try {
+-          // merge：append 只会动尾部分片，截断到导入前总数即恢复原状；
+-          // overwrite：整库恢复为导入前快照。
+-          const rollback = before || QuestionShards.readAll(bankId).slice(0, existingCount);
++          let rollback;
++          if (before) {
++            rollback = before; // overwrite：整库恢复为导入前快照
++          } else {
++            // merge：按 id 差集只撤销本批条目，保留其它标签并发新增（不能按 count 截断）
++            const own = new Set(fresh.map((q) => q.id));
++            rollback = QuestionShards.readAllFresh(bankId).filter((q) => !(q && own.has(q.id)));
++          }
+           QuestionShards.writeAll(bankId, rollback);
+           // 回滚也要真的落盘：否则「回滚成功」同样只是内存幻觉
+           await persist();
+diff --git a/js/data/store.js b/js/data/store.js
+index 381bf0206de04bed349099b2623212a91494f02c..9731a0b7931a49514c3f75cc06d4ac9199ab3aa2 100644
+--- a/js/data/store.js
++++ b/js/data/store.js
+@@ -48,6 +48,7 @@
+     'meta:schemaVersion',
+     'meta:migrationLock',
+     'meta:migrationBackup',
++    'meta:migrationPending',
+     PROBE_KEY,
+     QUOTA_CACHE_KEY
+   ];
+@@ -55,7 +56,7 @@
+      也不参与「恢复 replace 时删除旧键」——否则会把新设备的后端选择一起删掉。 */
+   const BACKUP_EXCLUDED_KEYS = [
+     BACKEND_KEY, PROGRESS_KEY, 'meta:lsMigratedAt', 'meta:lsCleanupAt', 'meta:lsBackupState',
+-    PROBE_KEY, QUOTA_CACHE_KEY
++    PROBE_KEY, QUOTA_CACHE_KEY, 'meta:migrationPending'
+   ];
+   /* 探测失败时回退的保守预算（= 名义 5MiB − 32KiB），来源标记为 conservative-constant */
+   const QUOTA_FALLBACK_CHARS = 5 * 1024 * 1024 - 32 * 1024;
+diff --git a/js/modules/backup.js b/js/modules/backup.js
+index 4f33235338b183aab7fbaf2429dc4c9d4084ba3a..56ae3003e3bcfc699422dbff52b2d7698a33e5c9 100644
+--- a/js/modules/backup.js
++++ b/js/modules/backup.js
+@@ -546,11 +546,11 @@
+     } catch (e) {
+       console.error('[Backup] 恢复失败，尝试回滚到恢复前快照：', e);
+       try {
+-        written.forEach((k) => {
+-          const old = snapshot.find((pair) => pair[0] === k);
+-          if (old) QB.Storage.set(k, old[1]);
+-          else QB.Storage.remove(k);
+-        });
++        // P0-2：按快照整份恢复（含本次已删除的载荷外旧键），再撤销本次新增的、快照中不存在的键。
++        // 只回写 written 会漏掉「删除已生效、随后落盘失败」时被误删的旧数据。
++        const snapMap = new Map(snapshot);
++        snapshot.forEach((pair) => QB.Storage.set(pair[0], pair[1]));
++        written.forEach((k) => { if (!snapMap.has(k)) QB.Storage.remove(k); });
+         await QB.Storage.forceSync();
+       } catch (rollbackErr) {
+         console.error('[Backup] 回滚也失败：', rollbackErr);
+diff --git a/js/modules/migrate.js b/js/modules/migrate.js
+index 2a8b784824c57d7a8a4d9b1790bc161b744709ef..c837c309544d34b6bfbae44c921f91cda93d8e66 100644
+--- a/js/modules/migrate.js
++++ b/js/modules/migrate.js
+@@ -664,7 +664,12 @@
+    */
+   function run(opts) {
+     const force = !!(opts && opts.force);
+-    if (currentVersion() >= SCHEMA_VERSION && !force) {
++    // P0-1：上次迁移未提交完成（进程被杀/写盘失败）时，"版本已最新"不可信，
++    // 必须忽略快速路径按 force 语义重跑一次幂等迁移完成自愈。
++    let pending = null;
++    try { pending = QB.Storage.get(QB.KEYS.metaMigrationPending, null); } catch (_) { pending = null; }
++    const needHeal = !!pending;
++    if (currentVersion() >= SCHEMA_VERSION && !force && !needHeal) {
+       // 版本已最新也可能残留旧 reviewMeta v3 清单（P2-06）：每次启动做一次幂等压缩。
+       // fail-loud：未水合库显式跳过（结果带 skipped），真实转换错误直接上抛中止，不静默吞。
+       const reviewMeta = QB.ReviewStore && typeof QB.ReviewStore.convertMetaLayouts === 'function'
+@@ -673,7 +678,7 @@
+       return Promise.resolve({ fromVersion: SCHEMA_VERSION, version: SCHEMA_VERSION, reviewMeta: reviewMeta });
+     }
+     if (inflight) return inflight;
+-    inflight = doRun(force).finally(() => { inflight = null; });
++    inflight = doRun(force || needHeal).finally(() => { inflight = null; });
+     return inflight;
+   }
+ 
+@@ -728,6 +733,12 @@
+         throw e;
+       }
+ 
++      // P0-1：进入任何业务键改写前先落「迁移进行中」标记。残留标记 = 上次未提交完成，
++      // 下次启动 run() 会忽略版本快速路径重跑幂等迁移；仅成功后清除。
++      QB.Storage.setSync(QB.KEYS.metaMigrationPending, {
++        from: fromVersion, to: SCHEMA_VERSION, at: Date.now()
++      });
++
+       // 分阶段水合（Phase 0 批次2）：迁移按逻辑键全量枚举（v6→v7 建块/校验、v4→v5 逐库遍历），
+       // 必须先补齐全部物理记录；否则只看到当前库，会出现「只迁移一个库」的静默数据缺口。
+       if (idbUsable && QB.Storage.mode === 'idb') {
+@@ -763,9 +774,12 @@
+         result.backend = await migrateV5ToV6();
+         // v6→v7：已有 IDB 安装的复习状态分块（新装/从 LS 升级在复制时已按块写入，无需再跑）
+         if (idbUsable && fromVersion >= 6) result.reviewChunks = await migrateV6ToV7();
+-        QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
+-        await QB.Storage.flush();
++        // P0-1：提交顺序 = 先结束缓冲并落盘业务数据，再写 schema 版本，最后清迁移标记。
++        // 任一中间点崩溃都可由重启自愈（标记仍在 → 重跑幂等迁移）。
+         QB.Storage.endMigrationBuffer(buffer, true);
++        await QB.Storage.flush();
++        QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
++        QB.Storage.remove(QB.KEYS.metaMigrationPending);
+         try { await backup.markAutoBackupDone(); } catch (_) { /* 进度标记失败不影响迁移结果 */ }
+         releaseLock(owner);
+         return result;
+diff --git a/js/modules/quiz-session.js b/js/modules/quiz-session.js
+index c122b49874a167be8cc9b647fd2d0285a2aa7fa7..d2903a7e668aa6f6ca3d11bd586b1b5410a378b3 100644
+--- a/js/modules/quiz-session.js
++++ b/js/modules/quiz-session.js
+@@ -108,7 +108,11 @@
+     }
+     try {
+       await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
+-    } catch (e) { notifyBackgroundError('保存复习进度失败', e); }
++    } catch (e) {
++      // P0-5：写盘失败必须把「已记录」置位回滚，否则该题本场永久不再收集
++      QB.SRSStore.unmarkGraded([entry]);
++      notifyBackgroundError('保存复习进度失败', e);
++    }
+     return entry;
+   }
+ 
+@@ -152,7 +156,11 @@
+     invalidateReviewLog();
+     if (srsEntries.length) {
+       try { await QB.SRSStore.gradeMany(State.bankId, srsEntries); }
+-      catch (e) { notifyBackgroundError('保存成绩失败', e); }
++      catch (e) {
++        // P0-5：整批写失败时回滚置位，下一次交卷/重试仍会收集这批结果
++        QB.SRSStore.unmarkGraded(srsEntries);
++        notifyBackgroundError('保存成绩失败', e);
++      }
+     }
+     const score = engine.getScore();
+     const durationMs = Date.now() - (State.quizMeta.startTs || engine.startedAt || Date.now());
+diff --git a/js/modules/srs-store.js b/js/modules/srs-store.js
+index ab24275ca1819258460832e4984418ef7cc04dca..cf3a8d6f704a4d670ace1ee613fe15c199efffe2 100644
+--- a/js/modules/srs-store.js
++++ b/js/modules/srs-store.js
+@@ -121,7 +121,7 @@
+    * 同一结果不会被第二次收集，从根上保证一次作答只写一条评分/一条 revlog
+    * （待自评结果不收集也不标记，材料题多步自评在聚合定论后才计入）。
+    * @param {Array<{question:Object, result:Object}>} pairs
+-   * @returns {Array<{question:Object, rating:number}>}
++   * @returns {Array<{question:Object, rating:number, result:Object}>}
+    */
+   function collectGraded(pairs) {
+     const out = [];
+@@ -131,11 +131,22 @@
+       const rating = ratingForResult(r);
+       if (rating === null) return;
+       r.srsRecorded = true;
+-      out.push({ question: p.question, rating: rating });
++      out.push({ question: p.question, rating: rating, result: r });
+     });
+     return out;
+   }
+ 
++  /**
++   * 写盘失败时回滚收集置位（P0-5）：把本次收集的 result 恢复为「待记录」，
++   * 交卷/重试会再次收集，避免一次瞬时写失败导致该题永久丢失复习进度。
++   * @param {Array<{result?:Object}>} entries collectGraded 的返回值
++   */
++  function unmarkGraded(entries) {
++    (entries || []).forEach((e) => {
++      if (e && e.result) e.result.srsRecorded = false;
++    });
++  }
++
+   /** 取某题状态（无记录返回 null） */
+   async function getState(bankId, q) {
+     return await stateFor(bankId, keyFor(q));
+@@ -276,6 +287,6 @@
+ 
+   QB.SRSStore = {
+     getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear,
+-    keyFor, ratingForResult, collectGraded, readMap, writeMap, fuzzSeedFor
++    keyFor, ratingForResult, collectGraded, unmarkGraded, readMap, writeMap, fuzzSeedFor
+   };
+ })(window);
+diff --git a/js/utils/quota.js b/js/utils/quota.js
+index 08ab5bada9195befdf0d70aa4aa77a86315e0748..3b1867549e336c7a633d4e9767876b96bf205976 100644
+--- a/js/utils/quota.js
++++ b/js/utils/quota.js
+@@ -62,6 +62,28 @@
+     return estimateQuestions(list) <= remain;
+   }
+ 
++  /**
++   * 异步容量预检（P0-6）：IDB 模式同步 API 拿不到上限，改用 navigator.storage.estimate()。
++   * - 非 IDB：checked=false（容量预检仍由导入入口的同步 canFitQuestions 负责，避免两套口径）；
++   * - IDB 且 estimate 可用：按 available 与估算比较，checked=true；
++   * - IDB 且 estimate 不可用（隐私模式/无权限/quota=0）：checked=false 显式退化，
++   *   由写入路径的异常捕获 + 回滚兜底，绝不冒充「已检查」。
++   * @param {Array<Object>} list
++   * @returns {Promise<{ok:boolean, checked:boolean, need:number, available:number|null}>}
++   */
++  async function canFitQuestionsAsync(list) {
++    const need = estimateQuestions(list);
++    // 非 IDB：沿用既有同步预检（data-io 入口），此处显式标记未检查，避免重复口径/误拒压测夹具
++    if (!isIdb()) {
++      return { ok: true, checked: false, need: need, available: null };
++    }
++    const est = await estimateAsync();
++    if (!est || !(est.quota > 0)) {
++      return { ok: true, checked: false, need: need, available: null };
++    }
++    return { ok: need <= est.available, checked: true, need: need, available: est.available };
++  }
++
+   /** IDB 模式异步估算（navigator.storage.estimate()；不可用时返回 null） */
+   async function estimateAsync() {
+     try {
+@@ -189,7 +211,8 @@
+   Object.assign(Q, {
+     isIdb: isIdb, limitBytes: limitBytes, usageBytes: usageBytes, remainingBytes: remainingBytes,
+     shardOverheadBytes: shardOverheadBytes, estimateQuestions: estimateQuestions,
+-    canFitQuestions: canFitQuestions, estimateAsync: estimateAsync, formatBytes: formatBytes,
++    canFitQuestions: canFitQuestions, canFitQuestionsAsync: canFitQuestionsAsync,
++    estimateAsync: estimateAsync, formatBytes: formatBytes,
+     bytesOfValue: bytesOfValue, diskBytes: diskBytes,
+     trackWrite: trackWrite, trackDelete: trackDelete, reset: reset, view: view, refresh: refresh
+   });
+diff --git a/scripts/backup-hydration.test.mjs b/scripts/backup-hydration.test.mjs
+index 1260817885713aa2234961b3eff4b68bdc1ea862..1ca4e72ceb05e6b44cc0bd95e649649cfcdde450 100644
+--- a/scripts/backup-hydration.test.mjs
++++ b/scripts/backup-hydration.test.mjs
+@@ -211,19 +211,24 @@ async function main() {
+   // 按库 keysScoped(id) 兜底」，新增 2 个调用点（local-adapter 49 → 51、合计 88 → 90）。
+   // 归类结论（均为已前置/已收窄）：`Storage.keys()` 处于 try/catch，仅在全量视图成立时使用；
+   // 命中 STORAGE_NOT_HYDRATED 才回退，且回退只对 isBankHydrated(id) 为真的库调用 keysScoped(id)。
++  // 2026-11-13 P0-3：`append` 增加磁盘权威读取 `metaOfFresh` / `shardOfFresh`（后者也被 readAllFresh 复用），
++  // 两处均为 getScopedFresh，作用域读取同样受「先水合」约束（与既有 getScoped 同错误码），故纳入冻结口径：
++  // local-adapter 51 → 53。
++  // 2026-11-13 P0-1：`migrate.run` 读取引导键 `meta:migrationPending`（全局键，非库作用域）；
++  // migrate 19 → 20，与既有 meta:schemaVersion 读取同类。
+   const EXPECTED_SITES = {
+     'js/app.js': 2,
+     'js/data/db.js': 1,
+-    'js/data/local-adapter.js': 51,
++    'js/data/local-adapter.js': 53,
+     'js/modules/backup.js': 10,
+-    'js/modules/migrate.js': 19,
++    'js/modules/migrate.js': 20,
+     'js/modules/package.js': 1,
+     'js/modules/start-prefs.js': 2,
+     'js/modules/sync-dav.js': 3,
+     'js/utils/hash-remap.js': 1
+   };
+   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
+-  A.eq(scan.total, 90, '可执行调用点合计 90（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
++  A.eq(scan.total, 93, '可执行调用点合计 93（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
+ 
+   // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
+   A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');
+diff --git a/scripts/backup.test.mjs b/scripts/backup.test.mjs
+index e41ec60b9ef497f23829908dbe777decfef1329d..7d4af64bd37c5dc4b9f74fc52bac9d4459291174 100644
+--- a/scripts/backup.test.mjs
++++ b/scripts/backup.test.mjs
+@@ -144,6 +144,37 @@ ok(QB.Storage.get('roll:onlyOld') && QB.Storage.get('roll:onlyOld').keep === tru
+ eq(QB.Storage.get('roll:onlyNew', null), null, '新写入键被撤销');
+ clearAll();
+ 
++section('P0-2 覆盖恢复：删除已生效后落盘失败，旧键必须整份恢复');
++clearAll();
++QB.Storage.setSync('roll2:shared', { v: 'old' });
++QB.Storage.setSync('roll2:onlyOld', { keep: true });
++const lateFailBackup = {
++  app: 'qforge-backup',
++  version: QB.CONFIG.VERSION,
++  exportedAt: new Date().toISOString(),
++  data: {
++    'roll2:shared': { v: 'new' },
++    'roll2:onlyNew': { fresh: true }
++  }
++};
++const origForceSync = QB.Storage.forceSync.bind(QB.Storage);
++// 仅在「载荷外旧键已被删除」之后再注入落盘失败，复现旧实现回滚只回写 written 的缺口
++QB.Storage.forceSync = function () {
++  if (QB.Storage.get('roll2:onlyOld', null) === null) {
++    return Promise.reject(new Error('模拟恢复第二次落盘失败'));
++  }
++  return origForceSync();
++};
++let lateThrew = false;
++try { await QB.Backup.applyBackup(lateFailBackup); } catch (e) { lateThrew = true; }
++QB.Storage.forceSync = origForceSync;
++ok(lateThrew, '删除后落盘失败：错误上抛');
++eq(QB.Storage.get('roll2:shared') && QB.Storage.get('roll2:shared').v, 'old', '已覆盖键恢复旧值');
++ok(!!(QB.Storage.get('roll2:onlyOld', null) && QB.Storage.get('roll2:onlyOld').keep === true),
++  '已删除的载荷外旧键被恢复（不再丢失）');
++eq(QB.Storage.get('roll2:onlyNew', null), null, '本次新写入键被撤销');
++clearAll();
++
+ section('异常输入');
+ let threw = false;
+ try { await QB.Backup.applyBackup({ app: 'other', data: {} }); } catch (e) { threw = true; }
+diff --git a/scripts/docs-baseline.json b/scripts/docs-baseline.json
+index 0e6a870f21d6ef5cbd4596f0357c7e35a34754cc..b794fb1b7fe7d9dbba6978b90ee37460f9ab8a8d 100644
+--- a/scripts/docs-baseline.json
++++ b/scripts/docs-baseline.json
+@@ -1,8 +1,8 @@
+ {
+-  "generatedAt": "2026-11-12T15:47:33.275Z",
++  "generatedAt": "2026-11-13T02:33:41.867Z",
+   "runItems": 38,
+   "suiteFiles": 37,
+-  "totalAssertions": 6025,
++  "totalAssertions": 6064,
+   "gateCount": 63,
+   "counts": {
+     "smoke-test.mjs": 738,
+@@ -12,7 +12,7 @@
+     "app-boot.test.mjs": 149,
+     "assets.test.mjs": 182,
+     "backup-hydration.test.mjs": 56,
+-    "backup.test.mjs": 151,
++    "backup.test.mjs": 155,
+     "blueprint.test.mjs": 18,
+     "contract.test.mjs": 98,
+     "dom-patch.test.mjs": 40,
+@@ -21,10 +21,10 @@
+     "fsrs-opt.test.mjs": 114,
+     "fsrs.test.mjs": 136,
+     "idb.test.mjs": 446,
+-    "import-commit.test.mjs": 57,
++    "import-commit.test.mjs": 64,
+     "importers-anki.test.mjs": 148,
+     "importers-quizlet.test.mjs": 75,
+-    "migrate.test.mjs": 322,
++    "migrate.test.mjs": 332,
+     "office-export.test.mjs": 1150,
+     "practice-builder.test.mjs": 28,
+     "pwa.test.mjs": 93,
+@@ -32,10 +32,10 @@
+     "review-queue.test.mjs": 51,
+     "rich-text.test.mjs": 66,
+     "sched.test.mjs": 221,
+-    "shard.test.mjs": 131,
++    "shard.test.mjs": 141,
+     "share-link.test.mjs": 93,
+     "source.test.mjs": 39,
+-    "srs.test.mjs": 79,
++    "srs.test.mjs": 87,
+     "static-server.test.mjs": 29,
+     "storage.test.mjs": 109,
+     "sw-runtime.test.mjs": 34,
+@@ -47,7 +47,7 @@
+   "firstScreen": {
+     "scripts": 69,
+     "files": 77,
+-    "rawKB": "795.4",
+-    "gzipKB": "290.2"
++    "rawKB": "803.6",
++    "gzipKB": "293.0"
+   }
+ }
+diff --git a/scripts/import-commit.test.mjs b/scripts/import-commit.test.mjs
+index 48515f710c46db4f51949e8a47285b9f8874346f..8a3108e94625648d3ebe6a0cf5f51206ade66978 100644
+--- a/scripts/import-commit.test.mjs
++++ b/scripts/import-commit.test.mjs
+@@ -329,6 +329,48 @@ const c1 = await makeQB({});
+     '成功 toast 在落盘确认之后（persist@' + persistIdx + ', flush@' + flushIdx + ', success@' + successIdx + '）');
+ }
+ 
++/* ================= 10. P0-6 IDB 配额预检 ================= */
++{
++  section('P0-6 IDB 配额预检：接近上限时写入前拒绝、0 键变化');
++  const raw = new Map();
++  const H = await createHarness(ROOT, {
++    raw: raw,
++    storageEstimate: () => ({ quota: 100000, usage: 95000 })
++  });
++  H.QB.DB.init();
++  const b = await H.QB.DB.banks.create({ name: 'P0-6库' });
++  H.QB.Storage._isIdb = () => true;
++  const keysBefore = H.QB.Storage.keys().slice().sort().join('|');
++  const big = {
++    type: 'single',
++    question: 'x'.repeat(4000),
++    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }],
++    answer: 'A'
++  };
++  let err = null;
++  try { await H.QB.DB.questions.insertMany(b.id, [big]); } catch (e) { err = e; }
++  ok(!!err, '可用空间不足时 insertMany 抛错');
++  eq(err && err.code, 'QUOTA_PRECHECK', '错误码标记为配额预检拒绝');
++  eq(H.QB.Storage.keys().slice().sort().join('|'), keysBefore, '拒绝发生在写入前：键集合零变化');
++  eq(await H.QB.DB.questions.count(b.id), 0, '题库仍为 0 题（未写半批）');
++}
++
++{
++  section('P0-6 estimate 不可用：显式退化，不误拒');
++  const raw = new Map();
++  const H = await createHarness(ROOT, { raw: raw });
++  H.QB.DB.init();
++  const b = await H.QB.DB.banks.create({ name: 'P0-6退化库' });
++  H.QB.Storage._isIdb = () => true;
++  const fit = await H.QB.Quota.canFitQuestionsAsync([{ question: '普通题' }]);
++  eq(fit.checked, false, 'estimate 不可用 → checked:false（不冒充已检查）');
++  eq(fit.ok, true, 'estimate 不可用 → 不误拒');
++  const res = await H.QB.DB.questions.insertMany(b.id, [{
++    type: 'judge', question: '退化路径写入', answer: '正确'
++  }]);
++  eq(res.inserted, 1, '退化为原有写入路径，导入成功');
++}
++
+ /* ================= 汇总 ================= */
+ console.log('\n========================================');
+ console.log('import-commit 断言: ' + (pass + failures.length) + '，通过: ' + pass + '，失败: ' + failures.length);
+diff --git a/scripts/migrate.test.mjs b/scripts/migrate.test.mjs
+index 031d5d91a2940dc79b564cfb3a2dfd19e57124af..c34c4505fc97b4af0138fcc022b702bfcd8d4487 100644
+--- a/scripts/migrate.test.mjs
++++ b/scripts/migrate.test.mjs
+@@ -265,7 +265,7 @@ section('v2→v5：旧单 blob 分片 + 450 条日志分段（幂等）');
+   // 追加只重写尾段（其余分段对象不变）
+   const seg0 = JSON.stringify(QB.Storage.get(QB.KEYS.revlogSeg(0)));
+   const seg1 = JSON.stringify(QB.Storage.get(QB.KEYS.revlogSeg(1)));
+-  QB.DB.revlog.append([{ t: T0 + 500, h: hashes[0], r: 3 }]);
++  await QB.DB.revlog.append([{ t: T0 + 500, h: hashes[0], r: 3 }]);
+   eq(JSON.stringify(QB.Storage.get(QB.KEYS.revlogSeg(0))), seg0, '追加不触碰段 0');
+   eq(JSON.stringify(QB.Storage.get(QB.KEYS.revlogSeg(1))), seg1, '追加不触碰段 1');
+   eq(QB.Storage.get(QB.KEYS.revlogSeg(2)).length, 51, '追加只写入尾段');
+@@ -1046,6 +1046,40 @@ section('P2-06 reviewMeta v3→v4：逐键一致、迁移失败保留原清单')
+   console.log('  [P2-06] 迁移前 v3 清单 3 键 → v4 标记 7B；逐键一致、错题/收藏未变、失败保留原清单');
+ }
+ 
++section('P0-1 迁移提交顺序：落盘失败不提前提交版本，重启自愈');
++{
++  const raw = new Map();
++  const H = await createHarness(ROOT, { raw: raw });
++  H.QB.DB.init();
++  H.QB.Storage.setSync(H.QB.KEYS.metaSchema, 5);
++  await H.QB.Storage.flush();
++  eq(H.QB.Storage.mode, 'ls', '前置：无 IDB，LS 是迁移目标');
++
++  // 注入最终提交失败的落盘：旧实现会先写版本再 flush，导致版本已 7 但数据未提交。
++  // 记录「失败瞬间」的持久版本，避开回滚还原对结论的掩盖（等价于进程在两次写入之间被杀）。
++  let seenAtFailure = null;
++  const origFlush = H.QB.Storage.flush;
++  H.QB.Storage.flush = function () {
++    seenAtFailure = H.QB.Storage.getFresh(H.QB.KEYS.metaSchema, null);
++    return Promise.reject(new Error('injected flush failure'));
++  };
++  let err = null;
++  try { await H.QB.Migration.run(); } catch (e) { err = e; }
++  H.QB.Storage.flush = origFlush;
++  ok(!!err, '落盘失败时迁移抛错（fail-loud）');
++  eq(seenAtFailure, 5, '落盘失败瞬间持久版本仍为 5（未提前提交）');
++  eq(H.QB.Storage.get(H.QB.KEYS.metaSchema), 5, '失败后 schema 版本仍为 5（未提前提交）');
++  const marker = H.QB.Storage.get(H.QB.KEYS.metaMigrationPending, null);
++  ok(!!(marker && marker.from === 5 && marker.to === 7), '迁移进行中标记保留（供重启自愈）');
++  ok(!H.QB.Storage.getFresh(H.QB.KEYS.metaMigrationLock, null), '失败后迁移锁已释放');
++
++  const r2 = await H.QB.Migration.run();
++  eq(r2.fromVersion, 5, '残留标记使快速路径失效：自愈重跑 fromVersion=5');
++  eq(H.QB.Storage.get(H.QB.KEYS.metaSchema), 7, '自愈成功后版本=7');
++  eq(H.QB.Storage.get(H.QB.KEYS.metaMigrationPending, null), null, '成功后清除迁移进行中标记');
++  ok(!H.QB.Storage.getFresh(H.QB.KEYS.metaMigrationLock, null), '自愈完成后迁移锁已释放');
++}
++
+ console.log('\n================ 汇总 ================');
+ console.log('通过: ' + pass + '，失败: ' + failures.length);
+ if (failures.length) {
+diff --git a/scripts/shard.test.mjs b/scripts/shard.test.mjs
+index ea580a79307ce8cf2490c212588b295b3883b50e..1c1ef1752137f6a3669fef80acdb811cdf6fa470 100644
+--- a/scripts/shard.test.mjs
++++ b/scripts/shard.test.mjs
+@@ -438,6 +438,71 @@ section('C018 题目内存索引：单题 O(1) 定位、merge 去重免全量读
+   eq((await QB.DB.questions.get('q-7')).id, 'q-7', 'removeMany 后索引失效，余题读取正确');
+ }
+ 
++section('P0-3 跨标签 append：并发追加取并集，不互相覆盖');
++{
++  const raw = new Map();
++  const ROOT = path.resolve(__dirname, '..');
++  const H1 = await createHarness(ROOT, { raw: raw });
++  H1.QB.DB.init();
++  const b = await H1.QB.DB.banks.create({ name: '并发追加库' });
++  const H2 = await createHarness(ROOT, { raw: raw });
++  H2.QB.DB.init();
++  const a = [mkQ(101)];
++  const a2 = [mkQ(102)];
++  const c = [mkQ(103), mkQ(104)];
++  await H1.QB.DB.questions.insertMany(b.id, a, { dedupe: false });
++  // H2 先读取一次完成缓存预热；随后 H1 再写入时 H2 尚未收到跨标签事件（并发窗口）
++  eq((await H2.QB.DB.questions.list(b.id, {})).items.length, 1, '预热：H2 看到 1 题');
++  await H1.QB.DB.questions.insertMany(b.id, a2, { dedupe: false });
++  await H2.QB.DB.questions.insertMany(b.id, c, { dedupe: false });
++  const H3 = await createHarness(ROOT, { raw: raw });
++  H3.QB.DB.init();
++  const list = (await H3.QB.DB.questions.list(b.id, {})).items;
++  const ids = list.map((q) => q.id).sort();
++  eq(list.length, 4, '两标签交错追加后为并集（实际 ' + list.length + ' 题）');
++  eq(ids.join(','), ['q-101', 'q-102', 'q-103', 'q-104'].sort().join(','), '并集包含双方题目 id');
++  eq(await H3.QB.DB.questions.count(b.id), 4, '清单 count 与并集一致');
++}
++
++section('P0-4 insertMany 失败原子回退：不误删并发新增、去重索引不污染');
++{
++  const raw = new Map();
++  const ROOT = path.resolve(__dirname, '..');
++  const H1 = await createHarness(ROOT, { raw: raw });
++  H1.QB.DB.init();
++  const b = await H1.QB.DB.banks.create({ name: '原子回退库' });
++  const H2 = await createHarness(ROOT, { raw: raw });
++  H2.QB.DB.init();
++  await H1.QB.DB.questions.insertMany(b.id, [mkQ(201)], { dedupe: false });
++  eq((await H2.QB.DB.questions.list(b.id, {})).items.length, 1, '预热：H2 看到 1 题');
++  // 另一标签并发追加（H2 尚未收到事件）
++  await H1.QB.DB.questions.insertMany(b.id, [mkQ(202)], { dedupe: false });
++
++  const origForce = H2.QB.Storage.forceSync.bind(H2.QB.Storage);
++  let failOnce = true;
++  H2.QB.Storage.forceSync = function () {
++    if (failOnce) { failOnce = false; throw new Error('injected persist failure'); }
++    return origForce();
++  };
++  let threw = false;
++  try { await H2.QB.DB.questions.insertMany(b.id, [mkQ(203)]); } catch (e) { threw = true; }
++  H2.QB.Storage.forceSync = origForce;
++  ok(threw, '落盘失败时 insertMany 抛错');
++
++  const H3 = await createHarness(ROOT, { raw: raw });
++  H3.QB.DB.init();
++  const after = (await H3.QB.DB.questions.list(b.id, {})).items;
++  const ids = after.map((q) => q.id).sort();
++  eq(ids.join(','), 'q-201,q-202', '回滚只撤销本批 q-203，保留另一标签并发新增的 q-202');
++
++  const retry = await H2.QB.DB.questions.insertMany(b.id, [mkQ(203)]);
++  eq(retry.inserted, 1, '重试同批成功插入（去重索引未被失败批次污染）');
++  eq(retry.duplicates, 0, '重试不误判为重复');
++  const H4 = await createHarness(ROOT, { raw: raw });
++  H4.QB.DB.init();
++  eq((await H4.QB.DB.questions.list(b.id, {})).items.length, 3, '最终并集 3 题');
++}
++
+ console.log('\n================ 汇总 ================');
+ console.log('通过: ' + pass + '，失败: ' + failures.length);
+ if (failures.length) {
+diff --git a/scripts/srs.test.mjs b/scripts/srs.test.mjs
+index cefc7a8087027387ee07d118e755cce5ebaa011c..1ff687faac20d3ab4097b242adc45bc659141a0f 100644
+--- a/scripts/srs.test.mjs
++++ b/scripts/srs.test.mjs
+@@ -333,6 +333,39 @@ section('写失败仍可观测：同步落盘失败抛错 + onWriteError 通知
+   ok(errs.length >= 1, 'onWriteError 已通知（可观测，不静默）');
+ }
+ 
++section('P0-5 评分置位与落盘顺序：写失败不永久丢失');
++{
++  const raw = new Map();
++  const H = await createHarness(ROOT, { raw });
++  H.QB.DB.init();
++  const bank = await H.QB.DB.banks.create({ name: 'P0-5库' });
++  await H.QB.DB.questions.insertMany(bank.id, [
++    { type: 'single', question: 'P0-5 评分题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
++  ], { dedupe: false });
++  const q = (await H.QB.DB.questions.list(bank.id, {})).items[0];
++  const key = H.QB.SRSStore.keyFor(q);
++  const result = { isCorrect: true, partial: false, srsRecorded: false };
++  const [entry] = H.QB.SRSStore.collectGraded([{ question: q, result }]);
++  eq(!!(entry && entry.result), true, '收集条目附带 result 引用（供失败回滚复位）');
++  await H.QB.Storage.flush();
++  // 注入同步落盘失败：grade 必须抛错，且本次置位可回滚
++  H.controls.failWrites = true;
++  let threw = false;
++  try { await H.QB.SRSStore.grade(bank.id, entry.question, entry.rating, T0); } catch (e) { threw = true; }
++  H.controls.failWrites = false;
++  ok(threw, '注入写失败：grade 抛错（不假成功）');
++  eq(result.srsRecorded, true, '写失败时置位暂留（等待调用方回滚）');
++  ok(typeof H.QB.SRSStore.unmarkGraded === 'function', '提供 unmarkGraded 回滚入口');
++  if (typeof H.QB.SRSStore.unmarkGraded === 'function') H.QB.SRSStore.unmarkGraded([entry]);
++  eq(result.srsRecorded, false, '回滚后恢复为待记录');
++  const again = H.QB.SRSStore.collectGraded([{ question: q, result }]);
++  eq(again.length, 1, '同一结果可再次收集（不永久丢失）');
++  await H.QB.SRSStore.grade(bank.id, again[0].question, again[0].rating, T0);
++  eq(result.srsRecorded, true, '重试写入成功后置位');
++  const logs = (await H.QB.FSRSOpt.readLog()).filter((e) => e.h === key);
++  eq(logs.length, 1, '重试后 revlog 恰 1 条（无重复）');
++}
++
+ console.log('\n================ 汇总 ================');
+ console.log('通过: ' + pass + '，失败: ' + failures.length);
+ if (failures.length) {
+diff --git a/scripts/sw-baseline.json b/scripts/sw-baseline.json
+index 0d05eba5cdc277e2a3f15dd1d6ef91a670382c0b..8d94eedcf91df5957486bccc94ab5fc90e14bd37 100644
+--- a/scripts/sw-baseline.json
++++ b/scripts/sw-baseline.json
+@@ -1,4 +1,4 @@
+ {
+-  "cache": "qforge-v61",
+-  "digest": "39c125d9313411ece68b5df622dbdfefe2481283a309020216d020e5c8d16972"
++  "cache": "qforge-v62",
++  "digest": "fa9a8f2dc6bacc708d2a6118ccbb213855dda15a4c7a427c17513844b4165d2e"
+ }
+diff --git a/sw.js b/sw.js
+index 3a2ef09fb1d47bf106b194f92d034f06ed808187..8739372a6d95d0b115747f7ef522858c3103d081 100644
+--- a/sw.js
++++ b/sw.js
+@@ -12,7 +12,7 @@
+  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
+  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
+  */
+-const CACHE = 'qforge-v61';
++const CACHE = 'qforge-v62';
+ // 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
+ const CACHE_PREFIX = 'qforge-';
+ const CORE = [

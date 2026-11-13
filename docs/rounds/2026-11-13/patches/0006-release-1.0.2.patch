@@ -1,0 +1,75 @@
+diff --git a/docs/DEVELOPMENT.md b/docs/DEVELOPMENT.md
+index 221525142eb81bb8f37efefbf780c8166d08b009..ba6eba2ecfb2959f3663a6ff8fe2c683f5ea615b 100644
+--- a/docs/DEVELOPMENT.md
++++ b/docs/DEVELOPMENT.md
+@@ -10,7 +10,7 @@
+ 
+ | 读数 | 当前值 | 事实源 |
+ | --- | --- | --- |
+-| SW 缓存版本 | qforge-v66 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
++| SW 缓存版本 | qforge-v67 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+ | 数据 schemaVersion | 7 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
+ | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
+ 
+diff --git a/docs/RELEASE-CHECKLIST.md b/docs/RELEASE-CHECKLIST.md
+index c67c90b5584664db0db8aea089d138e87a0a8237..6b08ce3d5404dc567b6e6b67a4b7153be92317f9 100644
+--- a/docs/RELEASE-CHECKLIST.md
++++ b/docs/RELEASE-CHECKLIST.md
+@@ -61,7 +61,7 @@ npm run verify
+       **该工作流不部署**，线上内容只由 `main` 决定。
+ - [ ] 本地复算产物（不写仓库）：
+ ```powershell
+-node scripts/build-staging.mjs --out .analysis\staging --version v1.0.1 --assert
++node scripts/build-staging.mjs --out .analysis\staging --version v1.0.2 --assert
+ node scripts/build-staging.mjs --selftest
+ ```
+ - [ ] PR 上只跑 dry-run：生成产物后断言 `?v=` 数量 = `<script src>` 数、`CACHE` 与版本一致、`git status --porcelain` 为空。
+diff --git a/js/config.js b/js/config.js
+index b58b1e33d948ecd8b7f4e5823d04692f479f0c4e..c4a8d1bd7a0930361560bd18faaf7cbd6eb3a7b8 100644
+--- a/js/config.js
++++ b/js/config.js
+@@ -130,7 +130,7 @@
+ 
+   QB.CONFIG = {
+     APP_NAME: '淬题',
+-    VERSION: '1.0.1',
++    VERSION: '1.0.2',
+ 
+     // 数据后端：'local' | 'api'（可由 backendOverride 覆盖，见上）
+     DATA_BACKEND: OVERRIDE.backend || 'local',
+diff --git a/package.json b/package.json
+index 398697be3572b1d4b989acee32446685138bf1f2..0232dd1eb9df3681116941f453b9f83de569d3a5 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "qforge",
+-  "version": "1.0.1",
++  "version": "1.0.2",
+   "private": true,
+   "description": "淬题 qforge —— 零依赖、本地优先的题库 / 刷题 / FSRS 间隔重复静态应用",
+   "scripts": {
+diff --git a/scripts/sw-baseline.json b/scripts/sw-baseline.json
+index 3dec374e9f4b1b841badc482982fa6802d01dbf4..46687551076c4fb73b2164bec759a273a935f5aa 100644
+--- a/scripts/sw-baseline.json
++++ b/scripts/sw-baseline.json
+@@ -1,4 +1,4 @@
+ {
+-  "cache": "qforge-v66",
+-  "digest": "a19b18fe38485e167b3b7cb3ada65a14c99cd625229209aa40deb5a1eefb75b9"
++  "cache": "qforge-v67",
++  "digest": "19d91b5d6ddd9dad6ab054681100a38358df6bf314165b5ae721a76af3426be7"
+ }
+diff --git a/sw.js b/sw.js
+index 7959065d58aed97c7238142a717607140d2870ab..9d4680b05fd9892942e67a7b48f0efd96ca8c9bc 100644
+--- a/sw.js
++++ b/sw.js
+@@ -12,7 +12,7 @@
+  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
+  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
+  */
+-const CACHE = 'qforge-v66';
++const CACHE = 'qforge-v67';
+ // 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
+ const CACHE_PREFIX = 'qforge-';
+ const CORE = [

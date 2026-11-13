@@ -1,0 +1,1118 @@
+diff --git a/docs/BENCH-DATA.md b/docs/BENCH-DATA.md
+index a24371d64451c56969b92117c65b9c9a336e7e39..16ffb6afe9397a5108cb2e819e10a91bb3b1db69 100644
+--- a/docs/BENCH-DATA.md
++++ b/docs/BENCH-DATA.md
+@@ -63,7 +63,7 @@
+ 
+ ### D-3. C 系列、存储与阶段 0/2/3 验收读数
+ 
+-bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw，2026-11-13 阶段 2A 契约语义对等复测 294.0 KB gzip / 807.0 KB raw，2026-11-13 阶段 2B 判分与统计口径复测 294.5 KB gzip / 808.4 KB raw）：**294.5 KB gzip / 808.4 KB raw**；按需包 23 个脚本另行随用随取（**跨包去重**合计 323.9 KB raw / 111.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
++bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw，2026-11-13 阶段 2A 契约语义对等复测 294.0 KB gzip / 807.0 KB raw，2026-11-13 阶段 2B 判分与统计口径复测 294.5 KB gzip / 808.4 KB raw，2026-11-13 阶段 2C 备份/同步/导入复测 295.2 KB gzip / 810.0 KB raw）：**295.2 KB gzip / 810.0 KB raw**；按需包 23 个脚本另行随用随取（**跨包去重**合计 323.9 KB raw / 111.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
+ 
+ > **逻辑键视图（C1）新增两行门禁（2026-11-07，50k/IDB 档，同机 `--expose-gc`，各 5/20 采样）**
+ > - `keys()` 首次构建（50000 题 · IDB）：中位 **15.08–17.38 ms**（三次门禁最小 11.89–14.22 / 最大 32.83–40.61，门禁按中位数判定），门禁 **≤40 ms**；逻辑键 **5.0 万级（本次 50361 个字符串物化，随夹具哈希去重略有浮动）**。（**2026-11-12 起口径已变更**：判定改为 10 轮最小样本 ≤ Node 大版本基线×1.35，见 **3-B-1**；本行保留为历史读数。）
+diff --git a/docs/DEVELOPMENT.md b/docs/DEVELOPMENT.md
+index 8836b82636bbcf8bc8b6dc03dc03b3131a86e8f6..e0ecf7176583781c9b13093f412bab5f33fe096b 100644
+--- a/docs/DEVELOPMENT.md
++++ b/docs/DEVELOPMENT.md
+@@ -10,7 +10,7 @@
+ 
+ | 读数 | 当前值 | 事实源 |
+ | --- | --- | --- |
+-| SW 缓存版本 | qforge-v64 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
++| SW 缓存版本 | qforge-v65 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+ | 数据 schemaVersion | 7 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
+ | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
+ 
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index fcd190f0a9f1cd479b88a83258bd72784401437d..35c8573e434acf4f8ee4fede56cf549c41849ec1 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -75,17 +75,17 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红
+ | `scripts/blueprint.test.mjs` | **18** | 题型×分类×难度筛选/抽题/缺口、种子可复现 |
+ | `scripts/share-link.test.mjs` | **93** | **C011 分享回链/粘贴码（离线往返）**：Base64 与 Node Buffer 逐字节一致 + URL-safe 可逆、坏字符抛错；ShareLink 同字节同码、`#share=` 回链/纯码双形态、`buildLink` 去旧 fragment、空/错前缀/非法字符抛错；**三库（图片/公式/材料题）collect→qbk(manifest)→encode→decode→runImport 往返：题数 3/3、contentHash 集合 100% 相等、packageId/version/checksum 三字段一致、清单与题数复核通过、包字节校验和相等、零清单警告**；材料父子结构与材料正文往返；**全程 stub `fetch` 调用计数 0（离线可用）**；只读分享页无 `<script>`/无内联事件、图片 data URL 内嵌、公式 `rt-frac`；粘贴纯码与完整回链均解析出题；**R-19 分享体积（12 项）：`estimateChars` 1..256 字节与 540 题/8MB 边界逐字节等于 `encode(...).length`；540 题大包预计回链 > 64 KB 时先确认、取消后 `encode` 0 次、返回 null、不打开分享弹窗** |
+ | `scripts/practice-builder.test.mjs` | **28** | **C010 错题/薄弱一键组卷（纯函数零写入）**：`Statistics.reviewStats` 按题库过滤与逐题聚合（r>=good 计正确、hard 计作答）、薄弱口径 4 组边界（3 次 1 对/2 次 2 对/1 次错/hard+good）、错题成员恒入、只含错题∪薄弱、内容键去重、limit、同 seed 确定性、空池 reason、材料题父子结构、**整库 raw 键值快照前后逐项一致** |
+-| `scripts/source.test.mjs` | **41** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入）；**无响应文案不出现 undefined（运算符优先级回归）**；**考试倒计时/刷新恢复关键接线（5 项）：timerText 传入、#quiz-timer 渲染与每秒更新、pagehide flush、remainingMs 统一口径**；**开始弹窗参数记忆接线（4 项）：load/save、无题库守卫、index 加载 start-prefs** |
++| `scripts/source.test.mjs` | **47** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入）；**无响应文案不出现 undefined（运算符优先级回归）**；**考试倒计时/刷新恢复关键接线（5 项）：timerText 传入、#quiz-timer 渲染与每秒更新、pagehide flush、remainingMs 统一口径**；**历史成绩写入字段一致性（P1-8，2 项）：交卷 `History.add` 与自评 `History.update` 均上报 `partial`**；**开始弹窗参数记忆接线（4 项）：load/save、无题库守卫、index 加载 start-prefs**；**P1-17 xlsx 行列上限（6 项）：上限常量与 `readSheets` 透传、`maxRows/maxCols` 不再为 Infinity** |
+ | `scripts/fsrs.test.mjs` | **136** | py-fsrs 6.3.2 黄金对照（S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f 1.391987、同日 S′_s 3.051249/10/10/15.534308）、衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term 阈值、1m/10m learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz（区间/分布/确定性） |
+ | `scripts/fsrs-opt.test.mjs` | **114** | revlog/FIFO/作用域隔离、四门控、**留出门控（holdout 20%/gateBasis）+历史最佳权重-loss 自洽**、合成日志留出 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；**增量重训（P1，23 项）：`trainedLogLen` 训练点、`shouldRetrain` 阈值与 `minNew` 可调、热启动 `warmStarted`、Worker 透传 `startWeights`/`WARM_ITERATIONS`**；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
+-| `scripts/srs.test.mjs` | **87** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项）；**崩溃/强杀不丢评分（16 项）：返回即落盘、重启补全+幂等、失败可观测（T10）、IDB 模式直读断言已提交** |
+-| `scripts/storage.test.mjs` | **113** | **C1 keys 精准失效（23 项，LS + IDB 双模式）：更新已存在键不推进 `_keysRev`、`keys()` 不整体重建（命中 <1ms）；真正删除/新增各重建一次后回到命中路径；`_awaitDeletes` 待删键不可见；LS 跨标签事件下仅新增/删除才失效（更新已存在键不合入视图）；IDB 侧 tombstone（值 undefined）不可见、`_chunkLookup` 物理块内键展开、对端 `values[k]` 前后可见性比较（已存在键更新 0 失效 / 新增与删除各 1 次 / 幽灵键 0 失效）；`keys()` 返回副本**；**R-08 跨标签错题合并（5 项）：本地/远端错题并集不整值覆盖、同题 `wrongCount`/`lastAt` 取较大值、本地独有题保留、收藏保持整值覆盖（防误改）**；setSync 即落盘/配额抛错+onError+待写重试、forceSync、跨标签 storage 事件、keys 合并 pending；**`Helpers.debounce().cancel`（丢弃挂起调用）+ 会话清空压过挂起防抖保存的竞态回归（交卷后不再「继续上次」）**；**pagehide flush 立即落盘/clear 后 flush 不复活会话（3 项）**；**跨标签复习状态按 ReviewMerge 合订（8 项）+ 本地 record/patch 单快照/失败回滚（3 项）**；**C008 双标签复习状态（8 项）：两个独立 harness 共享底层存储，A/B 各走真实 `put` → 逐键状态事件后 `stateKeys`/`readMap` 均覆盖双方、meta 为 v4 标记且 ≤16B 不含 keys、重复/非法载荷不破坏状态**；**P2-06 reviewMeta 写入字节（8 项）：拦截底层写入，1000 个新 hash → meta 写入 1 次 / 累计 7B / 末次 7B，物理键/统计/整表均 1000**；**C009 用量快照（6 项）：`Quota.reset` + 快照与 `refresh()` 全量估算误差 ≤0.1%（5 组固定种子）、覆盖/删除后增量同步、`clearAll` 后快照失效**；**R-07 字节口径唯一化（6 项）：`Storage.fullKeyOf` / `Quota.bytesOfValue` 已导出、物理键与 CONFIG 前缀一致、`usageBytes` 增量 = Σ `bytesOfValue`（5 种夹具 152B）、公式固定、`diskBytes` 复用同一物理键** |
+-| `scripts/backup.test.mjs` | **155** | 全量备份、覆盖/合并恢复、**恢复后题目缓存失效（C016/P2-01，4 项）：缓存先装载旧题 → 恢复 → 题目写修订号递增、`DB.loadQuestions` 不命中旧缓存返回新题**、**资产先写后切（C017/P2-11，7 项）：注入资产写失败 → 抛错、旧资产数量与内容不变；成功后新资产在、旧资产才被清理**、**forceSync（C017，8 项）：IDB 返回可等待 Promise、事务完成前不 resolve、完成后值落盘、flush 失败上抛**、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项）、**备份载荷两布局识别与双向转换（65 项）：`isServerFormat`/`isLocalFormat`、`serverToLocal`（题目映射 → 分片+清单、题目/进度/历史 snake→camel、本地专有 meta 直通）、`localToServer`（分片重组 → `{bankId:[题]}`、往返一致）、`applyBackup` 按 `QB.DB.backend` 自动转换（真机缺陷回归：后端载荷在 local 模式下恢复出 3 题而非 0 题；api 模式反向转换 + 已是后端布局则透传）**、**F3 跨版本降级（29 项）：默认 v5 备份被旧客户端明确拒绝（错误可读、未写入）、兼容导出 schema 4 + v2 hash + 旧单 blob/整表布局、清空恢复后 Migration 归一为 v3 且题库/题目/SRS/错题/收藏/日志逐项回位、32 位 hash 冲突拒绝导出**、**R-03 数据层端口（4 项）：sched/backup 端口已由领域模块注册、备份端口缺失抛可读错误（不静默返回空数据）、恢复端口后 export 正常返回 `{ data }`** |
+-| `scripts/backup-hydration.test.mjs` | **56** | **Phase 0 收尾硬证据（分阶段水合）**：50k/4 库真实写路径播种（`insertMany` + `reviews.record`）；新页面懒启动仅水合当前库（12,500 逻辑键 + 64 题目键）；**三条备份路径完整性**——`Backup.buildBackup`（记录计数 50,000 / 按键计数 256，4 库逐库 12,500）、`saveAutoBackup`+`readAutoBackup`（同口径，原始键数 ≥50,256）、`applyData(replace)` 快照（未水合库 E 的题目分片与复习块物理删除、记录 50,000 / 键 256、banks=4）；**未水合读取语义 (b)**——`Storage.get/getFresh` 返回 defaultValue 不抛错、`ensureBank` 后可见；**静态护栏**——去注释后 `Storage.keys|get|getFresh|keysScoped|getScoped|getScopedFresh` 89 处逐文件冻结，新增调用点即红；**C 步骤2（9 项）**——A 段前置静态护栏（`backup.export`/`saveAutoBackup`/`applyData` 的 ensureAll 早于读取、`applyBackup` 全局键、`migrate.run` ensureAll 早于 `migrate*` 且仅 IDB 目标）+ `bankIds` 运行时证据（未水合库状态键不在视图、库 id 经全局 `banks` 补全）；**路径3 严格前置（4 项）**：`__strictReads=true`、库B/E 未水合、部分视图 `keys()` 被严格守卫拒绝（50k 恢复必须依赖 `applyData` 内 `ensureAll`）；红例 `QFORGE_HYDRATION_RED=1` 退化为 12,500/64 且 E 残留（35 通过 / 14 失败） |
+-| `scripts/migrate.test.mjs` | **332** | v1→v5 全链路（contentHash v1/v2→v3（64 位）重映射、review/wrong/fav/revlog 键重映射、revlog 回填 b、分片化与一致修复）；**v4→v5 布局迁移（整表复习 → per-hash + v4 标记、整表日志 → 200 条/段追加、逐条完整性）**；**P2-06 reviewMeta v3→v4（启动期幂等压缩；迁移前后 `readMap` 逐键 Deep-equal、计数不变、错题/收藏逐字节未变、二次运行 0 写入、注入 meta 写失败保留原 v3 清单与全部状态）**；双读（旧整表与 per-hash 合并、旧日志清单缺失回退）；幂等（`force` 重跑逐字节不变、同题干异答案共存）；**断点重入/中断回滚（注入失败后 snapshot 恢复）、多标签共享存储仅迁移一次、`ensureLayout` 归一**；**F1 迁移前自动备份（写入前落盘、进度标记、备份恢复逐键一致、备份失败即中止且无半写、IDB `open()` 抛 `SecurityError` 回落 LS 且业务快照不变）**；**F2 多标签败者等待切换并补写（等待期 raw LS 不增键、切换后收藏 21→21、旧 LS 收藏被清理、重启仍 21）**；**F2b 持锁标签崩溃（锁过期）后等待者重抢锁接管：等待期收藏 21/22 回放、`takeover` 有值、`takeoverMs`、`_awaiting` 复位、锁释放、重启仍 22**；**F2c 胜者只是慢：锁 2s 心跳续租（`at` 前进、owner 不变）、等待者重抢返回 `locked`、实际迁移调用 0，最终 21 且无双迁移**；**P1 迁移期零 LS 业务写入（旧整表→IDB，raw.set 业务键 0、IDB 2 题/2 状态/2 日志逐键一致）**；**P2/P3/P4 容量预检（充足静默、IDB 不可用+不足写入前 `LS_CAPACITY` 无残留、≥85% nearLimit、IDB 可用超预算放行）**；**C007 回归：无旧整表日志时 `RevlogStore.convertLegacy` 不写空清单（避免启动期业务键令回落标记误降级）** |
+-| `scripts/shard.test.mjs` | **145** | 题目库分片存储：切分与清单、追加只写尾分片、按需单页只解析覆盖分片（冷读调用捕获）、越界零读、跨分片边界、单题 update/remove 只写所在分片、空分片回收、overwrite 高位回收、removeMany 跨分片、旧单 blob 兼容与写时迁移、删库级联清分片；**删除一致性（33 项）：单删清空中间分片后重编号且余题可读、removeMany 整片删除后余题可读、孤儿分片 `invariant` 检出与 `compact` 修复、迁移 v3→v4 启动自检修复坏清单并幂等**；**UI 级按需装载（阶段 A）：`count` 直读清单零分片解析、`loadQuestions` 缓存命中同一数组实例、`buildIndex` 复用缓存、create/update/remove 使修订号 +1 并令缓存失效重读、refresh 强制重读、空 bankId 安全返回**；**C018 内存索引（16 项）：预热后 `get` 0 次 `locate`（旧实现每次 ≥1 次）、merge 重复导入 0 次 `readAll`（旧实现 2 次）、全量重复判重/不新增/总数不变、merge 新增后再导入仍判重、update 后索引位置有效且哈希集同步、删除/removeMany 后同片位置前移仍读取正确** |
+-| `scripts/sync-dav.test.mjs` | **69** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404；**真实 HTTP 集成（本地 CORS WebDAV 验证端点 `serve-webdav.mjs`）：预检 OPTIONS 204 + 放行 Authorization + 回显 Origin、真实 PUT 201 并落盘可解析 JSON、错误密码 401、含图 PUT → 端点收 ZIP（PK 头）、真实 GET 下载解析、无对象 404（12 项）**；**C027 密码加密（20 项）：落盘 v2 无 `pass` 明文、密文含 alg/iv/data、随机 IV 两次密文不同、`loadConfig` 解密还原、`getConfig` 只报 `hasPass`、clearConfig；旧明文迁移（加密→回读校验→覆盖、删明文、二次读取幂等）、篡改首字节 → 空密码 + 可见错误、清空密码移除密文；上传使用解密密码（Basic 头还原 `u:s3cret-pw`）**；**R-14 密码不进 HTML 属性（4 项）：含引号/尖括号/& 的密码原文与转义形态均不出现在 `openModal` HTML、`data-dav="pass"` 无 `value` 属性、密码经回调里的 DOM `value` 回填且上传仍可用** |
+-| `scripts/sw-runtime.test.mjs` | **34** | Service Worker 运行时门禁（Node VM 加载 `sw.js`，内存 CacheStorage/fetch 替身）：install 预缓存清单与 CORE 逐项一致、**预缓存失败必须 reject 且不 skipWaiting**、导航仅 2xx 回写 `index.html`（500 不覆盖离线壳）、离线导航回退、静态资源缓存优先+仅 2xx 后台更新、非 GET/跨源/`/api` 不接管、**activate 只删本站 `qforge-*` 前缀内非当前版本并 claim（R-11：同源其他应用 `other-app-v1` 不被删除且内容保留，2 项）**、**缓存版本基线（`scripts/sw-baseline.json` 记录 CACHE + 93 个 js/css 摘要，改资源未 bump 即红）**；变异 `--mutate` 改摘要不动版本 → 33 通过 / 1 失败（exit 1） |
++| `scripts/srs.test.mjs` | **92** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项）；**崩溃/强杀不丢评分（16 项）：返回即落盘、重启补全+幂等、失败可观测（T10）、IDB 模式直读断言已提交**；**P1-10 无 patch 回退合并（5 项）：提交前重读并按 last 合并，不覆盖其他标签新状态** |
++| `scripts/storage.test.mjs` | **113** | **C1 keys 精准失效（23 项，LS + IDB 双模式）：更新已存在键不推进 `_keysRev`、`keys()` 不整体重建（命中 <1ms）；真正删除/新增各重建一次后回到命中路径；`_awaitDeletes` 待删键不可见；LS 跨标签事件下仅新增/删除才失效（更新已存在键不合入视图）；IDB 侧 tombstone（值 undefined）不可见、`_chunkLookup` 物理块内键展开、对端 `values[k]` 前后可见性比较（已存在键更新 0 失效 / 新增与删除各 1 次 / 幽灵键 0 失效）；`keys()` 返回副本**；**R-08 跨标签错题合并（5 项）：本地/远端错题并集不整值覆盖、同题 `wrongCount`/`lastAt` 取较大值、本地独有题保留、收藏保持整值覆盖（防误改）**；setSync 即落盘/配额抛错+onError+待写重试、forceSync、跨标签 storage 事件、keys 合并 pending；**`Helpers.debounce().cancel`（丢弃挂起调用）+ 会话清空压过挂起防抖保存的竞态回归（交卷后不再「继续上次」）**；**pagehide flush 立即落盘/clear 后 flush 不复活会话（3 项）**；**跨标签复习状态按 ReviewMerge 合订（8 项）+ 本地 record/patch 单快照/失败回滚（3 项）**；**C008 双标签复习状态（8 项）：两个独立 harness 共享底层存储，A/B 各走真实 `put` → 逐键状态事件后 `stateKeys`/`readMap` 均覆盖双方、meta 为 v4 标记且 ≤16B 不含 keys、重复/非法载荷不破坏状态**；**P2-06 reviewMeta 写入字节（8 项）：拦截底层写入，1000 个新 hash → meta 写入 1 次 / 累计 7B / 末次 7B，物理键/统计/整表均 1000**；**C009 用量快照（6 项）：`Quota.reset` + 快照与 `refresh()` 全量估算误差 ≤0.1%（5 组固定种子）、覆盖/删除后增量同步、`clearAll` 后快照失效**；**R-07 字节口径唯一化（6 项）：`Storage.fullKeyOf` / `Quota.bytesOfValue` 已导出、物理键与 CONFIG 前缀一致、`usageBytes` 增量 = Σ `bytesOfValue`（5 种夹具 152B）、公式固定、`diskBytes` 复用同一物理键**；**P1-4a 跨标签变更信号（4 项）：同轮多键合并为一次派发、无变更不发、注销后不再回调、本轮监听器快照不受后续注册影响** |
++| `scripts/backup.test.mjs` | **175** | 全量备份、覆盖/合并恢复、**恢复后题目缓存失效（C016/P2-01，4 项）：缓存先装载旧题 → 恢复 → 题目写修订号递增、`DB.loadQuestions` 不命中旧缓存返回新题**、**资产先写后切（C017/P2-11，7 项）：注入资产写失败 → 抛错、旧资产数量与内容不变；成功后新资产在、旧资产才被清理**、**forceSync（C017，8 项）：IDB 返回可等待 Promise、事务完成前不 resolve、完成后值落盘、flush 失败上抛**、**恢复失败快照回滚**、**WebDAV 密码脱敏**（6 项）、**备份载荷两布局识别与双向转换（65 项）：`isServerFormat`/`isLocalFormat`、`serverToLocal`（题目映射 → 分片+清单、题目/进度/历史 snake→camel、本地专有 meta 直通）、`localToServer`（分片重组 → `{bankId:[题]}`、往返一致）、`applyBackup` 按 `QB.DB.backend` 自动转换（真机缺陷回归：后端载荷在 local 模式下恢复出 3 题而非 0 题；api 模式反向转换 + 已是后端布局则透传）**、**F3 跨版本降级（29 项）：默认 v5 备份被旧客户端明确拒绝（错误可读、未写入）、兼容导出 schema 4 + v2 hash + 旧单 blob/整表布局、清空恢复后 Migration 归一为 v3 且题库/题目/SRS/错题/收藏/日志逐项回位、32 位 hash 冲突拒绝导出**、**R-03 数据层端口（4 项）：sched/backup 端口已由领域模块注册、备份端口缺失抛可读错误（不静默返回空数据）、恢复端口后 export 正常返回 `{ data }`**；**阶段 2C（22 项）：未消费的迁移前快照不被覆盖、merge 中途失败回滚并给出已写键清单、资产恢复前结构校验、JSON 体积/条目上限与导出前拒绝** |
++| `scripts/backup-hydration.test.mjs` | **58** | **Phase 0 收尾硬证据（分阶段水合）**：50k/4 库真实写路径播种（`insertMany` + `reviews.record`）；新页面懒启动仅水合当前库（12,500 逻辑键 + 64 题目键）；**三条备份路径完整性**——`Backup.buildBackup`（记录计数 50,000 / 按键计数 256，4 库逐库 12,500）、`saveAutoBackup`+`readAutoBackup`（同口径，原始键数 ≥50,256）、`applyData(replace)` 快照（未水合库 E 的题目分片与复习块物理删除、记录 50,000 / 键 256、banks=4）；**未水合读取语义 (b)**——`Storage.get/getFresh` 返回 defaultValue 不抛错、`ensureBank` 后可见；**静态护栏**——去注释后 `Storage.keys|get|getFresh|keysScoped|getScoped|getScopedFresh` 89 处逐文件冻结，新增调用点即红；**C 步骤2（9 项）**——A 段前置静态护栏（`backup.export`/`saveAutoBackup`/`applyData` 的 ensureAll 早于读取、`applyBackup` 全局键、`migrate.run` ensureAll 早于 `migrate*` 且仅 IDB 目标）+ `bankIds` 运行时证据（未水合库状态键不在视图、库 id 经全局 `banks` 补全）；**路径3 严格前置（4 项）**：`__strictReads=true`、库B/E 未水合、部分视图 `keys()` 被严格守卫拒绝（50k 恢复必须依赖 `applyData` 内 `ensureAll`）；红例 `QFORGE_HYDRATION_RED=1` 退化为 12,500/64 且 E 残留（35 通过 / 14 失败）；**阶段 2C：backup.js 新增 2 处全局键读取（P1-12 复用判定、P1-13 merge 旧值快照），冻结 95 处且均在 ensureAll 之后** |
++| `scripts/migrate.test.mjs` | **339** | v1→v5 全链路（contentHash v1/v2→v3（64 位）重映射、review/wrong/fav/revlog 键重映射、revlog 回填 b、分片化与一致修复）；**v4→v5 布局迁移（整表复习 → per-hash + v4 标记、整表日志 → 200 条/段追加、逐条完整性）**；**P2-06 reviewMeta v3→v4（启动期幂等压缩；迁移前后 `readMap` 逐键 Deep-equal、计数不变、错题/收藏逐字节未变、二次运行 0 写入、注入 meta 写失败保留原 v3 清单与全部状态）**；双读（旧整表与 per-hash 合并、旧日志清单缺失回退）；幂等（`force` 重跑逐字节不变、同题干异答案共存）；**断点重入/中断回滚（注入失败后 snapshot 恢复）、多标签共享存储仅迁移一次、`ensureLayout` 归一**；**F1 迁移前自动备份（写入前落盘、进度标记、备份恢复逐键一致、备份失败即中止且无半写、IDB `open()` 抛 `SecurityError` 回落 LS 且业务快照不变）**；**F2 多标签败者等待切换并补写（等待期 raw LS 不增键、切换后收藏 21→21、旧 LS 收藏被清理、重启仍 21）**；**F2b 持锁标签崩溃（锁过期）后等待者重抢锁接管：等待期收藏 21/22 回放、`takeover` 有值、`takeoverMs`、`_awaiting` 复位、锁释放、重启仍 22**；**F2c 胜者只是慢：锁 2s 心跳续租（`at` 前进、owner 不变）、等待者重抢返回 `locked`、实际迁移调用 0，最终 21 且无双迁移**；**P1 迁移期零 LS 业务写入（旧整表→IDB，raw.set 业务键 0、IDB 2 题/2 状态/2 日志逐键一致）**；**P2/P3/P4 容量预检（充足静默、IDB 不可用+不足写入前 `LS_CAPACITY` 无残留、≥85% nearLimit、IDB 可用超预算放行）**；**C007 回归：无旧整表日志时 `RevlogStore.convertLegacy` 不写空清单（避免启动期业务键令回落标记误降级）**；**P1-15 回滚不静默删键（7 项）：不可解析快照项保留当前值并抛 `ROLLBACK_PARTIAL`（带 failed 清单）** |
++| `scripts/shard.test.mjs` | **145** | 题目库分片存储：切分与清单、追加只写尾分片、按需单页只解析覆盖分片（冷读调用捕获）、越界零读、跨分片边界、单题 update/remove 只写所在分片、空分片回收、overwrite 高位回收、removeMany 跨分片、旧单 blob 兼容与写时迁移、删库级联清分片；**删除一致性（33 项）：单删清空中间分片后重编号且余题可读、removeMany 整片删除后余题可读、孤儿分片 `invariant` 检出与 `compact` 修复、迁移 v3→v4 启动自检修复坏清单并幂等**；**UI 级按需装载（阶段 A）：`count` 直读清单零分片解析、`loadQuestions` 缓存命中同一数组实例、`buildIndex` 复用缓存、create/update/remove 使修订号 +1 并令缓存失效重读、refresh 强制重读、空 bankId 安全返回**；**C018 内存索引（16 项）：预热后 `get` 0 次 `locate`（旧实现每次 ≥1 次）、merge 重复导入 0 次 `readAll`（旧实现 2 次）、全量重复判重/不新增/总数不变、merge 新增后再导入仍判重、update 后索引位置有效且哈希集同步、删除/removeMany 后同片位置前移仍读取正确**；**P1-4b 跨标签题目变更（4 项）：外部事件后写修订号推进、`loadQuestions` 不再命中旧读缓存、读到新题、total 与磁盘一致** |
++| `scripts/sync-dav.test.mjs` | **85** | 配置校验、Basic Auth、PUT/GET 注入 fetch、JSON/ZIP、401/403/404；**真实 HTTP 集成（本地 CORS WebDAV 验证端点 `serve-webdav.mjs`）：预检 OPTIONS 204 + 放行 Authorization + 回显 Origin、真实 PUT 201 并落盘可解析 JSON、错误密码 401、含图 PUT → 端点收 ZIP（PK 头）、真实 GET 下载解析、无对象 404（12 项）**；**C027 密码加密（20 项）：落盘 v2 无 `pass` 明文、密文含 alg/iv/data、随机 IV 两次密文不同、`loadConfig` 解密还原、`getConfig` 只报 `hasPass`、clearConfig；旧明文迁移（加密→回读校验→覆盖、删明文、二次读取幂等）、篡改首字节 → 空密码 + 可见错误、清空密码移除密文；上传使用解密密码（Basic 头还原 `u:s3cret-pw`）**；**R-14 密码不进 HTML 属性（4 项）：含引号/尖括号/& 的密码原文与转义形态均不出现在 `openModal` HTML、`data-dav="pass"` 无 `value` 属性、密码经回调里的 DOM `value` 回填且上传仍可用**；**P1-11 冲突/超时（16 项）：ETag 比对与 `If-Match`、412 转冲突、force 跳过检测、HEAD 405 降级提示、`AbortController` 超时中止、http 明文风险提示（D4）** |
++| `scripts/sw-runtime.test.mjs` | **34** | Service Worker 运行时门禁（Node VM 加载 `sw.js`，内存 CacheStorage/fetch 替身）：install 预缓存清单与 CORE 逐项一致、**预缓存失败必须 reject 且不 skipWaiting**、导航仅 2xx 回写 `index.html`（500 不覆盖离线壳）、离线导航回退、静态资源缓存优先+仅 2xx 后台更新、非 GET/跨源/`/api` 不接管、**activate 只删本站 `qforge-*` 前缀内非当前版本并 claim（R-11：同源其他应用 `other-app-v1` 不被删除且内容保留，2 项）**、**缓存版本基线（`scripts/sw-baseline.json` 记录 CACHE + 99 个 js/css 摘要，改资源未 bump 即红）**；变异 `--mutate` 改摘要不动版本 → 33 通过 / 1 失败（exit 1） |
+ | `scripts/pwa.test.mjs` | **93** | manifest/SW/离线资源完整性、FSRS Worker 文件/importScripts 依赖/消息协议/SW 预缓存/加载方式、**悬浮滚动按钮（11 项）**、**细节样式修复（7 项）**、**SW 不拦截同源 `/api` 前缀 + 缓存名换代（`qforge-v32`，断言 ≥ v4）+ 缓存前缀与 CACHE 一致 + activate 只删本站前缀缓存（R-11，4 项）**、**F1 迁移失败 try/catch 与回退提示、F3 `registerSW` 直接 `register`（不依赖 `load`，注册调用在 boot 内）**、**可访问性/移动端基础（6 项）**、**交卷末栏分栏（2 项）**、**192/512 PNG 图标（PNG 签名/manifest 192·512/maskable/apple-touch-icon/SW 预缓存，8 项）**、**CSP 基线（17 项）：meta 存在且位于样式/脚本之前、与 `security-headers.mjs` 逐字符一致、script-src 仅 self+file:（无 unsafe-inline/eval）、style-src 允许内联、img-src data/blob/file:、connect-src 仅 `'self'` 且不含 http(s)/file:/*/ws、`CSP_CONNECT_ALLOWLIST` 默认空、default-src/worker-src 含 file:、object-src/base-uri/form-action 收紧、meta 不写 frame-ancestors、无内联/跨源 script** |
+ | `scripts/static-server.test.mjs` | **29** | 静态服务路径守卫：正常/根/目录/百分号解码；`../`、`%2e%2e`、`..\`、深层越界、畸形编码、NUL 拒绝；含 `..` 归一后在 root 内也拒绝；**静态暴露守卫（7 项）：点目录/scripts/qforge-evaluation/CHANGELOG/denyDirs**；**安全响应头（8 项）：HTML CSP=共享策略+frame-ancestors、X-Frame-Options DENY、nosniff/Referrer-Policy，非 HTML 与 404 不带 CSP** |
+ | `scripts/ui-renderer.test.mjs` | **218** | **C007：IDB 回落提示（`fallbackBanner` 三类原因均含「IndexedDB」「兼容模式」「重试」，空/历史原因返回空串）**；**C009 存储健康卡（10 项）：渲染只读 `QB.Quota.view()`（未就绪 50 次调用 0 次 `usageBytes`）、IDB 6MB/600MB 不为 danger 且显示（1%）、上限未知时不画进度条并注明「上限由浏览器管理」、LS 90% 仍 danger**；**来源徽章（4 项）：含端口 + 长路径按段截断且保留分隔符（`127.0.0.1:8796…/real.apkg`，修复前丢失 `/`）**；**作答反馈位置：解析区在操作按钮与答题卡之前（6 项）**；**收藏夹富文本去记号**；**结果页未作答与待自评分开计数**；**复习计划卡/难卡/本题历史**；**可访问性（6 项）**；**未作答统计与交卷分栏（10 项）：答题头 ○ 未答 N、答题卡「已答·未答」子区域、考试结果未作答计错、主操作/末栏独立容器**；组卷/练习·考试开始弹窗纯 HTML 构建：`data-bp-min/max/cat` 属性可被 querySelector 命中（回归：多写引号致属性错位、点「开始」抛 TypeError）、**组卷抽题行每题型一行且不含分值列**、**练习/考试开始弹窗每题型「数量(st-count)+分值(bp-pts)」行、考试时长 `#st-duration` 默认 30、练习计时开关 `#st-timer`、分类 data-st-cat**、分类转义、**自定义标题（错题重练）**；**答题界面题干渲染（回归：非材料题曾仅对 material 渲染 `q.question`，只显示选项）**；**答题卡状态类与图例**；**收藏按钮已收藏态**；**搜索单行 sticky**；**历史统计 sticky 卡**；**区域数组与 DOM 对账（阶段 A）**；**答题卡格级增量（阶段 A）：帧稳定、子区域含已答/未答计数、仅计数+受影响格变化**；**结果页内联自评（6 项）：待自评简答按题号按钮、材料小问 data-child、已判定小问不渲染、得分/满分、文案指引**；**M4 材料小问乱序开关（组卷/练习/考试，3 项）与每题分值留空=默认（1 项）**；**导入校验和展示（5 项：无 meta 不渲染/一致/不一致/风险说明）**；**答题头倒计时 #quiz-timer（2 项：有 timerText 显示/无则不渲染）**；**开始弹窗回填上次参数（9 项：数量/分值/分类/时长/计时/小问乱序/选项乱序）**；**C010 一键组卷入口（3 项：首页菜单与错题页工具栏均含 `start-smart-practice`、文案含「错题+薄弱」）**；**C011 分享入口与 manifest 展示（3 项：首页含 `bank-share`、文案「分享链接/码」、导入预览显示 `manifest.packageId`）**；**C012 批注反馈（5 项）：反馈区批注块、`<script>` 转义、换行保留、材料题总评展示父题批注** |
+@@ -94,15 +94,15 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红
+ | `scripts/dom-patch.test.mjs` | **40** | `QB.DomPatch` 区域对账（`plan`/`normalize`/`snapshot`/`contentOf`/`groupSub`，DOM-free）：首次全变化、内容一致全不重建、单区域变化、区域新增/移除、顺序调整保留原节点、空区域过滤/重复 key 去重/空输入安全、列表移除场景；**子区域（格级）：`contentOf` 取 frame、帧未变→顶层不重建、`snapshot` 以 frame 为基准、`normalize` 保留 `frame`/`sub`、`groupSub` 按容器归组去重剔除非法项** |
+ | `scripts/app-boot.test.mjs` | **149** | **C021 app.js 运行时覆盖（Node + 最小 DOM 垫片，零网络）**：boot 空库首屏/顶栏同步/主题/SW 注册/空闲配额探测/本地迁移调用；无题库时文件导入、导出、拖拽均给出可操作提示且不进入导入；有题库时文件·文本·URL·刷新 URL 四条导入入口的参数透传（题库对象、触发元素、地址占位）与导出 6 入口→3 方法分派（kind/题库/触发元素）；拖拽 `dragenter/dragleave` 高亮、drop 传 `Files[0]` + `KINDS.DROP` + active、非 Files 忽略、答题中拒绝、无题库拒绝；分享回链（粘贴）成功落库/无效码/取消清理三条分支（`commitImport` 唯一入口、来源 PASTE、清 hash、切换到目标库、失败提示）；api 后端跳过本地迁移并走 `ApiAdapter`；**R-18 迁移等待文案（9 项，注入时钟）：持锁启动进入等待、首帧含阶段「等待切换」与「已等待 0 秒」、注入时钟推进 1/2 秒后秒数逐帧递增、切换完成后清除等待文案、完成提示可见、0 未处理 rejection、真实定时器护栏 1 项**；**R-21 启动失败兜底（9 项）：`DB.banks.list` reject → `banksLoaded` 不置真、`State.bootError` 记录、`#view` 显示「启动失败」、状态栏同步、0 未处理 rejection、诊断按钮生成 JSON Blob + `<a download>`、报告含错误栈与启动状态**；**R-01 渲染代次守卫（4 项）：统计页慢分支挂起 → 切首页完成渲染 → 释放旧渲染后首页内容与标签栏不被覆盖、旧统计内容不回写**；**P-6 统计页 forecast 缓存（4 项）：首次进入调用 1 次、数据未变再次渲染 0 次、revlog revision 变化后重算 1 次、离开再进入仍命中**；**迁移结果可见（Phase 0 批次1-2，4 项）：`reviewMeta` 有 skipped/failed 时启动提示「复习索引未完整整理」与跳过数量、不阻断启动、0 未处理 rejection**；**渲染错误策略（Phase 0 批次1-4，4 项）：不 await 的 `render()` 抛错不产生 unhandled rejection、统一「界面刷新失败」toast、状态栏错误态、同错误不重复刷屏**；**切库事务化（Phase 0 批次1-5，7 项）：注入持久化失败后 bankId 与原库持久化值均保持、状态栏停留原库、失败提示可见、0 未处理 rejection、恢复后正常切库生效并跟随新库**；**C 步骤4 后半作用域读取抛错（12 项）：`favoriteList`/`metaOf`/`shardOf` 在未水合库抛 `NotHydratedError` → 走 `render()` 顶层 catch，toast「界面刷新失败：未水合：X」、状态栏错误态、保留上次渲染内容（无白屏）、0 unhandled rejection**；**C 步骤4 第三批抛错可见性（8 项）：`ReviewStore.stateKeys` / `ReviewStore.readMap` 抛 `NotHydratedError` 同样走 `render()` 顶层 catch（toast/状态栏/无白屏/0 unhandled rejection）**；**删库 UI（2026-11-10，10 项）：走真实 `QB.BankManager.remove` 确认入口——取消不删库/题目保留/无成功提示；确认后库A 从清单移除、题目级联清空、`State.bankId` 与持久化 `currentBank` 回落到库B、状态栏跟随库B、成功 toast、0 未处理 rejection**（该套件为 LS 全量视图垫片；严格模式部分视图删库由 `idb.test` 覆盖，真实浏览器渲染/弹窗样式仍仅真机）；**变异测试 `--mutate-commit-import`：把 `commitImport` 调用改坏后整套件 92 通过 / 8 失败（exit 1），证明该入口被真实覆盖**（真机 DOM 未验证：垫片不实现布局/选择器/HTML 解析；Blob 下载与真实慢 IO 竞态未实机验证） |
+ | `scripts/idb.test.mjs` | **446** | IndexedDB 双后端存储（Phase G）：内存 IDB 驱动上的 `QB.Store` 初始/安全回落/单事务批量写失败整体回滚/四索引三类查询；`v5→v6` 迁移逐键一致 + 幂等 + 中断重入（按业务键比较，断言 `resumed/startAt/verified`）+ 多标签单锁；**迁移进度订阅与中途进度读数**；**迁移后首次启动校验 IDB 完整再自动清理旧 LS（回收>0、LS 业务占用归零、二次启动不重复）**；无 IDB 与打开失败回落、cleanup/rollback/reenable、空库新装、`estimate` 估算口径；**C007 回落收口（13 项）：三类规范原因（idb-unavailable/idb-empty/idb-read-failed）与 `fallbackDetail` 原始明细、原标记 idb + LS 无业务键保留标记可重试、回落会话写业务键即降级 ls-fallback、idb-empty 数据可见**；**C009 用量快照 estimate 路径（8 项）：`navigator.storage.estimate` 存在时 `refresh` 零全量扫描、quota=0 仍用 usage 且上限为未知（不套 LS 配额）、与驱动侧写入时增量记账误差 ≤0.1%、删除后驱动记账与快照同步下降**；**v7 分块布局（29 项）：256 桶/库的 `reviewChunk` 物理块、1000 条状态折叠为块内 key、`readLogicalMany`/`reviewStateParts`/块内状态逐条等价、跨标签读改写保留两侧键、v6 per-hash → v7 块迁移逐键一致、备份往返**；**备份 fail-loud（Phase 0 批次1-1，6 项）：模拟未水合库（物理存在、同步视图不可见）→ `backup.export` 前置 `ensureAll` 后备份覆盖其题目分片与折叠复习整表、`keys()` 重新可见；主导出按钮失败不产生未处理 rejection 且有「备份导出失败」toast**；**迁移 fail-loud（Phase 0 批次1-2，5 项）：未水合库显式进入 `skipped`、候选库集合含 banks 元数据、真实转换错误上抛中止（不塞 anomalies）、`Migration.run` 结果携带 skipped**；**跨标签 fail-loud（Phase 0 批次1-3，5 项）：IDB 广播读失败保留 banks 缓存与 keys 数、经 `onError` 可观测；LS 事件坏 JSON 保留本地值并通知**；**分阶段水合（Phase 0 批次2，26 项）：启动只水合当前库（`lastInit.scopeBank`）、其它库题目/复习状态在同步视图不可见、`isBankHydrated` 按库判定、`keys()` 合并 `_pending`（未落盘新键可见）、`ensureBank(B)` 后 7 题与复习键可见且不影响 A、备份的 `ensureAll` 覆盖从未水合的库C（题目分片 + 折叠复习整表）、删除非当前库先按库水合再级联（题目清单/分片/复习块均从 IDB 物理删除且当前库不受影响）**；**作用域读取 API（C 步骤1，28 项）：`getScoped/getScopedFresh/keysScoped` 三入口对未水合库抛 `NotHydratedError{bankId,key,code}`、已水合返回真实值、键归属与 bankId 不一致/全局键误用/未知键均抛 `TypeError`、`keysScoped(A)=全局+A 且不含 B`、`keysScoped(null)` 仅全局、合并 `_pending`；`__strictReads` 默认 false（旧 `get/getFresh/keys` 语义逐字不变），开启后三旧入口对未水合库均抛错、`ensureBank`/`ensureAll` 后恢复**；**B 段迁移（C 步骤3 前半，20 项）：未水合库 `remap` / `convertLegacy` 抛 `NotHydratedError`（旧行为分别静默返回 0 / 按残缺视图转换）；pending 旧整表不得覆盖较新 per-hash 状态（last=9000 保留）且不删除旧整表（不半迁移）；错误文案含「题库未水合」与 bankId；水合后 `convertLegacy` 以 per-hash 为准并删旧整表、`remap` 写新键删旧键；静态断言两函数走 `stateKeysScoped` + `getScopedFresh`，以及编辑器 errBox / 备份恢复 toast / 迁移 toast 三处兜底存在**；**B 段前置（C 步骤3 后半，22 项）：当前库已水合、新库 C 从未水合时，模拟「建库后直接渲染」的 `count`+`readMap` 读取必须完整或明确抛 `NotHydratedError`（旧行为实测 题目=0/复习状态=0）；`readMap`/`legacyMap`/`getScopedFresh` 未水合均抛错；4 处调用方静态前置（`bank-create`/`import-sample`/`bank-delete`/`maybeResume` 的 `ensureBank`）与 `legacyReviewMap` 不内嵌兜底；`render` 顶层 toast+状态栏兜底；`ensureBank` 后 题目=2 / 复习状态=2 / 待复习=2 / 错题=1 / 收藏=1，水合后 `readMap` 正常返回**；**C 步骤4 冷路径 8 处（29 项）：`indexesOf`（142）/`legacyOf`（152）/`wrongList`（818）/`wrongAddMany`（826）/`wrongRemove`（832）/`favoriteToggle`（845）/`convertMetaLayout` 首读（1148）与写后校验读（1173）在 B 库未水合时均抛 `NotHydratedError`（`name/code/bankId` 逐项校验，真实失败输出来自旧实现静默读空）；等价性段在同一已水合库（E）逐项断言 `wrongList` 条数、`wrongAddMany` 追加键、`wrongRemove` 后条数、`favoriteToggle` 的 `added` 与条数、`indexesOf` 清单、`legacyOf` 题数与首题文本、`convertMetaLayout` 的 `migrated/physical/verified` 与 v4 meta 无 `keys` 数组——迁移前后同值；静态护栏冻结 4 处 `getScopedFresh(K.wrong/K.favorite)`、`keysScoped`、两处 `getScopedFresh(K.reviewMeta)` 与 `__strictReads:false`**；**C 步骤4 后半只读渲染 3 处（20 项）：`metaOf`（124）/`shardOf`（129）/`favoriteList`（841）在未水合 B 库抛 `NotHydratedError`（旧行为实测分别返回 null/[]/[]），错误 `name/code/bankId` 逐项校验；同一已水合库等价性逐项断言（`metaOf.count=2`、`shardOf(A,0)` 2 题且首题不变、`favoriteList` 1 条且键不变）；真实 `UIRenderer.renderHome` 断言 `题目总数：<b>2</b>`、待复习 2、`2 题（新 0 / 到期 2…）`、错题/收藏入口均在；静态护栏 3 处 `getScoped` 与 `__strictReads:false`**；**C 步骤4 第三批热路径 984/1000（32 项）：未水合 B 库 `ReviewStore.stateKeys` 抛 `NotHydratedError`（旧实现实测返回 `[]`）；`readMap` 上游 legacy 先行拦截（独立 per-hash 负例不可构造，如实标注）；运行时探针证明 `readMap(A)` 4 次读取全走 `getScopedFresh`、直接 `getFresh` 0 次（旧实现 1/3）；等价性逐项（4 hash 与状态值、`stateKeys` 3 键、`count`=4、`stats` tracked/learned=4、`forecast` 7 天 `1,1,0,1,0,0,1`、逾期 1、备份折叠 4 条、真实 `renderHome` 4 题/待复习 1/错题 1/收藏 1、收卷 `get` 与 `readMap` 同值、revlog 1 条）；静态护栏 3 处**；**C 步骤4 收尾（27 项）：评分写路径 6 处（meta/get/reviewRevOf/prevLegacy/prevMeta/touched）+ removeHash 全部改走作用域入口；独立负例（meta/get/removeHash/record 首读点）逐项校验 `NotHydratedError{key}`；prevLegacy/prevMeta/touched 无独立负例，运行时探针 `directFresh=0/directGet=0/scopedFresh=4`；已水合等价 `saved=1/readMap` 不变；`grade`/`gradeMany` 未水合库自动 `ensureBank` 并真实落盘**；**B5/B6 补完（19 项）：`getScopedIndicator` 未水合可读指示键 / 非白名单 TypeError / 归属不一致 TypeError；`convertMetaLayouts` 等价（v3 skipped、v4 不误报）；`remapList` 未水合抛 `NotHydratedError` / 已水合键改写与冲突合并等价；migrate 4 处与 local-adapter 2 处传 `bankId` 静态护栏**；**C 步骤5 严格模式（1 项）：测试 harness 默认 `__strictReads=true`（断言 CI 口径），需要验证宽松契约的段落显式局部关闭**；**C 步骤6 收尾·删库作用域枚举（12 项）：A 已水合且含 1 条评分日志、B 未水合时严格模式下 `banks.remove(A,{cascade:true})` 不抛 `NotHydratedError`；删除后 A 评分为 0 条孤儿、A 题目清单物理删除、持久化 `currentBank` 置空且 `getCurrentBankId()` 回落到现存 B、B 数据与评分日志保留、B 仍保持未水合（不因删库全量水合）**；**严格模式回归固化（2026-11-09，33 项）：启动只水合当前库（`scopeBank`、全局键可读、部分视图 `keys()` 被拒、`keysScoped(A)` 不泄露未水合库B）、切库先 `ensureBank`（未水合作用域读取 fail-loud、切后题目/复习状态可见、C 仍未水合 → `keys()` 仍拒、`switchBank` 内 ensureBank 早于 `setCurrentBankId` 静态守卫）、删库（revlog 无日志）不调 `keys()`（0 次、A 题目清单物理删除、B 日志保留、currentBank 回落）、备份恢复部分视图先 `ensureAll`（replace 清除载荷外未水合库 E 的分片、恢复后 `keys()` 可用、A/B 各 3 题）** |
+-| `scripts/contract.test.mjs` | **124** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；**R-06 可选契约（21 项）：`QB.OPTIONAL_CONTRACTS` = reviews[get,patch] / revlog[revision] / progress[wrongAddMany]；`hasCapability` 为唯一检测入口；`assertOptional` 允许缺失（undefined/null）、拒绝非函数；local 有 get+patch、api 无 get 有 patch（声明过的合法状态）；第三方缺 get/patch/revision 时 `SRSStore.getState` 回退整表 list、`grade` 回退 record 整表（既有键保留），有 patch 时优先增量且不调 record**；**R-02 错题批量写（11 项）：`progress[wrongAddMany]` 可选契约存在、local/api 均提供、`assertOptional` 通过；50 题一次 `WrongBook.addMany` 只触发 1 次 `Storage.set`（旧逐题 50 次）、返回 50 条且累计字节减少 ≥95%；第三方适配器仅 `wrongAdd` 时串行降级 3 次且语义一致**；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源（**local-adapter 直读写 Storage，领域模块经 `QB.DB.*` 委托本适配器，禁双向委托以免自递归**）；**`historyAdd` 返回新增记录（与 api 适配器同形）**、**`historyUpdate` 保留 id/createdAt 且缺失 id 返回 null（4 项）**；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径；**权重归一下沉（4 项）：旧单组 `{w,...}` 读取归一为 global、banks 为空、local-adapter 不再引用 `QB.FSRSOpt`（数据层不反向依赖应用层）、使用 `QB.Weights.normalizeStore`**；**record 热路径（5 项）：本地一次落状态+日志、日志题库归属、logged/saved 回执** |
++| `scripts/contract.test.mjs` | **124** | 数据契约层（阶段 C）：`QB.CONTRACTS` **7 组**（banks/questions/progress + reviews/revlog/weights/backup）方法清单、`QB.ASSET_DRIVER_CONTRACT`（6 方法）、`assertAdapter`/`assertDriver` 缺组缺方法精确报错；**R-06 可选契约（21 项）：`QB.OPTIONAL_CONTRACTS` = reviews[get,patch] / revlog[revision] / progress[wrongAddMany]；`hasCapability` 为唯一检测入口；`assertOptional` 允许缺失（undefined/null）、拒绝非函数；local 有 get+patch、api 无 get 有 patch（声明过的合法状态）；第三方缺 get/patch/revision 时 `SRSStore.getState` 回退整表 list、`grade` 回退 record 整表（既有键保留），有 patch 时优先增量且不调 record**；**R-02 错题批量写（11 项）：`progress[wrongAddMany]` 可选契约存在、local/api 均提供、`assertOptional` 通过；50 题一次 `WrongBook.addMany` 只触发 1 次 `Storage.set`（旧逐题 50 次）、返回 50 条且累计字节减少 ≥95%；第三方适配器仅 `wrongAdd` 时串行降级 3 次且语义一致**；local-adapter 四组仓库（reviews/revlog/weights/backup）读写语义、与领域模块同源（**local-adapter 直读写 Storage，领域模块经 `QB.DB.*` 委托本适配器，禁双向委托以免自递归**）；**`historyAdd` 返回新增记录（与 api 适配器同形）**、**`historyUpdate` 保留 id/createdAt 且缺失 id 返回 null（4 项）**；**删库级联唯一入口 `cascadeDelete`**（题目分片/错题/收藏/复习/评分日志/权重 preset/历史/当前库，他库与旧无归属日志保留）+ 非级联路径；**权重归一下沉（4 项）：旧单组 `{w,...}` 读取归一为 global、banks 为空、local-adapter 不再引用 `QB.FSRSOpt`（数据层不反向依赖应用层）、使用 `QB.Weights.normalizeStore`**；**record 热路径（5 项）：本地一次落状态+日志、日志题库归属、logged/saved 回执**；**阶段 2A 契约语义对等（26 项）：`banks.create` 保留 source（缺省 null）、`banks.update` 过期 baseUpdatedAt → 409/CONFLICT 且未传不校验、`stampQuestion` 保留顶层 score（缺失不写字段）、`insertMany` 返回四键、删库级联清理 `meta:hashMap`（他库不受影响）、reviews/revlog/weights 统一返回 Promise** |
+ | `scripts/ui-port.test.mjs` | **25** | UIPort 端口（T07）：未注入实现时 toast/openModal/closeModal 为 no-op、校验和渲染返回空串、confirm 视为取消（安全降级）；注册后按约定透传参数与返回值、confirm 规范为布尔、实现抛错时 confirm 降级 false；**无 DOM 下游验证**：exporter 批注闸门经 `confirm`（取消中止 / 继续则标记省略）、`backup.confirmRestore` 经 openModal/closeModal/toast（取消返回 null 不写库）；静态断言 exporter/backup/sync-dav/data-io/bank-manager 五个 L2 模块不再出现 `QB.UIRenderer` |
+ | `scripts/references.test.mjs` | **20** | 全仓 `QB.<name>` 引用对账：运行时 `QB` 导出集合（harness + 补载 ui-renderer/dom-patch/bank-manager，不手写符号白名单）、剥离注释/字符串后递归扫描 `js/**/*.js`（75 文件 / 107 个引用名）、**悬空引用必须为 0**；唯一例外 `QB.App`（`app.js` DOM 启动挂载）显式列出且断言清单不漂移；扫描器自检（注释/字符串不误判）与 `QB.formatDate` 顶层不存在的直接回归；**R-15 容量常量收敛（7 项）：`js/` 下裸 `4 * 1024 * 1024` 必须为 0（`js/config.js` 唯一允许定义处）、`BACKUP_LS_WARN_BYTES`/`QUIZLET_MAX_TEXT_LENGTH` 常量存在且被 backup/quizlet 引用、annotation 兜底值必须等于 `LIMITS.ANNOTATION_TOTAL_MAX_BYTES`（防 4MiB/2MiB 漂移）** |
+-| `scripts/api-backend.test.mjs` | **328** | **R-09 列表 ETag（10 项）：服务端 ETag / no-store / 304 空体 / 写后旧 ETag 回 200；适配器第二次 GET 命中 304 复用、写后刷新、题目列表 304**；**参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；**CORS 默认关闭、显式放行来源预检 204、未放行不带 ACAO**；**content_hash 按合并后完整题目重算、仅改解析不变**；**筛选查询不污染 count 缓存**；**historyAdd 返回形状与 local 一致**、**historyUpdate PATCH（保留 id/created_at、未知 id 404、api 回写得分，6 项）**；**bank.sched 创建/保存/回读**；**题目与题库元数据乐观并发（13+13 项）：base_updated_at 匹配成功/updated_at 单调递增/过期 409 CONFLICT+current/冲突不覆盖；api 适配器 baseUpdatedAt → 409 错误码与消息**；**复习进度多端冲突（12 项）：服务端 `review_rev` 初始 0、PUT 后 +1、`base_rev` 匹配成功、过期 409 CONFLICT + current 且不覆盖；客户端 409 后按 `last` 合并重试一次（merged=true、双方键保留、服务端 rev 递增、revlog 只 1 条）**；**B1 增量写入与 B3 revlog 版本（12 项）：PATCH 只合并增量键、其余键保留、`null` 删除、`rev` 递增、缺 `items` 400、`base_rev` 过期 409 返回 current/rev、本地缓存与 `revlog.revision()` 同步**；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、**`count`/`reviews` 按库缓存命中与写·级联·`backup.import` 后失效（5 项）**、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错（注入 fetch 走**真实网络失败**路径）；**跨布局整链 E2E（33 项）：本地模式造数 → 本地布局备份 → api 模式 `applyBackup` 经 `localToServer` + 真实 `POST /api/backup?mode=replace` → 直读 `GET /api/backup` 核对接管后端口径（snake_case、按库归集、id 保留）→ 再恢复到另一 local 上下文，题库/题目/错题/历史/revlog/权重逐项等价（闭环）**；**可选 Bearer 令牌鉴权（12 项）**；**静态安全头（6 项）**；**作答热路径（16 项）：首次作答 4 请求（含按库读取调度设置，后续缓存命中）、热态 PATCH 1 请求、gradeMany 1 请求；错题额外 1；权重 write 后读缓存命中、remove 后重新 GET；revlog 非数组 400 BAD_REQUEST**；**按 IP 限流（24 项）：窗口限额/429+Retry-After/静态与 health 不受限/窗口重置/trustProxy 分桶/rateLimit:false 关闭，适配器 429 诚实抛出**；**API 模式删库严格守卫（2026-11-10，2 项）：`__strictReads=true` 下 `banks.remove` 不抛错、本地 `Storage.keys()` 调用 0 次（级联全在服务端，不回落本地 revlog 清理）** |
++| `scripts/api-backend.test.mjs` | **328** | **R-09 列表 ETag（10 项）：服务端 ETag / no-store / 304 空体 / 写后旧 ETag 回 200；适配器第二次 GET 命中 304 复用、写后刷新、题目列表 304**；**参考后端（`serve-api.mjs`）+ api 适配器 E2E**：真实 HTTP 上覆盖 banks/questions(batch·import)/progress/reviews·revlog·weights/backup/assets 的路由/状态码/错误体/路径穿越/原子落盘(.tmp 无残留)/同目录重启持久化/级联删库；**CORS 默认关闭、显式放行来源预检 204、未放行不带 ACAO**；**content_hash 按合并后完整题目重算、仅改解析不变**；**筛选查询不污染 count 缓存**；**historyAdd 返回形状与 local 一致**、**historyUpdate PATCH（保留 id/created_at、未知 id 404、api 回写得分，6 项）**；**bank.sched 创建/保存/回读**；**题目与题库元数据乐观并发（13+13 项）：base_updated_at 匹配成功/updated_at 单调递增/过期 409 CONFLICT+current/冲突不覆盖；api 适配器 baseUpdatedAt → 409 错误码与消息**；**复习进度多端冲突（12 项）：服务端 `review_rev` 初始 0、PUT 后 +1、`base_rev` 匹配成功、过期 409 CONFLICT + current 且不覆盖；客户端 409 后按 `last` 合并重试一次（merged=true、双方键保留、服务端 rev 递增、revlog 只 1 条）**；**B1 增量写入与 B3 revlog 版本（12 项）：PATCH 只合并增量键、其余键保留、`null` 删除、`rev` 递增、缺 `items` 400、`base_rev` 过期 409 返回 current/rev、本地缓存与 `revlog.revision()` 同步**；`DATA_BACKEND='api'` + 适配器指向该服务后用 UI 同款仓库调用面断言 wire 映射（bank_id/content_hash/by_type…）、**`count`/`reviews` 按库缓存命中与写·级联·`backup.import` 后失效（5 项）**、`revision()` 写修订号令整库读缓存正确失效、资产 FNV id 与服务端一致、后端不可达时诚实抛错（注入 fetch 走**真实网络失败**路径）；**跨布局整链 E2E（33 项）：本地模式造数 → 本地布局备份 → api 模式 `applyBackup` 经 `localToServer` + 真实 `POST /api/backup?mode=replace` → 直读 `GET /api/backup` 核对接管后端口径（snake_case、按库归集、id 保留）→ 再恢复到另一 local 上下文，题库/题目/错题/历史/revlog/权重逐项等价（闭环）**；**可选 Bearer 令牌鉴权（12 项）**；**静态安全头（6 项）**；**作答热路径（16 项）：首次作答 4 请求（含按库读取调度设置，后续缓存命中）、热态 PATCH 1 请求、gradeMany 1 请求；错题额外 1；权重 write 后读缓存命中、remove 后重新 GET；revlog 非数组 400 BAD_REQUEST**；**按 IP 限流（24 项）：窗口限额/429+Retry-After/静态与 health 不受限/窗口重置/trustProxy 分桶/rateLimit:false 关闭，适配器 429 诚实抛出**；**API 模式删库严格守卫（2026-11-10，2 项）：`__strictReads=true` 下 `banks.remove` 不抛错、本地 `Storage.keys()` 调用 0 次（级联全在服务端，不回落本地 revlog 清理）**；**insertMany 返回形状对等（6 项）：api 返回 inserted/duplicates/skipped/total、重复题干计 duplicates、空题干计 skipped、total 为库总数（与 local 同语义）** |
+ | `scripts/importers-anki.test.mjs` | **148** | 最小 SQLite 只读（页大小/UTF-16LE/freelist/被删记录/内部页递归/overflow 80KB/rowid 别名/`--` 注释剥离/坏库）、`.apkg` 包识别（Legacy1/Legacy2 取 anki21/缺 anki21 回退/Latest 拒绝并指引导出旧版/损坏 ZIP）、note 粒度导入（Front/Back 字段名映射、judge/single/essay 判定、`1`/`0` 不误判、cloze 降级 essay、媒体入库与缺失占位、多卡丢失项警告、HTML 剥离）、Legacy1/UTF-16/深分页全量、落库去重与 v3 contentHash、首次评分 revlog 写入；**D2：0 题拒绝原因在 UI 可见（.anki21b Legacy 指引 / 坏 SQLite 原因，不再只提示「未解析出任何题目」），错误弹窗挂 `.import-error` 类且无内联颜色** |
+ | `scripts/importers-quizlet.test.mjs` | **75** | 分隔符自动识别（Tab/逗号/分号/竖线）与显式自定义覆盖、`Term/Definition` 表头跳过、非两列/空 term/重复行跳过与警告、空文件明确报错、全部落 essay（term 题干 + definition 参考答案）、明确「无选项/无图片/无在线进度」提示、与既有 CSV 的路由边界（表头 CSV 不被劫持）；**D1：粘贴入口复用注册表（Tab/逗号/全角逗号与文件入口结果全等，Markdown/JSON/无法识别分支不回归）** |
+ | `scripts/import-commit.test.mjs` | **64** | **C006 导入事务（P1-02）**：容量预检拒绝时 0 次写且原因可见（先于预览）、写入中途超配额回滚到导入前（题数与占用字符数复原、无「导入完成」toast）、正常导入落盘回读一致与内容去重、四条入口共用 `commitImport` 且 `data-io` 只有 1 处 `insertMany`、IDB `flush` 失败不报成功并回滚；**C015 单小问材料题（P2-03/D5=A）：`runImport` 返回 1 条致命错误 → `commitImport` 返回 null、写入 0 次、题数不变（同包正常题也不落库）、弹窗含「至少 2 个」且未打开预览**；**C026 批注总量超限（7 项）：540 题满长汉字 8,100,000B > 2 MiB → 返回 null、写入 0 次、题数不变、弹窗含「批注总量/超过上限/删减批注」且未打开预览**；**R-20 导入体积预检（17 项）：上限常量 16 MiB；File-like 超限 → `FileReader` 构造 0 次、`Storage.set` 0 次、返回 null、弹窗含 `.import-error`/「超过导入上限」/「未读取文件」且未开预览；二进制快照按 `arrayBuffer.byteLength` 同样拒收；边界为开区间（=上限放行、+1 拒收），拒收结构标记 `migration.supported=false`；落盘顺序：成功 toast 严格晚于 `forceSync`/`flush`** |
+ | `scripts/a11y.test.mjs` | **103** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、**弹窗快照注册自检（每个导出的 `render*Dialog` 必须至少登记一份快照，新增弹窗漏登记即转红）**、全仓禁止 tabindex>0、模态焦点进入/异步回位链路/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖、**14 项视觉结构回归（含 `.import-error` 10 项：规则唯一、danger 前景/弱底/边框/圆角/换行均为语义令牌、无硬编码色值、两处失败弹窗共用该类且 JS 无内联样式）**；**变异 `--mutate`：删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked` → 95 通过 / 8 失败（exit 1）**；CI 以独立 `a11y` job 运行本命令 |
+-| **合计** | **6114 / 6114 通过 · 38 个运行项**（2026-11-12 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
++| **合计** | **6170 / 6170 通过 · 38 个运行项**（2026-11-13 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+ 
+ **真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**：
+ - 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。
+diff --git a/js/config.js b/js/config.js
+index 6c85fd94c0d7e18b3c84d38499dafc51f3d0dfa4..b58b1e33d948ecd8b7f4e5823d04692f479f0c4e 100644
+--- a/js/config.js
++++ b/js/config.js
+@@ -74,7 +74,14 @@
+     // 备份弹窗：LocalStorage 模式已用空间告警阈值（超过提示受 ~5MB 限制；不阻断导出）
+     BACKUP_LS_WARN_BYTES: 4 * 1024 * 1024,
+     // Quizlet .txt 接管上限：按 text.length（UTF-16 单元）比较，超过视为非 Quizlet，交回其他导入器
+-    QUIZLET_MAX_TEXT_LENGTH: 4 * 1024 * 1024
++    QUIZLET_MAX_TEXT_LENGTH: 4 * 1024 * 1024,
++    // 纯 JSON 备份（无图）读取/导出上限（P1-14）：与 zip-reader 的总量/条目上限对齐，
++    // 超限时导出前拒绝并建议改用 .qfbk 或分库，避免产出读不回来的备份。
++    BACKUP_JSON_MAX_BYTES: 64 * 1024 * 1024,
++    BACKUP_MAX_KEYS: 10000,
++    // xlsx 解析行列上限（P1-17）：由解析内核在解析前拒绝，避免超大表把标签页内存打满
++    XLSX_MAX_ROWS: 200000,
++    XLSX_MAX_COLS: 1000
+   };
+ 
+   // 题目图片资产（IndexedDB；改库名等于换存储实例，不会迁移旧图）
+diff --git a/js/importers/xlsx-importer.js b/js/importers/xlsx-importer.js
+index 274f6cd476d8160ac9e6fff725c370df9bbfa693..7cf5ec34413b65fee6995da90c97a9dbfd928f2a 100644
+--- a/js/importers/xlsx-importer.js
++++ b/js/importers/xlsx-importer.js
+@@ -46,9 +46,14 @@
+   async function parse(input) {
+     const buf = input.arrayBuffer;
+     if (!buf) throw new Error('未读取到文件内容');
+-    /* qforge 历史上不限制表数/行列数（zip 层已有 10000 条 / 64MB 上限），这里显式放开模块默认值 */
++    /* P1-17：行列上限来自 CONFIG.LIMITS，由解析内核在解析前拒绝超大表（表数仍放开；
++     * zip 层已有 10000 条 / 64MB 上限）。超限会整表拒绝，不产生部分导入。 */
++    const limits = (QB.CONFIG && QB.CONFIG.LIMITS) || {};
+     const sheets = await reader().readSheets(buf, {
+-      allowEmpty: true, maxSheets: Infinity, maxRows: Infinity, maxCols: Infinity
++      allowEmpty: true,
++      maxSheets: Infinity,
++      maxRows: Number(limits.XLSX_MAX_ROWS) > 0 ? Number(limits.XLSX_MAX_ROWS) : 200000,
++      maxCols: Number(limits.XLSX_MAX_COLS) > 0 ? Number(limits.XLSX_MAX_COLS) : 1000
+     });
+     if (!sheets.length) throw new Error('未找到工作表');
+     // 逐工作表解析（每张表首行须为同一套表头；空表自动跳过），按工作簿顺序合并
+diff --git a/js/modules/backup.js b/js/modules/backup.js
+index 56ae3003e3bcfc699422dbff52b2d7698a33e5c9..f6896f7ee8ba23b2fb8ce463f2a8a945f2ad343d 100644
+--- a/js/modules/backup.js
++++ b/js/modules/backup.js
+@@ -393,6 +393,30 @@
+     };
+   }
+ 
++  /**
++   * 现有「未被消费」的迁移前快照（P1-12）。
++   * 上次迁移中止/失败（phase='captured'）后重试时，不得用可能半迁移的数据覆盖原始迁移前快照；
++   * 仅当上一次迁移已成功提交（phase='migrated'）或快照不完整时才允许重新采集。
++   * @returns {Promise<Object|null>} IDB 路径返回元信息、LS 路径返回完整信封；不可用返回 null
++   */
++  async function existingUnconsumedBackup() {
++    if (hasIdb()) {
++      let meta = null;
++      try { meta = await idbRequest('readonly', (store) => store.get(AUTO_ID)); } catch (_) { return null; }
++      if (!isRawMeta(meta) || !meta.progress || meta.progress.phase === 'migrated') return null;
++      let recs = [];
++      try { recs = await idbRequest('readonly', (store) => store.getAll()); } catch (_) { return null; }
++      const chunks = (recs || []).filter((r) => r && typeof r.i === 'number'
++        && Array.isArray(r.keys) && Array.isArray(r.raws));
++      const total = chunks.reduce((n, c) => n + c.keys.length, 0);
++      if (chunks.length !== meta.dataChunks || total !== meta.dataKeys) return null; // 不完整 → 允许重建
++      return meta;
++    }
++    const back = QB.Storage.getFresh(QB.KEYS.metaMigrationBackup, null);
++    if (!isBackup(back) || !back.progress || back.progress.phase === 'migrated') return null;
++    return back;
++  }
++
+   /**
+    * 写迁移前自动备份；**写失败即抛错**（调用方须中止迁移）。
+    * IDB 路径：分块保存原始 JSON 串（每 100 键一条记录），不把全库解析成对象；
+@@ -406,6 +430,9 @@
+     // 分阶段水合（Phase 0 批次2）：自动备份是全量导出，先补齐全部物理记录；
+     // 失败即中止（迁移据此不进入任何数据改写）。
+     if (QB.Storage && typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
++    // P1-12：迁移中止后重试不覆盖原始迁移前快照（已完成迁移的快照允许滚动更新）
++    const kept = await existingUnconsumedBackup();
++    if (kept) return kept;
+     if (hasIdb()) {
+       const items = collectRawData();
+       const meta = autoMeta(info, startedAt, items.length);
+@@ -525,9 +552,35 @@
+     if (QB.Storage && typeof QB.Storage.ensureAll === 'function') await QB.Storage.ensureAll();
+ 
+     if (m === 'merge') {
+-      Object.keys(data).forEach((k) => QB.Storage.set(k, data[k]));
+-      await QB.Storage.forceSync();
+-      return { keys: Object.keys(data).length, mode: m };
++      const keys = Object.keys(data);
++      // 合并是逐键写入、非事务：先记旧值，失败时回滚已写键并给出清单（P1-13）
++      const prior = new Map(keys.map((k) => [k, QB.Storage.get(k, null)]));
++      const written = [];
++      try {
++        keys.forEach((k) => { QB.Storage.set(k, data[k]); written.push(k); });
++        await QB.Storage.forceSync();
++        return { keys: keys.length, mode: m };
++      } catch (e) {
++        try {
++          written.forEach((k) => {
++            const old = prior.get(k);
++            if (old === null || old === undefined) QB.Storage.remove(k);
++            else QB.Storage.set(k, old);
++          });
++          await QB.Storage.forceSync();
++        } catch (rollbackErr) {
++          console.error('[Backup] 合并回滚也失败：', rollbackErr);
++        }
++        const failedKey = keys[written.length] || keys[keys.length - 1] || '';
++        const listed = written.slice(0, 10).join(', ') + (written.length > 10 ? ' 等共 ' + written.length + ' 个' : '');
++        const err = new Error('合并恢复中断：写入「' + failedKey + '」时失败（' +
++          ((e && e.message) || String(e)) + '）。已写入的键' +
++          (written.length ? '（' + listed + '）' : '') + '已尝试回滚；可重试或改用覆盖恢复。');
++        err.partial = true;
++        err.written = written.slice();
++        err.cause = e;
++        throw err;
++      }
+     }
+ 
+     const oldKeys = QB.Storage.keys();
+@@ -754,15 +807,82 @@
+     return list.length;
+   }
+ 
++  /**
++   * 恢复资产前的结构校验（P1-13）：id 非空、bytes 非空。
++   * 不合规时在「数据恢复之前」拒绝，避免出现「数据已改写、图片没恢复」的半套状态。
++   * @param {Array<{id:string, bytes:ArrayBuffer|Uint8Array}>} assets
++   * @returns {{ok:boolean, ids:Array<string>, error:string}}
++   */
++  function validateAssets(assets) {
++    const list = assets || [];
++    const ids = [];
++    for (let i = 0; i < list.length; i++) {
++      const a = list[i];
++      if (!a || typeof a.id !== 'string' || !a.id) {
++        return { ok: false, ids: ids, error: '第 ' + (i + 1) + ' 个资产缺少 id' };
++      }
++      const n = a.bytes && (a.bytes.byteLength != null ? a.bytes.byteLength : (a.bytes.length || 0));
++      if (!n) return { ok: false, ids: ids, error: '资产 ' + a.id + ' 缺少内容（bytes 为空）' };
++      ids.push(a.id);
++    }
++    return { ok: true, ids: ids, error: '' };
++  }
++
++  /** 备份体积/条目上限（P1-14，取值见 CONFIG.LIMITS，与 zip-reader 上限对齐） */
++  function backupLimits() {
++    const L = (QB.CONFIG && QB.CONFIG.LIMITS) || {};
++    return {
++      maxBytes: Number(L.BACKUP_JSON_MAX_BYTES) || 64 * 1024 * 1024,
++      maxKeys: Number(L.BACKUP_MAX_KEYS) || 10000
++    };
++  }
++
++  function byteLengthOf(text) {
++    try { if (typeof Blob !== 'undefined') return new Blob([text]).size; } catch (_) { /* 退化 */ }
++    try { return new TextEncoder().encode(text).byteLength; } catch (_) { return text.length; }
++  }
++
++  function assertKeyLimit(backup) {
++    const limit = backupLimits();
++    const n = Object.keys((backup && backup.data) || {}).length;
++    if (n > limit.maxKeys) {
++      throw new Error('备份包含 ' + n + ' 个数据键，超过上限 ' + limit.maxKeys +
++        '；请分库导出或改用 .qfbk 包');
++    }
++  }
++
++  /** 导出前校验载荷规模（超限明确拒绝，不产出读不回来的备份） */
++  function assertExportablePayload(payload) {
++    const limit = backupLimits();
++    assertKeyLimit(payload);
++    const bytes = byteLengthOf(JSON.stringify(payload));
++    if (bytes > limit.maxBytes) {
++      throw new Error('备份体积约 ' + Math.round(bytes / 1024 / 1024) + ' MB，超过上限 ' +
++        Math.round(limit.maxBytes / 1024 / 1024) + ' MB；请分库导出或改用 .qfbk 包');
++    }
++    return true;
++  }
++
+   /** 解析备份文件：自动识别 ZIP 包（PK 头）或 JSON */
+   async function parseBackupFile(buffer) {
++    const limit = backupLimits();
++    const size = buffer && typeof buffer.byteLength === 'number' ? buffer.byteLength : 0;
++    // 先按字节数拒绝，再做 Uint8Array 转换（不为超大文件分配内存）
++    if (size > limit.maxBytes) {
++      throw new Error('备份文件约 ' + Math.round(size / 1024 / 1024) + ' MB，超过上限 ' +
++        Math.round(limit.maxBytes / 1024 / 1024) + ' MB；请改用 .qfbk 包或分库导出');
++    }
+     const bytes = new Uint8Array(buffer);
+     if (QB.Qbk.isZipBytes(bytes)) {
+       const bundle = await QB.Qbk.parseBundle(buffer, { jsonName: 'backup.json' });
+-      return { backup: JSON.parse(bundle.text), assets: bundle.assets };
++      const backup = JSON.parse(bundle.text);
++      assertKeyLimit(backup);
++      return { backup: backup, assets: bundle.assets };
+     }
+     const text = QB.decodeUtf8(bytes);
+-    return { backup: JSON.parse(text), assets: [] };
++    const backup = JSON.parse(text);
++    assertKeyLimit(backup);
++    return { backup: backup, assets: [] };
+   }
+ 
+   /* ---------------- 浏览器外壳 ---------------- */
+@@ -782,6 +902,7 @@
+       blob = new Blob([bundle.content], { type: 'application/zip' });
+       name = filename || ('qforge-backup' + suffix + '-' + new Date().toISOString().slice(0, 10) + '.qfbk');
+     } else {
++      assertExportablePayload(payload); // P1-14：JSON 路径超限直接拒绝（建议 .qfbk/分库）
+       blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+       name = filename || ('qforge-backup' + suffix + '-' + new Date().toISOString().slice(0, 10) + '.json');
+     }
+@@ -822,6 +943,9 @@
+             modal.querySelector('[data-bk="ok"]').onclick = async () => {
+               const mode = modal.querySelector('#bk-merge').checked ? 'merge' : 'replace';
+               try {
++                // P1-13：资产结构先校验；不合规时不触碰数据（避免半套恢复）
++                const assetCheck = validateAssets(parsed.assets);
++                if (!assetCheck.ok) throw new Error('资产校验失败：' + assetCheck.error);
+                 const r = await applyBackup(backup, { mode: mode });
+                 const imgCount = await restoreAssets(parsed.assets, mode);
+                 QB.UIPort.closeModal();
+@@ -997,7 +1121,8 @@
+     toLegacyPayload,
+     isServerFormat, isLocalFormat, serverToLocal, localToServer,
+     assertCompatible, saveAutoBackup, readAutoBackup, markAutoBackupDone, clearAutoBackup,
+-    buildAssetBundle, parseBackupFile, restoreAssets, globallyReferencedAssetIds,
++    buildAssetBundle, parseBackupFile, restoreAssets, validateAssets, assertExportablePayload,
++    globallyReferencedAssetIds,
+     confirmRestore,
+     download, pickAndRestore, openFlow
+   };
+diff --git a/js/modules/migrate.js b/js/modules/migrate.js
+index c837c309544d34b6bfbae44c921f91cda93d8e66..94a0451237012fb9958235cb99d1ca77fbede289 100644
+--- a/js/modules/migrate.js
++++ b/js/modules/migrate.js
+@@ -106,8 +106,14 @@
+     };
+   }
+ 
++  /**
++   * 按迁移前快照回滚。
++   * P1-15：某键快照串无法解析时**保留当前值**（不 set、不 remove）并记录，最后抛
++   * ROLLBACK_PARTIAL——旧实现 remove 该键，等于把用户数据静默删掉。
++   * @returns {{failed:Array<string>}} 全部成功时 failed 为空
++   */
+   function restoreAll(snap) {
+-    if (!snap) return;
++    if (!snap) return { failed: [] };
+     const current = QB.Storage.keys();
+     // 引导标记（后端选择/迁移标记/schema 版本/锁）不参与「快照外删除」：
+     // 它们描述「当前该用哪个后端」，回滚旧业务数据不应把后端选择也退回去。
+@@ -118,13 +124,22 @@
+     });
+     // 先恢复内存/待写队列再统一落盘：迁移失败常因配额，逐个 setSync 会在第一个键再次抛错
+     // 导致后续键没回滚；set 不立即落盘，最后 forceSync 一次性提交（仍失败则待写队列保留旧值重试）。
++    const failed = [];
+     snap.raws.forEach((pair) => {
+       if (pair[1] === null || pair[1] === undefined) { QB.Storage.remove(pair[0]); return; }
+       let value;
+-      try { value = JSON.parse(pair[1]); } catch (_) { QB.Storage.remove(pair[0]); return; }
++      try { value = JSON.parse(pair[1]); } catch (_) { failed.push(pair[0]); return; }
+       QB.Storage.set(pair[0], value);
+     });
+     QB.Storage.forceSync();
++    if (failed.length) {
++      const e = new Error('回滚未完成：' + failed.length + ' 个快照键无法解析，已保留当前值（' +
++        failed.slice(0, 5).join(', ') + (failed.length > 5 ? ' 等' : '') + '）');
++      e.code = 'ROLLBACK_PARTIAL';
++      e.failed = failed;
++      throw e;
++    }
++    return { failed: failed };
+   }
+ 
+   /* ---------------- v1 → v2（历史；hash 升到当前版本） ---------------- */
+@@ -799,7 +814,7 @@
+   }
+ 
+   QB.Migration = {
+-    SCHEMA_VERSION, run, currentVersion, ensureLayout,
++    SCHEMA_VERSION, run, currentVersion, ensureLayout, restoreAll,
+     migrateV1ToV2, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7,
+     LOCK_TTL_MS
+   };
+diff --git a/js/modules/srs-store.js b/js/modules/srs-store.js
+index cf3a8d6f704a4d670ace1ee613fe15c199efffe2..29ef53524f55f7037753fd453c6f5e829ebc2782 100644
+--- a/js/modules/srs-store.js
++++ b/js/modules/srs-store.js
+@@ -43,11 +43,16 @@
+     let res;
+     if (QB.hasCapability(QB.DB, 'reviews', 'patch')) res = await repo.patch(bankId, delta, entries);
+     else {
+-      // 旧第三方适配器：无 patch 时读整表、加上本批改动后整表提交（行为不变）
++      // 旧第三方适配器：无 patch 时读整表、按 ReviewMerge 合并本批改动后整表提交。
++      // 读与写之间另一标签可能已写入更新的状态：逐键按 last 大者合并（平局保留落盘值），
++      // 不得用本批计算结果直接整值覆盖（P1-10）。
+       const map = await readMap(bankId);
++      const merge = QB.ReviewMerge && typeof QB.ReviewMerge.mergeMaps === 'function'
++        ? QB.ReviewMerge.mergeMaps : null;
+       Object.keys(delta || {}).forEach((k) => {
+         if (delta[k] === null) delete map[k];
+-        else map[k] = delta[k];
++        else if (!map[k]) map[k] = delta[k];
++        else map[k] = merge ? merge({ s: delta[k] }, { s: map[k] }).s : delta[k];
+       });
+       res = await repo.record(bankId, map, entries);
+     }
+diff --git a/js/modules/sync-dav.js b/js/modules/sync-dav.js
+index 42099072112941cd67fab0e5fa6efc4f940b7fe5..933131b5dbde3943ca9e7677cb3d347eebd8700c 100644
+--- a/js/modules/sync-dav.js
++++ b/js/modules/sync-dav.js
+@@ -142,6 +142,7 @@
+       lastAt: raw.lastAt,
+       lastName: raw.lastName,
+       lastSize: raw.lastSize,
++      lastEtag: raw.lastEtag || '',
+       hasPass: !!(raw.passEnc || (typeof raw.pass === 'string' && raw.pass)),
+       v: raw.v || 1
+     };
+@@ -162,6 +163,7 @@
+       lastAt: raw.lastAt,
+       lastName: raw.lastName,
+       lastSize: raw.lastSize,
++      lastEtag: raw.lastEtag || '',
+       hasPass: true,
+       v: raw.v || 1
+     };
+@@ -180,7 +182,7 @@
+         if (verify.pass === raw.pass) {
+           QB.Storage.set(QB.KEYS.metaDav, {
+             v: 2, baseUrl: out.baseUrl, user: out.user, passEnc: enc.enc,
+-            lastAt: out.lastAt, lastName: out.lastName, lastSize: out.lastSize
++            lastAt: out.lastAt, lastName: out.lastName, lastSize: out.lastSize, lastEtag: out.lastEtag
+           });
+           out.migrated = true;
+           out.v = 2;
+@@ -192,7 +194,7 @@
+       // Web Crypto / 密钥不可用：明文不能继续留在 localStorage；移除明文，保元数据，密码仅本次会话可用
+       QB.Storage.set(QB.KEYS.metaDav, {
+         v: 2, baseUrl: out.baseUrl, user: out.user,
+-        lastAt: out.lastAt, lastName: out.lastName, lastSize: out.lastSize
++        lastAt: out.lastAt, lastName: out.lastName, lastSize: out.lastSize, lastEtag: out.lastEtag
+       });
+       out.migrated = true;
+       out.passPersisted = false;
+@@ -215,7 +217,8 @@
+       user: String((cfg.user !== undefined ? cfg.user : raw.user) || '').trim(),
+       lastAt: cfg.lastAt !== undefined ? cfg.lastAt : raw.lastAt,
+       lastName: cfg.lastName !== undefined ? cfg.lastName : raw.lastName,
+-      lastSize: cfg.lastSize !== undefined ? cfg.lastSize : raw.lastSize
++      lastSize: cfg.lastSize !== undefined ? cfg.lastSize : raw.lastSize,
++      lastEtag: cfg.lastEtag !== undefined ? cfg.lastEtag : (raw.lastEtag || '')
+     };
+     let passText = '';
+     let warning = '';
+@@ -282,9 +285,106 @@
+     return fetch;
+   }
+ 
++  /* ---------------- 超时 / 冲突（P1-11） ---------------- */
++
++  const DEFAULT_TIMEOUT_MS = 30000;
++
++  /** 超时统一错误（可识别 code，调用方不必解析文案） */
++  function timeoutError(ms) {
++    const e = new Error('WebDAV 请求超时（' + Math.max(1, Math.round(ms / 1000)) + ' 秒），已中止');
++    e.code = 'DAV_TIMEOUT';
++    return e;
++  }
++
++  /**
++   * 带超时与中止的 fetch 封装：黑洞网络/无响应的 WebDAV 服务不能永久挂起上传/下载。
++   * timeout<=0 或环境无 AbortController 时退化为普通请求（老浏览器不阻断功能）。
++   */
++  async function request(fetchImpl, url, init, timeoutMs) {
++    const ms = timeoutMs == null ? DEFAULT_TIMEOUT_MS : Number(timeoutMs);
++    if (!(ms > 0) || typeof AbortController !== 'function') return await fetchImpl(url, init);
++    const ctrl = new AbortController();
++    const timer = setTimeout(() => { try { ctrl.abort(); } catch (_) { /* 已结束 */ } }, ms);
++    try {
++      return await fetchImpl(url, Object.assign({}, init, { signal: ctrl.signal }));
++    } catch (e) {
++      if (ctrl.signal && ctrl.signal.aborted) throw timeoutError(ms);
++      throw e;
++    } finally {
++      clearTimeout(timer);
++    }
++  }
++
++  function headerOf(res, name) {
++    const h = res && res.headers;
++    if (!h) return '';
++    if (typeof h.get === 'function') return h.get(name) || '';
++    return h[name] || h[name.toLowerCase()] || '';
++  }
++
++  /**
++   * 上传前远端变更检测（D-2C-2）：HEAD 取 ETag / Last-Modified / Content-Length。
++   * - 有 ETag：与上次上传记录的 lastEtag 比较（本机从未上传过则不判冲突）。
++   * - 无 ETag：Last-Modified 晚于上次上传时间，或（无 Last-Modified 时）大小与记录不一致 → 冲突。
++   * - 服务端不支持 HEAD（405/501）或 HEAD 异常：返回 {supported:false}，不阻断上传，由调用方提示。
++   */
++  async function checkRemote(checked, cfg, fetchImpl, timeoutMs) {
++    try {
++      const res = await request(fetchImpl, checked.url, {
++        method: 'HEAD',
++        headers: { Authorization: authHeader(checked.user, checked.pass) }
++      }, timeoutMs);
++      try { if (res && typeof res.arrayBuffer === 'function') await res.arrayBuffer(); } catch (_) { /* 消费响应体 */ }
++      if (!res) return { supported: false };
++      if (res.status === 401 || res.status === 403) throw new Error('WebDAV 认证失败（401/403）：检查账号与应用密码');
++      if (res.status === 404) return { supported: true, exists: false };
++      if (res.status === 405 || res.status === 501) return { supported: false };
++      if (res.status < 200 || res.status >= 400) return { supported: false };
++      const etag = headerOf(res, 'ETag');
++      const lastMod = headerOf(res, 'Last-Modified');
++      const len = headerOf(res, 'Content-Length');
++      return {
++        supported: true,
++        exists: true,
++        etag: etag || '',
++        lastModified: lastMod ? (Date.parse(lastMod) || 0) : 0,
++        size: len === '' ? null : Number(len)
++      };
++    } catch (e) {
++      if (e && e.code === 'DAV_TIMEOUT') throw e; // 超时是明确失败，不降级为「无冲突」
++      return { supported: false, error: e };
++    }
++  }
++
++  /** 远端相对本机上次上传是否已变更；返回原因文案或 null */
++  function conflictOf(remote, cfg) {
++    if (!remote || !remote.supported || !remote.exists) return null;
++    cfg = cfg || {};
++    if (remote.etag) {
++      if (cfg.lastEtag && remote.etag !== cfg.lastEtag) return '云端备份已被其他设备更新（ETag 不一致）';
++      return null;
++    }
++    const lastAt = Number(cfg.lastAt) || 0;
++    if (remote.lastModified && lastAt && remote.lastModified > lastAt + 1000) {
++      return '云端备份的修改时间晚于本机上次上传';
++    }
++    const lastSize = Number(cfg.lastSize);
++    if (!remote.lastModified && remote.size != null && isFinite(lastSize) && lastSize > 0 && remote.size !== lastSize) {
++      return '云端备份大小与本机上次上传不一致';
++    }
++    return null;
++  }
++
++  function conflictError(reason) {
++    const e = new Error('上传已取消：' + reason + '。确认要覆盖云端备份时请选择「仍要上传」。');
++    e.code = 'DAV_CONFLICT';
++    return e;
++  }
++
+   /**
+-   * 上传当前全量备份
+-   * @param {{config?:Object, fetch?:Function}} [opts] fetch 可注入（测试）
++   * 上传当前全量备份（P1-11：上传前检测远端变更、请求可超时中止）
++   * @param {{config?:Object, fetch?:Function, timeout?:number, force?:boolean}} [opts]
++   *   fetch 可注入（测试）；timeout 毫秒（0=不超时）；force 跳过冲突检测（用户确认覆盖）
+    */
+   async function upload(opts) {
+     opts = opts || {};
+@@ -297,32 +397,46 @@
+       body = bundle.content; mime = 'application/zip'; assetCount = bundle.assetCount;
+     } else {
+       QB.Storage.forceSync();
+-      body = JSON.stringify(await QB.Backup.buildBackup());
++      const payload = await QB.Backup.buildBackup();
++      if (QB.Backup.assertExportablePayload) QB.Backup.assertExportablePayload(payload); // P1-14：超限导出前拒绝
++      body = JSON.stringify(payload);
+       mime = 'application/json;charset=utf-8';
+       assetCount = 0;
+     }
+     const fetchImpl = opts.fetch || defaultFetch();
+-    const res = await fetchImpl(checked.url, {
+-      method: 'PUT',
+-      headers: { Authorization: authHeader(checked.user, checked.pass), 'Content-Type': mime },
+-      body: body
+-    });
++    let conflictCheck = 'unsupported';
++    let remote = null;
++    if (!opts.force) {
++      remote = await checkRemote(checked, cfg, fetchImpl, opts.timeout);
++      conflictCheck = remote.supported ? 'checked' : 'unsupported';
++      const reason = conflictOf(remote, cfg);
++      if (reason) throw conflictError(reason);
++    }
++    const headers = { Authorization: authHeader(checked.user, checked.pass), 'Content-Type': mime };
++    if (!opts.force && remote && remote.etag) headers['If-Match'] = remote.etag;
++    const res = await request(fetchImpl, checked.url, { method: 'PUT', headers: headers, body: body }, opts.timeout);
+     // 消费响应体（WebDAV/代理可能回非空 body）：未消费的 Response 被释放时浏览器会记
+     // `net::ERR_ABORTED`——请求其实已成功（与 api-adapter.req 同一类噪声，见 CHANGELOG.internal.md）。
+     try { await res.arrayBuffer(); } catch (e) { /* 消费失败不影响状态判定 */ }
+     if (!res || OK_STATUS.indexOf(res.status) < 0) {
+       const status = res && res.status;
++      if (status === 412) throw conflictError('云端备份在检测后被其他设备更新（HTTP 412）');
+       throw new Error(status === 401 || status === 403
+         ? 'WebDAV 认证失败（401/403）：检查账号与应用密码'
+         : 'WebDAV 上传失败（HTTP ' + (status || '无响应') + '）');
+     }
+     const size = body instanceof ArrayBuffer ? body.byteLength : body.length;
+     const saved = await saveConfig(Object.assign({}, cfg, {
+-      pass: checked.pass, lastAt: Date.now(), lastName: FILE_NAME, lastSize: size
++      pass: checked.pass, lastAt: Date.now(), lastName: FILE_NAME, lastSize: size,
++      lastEtag: headerOf(res, 'ETag') || (remote && remote.etag) || ''
+     }));
+-    return { ok: true, status: res.status, url: checked.url, size: size, assetCount: assetCount, config: saved };
++    return {
++      ok: true, status: res.status, url: checked.url, size: size, assetCount: assetCount,
++      conflictCheck: conflictCheck, config: saved
++    };
+   }
+ 
++
+   /**
+    * 下载云端备份并解析（不直接恢复，交给 Backup.confirmRestore 让用户选覆盖/合并）
+    * @returns {Promise<{backup:Object, assets:Array, source:string}>}
+@@ -333,10 +447,10 @@
+     if (!opts.config && cfg.passError) throw new Error(cfg.passError);
+     const checked = validateConfig(cfg);
+     const fetchImpl = opts.fetch || defaultFetch();
+-    const res = await fetchImpl(checked.url, {
++    const res = await request(fetchImpl, checked.url, {
+       method: 'GET',
+       headers: { Authorization: authHeader(checked.user, checked.pass) }
+-    });
++    }, opts.timeout);
+     if (!res || res.status !== 200) {
+       const status = res && res.status;
+       if (res) { try { await res.arrayBuffer(); } catch (e) { /* 同上：消费以免记 ERR_ABORTED */ } }
+@@ -358,6 +472,10 @@
+     const last = cfg.lastAt ? QB.Helpers.formatDate(cfg.lastAt) + '（' + Math.round((cfg.lastSize || 0) / 1024) + ' KB）' : '尚未上传';
+     const passError = cfg.passError
+       ? '<p class="li-meta" style="color:#c62828">' + esc(cfg.passError) + '</p>' : '';
++    // D4：允许 http，但必须显式提示明文传输风险（不做地址分类/拦截逻辑）
++    const insecureNote = /^http:/i.test(String(cfg.baseUrl || ''))
++      ? '<p class="li-meta" style="color:#c62828">当前使用 http:// 明文传输：账号与应用密码可能在网络中被截获，请优先改用 https://。</p>'
++      : '';
+     QB.UIPort.openModal(
+       '<h3>WebDAV 云备份</h3>' +
+       '<div class="qe-form">' +
+@@ -367,6 +485,7 @@
+       '<label class="qe-label">密码 / 应用密码（AES-GCM 加密保存在本机，密钥不可导出）</label>' +
+       '<input type="password" data-dav="pass" style="width:100%">' +
+       passError +
++      insecureNote +
+       '<p class="li-meta">加密边界（不夸大）：密码不再以明文写入 localStorage，能防「只拿到 localStorage 备份/截图」的泄露；但不能防同源 XSS、恶意浏览器扩展、同机读盘或整浏览器配置拷贝，也不能替代应用专用密码。建议使用应用专用密码，共享设备用完点「清除配置」。跨域 WebDAV 还需在 CSP connect-src 白名单放行该域。</p>' +
+       '<p class="li-meta">上次上传：' + esc(last) + '　固定对象 ' + esc(FILE_NAME) + '</p>' +
+       '<p class="li-meta">需要 WebDAV 服务允许本站 CORS 跨域访问；坚果云等公共服务默认可能被浏览器拦截，自建/Nextcloud 通常可配置。</p>' +
+@@ -381,7 +500,7 @@
+           baseUrl: modal.querySelector('[data-dav="url"]').value,
+           user: modal.querySelector('[data-dav="user"]').value,
+           pass: modal.querySelector('[data-dav="pass"]').value,
+-          lastAt: cfg.lastAt, lastName: cfg.lastName, lastSize: cfg.lastSize
++          lastAt: cfg.lastAt, lastName: cfg.lastName, lastSize: cfg.lastSize, lastEtag: cfg.lastEtag || ''
+         });
+         // R-14：密码只经 DOM value 回填，绝不写入 HTML 属性（避免随 innerHTML/截图/序列化泄露）
+         const passInput = modal.querySelector('[data-dav="pass"]');
+@@ -395,13 +514,28 @@
+         modal.querySelector('[data-dav="clear"]').onclick = () => { clearConfig(); QB.UIPort.toast('已清除 WebDAV 配置', 'ok'); QB.UIPort.closeModal(); };
+         modal.querySelector('[data-dav="up"]').onclick = async () => {
+           const conf = read();
++          const doUpload = async (force) => {
++            const r = await upload({ config: conf, force: force });
++            const extra = r.conflictCheck === 'unsupported'
++              ? '；服务端不支持变更检测，未能确认云端是否被其他设备更新' : '';
++            QB.UIPort.toast('已上传到 WebDAV（' + Math.round(r.size / 1024) + ' KB' +
++              (r.assetCount ? '，含图 ' + r.assetCount + ' 张' : '') + extra + '）', 'ok');
++            QB.UIPort.closeModal();
++          };
+           try {
+             await persist(conf);
+             QB.UIPort.toast('正在上传备份…');
+-            const r = await upload({ config: conf });
+-            QB.UIPort.toast('已上传到 WebDAV（' + Math.round(r.size / 1024) + ' KB' + (r.assetCount ? '，含图 ' + r.assetCount + ' 张' : '') + '）', 'ok');
+-            QB.UIPort.closeModal();
+-          } catch (e) { QB.UIPort.toast('上传失败：' + e.message, 'err'); }
++            await doUpload(false);
++          } catch (e) {
++            if (e && e.code === 'DAV_CONFLICT') {
++              // 不盲覆盖：先让用户确认；确认后带 force 重传（不再做第二次检测）
++              const go = await QB.UIPort.confirm('云端备份可能已被其他设备更新。仍要用本机数据覆盖云端吗？', '仍要上传');
++              if (!go) return;
++              try { await doUpload(true); } catch (e2) { QB.UIPort.toast('上传失败：' + e2.message, 'err'); }
++              return;
++            }
++            QB.UIPort.toast('上传失败：' + e.message, 'err');
++          }
+         };
+         modal.querySelector('[data-dav="down"]').onclick = async () => {
+           try {
+diff --git a/scripts/backup-hydration.test.mjs b/scripts/backup-hydration.test.mjs
+index 1ca4e72ceb05e6b44cc0bd95e649649cfcdde450..853d7727399c3e1313c34e8aa473322a8cfe6700 100644
+--- a/scripts/backup-hydration.test.mjs
++++ b/scripts/backup-hydration.test.mjs
+@@ -216,11 +216,14 @@ async function main() {
+   // local-adapter 51 → 53。
+   // 2026-11-13 P0-1：`migrate.run` 读取引导键 `meta:migrationPending`（全局键，非库作用域）；
+   // migrate 19 → 20，与既有 meta:schemaVersion 读取同类。
++  // 2026-11-13 阶段 2C：backup.js 新增 2 处全局键读取（P1-12 `existingUnconsumedBackup` 的
++  // `getFresh(metaMigrationBackup)`、P1-13 merge 分支的旧值快照 `get`），均在 saveAutoBackup/
++  // applyData 的 `ensureAll()` 之后执行，属全局引导/备份键口径：backup 10 → 12，合计 93 → 95。
+   const EXPECTED_SITES = {
+     'js/app.js': 2,
+     'js/data/db.js': 1,
+     'js/data/local-adapter.js': 53,
+-    'js/modules/backup.js': 10,
++    'js/modules/backup.js': 12,
+     'js/modules/migrate.js': 20,
+     'js/modules/package.js': 1,
+     'js/modules/start-prefs.js': 2,
+@@ -228,7 +231,7 @@ async function main() {
+     'js/utils/hash-remap.js': 1
+   };
+   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
+-  A.eq(scan.total, 93, '可执行调用点合计 93（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
++  A.eq(scan.total, 95, '可执行调用点合计 95（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
+ 
+   // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
+   A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');
+@@ -245,6 +248,11 @@ async function main() {
+   const applySlice = bkSrc.slice(at(bkSrc, 'async function applyData'), at(bkSrc, 'async function applyBackup'));
+   A.ok(at(applySlice, 'await QB.Storage.ensureAll()') < at(applySlice, 'const oldKeys = QB.Storage.keys()'),
+     'A5/A6 applyData：ensureAll 早于旧键快照（replace 才能删到载荷外库）');
++  A.ok(at(applySlice, 'await QB.Storage.ensureAll()') < at(applySlice, 'const prior = new Map(keys.map'),
++    'P1-13 merge：旧值快照（Storage.get）在 ensureAll 之后，只读全量视图');
++  const autoSlice = bkSrc.slice(at(bkSrc, 'async function saveAutoBackup'), at(bkSrc, 'async function markAutoBackupDone'));
++  A.ok(at(autoSlice, 'await QB.Storage.ensureAll()') < at(autoSlice, 'await existingUnconsumedBackup()'),
++    'P1-12 复用判定（getFresh metaMigrationBackup）在 ensureAll 之后');
+   const localOnly = /const LOCAL_ONLY_META_KEYS = \[([\s\S]*?)\];/.exec(bkSrc);
+   A.ok(!!localOnly && /metaDav/.test(localOnly[1]) && !/review|questions:|wrong|favorite/i.test(localOnly[1]),
+     'A7 applyBackup：读取的 LOCAL_ONLY_META_KEYS 全为全局偏好键（无库作用域键，无需水合）');
+diff --git a/scripts/backup.test.mjs b/scripts/backup.test.mjs
+index 7d4af64bd37c5dc4b9f74fc52bac9d4459291174..21f42339def3d15593b0197ef3b83c4e6d0db1b8 100644
+--- a/scripts/backup.test.mjs
++++ b/scripts/backup.test.mjs
+@@ -524,6 +524,78 @@ section('数据层端口注册（R-03：L2 → L1，数据层不反向点名领
+   ok(!!(await QB.LocalAdapter.backup.export()).data, '恢复端口后 export 正常返回 { data }');
+ }
+ 
++section('P1-12 迁移前自动备份：未消费快照不被覆盖');
++clearAll();
++{
++  const b1 = await QB.Backup.saveAutoBackup({ fromVersion: 5, toVersion: 7 });
++  const at1 = b1.progress && b1.progress.startedAt;
++  ok(!!at1, '首次采集得到快照（' + at1 + '）');
++  // 模拟迁移过程中数据已被改写：此时不得用新数据覆盖尚未消费的迁移前快照
++  QB.Storage.set('p1x:probe', { changed: true });
++  QB.Storage.forceSync();
++  const b2 = await QB.Backup.saveAutoBackup({ fromVersion: 5, toVersion: 7 });
++  eq(b2.progress && b2.progress.startedAt, at1, '未消费（captured）快照复用，不覆盖');
++  ok(!b2.data || b2.data['p1x:probe'] === undefined, '复用快照不含迁移中新增的数据（仍是迁移前视图）');
++  await QB.Backup.markAutoBackupDone();
++  const b3 = await QB.Backup.saveAutoBackup({ fromVersion: 6, toVersion: 7 });
++  ok(b3.data && b3.data['p1x:probe'] !== undefined, '上次迁移已提交（migrated）后允许重新采集当前数据');
++  const read = await QB.Backup.readAutoBackup();
++  eq(read && read.progress && read.progress.startedAt, b3.progress.startedAt, '新快照可读（覆盖后仍可用）');
++}
++clearAll();
++
++section('P1-13 合并恢复中途失败：回滚已写键并给出清单');
++clearAll();
++{
++  QB.Storage.setSync('mg:a', { v: 'old' });
++  QB.Storage.setSync('mg:b', { v: 'old' });
++  const origSet = QB.Storage.set.bind(QB.Storage);
++  QB.Storage.set = (k, v) => {
++    if (k === 'mg:c') throw new Error('模拟合并第 3 个键写入失败');
++    return origSet(k, v);
++  };
++  let mgErr = null;
++  try {
++    await QB.Backup.applyData({ 'mg:a': { v: 'new' }, 'mg:b': { v: 'new' }, 'mg:c': { v: 'new' } }, 'merge');
++  } catch (e) { mgErr = e; }
++  QB.Storage.set = origSet;
++  ok(!!mgErr, '合并中途失败时错误上抛（不假成功）');
++  eq(mgErr && mgErr.partial, true, '错误标记 partial（可恢复提示）');
++  ok(/mg:a|mg:b/.test((mgErr && mgErr.message) || ''), '错误提示列出已写入键清单');
++  eq(QB.Storage.get('mg:a').v, 'old', '已写键 a 回滚旧值');
++  eq(QB.Storage.get('mg:b').v, 'old', '已写键 b 回滚旧值');
++  eq(QB.Storage.get('mg:c', null), null, '失败键未被写入');
++}
++{
++  const v1 = QB.Backup.validateAssets([]);
++  ok(v1 && v1.ok, '空资产列表校验通过');
++  const v2 = QB.Backup.validateAssets([{ id: 'a1', bytes: new Uint8Array([1, 2]), mime: 'image/png' }]);
++  ok(v2 && v2.ok && v2.ids[0] === 'a1', '合法资产校验通过');
++  const v3 = QB.Backup.validateAssets([{ id: 'a2' }]);
++  ok(v3 && v3.ok === false && /缺少内容/.test(v3.error), '缺 bytes 的资产在恢复前被拒绝');
++  const v4 = QB.Backup.validateAssets([{ bytes: new Uint8Array([1]) }]);
++  ok(v4 && v4.ok === false && /缺少 id/.test(v4.error), '缺 id 的资产在恢复前被拒绝');
++}
++clearAll();
++
++section('P1-14 JSON 备份体积/条目上限');
++{
++  const L = QB.CONFIG.LIMITS;
++  ok(typeof L.BACKUP_JSON_MAX_BYTES === 'number' && L.BACKUP_JSON_MAX_BYTES > 0, '配置含 JSON 备份字节上限');
++  ok(typeof L.BACKUP_MAX_KEYS === 'number' && L.BACKUP_MAX_KEYS > 0, '配置含 JSON 备份条目上限');
++  // 伪造 byteLength：必须在 Uint8Array 转换前拒绝，避免先分配 64MB
++  let sizeErr = null;
++  try { await QB.Backup.parseBackupFile({ byteLength: (L.BACKUP_JSON_MAX_BYTES || 0) + 1 }); } catch (e) { sizeErr = e; }
++  ok(!!sizeErr && /上限/.test(sizeErr.message), '超限 JSON 在解析前被拒绝（' + (sizeErr && sizeErr.message) + '）');
++  const bigData = {};
++  const n = (L.BACKUP_MAX_KEYS || 10000) + 1;
++  for (let i = 0; i < n; i++) bigData['k' + i] = 1;
++  let keyErr = null;
++  try { QB.Backup.assertExportablePayload({ app: 'qforge-backup', data: bigData }); } catch (e) { keyErr = e; }
++  ok(!!keyErr && /数据键/.test(keyErr.message), '导出前按条目上限拒绝（' + (keyErr && keyErr.message) + '）');
++  ok(QB.Backup.assertExportablePayload({ app: 'qforge-backup', data: { a: 1 } }) === true, '正常载荷通过导出校验');
++}
++
+ console.log('\n================ 汇总 ================');
+ console.log('通过: ' + pass + '，失败: ' + failures.length);
+ if (failures.length) {
+diff --git a/scripts/docs-baseline.json b/scripts/docs-baseline.json
+index 810c7517d3a7ed70b80f8efbb50f46cd08f80fa9..0c52b10ddd83dcaf2905e40919ad85d95d582a4e 100644
+--- a/scripts/docs-baseline.json
++++ b/scripts/docs-baseline.json
+@@ -1,8 +1,8 @@
+ {
+-  "generatedAt": "2026-11-13T02:43:03.273Z",
++  "generatedAt": "2026-11-13T02:46:14.236Z",
+   "runItems": 38,
+   "suiteFiles": 37,
+-  "totalAssertions": 6114,
++  "totalAssertions": 6170,
+   "gateCount": 63,
+   "counts": {
+     "smoke-test.mjs": 746,
+@@ -11,8 +11,8 @@
+     "api-backend.test.mjs": 328,
+     "app-boot.test.mjs": 149,
+     "assets.test.mjs": 182,
+-    "backup-hydration.test.mjs": 56,
+-    "backup.test.mjs": 155,
++    "backup-hydration.test.mjs": 58,
++    "backup.test.mjs": 175,
+     "blueprint.test.mjs": 18,
+     "contract.test.mjs": 124,
+     "dom-patch.test.mjs": 40,
+@@ -24,7 +24,7 @@
+     "import-commit.test.mjs": 64,
+     "importers-anki.test.mjs": 148,
+     "importers-quizlet.test.mjs": 75,
+-    "migrate.test.mjs": 332,
++    "migrate.test.mjs": 339,
+     "office-export.test.mjs": 1150,
+     "practice-builder.test.mjs": 28,
+     "pwa.test.mjs": 93,
+@@ -34,12 +34,12 @@
+     "sched.test.mjs": 221,
+     "shard.test.mjs": 145,
+     "share-link.test.mjs": 93,
+-    "source.test.mjs": 41,
+-    "srs.test.mjs": 87,
++    "source.test.mjs": 47,
++    "srs.test.mjs": 92,
+     "static-server.test.mjs": 29,
+     "storage.test.mjs": 113,
+     "sw-runtime.test.mjs": 34,
+-    "sync-dav.test.mjs": 69,
++    "sync-dav.test.mjs": 85,
+     "ui-port.test.mjs": 25,
+     "ui-renderer.test.mjs": 218,
+     "xml-lite.test.mjs": 39
+@@ -47,7 +47,7 @@
+   "firstScreen": {
+     "scripts": 69,
+     "files": 77,
+-    "rawKB": "808.4",
+-    "gzipKB": "294.5"
++    "rawKB": "810.0",
++    "gzipKB": "295.2"
+   }
+ }
+diff --git a/scripts/migrate.test.mjs b/scripts/migrate.test.mjs
+index c34c4505fc97b4af0138fcc022b702bfcd8d4487..1ad947ed53cc2022c00c5277de4d3c421ac4fd54 100644
+--- a/scripts/migrate.test.mjs
++++ b/scripts/migrate.test.mjs
+@@ -1080,6 +1080,30 @@ section('P0-1 迁移提交顺序：落盘失败不提前提交版本，重启自
+   ok(!H.QB.Storage.getFresh(H.QB.KEYS.metaMigrationLock, null), '自愈完成后迁移锁已释放');
+ }
+ 
++section('P1-15 回滚不静默删键：不可解析快照项保留当前值并报错');
++{
++  const Hl = await createHarness(ROOT); // 独立环境：restoreAll 会清理快照外键
++  Hl.QB.DB.init();
++  Hl.QB.Storage.set('rl:keep', { v: 'old' });
++  Hl.QB.Storage.set('rl:bad', { v: 'live' });
++  Hl.QB.Storage.forceSync();
++  let err = null;
++  try {
++    Hl.QB.Migration.restoreAll({
++      keys: ['rl:keep', 'rl:bad'],
++      raws: [['rl:keep', '{"v":"snap"}'], ['rl:bad', '{broken']]
++    });
++  } catch (e) { err = e; }
++  ok(!!err && err.code === 'ROLLBACK_PARTIAL', '回滚部分失败 → 抛出可识别错误');
++  ok(!!err && err.failed && err.failed.indexOf('rl:bad') >= 0, '错误携带无法解析的键清单');
++  eq(Hl.QB.Storage.get('rl:keep').v, 'snap', '可解析项正常回滚到快照值');
++  ok(!!Hl.QB.Storage.get('rl:bad', null), '不可解析项仍存在（未被静默删除）');
++  eq(Hl.QB.Storage.get('rl:bad').v, 'live', '不可解析项保留回滚前当前值');
++  const r = Hl.QB.Migration.restoreAll({ keys: ['rl:keep'], raws: [['rl:keep', '{"v":"ok"}']] });
++  ok(r && r.failed.length === 0, '正常快照回滚返回空失败清单');
++  eq(Hl.QB.Storage.get('rl:keep').v, 'ok', '正常回滚写入快照值');
++}
++
+ console.log('\n================ 汇总 ================');
+ console.log('通过: ' + pass + '，失败: ' + failures.length);
+ if (failures.length) {
+diff --git a/scripts/source.test.mjs b/scripts/source.test.mjs
+index 4573eb26b79053417b28f8cbe67c7b3fb43405cd..d254addce596ae7fba29113ddde42228ac71aa89 100644
+--- a/scripts/source.test.mjs
++++ b/scripts/source.test.mjs
+@@ -175,6 +175,18 @@ section('开始弹窗参数记忆接线（源码级回归）');
+   ok(indexSrc.indexOf('js/modules/start-prefs.js') >= 0, 'index.html 加载 start-prefs.js');
+ }
+ 
++section('P1-17 xlsx 读取行列上限（源码级回归）');
++{
++  const src = fs.readFileSync(path.join(QB_DIR, 'js/importers/xlsx-importer.js'), 'utf8');
++  ok(src.indexOf('XLSX_MAX_ROWS') >= 0, 'readSheets 使用 CONFIG.LIMITS.XLSX_MAX_ROWS');
++  ok(src.indexOf('XLSX_MAX_COLS') >= 0, 'readSheets 使用 CONFIG.LIMITS.XLSX_MAX_COLS');
++  ok(src.indexOf('maxRows: Infinity') < 0, 'maxRows 不再无限制');
++  ok(src.indexOf('maxCols: Infinity') < 0, 'maxCols 不再无限制');
++  const L = QB.CONFIG.LIMITS;
++  eq(L.XLSX_MAX_ROWS, 200000, '行上限常量');
++  eq(L.XLSX_MAX_COLS, 1000, '列上限常量');
++}
++
+ console.log('\n================ 汇总 ================');
+ console.log('通过: ' + pass + '，失败: ' + failures.length);
+ if (failures.length) {
+diff --git a/scripts/srs.test.mjs b/scripts/srs.test.mjs
+index 1ff687faac20d3ab4097b242adc45bc659141a0f..72b6cc642f195a864619687e014055199ef73404 100644
+--- a/scripts/srs.test.mjs
++++ b/scripts/srs.test.mjs
+@@ -366,6 +366,48 @@ section('P0-5 评分置位与落盘顺序：写失败不永久丢失');
+   eq(logs.length, 1, '重试后 revlog 恰 1 条（无重复）');
+ }
+ 
++section('P1-10 无 patch 适配器：提交前按 last 合并，不覆盖其他标签新状态');
++{
++  const raw = new Map(); // 独立 harness，避免污染前序断言
++  const H = await createHarness(ROOT, { raw });
++  H.QB.DB.init();
++  const bank = await H.QB.DB.banks.create({ name: '回退合并库' });
++  await H.QB.DB.questions.insertMany(bank.id, [
++    { type: 'single', question: '回退合并题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
++  ], { dedupe: false });
++  const q = (await H.QB.DB.questions.list(bank.id, {})).items[0];
++  const key = H.QB.SRSStore.keyFor(q);
++  const older = { algo: 'fsrs', due: T0 + DAY, stability: 3, difficulty: 5, reps: 2, lapses: 0, last: T0 - DAY };
++  const newerState = { algo: 'fsrs', due: T0 + 5 * DAY, stability: 42, difficulty: 7, reps: 9, lapses: 1, last: T0 + 5000 };
++  let listCalls = 0;
++  const stored = {};
++  const fake = {
++    // 第一次读取（评分算状态）返回旧值；第二次（提交前重读）模拟另一标签已写入更新状态
++    list() {
++      listCalls++;
++      const map = {};
++      map[key] = listCalls === 1 ? older : newerState;
++      return map;
++    },
++    async record(bankId, map) {
++      stored[bankId] = Object.assign({}, map);
++      return { saved: Object.keys(map || {}).length };
++    },
++    async remove(bankId) { delete stored[bankId]; }
++  };
++  const realReviews = H.QB.DB.reviews;
++  H.QB.DB.reviews = fake; // 无 get/patch 能力 → 走 record 整表回退路径
++  let gradeErr = null;
++  try { await H.QB.SRSStore.grade(bank.id, q, H.QB.SRS.RATINGS.good, T0); } catch (e) { gradeErr = e; }
++  H.QB.DB.reviews = realReviews;
++  eq(gradeErr, null, '回退路径评分不抛错');
++  ok(listCalls >= 2, '回退路径写入前重读整表（实际读取 ' + listCalls + ' 次）');
++  const out = stored[bank.id] && stored[bank.id][key];
++  ok(!!out, '本批改动已提交到适配器');
++  eq(out && out.stability, 42, '其他标签较新的状态胜出（不被本批结果覆盖）');
++  eq(out && out.last, newerState.last, '合并按 last 取大者');
++}
++
+ console.log('\n================ 汇总 ================');
+ console.log('通过: ' + pass + '，失败: ' + failures.length);
+ if (failures.length) {
+diff --git a/scripts/sw-baseline.json b/scripts/sw-baseline.json
+index 20e5e2a382da2c2ca97f4ff3be9d654ebd77dfb6..a38f5de84b848052046a4f115043c0042f8ee486 100644
+--- a/scripts/sw-baseline.json
++++ b/scripts/sw-baseline.json
+@@ -1,4 +1,4 @@
+ {
+-  "cache": "qforge-v64",
+-  "digest": "8dc2eab8b85d09f7feeb4ff8f0cb06e2e566984d2d406d170a98ca5c040ce70a"
++  "cache": "qforge-v65",
++  "digest": "abb91642b8dfe221778816a03d08363a43a194aa9358af9a3197cf9b51ad095d"
+ }
+diff --git a/scripts/sync-dav.test.mjs b/scripts/sync-dav.test.mjs
+index cc1a79e025bf017336b112ef301d20b62397c4d1..0f8b89880667d3f3235fc19bde0be01f3ca6f866 100644
+--- a/scripts/sync-dav.test.mjs
++++ b/scripts/sync-dav.test.mjs
+@@ -243,6 +243,117 @@ section('真实 HTTP 集成：本地 CORS WebDAV 验证端点（预检 / PUT / G
+   await QB.Assets.clear();
+ }
+ 
++section('P1-11 上传前冲突检测（ETag / If-Match / 降级）');
++{
++  const headersOf = (map) => ({ get: (n) => (map && map[n] != null ? String(map[n]) : null) });
++  const routeFetch = (routes, calls) => (url, opts) => {
++    const m = (opts && opts.method) || 'GET';
++    calls.push({ method: m, headers: opts && opts.headers });
++    const r = typeof routes[m] === 'function' ? routes[m](url, opts) : routes[m];
++    if (!r) return Promise.resolve({ status: 404, headers: headersOf({}), arrayBuffer: async () => new ArrayBuffer(0) });
++    return Promise.resolve({
++      status: r.status, headers: headersOf(r.headers),
++      arrayBuffer: async () => new ArrayBuffer(0)
++    });
++  };
++  QB.Storage.set('banks', []);
++  QB.Storage.set('user:history', []);
++
++  // 远端 ETag 与本机上次记录不一致 → 冲突，且不得发出 PUT
++  {
++    const calls = [];
++    const f = routeFetch({
++      HEAD: { status: 200, headers: { ETag: '"remote-v2"' } },
++      PUT: { status: 201, headers: {} }
++    }, calls);
++    let err = null;
++    try { await D.upload({ config: Object.assign({}, CONF, { lastEtag: '"local-v1"', lastAt: 1, lastSize: 10 }), fetch: f }); }
++    catch (e) { err = e; }
++    ok(!!err && err.code === 'DAV_CONFLICT', 'ETag 不一致 → DAV_CONFLICT');
++    ok(/已被其他设备更新/.test(err.message), '冲突提示可读（' + err.message + '）');
++    ok(!calls.some((c) => c.method === 'PUT'), '冲突时不盲覆盖（未发出 PUT）');
++  }
++
++  // force=true 跳过检测，且不带 If-Match
++  {
++    const calls = [];
++    const f = routeFetch({ HEAD: { status: 200, headers: { ETag: '"remote-v2"' } }, PUT: { status: 201, headers: {} } }, calls);
++    const r = await D.upload({ config: CONF, fetch: f, force: true });
++    ok(r.ok, 'force 上传成功');
++    ok(!calls.some((c) => c.method === 'HEAD'), 'force 跳过 HEAD 检测');
++    const put = calls.find((c) => c.method === 'PUT');
++    ok(put && !put.headers['If-Match'], 'force 上传不带 If-Match');
++  }
++
++  // ETag 一致 → 携带 If-Match，成功后记录 lastEtag
++  {
++    const calls = [];
++    const f = routeFetch({
++      HEAD: { status: 200, headers: { ETag: '"same"' } },
++      PUT: { status: 201, headers: { ETag: '"after"' } }
++    }, calls);
++    const r = await D.upload({ config: Object.assign({}, CONF, { lastEtag: '"same"' }), fetch: f });
++    const put = calls.find((c) => c.method === 'PUT');
++    eq(put && put.headers['If-Match'], '"same"', 'ETag 一致 → 条件上传带上 If-Match');
++    eq(r.conflictCheck, 'checked', '返回冲突检测状态 checked');
++    eq(D.getConfig().lastEtag, '"after"', '上传成功后记录最新 ETag');
++  }
++
++  // 服务端在检测后被改写 → 412 → 冲突错误
++  {
++    const calls = [];
++    const f = routeFetch({ HEAD: { status: 200, headers: { ETag: '"same"' } }, PUT: { status: 412, headers: {} } }, calls);
++    let err = null;
++    try { await D.upload({ config: Object.assign({}, CONF, { lastEtag: '"same"' }), fetch: f }); } catch (e) { err = e; }
++    ok(!!err && err.code === 'DAV_CONFLICT', '412 → DAV_CONFLICT（检测后被改写）');
++  }
++
++  // 服务端不支持 HEAD（405）→ 降级上传并标注 unsupported
++  {
++    const calls = [];
++    const f = routeFetch({ HEAD: { status: 405, headers: {} }, PUT: { status: 201, headers: {} } }, calls);
++    const r = await D.upload({ config: CONF, fetch: f });
++    eq(r.conflictCheck, 'unsupported', 'HEAD 405 → 降级（不阻断上传）');
++  }
++
++  // 无 ETag 时按 Last-Modified 判断：远端更新晚于本机上次上传 → 冲突
++  {
++    const calls = [];
++    const f = routeFetch({ HEAD: { status: 200, headers: {} }, PUT: { status: 201, headers: {} } }, calls);
++    let err = null;
++    const conf = Object.assign({}, CONF, { lastAt: Date.parse('2026-01-01T00:00:00Z'), lastSize: 0 });
++    const f2 = routeFetch({ HEAD: { status: 200, headers: { 'Last-Modified': 'Tue, 02 Jun 2026 00:00:00 GMT' } }, PUT: { status: 201, headers: {} } }, calls);
++    try { await D.upload({ config: conf, fetch: f2 }); } catch (e) { err = e; }
++    ok(!!err && err.code === 'DAV_CONFLICT', 'Last-Modified 晚于上次上传 → 冲突');
++  }
++}
++
++section('P1-11 请求超时可中止（黑洞服务不永久挂起）');
++{
++  const hang = (url, opts) => new Promise((resolve, reject) => {
++    const s = opts && opts.signal;
++    if (!s) return; // 无信号：真的挂起（超时机制必须自己中止）
++    s.addEventListener('abort', () => {
++      const e = new Error('aborted');
++      e.name = 'AbortError';
++      reject(e);
++    });
++  });
++  let err = null;
++  try { await D.fetchBackup({ config: CONF, fetch: hang, timeout: 20 }); } catch (e) { err = e; }
++  ok(!!err && err.code === 'DAV_TIMEOUT', '超时抛 DAV_TIMEOUT（实际：' + (err && err.message) + '）');
++  ok(/超时/.test((err && err.message) || ''), '超时提示可读');
++}
++
++section('P1-11/D4 允许 http 但界面显式提示明文风险（源码级）');
++{
++  const src = fs.readFileSync(path.join(__dirname, '..', 'js/modules/sync-dav.js'), 'utf8');
++  ok(src.indexOf('明文传输') >= 0, '设置弹窗含 http 明文传输风险提示');
++  let httpOk = true;
++  try { D.validateConfig({ baseUrl: 'http://dav.example.com/dav/', user: 'u', pass: 'p' }); } catch (e) { httpOk = false; }
++  ok(httpOk, 'http 地址仍被允许（D4：不拦截，只提示）');
++}
++
+ console.log('\n================ 汇总 ================');
+ console.log('通过: ' + pass + '，失败: ' + failures.length);
+ if (failures.length) {
+diff --git a/sw.js b/sw.js
+index 200fe896cea2d8b209c9ede1ac258133283ee339..347d3a8d290f78f6e663d57114c966fdb2c2c023 100644
+--- a/sw.js
++++ b/sw.js
+@@ -12,7 +12,7 @@
+  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
+  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
+  */
+-const CACHE = 'qforge-v64';
++const CACHE = 'qforge-v65';
+ // 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
+ const CACHE_PREFIX = 'qforge-';
+ const CORE = [

@@ -1,0 +1,951 @@
+diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
+index 78261646f6bf6f62a81b393b4dd7fde2b75f1b94..c3313b756e23436b33b79d9b5a38fabf8f49a6a4 100644
+--- a/.github/workflows/test.yml
++++ b/.github/workflows/test.yml
+@@ -21,6 +21,8 @@ jobs:
+           node-version: '24'
+       - name: 文档数字校验（静态基线；README / docs/DEVELOPMENT.md）
+         run: node scripts/docs-check.mjs --static
++      - name: 异步卫生（空 catch / 未处理 Promise；历史存量走有到期日的基线）
++        run: node scripts/check-async-hygiene.mjs
+       - name: CI 覆盖自检（logic-tests 单步 + ORDER 与磁盘双向一致）
+         run: node scripts/check-ci-coverage.mjs
+       - name: 文档链接 / 锚点 / 版本读数
+diff --git a/docs/BENCH-DATA.md b/docs/BENCH-DATA.md
+index 16ffb6afe9397a5108cb2e819e10a91bb3b1db69..342bdd50d3f330d9a5cb579809bc9f693170a37d 100644
+--- a/docs/BENCH-DATA.md
++++ b/docs/BENCH-DATA.md
+@@ -63,7 +63,7 @@
+ 
+ ### D-3. C 系列、存储与阶段 0/2/3 验收读数
+ 
+-bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw，2026-11-13 阶段 2A 契约语义对等复测 294.0 KB gzip / 807.0 KB raw，2026-11-13 阶段 2B 判分与统计口径复测 294.5 KB gzip / 808.4 KB raw，2026-11-13 阶段 2C 备份/同步/导入复测 295.2 KB gzip / 810.0 KB raw）：**295.2 KB gzip / 810.0 KB raw**；按需包 23 个脚本另行随用随取（**跨包去重**合计 323.9 KB raw / 111.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
++bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw，2026-11-13 阶段 2A 契约语义对等复测 294.0 KB gzip / 807.0 KB raw，2026-11-13 阶段 2B 判分与统计口径复测 294.5 KB gzip / 808.4 KB raw，2026-11-13 阶段 2C 备份/同步/导入复测 295.2 KB gzip / 810.0 KB raw，2026-11-13 阶段 3 P2 治理复测 295.5 KB gzip / 810.8 KB raw）：**295.5 KB gzip / 810.8 KB raw**；按需包 23 个脚本另行随用随取（**跨包去重**合计 323.9 KB raw / 111.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
+ 
+ > **逻辑键视图（C1）新增两行门禁（2026-11-07，50k/IDB 档，同机 `--expose-gc`，各 5/20 采样）**
+ > - `keys()` 首次构建（50000 题 · IDB）：中位 **15.08–17.38 ms**（三次门禁最小 11.89–14.22 / 最大 32.83–40.61，门禁按中位数判定），门禁 **≤40 ms**；逻辑键 **5.0 万级（本次 50361 个字符串物化，随夹具哈希去重略有浮动）**。（**2026-11-12 起口径已变更**：判定改为 10 轮最小样本 ≤ Node 大版本基线×1.35，见 **3-B-1**；本行保留为历史读数。）
+diff --git a/docs/DEVELOPMENT.md b/docs/DEVELOPMENT.md
+index e0ecf7176583781c9b13093f412bab5f33fe096b..221525142eb81bb8f37efefbf780c8166d08b009 100644
+--- a/docs/DEVELOPMENT.md
++++ b/docs/DEVELOPMENT.md
+@@ -10,7 +10,7 @@
+ 
+ | 读数 | 当前值 | 事实源 |
+ | --- | --- | --- |
+-| SW 缓存版本 | qforge-v65 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
++| SW 缓存版本 | qforge-v66 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+ | 数据 schemaVersion | 7 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
+ | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
+ 
+@@ -134,7 +134,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
+ - 已覆盖的复习设置弹窗（三档宽度）：弹窗内容 `scrollWidth == clientWidth`；11 个控件（`#sched-fuzz`、`#sched-fuzzmax`、`#sched-ed0..6`、`#sched-leech-action`、`#sched-leech`）实际点击矩形 ≥44×44（复选框量包裹 label）；复选框 `Space`、下拉 `↓` 可切换；`Esc` 后焦点回位。
+ - **未覆盖**：拖拽导入（无稳定可聚焦触发元素，`activeElement` 为 `BODY` 时不回焦）；`backup.js` 恢复确认等「外层弹窗内再开内层弹窗」只验证了 `openModal` 保留外层入口的源码约定，未做真机 Esc 断言；`confirmDialog` 在无弹窗的异步回调中调用；`SyncDAV` 弹窗；键盘操作（仅复习设置弹窗做了真机断言：Tab 循环、复选框 Space、下拉 ↓）；14 份渲染快照之外的动态题型/材料题子问。新增弹窗或入口时必须先补静态断言，再按需补真机用例。
+ 
+-**本地全量门禁**：`npm run verify` = `npm run verify:fast`（check-ngm → check-modules → check-layers → check-changelog → check-deletions → docs-links → check-ci-coverage → test-all → docs-check --static）→ `npm run bench`（默认带 `--assert`）→ `node scripts/check-discipline.mjs --strict`。只想快速回归用 `npm run verify:fast`（不含性能与纪律，省一轮 bench）。历史缺陷：`bench` 曾不带 `--assert`、`verify` 也不含 bench/discipline，注入 10% 慢化时 `npm run verify` 仍可全绿。
++**本地全量门禁**：`npm run verify` = `npm run verify:fast`（check-ngm → check-modules → check-layers → check-deps → check-csp → check-changelog → check-deletions → docs-links → check-ci-coverage → test-all → docs-check --static → check-release）→ `npm run bench`（默认带 `--assert`）→ `node scripts/check-discipline.mjs --strict`。只想快速回归用 `npm run verify:fast`（不含性能与纪律，省一轮 bench）。**第 14 问**由 `scripts/check-async-hygiene.mjs` 提供读数（空 catch / 未处理 Promise，历史存量走 `scripts/hygiene-baseline.json` 的带到期日豁免；CI 的 `docs-check` job 也直接跑它）。纪律看板区分 ✅ 通过 / ⚠️ 不适用（结构上不成立，不计分母）/ ⏭️ 临时跳过（`{reason, expires}`，到期自动转缺口）/ ❌ 缺口，`--strict` 遇任一缺口即 exit 1。历史缺陷：`bench` 曾不带 `--assert`、`verify` 也不含 bench/discipline，注入 10% 慢化时 `npm run verify` 仍可全绿。
+ 
+ ## 5. 扩展指南（最小改动路径）
+ 
+@@ -194,3 +194,52 @@ python scripts/gen_fixtures.py --docx-image    # 仅生成含内嵌 PNG 的 docx
+ - 业务逻辑变更必须在**同一提交**内同步文档：API 签名 → API-CONTRACT；架构/策略 → ARCHITECTURE；CLI/行为 → user-guide；导入导出格式 → IMPORT/EXPORT-FORMAT；调度算法 → SRS。
+ - 每次提交在 `CHANGELOG.internal.md` 留痕：Commit Hash、核心改动、验证数据、遗留 TODO/风险（该文件不对外发布）。
+ - 仅本地 `git commit`，**禁止自动 push**（除非明确要求）。
++
++## 8. 手动验收与已知环境问题
++
++### 8.1 真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）
++
++- 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。
++- 关闭标签后重新打开：自动恢复考试「第 1 / 3 题」，提示剩余 29:11；刷新后仍自动回到同一题，倒计时 28:48→27:26 持续递减（PASS）。
++- CSP 基线（同日 `serve.mjs` 127.0.0.1:8777）：首页渲染正常、控制台无 CSP 违规；选择示例题库 → 练习模式（单选 3 题）→ 出现「单选 第 1 / 3 题」→ 错误选项提交后出现「❌ 回答错误」、正确答案与解析（PASS）。
++- 开始参数记忆（2026-10-31 同日）：选择示例题库 → 练习模式设置判断题 3 题 → 开始 → 结束练习 → 返回首页 → 再次打开练习模式，判断题数量仍为 3，控制台无错误（PASS）。
++- 截图：`qforge-exam-timer.png`（本地临时目录）。
++
++### 8.2 真实浏览器端到端验收（2026-11-06，手动门禁，不进 CI）
++
++```powershell
++node scripts/e2e-browser.mjs                 # 全跑：C020/C025/C007/C008/IDB50K，49/49 exit 0
++node scripts/e2e-browser.mjs --only=sw       # 单场景复验
++```
++
++- 启动本机 Edge（CDP）+ 进程内静态服务器，覆盖：C020 跨源 CSP 默认拦截与三处白名单部署模拟、C025 install 预缓存失败/导航 500 不覆盖离线壳/CACHE 版本生效、C007 InPrivate 与 IDB 不可用回落及可恢复标记、C008 双标签并发评分、IDB 50k `storage.estimate` 与渲染帧时间。
++- 证据（`result.json`、`run.log`、截图）写入 `.screenshots/e2e-browser/`，**不入库**；场景无法真机执行时脚本明确标记「未测」并 exit 1，禁止用 Node 替身冒充真机结果。
++
++### 8.3 已知环境问题：偶发 `exit 134`（V8 分配失败）
++
++**现象**：串行跑 `storage.test.mjs`（`node storage.test.mjs`，在 `scripts/` 下）时偶发 `FATAL ERROR: AlignedAlloc Allocation failed - process out of memory`
++或 `FATAL ERROR: Zone Allocation failed - process out of memory`，退出码 134（SIGABRT）。崩溃位置不固定——实测两次分别在
++「P2-06 reviewMeta」段首和打印完「汇总」之后。崩溃时存活堆 12.6–13.9 MB、已提交堆 18.6–19.8 MB，此前 GC 全是 Scavenge
++（单次 0.22–0.35 ms，`mu = 1.000`），native 栈只有地址无符号，日志不含失败分配的 size / alignment 与 `GetLastError`。
++日志：`.analysis/flake/`（已 gitignore，不入库）。
++
++**已排除**：
++
++| 假设 | 排除依据 |
++|---|---|
++| 测试数据量过大 | 全套数据 <1 MB；`--max-old-space-size=48` 下 109 条断言稳定通过 |
++| 并发争抢 | 当时是串行循环（`1..20`，一次一个 node 进程），两次崩溃在同一 shell 内 |
++| V8 堆上限 | 实测 `heap_size_limit` = 4192 MB（`--max-old-space-size=48` 时为 144 MB） |
++| `NODE_OPTIONS` 设了小堆 | 进程 / 用户 / 系统 / `HKCU\Environment` 四处皆空 |
++| 提交内存不足 | Commit Limit 37.4 GB（物理 32.5 GB + 4.9 GB 页面文件），崩溃时余量约 17 GB，进程峰值工作集 65 MB |
++
++**结论**：进程向系统申请内存被外部拒绝，最可能是沙箱 Job 对象配额或 EDR / 杀软钩子。日志本身不带失败分配的
++size / alignment 与 `GetLastError`，无法再往下定性。同一命令 40 次里仅在 3 秒窗口内崩过 2 次，之后不复现。
++
++**复发时怎么抓**：
++
++1. 抓崩溃瞬间的 Job 对象内存限额（Process Hacker → `JobObjectExtendedLimitInformation`）、进程虚拟内存与句柄数；
++2. 查 EDR / 杀软事件日志，确认是否有 mmap 拦截记录；
++3. 在 CI 上出现时，抓 runner 的 Commit Limit 与失败瞬间进程虚拟内存（runner 是独立 16 GB VM，无本机沙箱层，理论上不复现）。
++
++> **不要**通过放宽或改写测试断言来消除该现象：它不反映被测代码的问题，改断言只会掩盖环境故障。
+diff --git a/docs/TESTING.md b/docs/TESTING.md
+index 35c8573e434acf4f8ee4fede56cf549c41849ec1..0c48037a9c1503670da39bfcc7e55dd162a518de 100644
+--- a/docs/TESTING.md
++++ b/docs/TESTING.md
+@@ -64,7 +64,7 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红
+ 
+ | 套件 | 断言数（2026-11-06 本机实跑；UTC 由 CI 矩阵覆盖） | 覆盖 |
+ | --- | --- | --- |
+-| `scripts/smoke-test.mjs` | **746** | **公共抽象黄金值（18 项：FNV 字符串/字节、mulberry32 序列、答案文本、权重仓归一、FSRSOpt 同源）**、**复习状态合并 ReviewMerge（9 项：双方独有键保留、last 相同保留远端、local/remote 更大 last、缺失/负 last 归零、不修改入参）**、**开始弹窗参数记忆 StartPrefs（20 项：默认/钳制/往返/模式隔离）**、全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v3（64 位）**、**解析类多列/多标记合并（15 项）**、**真实多列解题思路材料题（72 项）**、**真实问卷星 425/30 题（56 项）**、**按题型分值（15 项）**、**考试时长与练习正计时（8 项）**、**考试简答待自评（7 项）**、**`selfAssessAt` 按下标自评（材料小问改判/得分回算/普通简答，5 项）**、**M4 小问乱序与子问分值（22 项：contentHash 不变/同种子可复现/按新下标判分、score 1–100 归一/满分 20+30/本场显式覆盖/导入与 wire 保留）**、**填空空位/答案数不一致（9 项：按较大值保留、缺失补空、警告、一致不警告、splitFillAnswers）**、内置样例、xlsx/docx 解析、DOCX 图片、选项乱序、三格式 540 题往返、多题库隔离/级联删除、答题卡、**结果页错题重练（7 项）**；**搜索覆盖选项/填空/参考答案/材料正文与子问题（6 项）**、**考试会话恢复（7 项：startedAt/deadlineAt 保存与 restore、remainingMs 截止计算、旧会话 startedAt+durationMs 推导、极旧会话整段回退）**；**C019 判断题非法答案（5 项：题干答案非法→pending、作答非法→pending、未作答仍判错、文本对/错合法、pending 不计入 ResultPolicy 已判定/错误）** |
++| `scripts/smoke-test.mjs` | **731** | **公共抽象黄金值（18 项：FNV 字符串/字节、mulberry32 序列、答案文本、权重仓归一、FSRSOpt 同源）**、**复习状态合并 ReviewMerge（9 项：双方独有键保留、last 相同保留远端、local/remote 更大 last、缺失/负 last 归零、不修改入参）**、**开始弹窗参数记忆 StartPrefs（20 项：默认/钳制/往返/模式隔离）**、全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v3（64 位）**、**解析类多列/多标记合并（15 项）**、**真实多列解题思路材料题（72 项）**、**真实问卷星 425/30 题（56 项）**、**按题型分值（15 项）**、**考试时长与练习正计时（8 项）**、**考试简答待自评（7 项）**、**`selfAssessAt` 按下标自评（材料小问改判/得分回算/普通简答，5 项）**、**M4 小问乱序与子问分值（22 项：contentHash 不变/同种子可复现/按新下标判分、score 1–100 归一/满分 20+30/本场显式覆盖/导入与 wire 保留）**、**填空空位/答案数不一致（9 项：按较大值保留、缺失补空、警告、一致不警告、splitFillAnswers）**、内置样例、xlsx/docx 解析、DOCX 图片、选项乱序、三格式 540 题往返、多题库隔离/级联删除、答题卡、**结果页错题重练（7 项）**；**搜索覆盖选项/填空/参考答案/材料正文与子问题（6 项）**、**考试会话恢复（7 项：startedAt/deadlineAt 保存与 restore、remainingMs 截止计算、旧会话 startedAt+durationMs 推导、极旧会话整段回退）**；**C019 判断题非法答案（5 项：题干答案非法→pending、作答非法→pending、未作答仍判错、文本对/错合法、pending 不计入 ResultPolicy 已判定/错误）** |
+ | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
+ | `scripts/exporter.test.mjs` | **204** | 七格式注册（含 html 分享页）、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、**合并解析文本 CSV 往返**、**材料题五格式分流/18·19 列多行块/三格式 hash 往返/JSON 嵌套 material+children 往返/小问分值 MD·DOCX·CSV·XLSX·JSON 往返（M4，12 项）**、**JSON 内容校验和（导出/一致/篡改警告，4 项）**、**JSON 可选 `bank.sched`（已设置才写入/未设置与旧包同构，4 项）**、错题 wrongCount、乱序隔离、历史记录四格式；**只读分享页（23 项）：完整文档/UTF-8/标题描述/答案与解析/无脚本/XSS 转义/缺图占位/data URL 内嵌/材料父子编号/历史拒绝/kind 白名单** |
+ | `scripts/office-export.test.mjs` | **1150** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
+@@ -75,7 +75,7 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红
+ | `scripts/blueprint.test.mjs` | **18** | 题型×分类×难度筛选/抽题/缺口、种子可复现 |
+ | `scripts/share-link.test.mjs` | **93** | **C011 分享回链/粘贴码（离线往返）**：Base64 与 Node Buffer 逐字节一致 + URL-safe 可逆、坏字符抛错；ShareLink 同字节同码、`#share=` 回链/纯码双形态、`buildLink` 去旧 fragment、空/错前缀/非法字符抛错；**三库（图片/公式/材料题）collect→qbk(manifest)→encode→decode→runImport 往返：题数 3/3、contentHash 集合 100% 相等、packageId/version/checksum 三字段一致、清单与题数复核通过、包字节校验和相等、零清单警告**；材料父子结构与材料正文往返；**全程 stub `fetch` 调用计数 0（离线可用）**；只读分享页无 `<script>`/无内联事件、图片 data URL 内嵌、公式 `rt-frac`；粘贴纯码与完整回链均解析出题；**R-19 分享体积（12 项）：`estimateChars` 1..256 字节与 540 题/8MB 边界逐字节等于 `encode(...).length`；540 题大包预计回链 > 64 KB 时先确认、取消后 `encode` 0 次、返回 null、不打开分享弹窗** |
+ | `scripts/practice-builder.test.mjs` | **28** | **C010 错题/薄弱一键组卷（纯函数零写入）**：`Statistics.reviewStats` 按题库过滤与逐题聚合（r>=good 计正确、hard 计作答）、薄弱口径 4 组边界（3 次 1 对/2 次 2 对/1 次错/hard+good）、错题成员恒入、只含错题∪薄弱、内容键去重、limit、同 seed 确定性、空池 reason、材料题父子结构、**整库 raw 键值快照前后逐项一致** |
+-| `scripts/source.test.mjs` | **47** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入）；**无响应文案不出现 undefined（运算符优先级回归）**；**考试倒计时/刷新恢复关键接线（5 项）：timerText 传入、#quiz-timer 渲染与每秒更新、pagehide flush、remainingMs 统一口径**；**历史成绩写入字段一致性（P1-8，2 项）：交卷 `History.add` 与自评 `History.update` 均上报 `partial`**；**开始弹窗参数记忆接线（4 项）：load/save、无题库守卫、index 加载 start-prefs**；**P1-17 xlsx 行列上限（6 项）：上限常量与 `readSheets` 透传、`maxRows/maxCols` 不再为 Infinity** |
++| `scripts/source.test.mjs` | **51** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入）；**无响应文案不出现 undefined（运算符优先级回归）**；**考试倒计时/刷新恢复关键接线（5 项）：timerText 传入、#quiz-timer 渲染与每秒更新、pagehide flush、remainingMs 统一口径**；**历史成绩写入字段一致性（P1-8，2 项）：交卷 `History.add` 与自评 `History.update` 均上报 `partial`**；**组卷 seed 写回与恢复复用（P2-7，4 项）：新会话仍随机、集训把 seed 交给 beginQuiz、seed 写入快照、恢复时读取**；**开始弹窗参数记忆接线（4 项）：load/save、无题库守卫、index 加载 start-prefs**；**P1-17 xlsx 行列上限（6 项）：上限常量与 `readSheets` 透传、`maxRows/maxCols` 不再为 Infinity** |
+ | `scripts/fsrs.test.mjs` | **136** | py-fsrs 6.3.2 黄金对照（S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f 1.391987、同日 S′_s 3.051249/10/10/15.534308）、衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term 阈值、1m/10m learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz（区间/分布/确定性） |
+ | `scripts/fsrs-opt.test.mjs` | **114** | revlog/FIFO/作用域隔离、四门控、**留出门控（holdout 20%/gateBasis）+历史最佳权重-loss 自洽**、合成日志留出 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；**增量重训（P1，23 项）：`trainedLogLen` 训练点、`shouldRetrain` 阈值与 `minNew` 可调、热启动 `warmStarted`、Worker 透传 `startWeights`/`WARM_ITERATIONS`**；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
+ | `scripts/srs.test.mjs` | **92** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项）；**崩溃/强杀不丢评分（16 项）：返回即落盘、重启补全+幂等、失败可观测（T10）、IDB 模式直读断言已提交**；**P1-10 无 patch 回退合并（5 项）：提交前重读并按 last 合并，不覆盖其他标签新状态** |
+@@ -102,24 +102,10 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红
+ | `scripts/importers-quizlet.test.mjs` | **75** | 分隔符自动识别（Tab/逗号/分号/竖线）与显式自定义覆盖、`Term/Definition` 表头跳过、非两列/空 term/重复行跳过与警告、空文件明确报错、全部落 essay（term 题干 + definition 参考答案）、明确「无选项/无图片/无在线进度」提示、与既有 CSV 的路由边界（表头 CSV 不被劫持）；**D1：粘贴入口复用注册表（Tab/逗号/全角逗号与文件入口结果全等，Markdown/JSON/无法识别分支不回归）** |
+ | `scripts/import-commit.test.mjs` | **64** | **C006 导入事务（P1-02）**：容量预检拒绝时 0 次写且原因可见（先于预览）、写入中途超配额回滚到导入前（题数与占用字符数复原、无「导入完成」toast）、正常导入落盘回读一致与内容去重、四条入口共用 `commitImport` 且 `data-io` 只有 1 处 `insertMany`、IDB `flush` 失败不报成功并回滚；**C015 单小问材料题（P2-03/D5=A）：`runImport` 返回 1 条致命错误 → `commitImport` 返回 null、写入 0 次、题数不变（同包正常题也不落库）、弹窗含「至少 2 个」且未打开预览**；**C026 批注总量超限（7 项）：540 题满长汉字 8,100,000B > 2 MiB → 返回 null、写入 0 次、题数不变、弹窗含「批注总量/超过上限/删减批注」且未打开预览**；**R-20 导入体积预检（17 项）：上限常量 16 MiB；File-like 超限 → `FileReader` 构造 0 次、`Storage.set` 0 次、返回 null、弹窗含 `.import-error`/「超过导入上限」/「未读取文件」且未开预览；二进制快照按 `arrayBuffer.byteLength` 同样拒收；边界为开区间（=上限放行、+1 拒收），拒收结构标记 `migration.supported=false`；落盘顺序：成功 toast 严格晚于 `forceSync`/`flush`** |
+ | `scripts/a11y.test.mjs` | **103** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、**弹窗快照注册自检（每个导出的 `render*Dialog` 必须至少登记一份快照，新增弹窗漏登记即转红）**、全仓禁止 tabindex>0、模态焦点进入/异步回位链路/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖、**14 项视觉结构回归（含 `.import-error` 10 项：规则唯一、danger 前景/弱底/边框/圆角/换行均为语义令牌、无硬编码色值、两处失败弹窗共用该类且 JS 无内联样式）**；**变异 `--mutate`：删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked` → 95 通过 / 8 失败（exit 1）**；CI 以独立 `a11y` job 运行本命令 |
+-| **合计** | **6170 / 6170 通过 · 38 个运行项**（2026-11-13 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
++| **合计** | **6179 / 6179 通过 · 38 个运行项**（2026-11-13 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+ 
+-**真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**：
+-- 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。
+-- 关闭标签后重新打开：自动恢复考试「第 1 / 3 题」，提示剩余 29:11；刷新后仍自动回到同一题，倒计时 28:48→27:26 持续递减（PASS）。
+-- CSP 基线（同日 `serve.mjs` 127.0.0.1:8777）：首页渲染正常、控制台无 CSP 违规；选择示例题库 → 练习模式（单选 3 题）→ 出现「单选 第 1 / 3 题」→ 错误选项提交后出现「❌ 回答错误」、正确答案与解析（PASS）。
+-- 开始参数记忆（2026-10-31 同日）：选择示例题库 → 练习模式设置判断题 3 题 → 开始 → 结束练习 → 返回首页 → 再次打开练习模式，判断题数量仍为 3，控制台无错误（PASS）。
+-- 截图：`qforge-exam-timer.png`（本地临时目录）。
+-
+-**真实浏览器端到端验收（2026-11-06，手动门禁，不进 CI）**：
+-
+-```powershell
+-node scripts/e2e-browser.mjs                 # 全跑：C020/C025/C007/C008/IDB50K，49/49 exit 0
+-node scripts/e2e-browser.mjs --only=sw       # 单场景复验
+-```
+-
+-- 启动本机 Edge（CDP）+ 进程内静态服务器，覆盖：C020 跨源 CSP 默认拦截与三处白名单部署模拟、C025 install 预缓存失败/导航 500 不覆盖离线壳/CACHE 版本生效、C007 InPrivate 与 IDB 不可用回落及可恢复标记、C008 双标签并发评分、IDB 50k `storage.estimate` 与渲染帧时间。
+-- 证据（`result.json`、`run.log`、截图）写入 `.screenshots/e2e-browser/`，**不入库**；场景无法真机执行时脚本明确标记「未测」并 exit 1，禁止用 Node 替身冒充真机结果。
++> 手动浏览器验收记录、偶发 `exit 134` 的现象与复现步骤见
++> [DEVELOPMENT.md 第 8 节](DEVELOPMENT.md#8-手动验收与已知环境问题)；本节只保留自动化总闸的跑法。
+ 
+ **浏览器端到端 CI 门禁（`e2e` job）**：独立 job（ubuntu + Node 24 + headless chromium，8 分钟上限），六场景、确定性写法、边界与失败取证见 [E2E-CI.md](E2E-CI.md)。
+ 
+@@ -131,47 +117,18 @@ Get-ChildItem scripts\*.test.mjs, scripts\smoke-test.mjs | ForEach-Object { node
+ node scripts/test-all.mjs
+ ```
+ 
+-## 已知环境问题：偶发 `exit 134`（V8 分配失败）
+-
+-**现象**：串行跑 `storage.test.mjs`（`node storage.test.mjs`，在 `scripts/` 下）时偶发 `FATAL ERROR: AlignedAlloc Allocation failed - process out of memory`
+-或 `FATAL ERROR: Zone Allocation failed - process out of memory`，退出码 134（SIGABRT）。崩溃位置不固定——实测两次分别在
+-「P2-06 reviewMeta」段首和打印完「汇总」之后。崩溃时存活堆 12.6–13.9 MB、已提交堆 18.6–19.8 MB，此前 GC 全是 Scavenge
+-（单次 0.22–0.35 ms，`mu = 1.000`），native 栈只有地址无符号，日志不含失败分配的 size / alignment 与 `GetLastError`。
+-日志：`.analysis/flake/`（已 gitignore，不入库）。
+-
+-**已排除**：
+-
+-| 假设 | 排除依据 |
+-|---|---|
+-| 测试数据量过大 | 全套数据 <1 MB；`--max-old-space-size=48` 下 109 条断言稳定通过 |
+-| 并发争抢 | 当时是串行循环（`1..20`，一次一个 node 进程），两次崩溃在同一 shell 内 |
+-| V8 堆上限 | 实测 `heap_size_limit` = 4192 MB（`--max-old-space-size=48` 时为 144 MB） |
+-| `NODE_OPTIONS` 设了小堆 | 进程 / 用户 / 系统 / `HKCU\Environment` 四处皆空 |
+-| 提交内存不足 | Commit Limit 37.4 GB（物理 32.5 GB + 4.9 GB 页面文件），崩溃时余量约 17 GB，进程峰值工作集 65 MB |
+-
+-**结论**：进程向系统申请内存被外部拒绝，最可能是沙箱 Job 对象配额或 EDR / 杀软钩子。日志本身不带失败分配的
+-size / alignment 与 `GetLastError`，无法再往下定性。同一命令 40 次里仅在 3 秒窗口内崩过 2 次，之后不复现。
+-
+-**复发时怎么抓**：
+-
+-1. 抓崩溃瞬间的 Job 对象内存限额（Process Hacker → `JobObjectExtendedLimitInformation`）、进程虚拟内存与句柄数；
+-2. 查 EDR / 杀软事件日志，确认是否有 mmap 拦截记录；
+-3. 在 CI 上出现时，抓 runner 的 Commit Limit 与失败瞬间进程虚拟内存（runner 是独立 16 GB VM，无本机沙箱层，理论上不复现）。
+-
+-> **不要**通过放宽或改写测试断言来消除该现象：它不反映被测代码的问题，改断言只会掩盖环境故障。
+-
+----
+-
+-## 附：十问看板（成熟度自评）
++## 附：纪律看板（成熟度自评）
+ 
+-> `engineering-discipline.md` §8 的十问清单，做成了一个脚本：它**不替代**任何判据，
+-> 只回答"这个仓库现在几档、缺哪一条"。
++> `engineering-discipline.md` §8 的十问清单 + 本项目追加的 4 条（文档规模、总闸覆盖、命令可解析、
++> 异步卫生），做成了一个脚本：它**不替代**任何判据，只回答"这个仓库现在几档、缺哪一条"。
+ 
+ ```bash
+ npm run discipline
+ ```
+ 
+-结构上不适用的问写在 `docs/discipline-exemptions.json`（理由必须写清为什么结构上不成立；
+-"暂时没做"不是理由）。不适用项从分母剔除，而不是从分子加分。
++`docs/discipline-exemptions.json` 支持两种声明：**不适用**（字符串；理由必须写清为什么结构上不成立，
++"暂时没做"不是理由）与**临时跳过**（`{reason, expires}`；到期当天自动变成缺口，不算永久豁免）。
++两者都不计入分母的"具备"比例，但临时跳过会在看板上单列并带到期日。
+ 
+-当前：**8/8 → L4**。第 4、5 问声明了不适用（运行时断言即契约、纯静态无构建），理由在 `docs/discipline-exemptions.json`。
++当前：**13/13 项具备 · 不适用 1（第 5 问）→ L4**；`--strict` 无缺口。
++第 14 问由 `scripts/check-async-hygiene.mjs` 提供读数（空 catch / 未处理 Promise）。
+diff --git a/js/app.js b/js/app.js
+index 6719f2a8d85ef713fbfc147bc3e9e7a47300d405..44ff39ccc3250c501b6d689b3a8fe694ea1dd9d0 100644
+--- a/js/app.js
++++ b/js/app.js
+@@ -657,17 +657,17 @@
+     // C009：存储用量基线只在这里算一次；渲染只读 QB.Quota.view()（O(1)），
+     // 之后由 Storage 写入/删除的字节增量维护（整库清空/后端切换会 reset 后重建）。
+     try { await QB.Quota.refresh(); } catch (e) { /* 用量只影响展示，失败不阻断启动 */ }
+-    QB.DB.init();
++    try { await QB.DB.init(); } catch (e) { notifyBackgroundError('数据层初始化失败', e); }
+     // 刷新/切后台时冲刷会话防抖：考试中最后一次作答不在 500ms 窗口内也能恢复
+     const flushSession = () => {
+       try {
+         const p = QB.ProgressSaver.flush();
+         if (p && typeof p.catch === 'function') p.catch(() => { /* 尽力而为，不产生未处理拒绝 */ });
+-      } catch (e) { /* 尽力而为 */ }
++      } catch (e) { /* 会话冲刷失败不阻断卸载 */ }
+       try {
+         const q = QB.Storage.flush();
+         if (q && typeof q.catch === 'function') q.catch(() => { /* IDB 异步落盘尽力而为 */ });
+-      } catch (e) { /* 尽力而为 */ }
++      } catch (e) { /* 存储冲刷失败不阻断卸载 */ }
+     };
+     if (window.addEventListener) window.addEventListener('pagehide', flushSession);
+     if (document.addEventListener) {
+diff --git a/js/data/contracts.js b/js/data/contracts.js
+index 879a5dfaf327712bfe3b615aa5905582e7130541..78fcda73d1b58c6974dba484354778a3ec6caa54 100644
+--- a/js/data/contracts.js
++++ b/js/data/contracts.js
+@@ -188,12 +188,12 @@
+     /** 打开弹窗（参数与 UIRenderer.openModal 一致） */
+     openModal(html, onMount, onClose, returnFocusTo) {
+       const fn = this._implFn('openModal');
+-      if (fn) { try { return fn(html, onMount, onClose, returnFocusTo); } catch (e) { /* no-op */ } }
++      if (fn) { try { return fn(html, onMount, onClose, returnFocusTo); } catch (e) { /* 视图实现未就绪时忽略 */ } }
+     },
+     /** 关闭弹窗 */
+     closeModal() {
+       const fn = this._implFn('closeModal');
+-      if (fn) { try { return fn(); } catch (e) { /* no-op */ } }
++      if (fn) { try { return fn(); } catch (e) { /* 视图实现未就绪时忽略 */ } }
+     },
+     /** 导入预览的校验和 HTML；实现缺席时返回空串（预览仍可正常显示） */
+     renderImportChecksum(meta) {
+diff --git a/js/data/local-adapter.js b/js/data/local-adapter.js
+index 953c54e2d19703ad20b6223873abea33cf0b4405..97d07bed12bb9359412af70f5ac9df2ea2016441 100644
+--- a/js/data/local-adapter.js
++++ b/js/data/local-adapter.js
+@@ -1315,7 +1315,7 @@
+       try {
+         ReviewStore.writeMarker(bankId);
+       } catch (e) {
+-        try { Storage.set(K.reviewMeta(bankId), raw); } catch (_) { /* 保留旧视图 */ }
++        try { Storage.set(K.reviewMeta(bankId), raw); } catch (_) { /* 回写旧视图失败时保留内存统计 */ }
+         stats.failed = String((e && e.message) || e);
+         return stats;
+       }
+@@ -1737,7 +1737,7 @@
+           if (prevLegacy != null) Storage.set(K.review(bankId), prevLegacy);
+           Storage.set(K.reviewRev(bankId), prevRev);
+           Storage.forceSync();
+-        } catch (_) { /* 尽力回滚 */ }
++        } catch (_) { /* 回滚失败保留原始错误向上抛 */ }
+         throw e;
+       }
+     },
+diff --git a/js/data/store.js b/js/data/store.js
+index 9731a0b7931a49514c3f75cc06d4ac9199ab3aa2..1c6fdbad3213676b9649f42dec347494892cdcce 100644
+--- a/js/data/store.js
++++ b/js/data/store.js
+@@ -122,7 +122,7 @@
+       if (typeof navigator !== 'undefined' && navigator && typeof navigator.userAgent === 'string') {
+         return navigator.userAgent;
+       }
+-    } catch (_) { /* 受限环境 */ }
++    } catch (_) { /* 无 navigator 的受限环境用 unknown */ }
+     return 'unknown';
+   }
+ 
+diff --git a/js/modules/backup.js b/js/modules/backup.js
+index f6896f7ee8ba23b2fb8ce463f2a8a945f2ad343d..c7445a63e505ef60941292480574d48e2ffe1b13 100644
+--- a/js/modules/backup.js
++++ b/js/modules/backup.js
+@@ -838,7 +838,7 @@
+   }
+ 
+   function byteLengthOf(text) {
+-    try { if (typeof Blob !== 'undefined') return new Blob([text]).size; } catch (_) { /* 退化 */ }
++    try { if (typeof Blob !== 'undefined') return new Blob([text]).size; } catch (_) { /* Blob 不可用时退化到 TextEncoder */ }
+     try { return new TextEncoder().encode(text).byteLength; } catch (_) { return text.length; }
+   }
+ 
+diff --git a/js/modules/fsrs-train-client.js b/js/modules/fsrs-train-client.js
+index 6fbca3404d5a2ed13b4b2e074ee8576723935cfb..1f9a6d72cfb374b68399a6a491efe9e74ae1aa02 100644
+--- a/js/modules/fsrs-train-client.js
++++ b/js/modules/fsrs-train-client.js
+@@ -55,7 +55,7 @@
+         if (settled) return;
+         settled = true;
+         clearTimeout(timer);
+-        try { worker.terminate(); } catch (e) { /* 忽略 */ }
++        try { worker.terminate(); } catch (e) { /* worker 可能已终止，忽略清理异常 */ }
+         fn(arg);
+       };
+       const timer = setTimeout(() => finish(reject, new Error('Worker 训练超时')), Core.WORKER_TIMEOUT_MS);
+diff --git a/js/modules/quiz-engine.js b/js/modules/quiz-engine.js
+index b9ff3105045c2706b4285a3216f33178a24bb2cd..dd8dc07f70fdae12e0516a8cd16c20f385b410e6 100644
+--- a/js/modules/quiz-engine.js
++++ b/js/modules/quiz-engine.js
+@@ -48,6 +48,8 @@
+     this.pointsMap = opts.pointsMap && Object.keys(opts.pointsMap).length ? opts.pointsMap : null;
+     this.durationMs = Number(opts.durationMs) > 0 ? Number(opts.durationMs) : 0;
+     this.showTimer = !!opts.showTimer;
++    // 组卷 seed（P2-7）：随会话快照持久化，恢复时复用；0 表示未指定（如手动选题）
++    this.composeSeed = Number(opts.composeSeed) > 0 ? Number(opts.composeSeed) : 0;
+     this.startedAt = 0;
+     this.deadlineAt = 0;
+     this.reset();
+@@ -465,7 +467,8 @@
+       durationMs: this.durationMs,
+       showTimer: this.showTimer,
+       startedAt: this.startedAt || 0,
+-      deadlineAt: this.deadlineAt || 0
++      deadlineAt: this.deadlineAt || 0,
++      composeSeed: this.composeSeed || 0
+     };
+   };
+ 
+@@ -482,6 +485,7 @@
+     this.showTimer = !!state.showTimer;
+     this.startedAt = Number(state.startedAt) > 0 ? Number(state.startedAt) : 0;
+     this.deadlineAt = Number(state.deadlineAt) > 0 ? Number(state.deadlineAt) : 0;
++    this.composeSeed = Number(state.composeSeed) > 0 ? Number(state.composeSeed) : 0;
+     // 旧版会话只有 startedAt、没有 deadlineAt：用 startedAt + durationMs 推导截止时间，避免恢复后重新计时
+     if (this.durationMs > 0 && !this.deadlineAt && this.startedAt > 0) {
+       this.deadlineAt = this.startedAt + this.durationMs;
+diff --git a/js/modules/quiz-session.js b/js/modules/quiz-session.js
+index 4f0f177afe30b10a139d969a5eb319aa035f8130..ea80a4404b394d0fb1dccf9ee1c1e9fe959dd504 100644
+--- a/js/modules/quiz-session.js
++++ b/js/modules/quiz-session.js
+@@ -36,10 +36,11 @@
+     // 考试截止时间随会话持久化：刷新/崩溃恢复后按剩余时间继续，而不是重新计时
+     if (engine.mode === 'exam' && engine.durationMs > 0) engine.deadlineAt = engine.startedAt + engine.durationMs;
+     State.engine = engine;
+-    State.quizMeta = { startTs: engine.startedAt, title: title || '', focusLeaves: 0, locked: false };
++    State.quizMeta = { startTs: engine.startedAt, title: title || '', focusLeaves: 0, locked: false, composeSeed: engine.composeSeed || 0 };
+     State.view = 'quiz';
+     startQuizTimer(engine);
+-    QB.ProgressSaver.save(State.bankId, engine);
++    const saved = QB.ProgressSaver.save(State.bankId, engine);
++    if (saved && typeof saved.catch === 'function') saved.catch((e) => notifyBackgroundError('保存会话失败', e));
+     hydrateQuizReviewContext(State.bankId, engine);
+     render();
+   }
+@@ -244,13 +245,14 @@
+       QB.DB.loadQuestions(State.bankId),
+       reviewLogFor(State.bankId)
+     ]);
++    const seed = Date.now() % 2147483647;
+     const built = QB.PracticeBuilder.build({
+       questions: items || [],
+       wrongKeys: (wrongList || []).map((w) => w.questionKey),
+       revlog: log,
+       bankId: State.bankId,
+       limit: QB.CONFIG.LIMITS.QUESTIONS_PER_QUIZ,
+-      seed: Date.now() % 2147483647
++      seed
+     });
+     if (!built.questions.length) {
+       UI.toast('没有错题或薄弱点（薄弱 = 作答≥' + QB.CONFIG.LIMITS.WEAK_MIN_ATTEMPTS +
+@@ -258,7 +260,8 @@
+       return;
+     }
+     beginQuiz(built.questions, 'practice',
+-      '错题+薄弱集训（' + built.counts.total + ' 题：错题 ' + built.counts.wrong + ' / 薄弱 ' + built.counts.weak + '）');
++      '错题+薄弱集训（' + built.counts.total + ' 题：错题 ' + built.counts.wrong + ' / 薄弱 ' + built.counts.weak + '）',
++      { composeSeed: seed });
+   }
+ 
+   /** 当前题 FSRS 状态（本场开练时快照；无快照返回 null） */
+@@ -380,7 +383,7 @@
+     engine.restore(s);
+     State.engine = engine;
+     // 考试保留原始开始时间（历史用时含刷新/关闭期间，剩余时间由 deadlineAt 决定）；练习从恢复时刻重新计时
+-    State.quizMeta = { startTs: isExam ? (engine.startedAt || Date.now()) : Date.now(), title: '继续上次' };
++    State.quizMeta = { startTs: isExam ? (engine.startedAt || Date.now()) : Date.now(), title: '继续上次', composeSeed: engine.composeSeed || 0 };
+     State.view = 'quiz';
+     hydrateQuizReviewContext(State.bankId, engine);
+     if (isExam && engine.durationMs > 0) {
+diff --git a/js/modules/sync-dav.js b/js/modules/sync-dav.js
+index 933131b5dbde3943ca9e7677cb3d347eebd8700c..46eb65d3c0cf93199b70045e7deb7c08f48a0b26 100644
+--- a/js/modules/sync-dav.js
++++ b/js/modules/sync-dav.js
+@@ -47,7 +47,7 @@
+       if (typeof indexedDB === 'undefined' || !indexedDB) return resolve(null);
+       try {
+         const req = indexedDB.open(SECRET_DB, 1);
+-        req.onupgradeneeded = () => { try { req.result.createObjectStore(SECRET_STORE); } catch (e) { /* 已存在 */ } };
++        req.onupgradeneeded = () => { try { req.result.createObjectStore(SECRET_STORE); } catch (e) { /* 对象存储已由前一次升级创建 */ } };
+         req.onsuccess = () => resolve(req.result);
+         req.onerror = () => resolve(null);
+         req.onblocked = () => resolve(null);
+@@ -304,7 +304,7 @@
+     const ms = timeoutMs == null ? DEFAULT_TIMEOUT_MS : Number(timeoutMs);
+     if (!(ms > 0) || typeof AbortController !== 'function') return await fetchImpl(url, init);
+     const ctrl = new AbortController();
+-    const timer = setTimeout(() => { try { ctrl.abort(); } catch (_) { /* 已结束 */ } }, ms);
++    const timer = setTimeout(() => { try { ctrl.abort(); } catch (_) { /* 定时器已清理后 abort 无副作用 */ } }, ms);
+     try {
+       return await fetchImpl(url, Object.assign({}, init, { signal: ctrl.signal }));
+     } catch (e) {
+@@ -334,7 +334,7 @@
+         method: 'HEAD',
+         headers: { Authorization: authHeader(checked.user, checked.pass) }
+       }, timeoutMs);
+-      try { if (res && typeof res.arrayBuffer === 'function') await res.arrayBuffer(); } catch (_) { /* 消费响应体 */ }
++      try { if (res && typeof res.arrayBuffer === 'function') await res.arrayBuffer(); } catch (_) { /* HEAD 响应体可丢弃，读取失败不影响判定 */ }
+       if (!res) return { supported: false };
+       if (res.status === 401 || res.status === 403) throw new Error('WebDAV 认证失败（401/403）：检查账号与应用密码');
+       if (res.status === 404) return { supported: true, exists: false };
+diff --git a/js/utils/rich-text.js b/js/utils/rich-text.js
+index 9cf7748634db5223d41df388b31d3ab8990dbfcf..ec6091bf18f41327d345613817ed11fa1b392b39 100644
+--- a/js/utils/rich-text.js
++++ b/js/utils/rich-text.js
+@@ -27,7 +27,7 @@
+   let activeUrls = [];
+   function revokeActive() {
+     if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
+-      activeUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) { /* 已失效 */ } });
++      activeUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) { /* URL 已被回收时忽略重复释放 */ } });
+     }
+     activeUrls = [];
+   }
+diff --git a/scripts/check-async-hygiene.mjs b/scripts/check-async-hygiene.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7c932b2d4610ac1d575d387214ea474f3ce1ab1d
+--- /dev/null
++++ b/scripts/check-async-hygiene.mjs
+@@ -0,0 +1,222 @@
++/**
++ * check-async-hygiene.mjs —— 异步卫生门禁（零依赖；D5：不引入 ESLint）
++ *
++ * 只守两条规则（与任务卡 P2-1 对齐）：
++ *   1. empty-catch      ：catch 块既无语句，注释有效字符又 < 6 —— 占位注释不算豁免；
++ *   2. floating-promise ：语句级调用已知异步 API，却既没 await/return/void，
++ *                         也没接 .catch/.then，也没有赋给变量。
++ *
++ * 为什么不用 ESLint：仓库是零依赖纯静态站点，为两条规则引入 devDependency 与锁文件
++ * 的代价，比一个 150 行的脚本高得多；而且这两条规则的误报面很小，脚本足够。
++ *
++ * 豁免：scripts/hygiene-baseline.json。每条必须写 reason 与 expires；
++ * **到期未清零即失败**——否则“先豁免、以后再说”会变成永久豁免。
++ *
++ * 已知边界：floating-promise 只识别「单行语句级」调用；跨行调用、动态属性访问不在此规则内。
++ * 这是刻意的：轻量门禁宁可少报，也不要为了全报而写半个类型系统。
++ *
++ * 用法：
++ *   node scripts/check-async-hygiene.mjs                 # 门禁
++ *   node scripts/check-async-hygiene.mjs --write-baseline # 把当前违规写成豁免（需人工补 reason）
++ *   node scripts/check-async-hygiene.mjs --selftest       # 证明两条规则与到期语义都会拦
++ */
++import fs from 'node:fs';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++
++const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
++const BASELINE = path.join(ROOT, 'scripts', 'hygiene-baseline.json');
++const ARGS = process.argv.slice(2);
++const SELFTEST = ARGS.includes('--selftest');
++const WRITE = ARGS.includes('--write-baseline');
++
++const RULES = {
++  'empty-catch': '空 catch：补日志/处理，或写清为何可以忽略（注释 ≥ 6 字）',
++  'floating-promise': '未处理的 Promise：加 await / return / void，或接 .catch(...) 记录错误'
++};
++const MIN_COMMENT = 6;
++const FLOATING_RE = /^QB\.(?:DB|SRSStore|History|Backup|SyncDAV|WrongBook|Favorites)\.[\w$]+\s*\(/;
++const FLOATING_PS_RE = /^QB\.ProgressSaver\.(?:save|flush)\s*\(/;
++// SRSStore 里这几个是同步纯函数（不做 I/O），语句级调用不产生 Promise。
++const SYNC_OK_RE = /^QB\.SRSStore\.(?:unmarkGraded|collectGraded|keyFor|ratingForResult|fuzzSeedFor)\s*\(/;
++
++/** 扫描目录下所有 .js（只扫产品代码，避免脚本自身的 catch 噪声） */
++function jsFiles(dir, out = []) {
++  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
++    const p = path.join(dir, e.name);
++    if (e.isDirectory()) jsFiles(p, out);
++    else if (e.name.endsWith('.js')) out.push(p);
++  }
++  return out;
++}
++
++/** 取 catch 块的 body（按花括号配对；源码均为合法 JS，注释中的花括号极少见） */
++function catchBodies(src) {
++  const out = [];
++  const re = /catch\s*(?:\([^)]*\))?\s*\{/g;
++  let m;
++  while ((m = re.exec(src)) !== null) {
++    const start = m.index + m[0].length;
++    let depth = 1;
++    let i = start;
++    for (; i < src.length && depth > 0; i++) {
++      if (src[i] === '{') depth++;
++      else if (src[i] === '}') depth--;
++    }
++    out.push({ body: src.slice(start, i - 1), index: m.index });
++  }
++  return out;
++}
++
++/** 返回 [{rule, snippet}]，按出现顺序 */
++function scanSource(src) {
++  const found = [];
++  for (const { body } of catchBodies(src)) {
++    const code = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').trim();
++    if (code !== '') continue;
++    const comment = body.replace(/\/\*|\*\/|\/\//g, '').replace(/\s+/g, ' ').trim();
++    if (comment.length >= MIN_COMMENT) continue;
++    found.push({ rule: 'empty-catch', snippet: body.trim().replace(/\s+/g, ' ') });
++  }
++  for (const raw of src.split('\n')) {
++    const line = raw.trim();
++    if (!line || line.startsWith('//') || line.startsWith('*') || line.startsWith('/*')) continue;
++    if (SYNC_OK_RE.test(line)) continue;
++    if (!(FLOATING_RE.test(line) || FLOATING_PS_RE.test(line))) continue;
++    if (!line.replace(/;\s*$/, '').endsWith(')')) continue; // 跨行调用不在本规则内
++    if (/\.(?:catch|then|finally)\(/.test(line)) continue;
++    found.push({ rule: 'floating-promise', snippet: line });
++  }
++  return found;
++}
++
++function collect(root) {
++  const list = [];
++  for (const abs of jsFiles(path.join(root, 'js'))) {
++    const file = path.relative(root, abs).split(path.sep).join('/');
++    for (const v of scanSource(fs.readFileSync(abs, 'utf8'))) {
++      list.push({ file, rule: v.rule, snippet: v.snippet });
++    }
++  }
++  return list;
++}
++
++/** 同一文件里同规则、同片段的重复出现按 index 区分（否则一模一样的片段无法逐条豁免） */
++function keyOf(v, index) {
++  return v.file + '\u0000' + v.rule + '\u0000' + v.snippet + '\u0000' + index;
++}
++
++function withIndex(list) {
++  const seen = new Map();
++  return list.map((v) => {
++    const base = v.file + '\u0000' + v.rule + '\u0000' + v.snippet;
++    const index = seen.get(base) || 0;
++    seen.set(base, index + 1);
++    return Object.assign({}, v, { index });
++  });
++}
++
++function today() {
++  return new Date().toISOString().slice(0, 10);
++}
++
++/** 返回 { newOnes, expired, matched, unused } */
++function classify(found, baseline, now) {
++  const entries = Array.isArray(baseline.entries) ? baseline.entries : [];
++  const entryByKey = new Map();
++  for (const e of entries) {
++    if (!e || !e.file || !e.rule || !e.snippet) continue;
++    entryByKey.set(keyOf(e, Number(e.index) || 0), e);
++  }
++  const newOnes = [];
++  const expired = [];
++  const matched = new Set();
++  for (const v of withIndex(found)) {
++    const k = keyOf(v, v.index);
++    const e = entryByKey.get(k);
++    if (!e) { newOnes.push(v); continue; }
++    matched.add(k);
++    if (!e.expires || e.expires < now) expired.push(Object.assign({}, v, { expires: e.expires || '(未写)' }));
++  }
++  const unused = entries.filter((e) => !matched.has(keyOf(e, Number(e.index) || 0)));
++  return { newOnes, expired, unused };
++}
++
++function readBaseline() {
++  if (!fs.existsSync(BASELINE)) return { entries: [] };
++  try { return JSON.parse(fs.readFileSync(BASELINE, 'utf8')); } catch (e) {
++    console.error('hygiene-baseline.json 无法解析：' + e.message);
++    process.exit(1);
++  }
++}
++
++/* ---------------- selftest ---------------- */
++if (SELFTEST) {
++  const cases = [];
++  const check = (name, hit) => cases.push({ name, hit });
++  check('catch 完全为空 → 违规', scanSource('try { a(); } catch (e) {}').length === 1);
++  check('catch 只有占位注释 → 违规', scanSource('try { a(); } catch (e) { /* 忽略 */ }').length === 1);
++  check('catch 有原因注释 → 放行', scanSource('try { a(); } catch (e) { /* 清理失败不阻断 */ }').length === 0);
++  check('catch 有语句 → 放行', scanSource('try { a(); } catch (e) { log(e); }').length === 0);
++  check('未处理的 Promise → 违规', scanSource('QB.DB.init();').length === 1);
++  check('await 后放行', scanSource('await QB.DB.init();').length === 0);
++  check('接 .catch 后放行', scanSource('QB.DB.init().catch(report);').length === 0);
++  check('赋值后放行', scanSource('const p = QB.DB.init();').length === 0);
++  const found = [{ file: 'a.js', rule: 'empty-catch', snippet: '{}' }];
++  check('过期豁免 → 失败', classify(found, {
++    entries: [{ file: 'a.js', rule: 'empty-catch', snippet: '{}', index: 0, expires: '2000-01-01' }]
++  }, today()).expired.length === 1);
++  check('未过期豁免 → 放行', classify(found, {
++    entries: [{ file: 'a.js', rule: 'empty-catch', snippet: '{}', index: 0, expires: '2999-01-01' }]
++  }, today()).newOnes.length === 0);
++  check('无豁免 → 新违规', classify(found, { entries: [] }, today()).newOnes.length === 1);
++  let ok = true;
++  cases.forEach((c) => {
++    console.log('[selftest] ' + c.name + ' → ' + (c.hit ? '符合预期' : '判据失效'));
++    if (!c.hit) ok = false;
++  });
++  process.exit(ok ? 0 : 1);
++}
++
++/* ---------------- main ---------------- */
++const found = collect(ROOT);
++if (WRITE) {
++  const entries = withIndex(found).map((v) => ({
++    file: v.file,
++    rule: v.rule,
++    snippet: v.snippet,
++    index: v.index,
++    reason: '阶段 3 历史存量（P2-2 清零前的临时豁免）',
++    expires: '2027-01-31'
++  }));
++  fs.writeFileSync(BASELINE, JSON.stringify({
++    generatedAt: new Date().toISOString(),
++    note: '历史存量豁免。每条必须有 reason 与 expires；到期未清零时门禁失败。刷新增量用 --write-baseline。',
++    entries
++  }, null, 2) + '\n');
++  console.log('已写入基线 ' + path.relative(ROOT, BASELINE) + '：' + entries.length + ' 条豁免');
++  process.exit(0);
++}
++
++const baseline = readBaseline();
++const { newOnes, expired, unused } = classify(found, baseline, today());
++const exempted = found.length - newOnes.length;
++
++if (newOnes.length) {
++  console.error('异步卫生门禁失败：' + newOnes.length + ' 处新增违规（基线 ' + baseline.entries.length + ' 条）');
++  newOnes.forEach((v) => console.error('  ✗ [' + v.rule + '] ' + v.file + '：' + v.snippet.slice(0, 100)
++    + ' —— ' + RULES[v.rule]));
++}
++if (expired.length) {
++  console.error('异步卫生门禁失败：' + expired.length + ' 条豁免已到期（' + expired[0].expires + '），必须清零');
++  expired.forEach((v) => console.error('  ✗ [' + v.rule + '] ' + v.file + '：' + v.snippet.slice(0, 100)));
++}
++if (newOnes.length || expired.length) {
++  console.error('处理方式：修掉违规后运行 node scripts/check-async-hygiene.mjs --write-baseline 收紧基线。');
++  process.exit(1);
++}
++if (unused.length) {
++  console.log('异步卫生：' + unused.length + ' 条基线豁免已不再命中（可运行 --write-baseline 收紧）');
++}
++console.log('异步卫生门禁通过 ✅：扫描 ' + jsFiles(path.join(ROOT, 'js')).length + ' 个文件，'
++  + exempted + ' 处豁免 / 0 处新增');
+diff --git a/scripts/check-discipline.mjs b/scripts/check-discipline.mjs
+index c39efcb0c120a035495cdf45b86e473442398083..39db20e20e5b8d63f0592c41af58ad5af61b9079 100644
+--- a/scripts/check-discipline.mjs
++++ b/scripts/check-discipline.mjs
+@@ -1,11 +1,12 @@
+ /**
+  * check-discipline.mjs —— 方法论自检看板（零依赖）
+  *
+- * 对应 `engineering-discipline.md` §8 的十问。它**不替代**任何判据，只回答一件事：
++ * 对应 `engineering-discipline.md` §8 的十问，外加本项目追加的 4 条（文档规模、总闸覆盖、
++ * 命令可解析、异步卫生）。它**不替代**任何判据，只回答一件事：
+  * **这个仓库现在处于哪一档，缺的是哪一条**。
+  *
+  * 为什么需要它：纪律不均衡是常态——每个仓库都有几条做得很好、几条从来没做。
+- * 单看"CI 绿了"看不出缺口；单看"文档写了"更看不出。十问逐条给 ✅/⚠️/❌ 与读数，
++ * 单看"CI 绿了"看不出缺口；单看"文档写了"更看不出。逐条给 ✅/⚠️/⏭️/❌ 与读数，
+  * 缺口就变成一张可执行的清单。
+  *
+  * 用法：node scripts/check-discipline.mjs [--strict]
+@@ -14,7 +15,7 @@
+  */
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import { execFileSync } from 'node:child_process';
++import { execFileSync, spawnSync } from 'node:child_process';
+ import { fileURLToPath } from 'node:url';
+ 
+ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+@@ -37,24 +38,42 @@ const pkg = (() => { try { return JSON.parse(read('package.json')); } catch { re
+ const scripts = (pkg && pkg.scripts) || {};
+ const workflows = list('.github/workflows').filter((f) => /\.ya?ml$/.test(f)).map((f) => read('.github/workflows/' + f)).join('\n');
+ 
+-/* 不适用声明：有些问对某些项目**结构上就不成立**（包仓库没有构建产物、纯静态站点没有依赖锁）。
++/* 不适用 / 临时跳过：有些问对某些项目**结构上就不成立**（包仓库没有构建产物、纯静态站点没有依赖锁）。
+    与其让它长期挂红、训练人忽略红色，不如把"不适用 + 理由"写下来，由看板标 ⚠️ 并排出计分。
+-   理由必须写清"为什么结构上不成立"，不写或写得太短（<10 字）仍按缺口算。 */
++   理由必须写清"为什么结构上不成立"，不写或写得太短（<10 字）仍按缺口算。
++
++   两种声明必须分开：
++     - 不适用（na）  ：结构上不成立，无到期日，永远排除在分母外；
++     - 临时跳过（skip）：现在欠账、约定了到期日（expires）。到期即变红——
++       否则"先挂豁免、以后再说"会变成永久豁免。 */
+ const exemptions = (() => {
+   try {
+     const raw = JSON.parse(read('docs/discipline-exemptions.json'));
+     const out = {};
+     for (const [k, v] of Object.entries(raw.exemptions || {})) {
+-      if (typeof v === 'string' && v.trim().length >= 10) out[k] = v.trim();
++      if (typeof v === 'string') {
++        if (v.trim().length >= 10) out[k] = { reason: v.trim(), expires: '' };
++      } else if (v && typeof v.reason === 'string' && v.reason.trim().length >= 10) {
++        out[k] = { reason: v.reason.trim(), expires: String(v.expires || '') };
++      }
+     }
+     return out;
+   } catch { return {}; }
+ })();
+ 
++const todayStr = new Date().toISOString().slice(0, 10);
+ const checks = [];
+ const add = (id, ask, ok, note) => {
+-  if (exemptions[id]) {
+-    checks.push({ id, ask, state: 'na', note: '不适用：' + exemptions[id] });
++  const ex = exemptions[id];
++  if (ex) {
++    if (ex.expires && ex.expires < todayStr) {
++      checks.push({ id, ask, state: 'gap', note: '豁免已到期（' + ex.expires + '）：' + ex.reason });
++    } else {
++      checks.push({
++        id, ask, state: ex.expires ? 'skip' : 'na',
++        note: (ex.expires ? '临时跳过（至 ' + ex.expires + '）：' : '不适用：') + ex.reason
++      });
++    }
+     return;
+   }
+   checks.push({ id, ask, state: ok === true ? 'ok' : ok === 'na' ? 'na' : 'gap', note });
+@@ -249,23 +268,38 @@ add(13, '文档里的命令都指向真实存在的脚本', missingCmds.length =
+     ? '断 ' + missingCmds.length + ' 条（如 ' + missingCmds[0] + '）'
+     : cmdCount + ' 条命令全部可解析');
+ 
++/* 14. 异步卫生（P2-1 / D5：空 catch 与未处理 Promise） */
++// 不引入 ESLint：两条规则由 check-async-hygiene.mjs 守，历史存量走有到期日的基线。
++// 这里只取它的退出码——门禁脚本自己对"新增 vs 豁免到期"负责解释。
++const hygiene = spawnSync(process.execPath, [path.join(ROOT, 'scripts/check-async-hygiene.mjs')], {
++  cwd: ROOT, encoding: 'utf8'
++});
++const hygieneTail = ((hygiene.stdout || '') + (hygiene.stderr || '')).trim().split('\n').pop() || '';
++add(14, '异步卫生（空 catch / 未处理 Promise）', hygiene.status === 0,
++  hygiene.status === 0 ? hygieneTail : '存在新增违规或豁免已到期（node scripts/check-async-hygiene.mjs）');
++
+ /* ---------------- 成熟度 ---------------- */
+ const okCount = checks.filter((c) => c.state === 'ok').length;
+-const applicable = checks.filter((c) => c.state !== 'na').length;
++const naCount = checks.filter((c) => c.state === 'na').length;
++const skipCount = checks.filter((c) => c.state === 'skip').length;
++const applicable = checks.filter((c) => c.state === 'ok' || c.state === 'gap').length;
+ const ratio = applicable ? okCount / applicable : 0;
+ // 按"具备比例"算档，而不是按绝对条数：声明了不适用的项目不该被它无解的那几问拖住。
++// 临时跳过（skip）不计入分母——它已明确欠账，到期会自动变成缺口。
+ const level = ratio === 1 && okCount >= 6 ? 'L4'
+   : ratio >= 0.8 ? 'L3'
+     : ratio >= 0.6 ? 'L2'
+       : okCount >= 2 ? 'L1' : 'L0';
+ 
+-console.log(`discipline: ${okCount}/${applicable} 项具备 → ${level}`);
++console.log(`discipline: ${okCount}/${applicable} 项具备`
++  + (naCount ? ` · 不适用 ${naCount}` : '') + (skipCount ? ` · 临时跳过 ${skipCount}` : '')
++  + ` → ${level}`);
+ for (const c of checks) {
+-  const mark = c.state === 'ok' ? '✅' : c.state === 'na' ? '⚠️ ' : '❌';
++  const mark = c.state === 'ok' ? '✅' : c.state === 'na' ? '⚠️ ' : c.state === 'skip' ? '⏭️ ' : '❌';
+   console.log(`  ${mark} ${String(c.id).padStart(2)}. ${c.ask} —— ${c.note}`);
+ }
+ const gaps = checks.filter((c) => c.state === 'gap').map((c) => c.id);
+-if (gaps.length) console.log(`  缺口：第 ${gaps.join('、')} 问`);
++if (gaps.length) console.log(`  缺口：第 ${gaps.join('、')} 问${skipCount ? `（另有临时跳过：第 ${checks.filter((c) => c.state === 'skip').map((c) => c.id).join('、')} 问）` : ''}`);
+ 
+ if (STRICT && gaps.length) {
+   console.error(`\n--strict：存在 ${gaps.length} 个缺口（第 ${gaps.join('、')} 问），成熟度 ${level} 不予放行`);
+diff --git a/scripts/check-release.mjs b/scripts/check-release.mjs
+index 8dd8ebc93c9a7f92c69c4da841843e6dd006a798..69a6372e9c7d31695629176bf0000de271527bd7 100644
+--- a/scripts/check-release.mjs
++++ b/scripts/check-release.mjs
+@@ -8,6 +8,9 @@
+  *      不随发布变化，只校验格式，避免再被误读成"版本不一致"）；
+  *   3. sw.js 的 CACHE 形如 qforge-vNN，且不低于发布台账（docs/release-ledger.json）里
+  *      记录的上次已发布值——把 CACHE 回退到老值会被拦下；
++ *      **本检查只针对源码树**：`build-staging.mjs` 产出的发布目录会把 CACHE 换成
++ *      `qforge-<semver>`（如 `qforge-v1.0.2`），那是产物命名而不是台账口径，
++ *      由 `build-staging --assert` 自证；不要把产物目录拿来跑本脚本。
+  *   4. 应用版本不低于台账记录的上次已发布版本；
+  *   5. index.html 的 classic <script> 数量与 contracts/modules.json 的模块数相等
+  *      （顺序与 requires 由 check-modules.mjs 负责，这里只做发布视角的数量核对）。
+diff --git a/scripts/docs-baseline.json b/scripts/docs-baseline.json
+index 0c52b10ddd83dcaf2905e40919ad85d95d582a4e..b26e288e7ba3046a128cef26562f55910ff12c05 100644
+--- a/scripts/docs-baseline.json
++++ b/scripts/docs-baseline.json
+@@ -1,11 +1,11 @@
+ {
+-  "generatedAt": "2026-11-13T02:46:14.236Z",
++  "generatedAt": "2026-11-13T02:49:36.010Z",
+   "runItems": 38,
+   "suiteFiles": 37,
+-  "totalAssertions": 6170,
++  "totalAssertions": 6179,
+   "gateCount": 63,
+   "counts": {
+-    "smoke-test.mjs": 746,
++    "smoke-test.mjs": 751,
+     "a11y.test.mjs": 103,
+     "annotation.test.mjs": 90,
+     "api-backend.test.mjs": 328,
+@@ -34,7 +34,7 @@
+     "sched.test.mjs": 221,
+     "shard.test.mjs": 145,
+     "share-link.test.mjs": 93,
+-    "source.test.mjs": 47,
++    "source.test.mjs": 51,
+     "srs.test.mjs": 92,
+     "static-server.test.mjs": 29,
+     "storage.test.mjs": 113,
+@@ -47,7 +47,7 @@
+   "firstScreen": {
+     "scripts": 69,
+     "files": 77,
+-    "rawKB": "810.0",
+-    "gzipKB": "295.2"
++    "rawKB": "810.8",
++    "gzipKB": "295.5"
+   }
+ }
+diff --git a/scripts/docs-check.mjs b/scripts/docs-check.mjs
+index 69365bc93250ff7e6c5aeb01f2432650854743bd..3d79514116e81089873c1a9dc40e77250a9c1c7d 100644
+--- a/scripts/docs-check.mjs
++++ b/scripts/docs-check.mjs
+@@ -407,7 +407,9 @@ markdownFiles().forEach((rel) => {
+ 
+ console.log('\n================ 文档数字校验 ================');
+ if (!problems.length) {
+-  console.log('全部一致 ✅');
++  console.log('全部一致 ✅' + (MODE === 'static'
++    ? '（静态基线模式：套件数/断言数/门禁项数取 docs-baseline.json；运行项与首屏体积仍实时读取）'
++    : ''));
+ } else {
+   problems.forEach((p) => console.log('  ✗ ' + p));
+   console.log('共 ' + problems.length + ' 处漂移，请更新文档。');
+diff --git a/scripts/hygiene-baseline.json b/scripts/hygiene-baseline.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..cea10f63fd7f7f6bdfc7cfb081d9fb34e3753975
+--- /dev/null
++++ b/scripts/hygiene-baseline.json
+@@ -0,0 +1,5 @@
++{
++  "generatedAt": "2026-11-13T01:54:52.673Z",
++  "note": "历史存量豁免。每条必须有 reason 与 expires；到期未清零时门禁失败。刷新增量用 --write-baseline。",
++  "entries": []
++}
+diff --git a/scripts/smoke-test.mjs b/scripts/smoke-test.mjs
+index 5d1dc4f8226468e7a4721d8d4e4694646de7b507..3f25b9de5d96a51da3bcfd6601731a873b7e2536 100644
+--- a/scripts/smoke-test.mjs
++++ b/scripts/smoke-test.mjs
+@@ -1209,7 +1209,7 @@ eq(hs.avgAccuracy, 78, '历史平均正确率 78');
+ eq((await QB.History.list(bankB.id)).length, 0, '历史按题库隔离');
+ 
+ const engine0 = new QB.QuizEngine();
+-engine0.loadQuestions(listA.items.slice(0, 3), 'mixed');
++engine0.loadQuestions(listA.items.slice(0, 3), 'mixed', { composeSeed: 4242 });
+ engine0.mode = 'exam';
+ engine0.durationMs = 60000;
+ engine0.startedAt = 1700000000000;
+@@ -1220,10 +1220,13 @@ eq(savedSession.bankId, bankA.id, '进度会话已保存');
+ eq(savedSession.questions.length, 3, '进度会话题目数 3');
+ eq(savedSession.startedAt, 1700000000000, '考试开始时间随会话保存');
+ eq(savedSession.deadlineAt, 1700000060000, '考试截止时间随会话保存（刷新后按剩余计时）');
++eq(savedSession.composeSeed, 4242, '组卷 seed 随会话快照持久化');
+ const restoredExam = new QB.QuizEngine();
+ ok(restoredExam.restore(savedSession), '考试会话可恢复');
+ eq(restoredExam.deadlineAt, 1700000060000, 'restore 保留截止时间');
+ eq(restoredExam.startedAt, 1700000000000, 'restore 保留开始时间');
++eq(restoredExam.composeSeed, 4242, 'restore 复用同一组卷 seed');
++ok(JSON.stringify(restoredExam.questions) === JSON.stringify(engine0.questions), '恢复后题目顺序与快照一致');
+ eq(restoredExam.remainingMs(1700000030000), 30000, 'remainingMs：按 deadlineAt 计算剩余');
+ // 旧版会话只有 startedAt、没有 deadlineAt：restore 推导截止时间，不重新计时
+ const legacyExam = new QB.QuizEngine();
+@@ -1236,6 +1239,13 @@ veryOldExam.restore({ mode: 'exam', durationMs: 60000, questions: [{}] });
+ eq(veryOldExam.deadlineAt, 0, '极旧会话：无开始时间不推导截止');
+ eq(veryOldExam.remainingMs(), 60000, '极旧会话：回退整段时长');
+ eq(new QB.QuizEngine().remainingMs(), 0, '不限时：剩余 0（不启动倒计时）');
++// 未指定 seed（手动选题/旧会话）不伪造：快照里为 0，恢复后仍为 0
++const noSeed = new QB.QuizEngine();
++noSeed.loadQuestions(listA.items.slice(0, 2), 'mixed');
++eq(noSeed.getState().composeSeed, 0, '未指定组卷 seed 时会话快照为 0');
++const noSeedBack = new QB.QuizEngine();
++noSeedBack.restore(noSeed.getState());
++eq(noSeedBack.composeSeed, 0, '未指定 seed 的旧会话恢复后仍为 0');
+ 
+ /* ================= 7. 答题引擎 ================= */
+ section('答题引擎（练习 + 考试）');
+diff --git a/scripts/source.test.mjs b/scripts/source.test.mjs
+index d254addce596ae7fba29113ddde42228ac71aa89..012c92e4d257aa5b6f23ba4affaa81f57f7c48f3 100644
+--- a/scripts/source.test.mjs
++++ b/scripts/source.test.mjs
+@@ -164,6 +164,16 @@ section('历史成绩写入字段一致性（P1-8）');
+     '自评回写历史上报 partial（两写路径一致）');
+ }
+ 
++section('组卷 seed 写回与恢复复用（P2-7）');
++{
++  const sessionSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/quiz-session.js'), 'utf8');
++  const engineSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/quiz-engine.js'), 'utf8');
++  ok(/seed\s*=\s*Date\.now\(\)\s*%\s*2147483647/.test(sessionSrc), '新会话仍按开练时刻生成随机 seed');
++  ok(sessionSrc.indexOf('composeSeed: seed') >= 0, '集训把本次 seed 交给 beginQuiz');
++  ok(engineSrc.indexOf('composeSeed: this.composeSeed || 0') >= 0, 'seed 写入会话快照');
++  ok(engineSrc.indexOf('this.composeSeed = Number(state.composeSeed)') >= 0, '恢复会话时读取并复用 seed');
++}
++
+ section('开始弹窗参数记忆接线（源码级回归）');
+ {
+   const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8')
+diff --git a/scripts/sw-baseline.json b/scripts/sw-baseline.json
+index a38f5de84b848052046a4f115043c0042f8ee486..3dec374e9f4b1b841badc482982fa6802d01dbf4 100644
+--- a/scripts/sw-baseline.json
++++ b/scripts/sw-baseline.json
+@@ -1,4 +1,4 @@
+ {
+-  "cache": "qforge-v65",
+-  "digest": "abb91642b8dfe221778816a03d08363a43a194aa9358af9a3197cf9b51ad095d"
++  "cache": "qforge-v66",
++  "digest": "a19b18fe38485e167b3b7cb3ada65a14c99cd625229209aa40deb5a1eefb75b9"
+ }
+diff --git a/sw.js b/sw.js
+index 347d3a8d290f78f6e663d57114c966fdb2c2c023..7959065d58aed97c7238142a717607140d2870ab 100644
+--- a/sw.js
++++ b/sw.js
+@@ -12,7 +12,7 @@
+  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
+  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
+  */
+-const CACHE = 'qforge-v65';
++const CACHE = 'qforge-v66';
+ // 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
+ const CACHE_PREFIX = 'qforge-';
+ const CORE = [
