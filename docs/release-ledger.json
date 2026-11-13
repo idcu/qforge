@@ -1,8 +1,17 @@
 {
-  "_comment": "发布台账：只记录『上一次已发布』的应用版本与 SW 缓存名。check-release.mjs 默认模式禁止回退（当前值必须 ≥ 台账）；--release 模式要求 CACHE 严格大于台账（本次确实 bump 过），并在通过后自动写回本文件。应用版本在 package.json 与 js/config.js，.ngm-version 是 ngm 工具链版本，二者语义不同。",
+  "_comment": "发布台账：只记录『上一次已发布』的应用版本与 SW 缓存名。check-release.mjs 默认模式禁止回退（当前值必须 ≥ 台账）；--release 模式要求 CACHE 严格大于台账（本次确实 bump 过），并在通过后自动写回本文件。应用版本在 package.json 与 js/config.js，.ngm-version 是 ngm 工具链版本，二者语义不同。versionPolicy 只是版本节奏说明，本脚本不读取。",
   "lastReleased": {
     "version": "1.0.2",
     "cache": "qforge-v67",
     "date": "2026-11-13"
+  },
+  "versionPolicy": {
+    "nextBaseline": "1.0.3",
+    "patch": "1.0.3：缺陷修复、文档/测试/门禁调整；无用户可见新能力、无数据或导入导出格式变化",
+    "minor": "1.1.0：新增用户可见能力或既有行为变化，且数据与 qbk/qfbk/JSON/CSV 等格式向后兼容",
+    "major": "2.0.0：破坏数据、格式或契约兼容（不可逆 schema 迁移、旧包无法导入）",
+    "cache": "任何 js/** 或 index.html 改动都必须 +1（如 qforge-v68），与版本号无关；回滚用更大的新号",
+    "cadence": "应用版本只在对外发布时前进，同一批次只 bump 一次；CACHE 不跨批次省略；台账只记已发布值",
+    "note": "原计划中的 v1.1.0 / v1.2.0 未单独发布，已并入 2026-11-13 的 v1.0.2；差异说明见 2026-11-13/dev-plan-from-audit/outputs/qforge-下一步开发计划与任务分解-2026-11-13.md §7.1"
   }
 }
