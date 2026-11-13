@@ -167,12 +167,20 @@ function failInto(out, file, what, docValue, actual) {
   out.push(file + '：' + what + ' 文档=' + docValue + '，实测=' + actual);
 }
 
-/** 校验每一条「特定套件」的断言数；数字缺失 = 失败（不允许静默跳过） */
+/** 校验每一条「运行项」的断言数；数字缺失 = 失败（不允许静默跳过）
+ * 匹配按运行项清单（ctx.counts 的键），而不是只看 `*.test.mjs`：
+ * `smoke-test.mjs` 这类不以 .test 命名的运行项同样必须被复算。
+ * （2026-11-13：该行文档写 731、实跑 751，因命名不匹配长期静默绿。） */
 function checkSuiteRows(doc, ctx, out) {
+  const runItems = new Set(Object.keys(ctx.counts));
   doc.lines.forEach((line, i) => {
-    const fileM = line.match(/scripts\/([\w.-]+\.test\.mjs)/);
-    if (!fileM || !(fileM[1] in ctx.counts)) return;
-    const name = fileM[1];
+    // 一行可能同时提到非运行项脚本与运行项；取第一个属于运行项清单的匹配，
+    // 避免前面的非运行项把后面的运行项遮住。
+    const names = [...line.matchAll(/scripts\/([\w.-]+\.mjs)/g)]
+      .map((m) => m[1])
+      .filter((n) => runItems.has(n));
+    if (!names.length) return;
+    const name = names[0];
     const isTableRow = /^\|\s*`scripts\//.test(line);
     let actualNum = null;
     if (isTableRow) {
@@ -315,6 +323,58 @@ if (SELFTEST) {
       }).length === 0
     },
     {
+      name: '运行项清单外的脚本提及（如 docs-check.mjs）不得误杀',
+      hit: () => {
+        const doc = { rel: 'FAKE.md', text: '见 `scripts/docs-check.mjs`\n', lines: ['见 `scripts/docs-check.mjs`'] };
+        return auditDoc(doc, ctx).length === 0;
+      }
+    },
+    {
+      name: 'smoke-test 等非 .test.mjs 运行项数字漂移必须红',
+      hit: () => {
+        const smokeCtx = Object.assign({}, ctx, {
+          counts: Object.assign({}, ctx.counts, { 'smoke-test.mjs': 7 }),
+          runOrder: ['smoke-test.mjs', 'demo.test.mjs']
+        });
+        const doc = {
+          rel: 'FAKE.md',
+          text: '| `scripts/smoke-test.mjs` | **5** |\n',
+          lines: ['| `scripts/smoke-test.mjs` | **5** |']
+        };
+        return auditDoc(doc, smokeCtx).length > 0;
+      }
+    },
+    {
+      name: 'smoke-test 非表格行缺断言数必须红',
+      hit: () => {
+        const smokeCtx = Object.assign({}, ctx, {
+          counts: Object.assign({}, ctx.counts, { 'smoke-test.mjs': 7 }),
+          runOrder: ['smoke-test.mjs', 'demo.test.mjs']
+        });
+        const doc = {
+          rel: 'FAKE.md',
+          text: '`node scripts/smoke-test.mjs` 覆盖见上\n',
+          lines: ['`node scripts/smoke-test.mjs` 覆盖见上']
+        };
+        return auditDoc(doc, smokeCtx).length > 0;
+      }
+    },
+    {
+      name: '非运行项脚本写在前面不得遮住后面的运行项',
+      hit: () => {
+        const smokeCtx = Object.assign({}, ctx, {
+          counts: Object.assign({}, ctx.counts, { 'smoke-test.mjs': 7 }),
+          runOrder: ['smoke-test.mjs', 'demo.test.mjs']
+        });
+        const doc = {
+          rel: 'FAKE.md',
+          text: '`node scripts/docs-check.mjs` 后跑 `node scripts/smoke-test.mjs`\n',
+          lines: ['`node scripts/docs-check.mjs` 后跑 `node scripts/smoke-test.mjs`']
+        };
+        return auditDoc(doc, smokeCtx).length > 0;
+      }
+    },
+    {
       name: '门禁条数漂移（声明 63 / 实跑 62 / 基线 66）',
       hit: () => gateCountProblems(63, 62, 66, 'static').length > 0
     },
@@ -389,8 +449,10 @@ if (MODE === 'write') {
 // 少读一个文件 = 那些读数悄悄不再被校验，而"没红过"看起来与"没问题"一样。
 const DOCS_WITH_NUMBERS = [
   'README.md',
+  'docs/CURRENT-STATE.md',
   'docs/DEVELOPMENT.md',
   'docs/TESTING.md',
+  'docs/TESTING-SUITES.md',
   'docs/BENCH.md',
   'docs/BENCH-DATA.md'
 ].map(readDoc);
