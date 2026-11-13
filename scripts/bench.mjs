@@ -78,6 +78,8 @@ const { QB, window } = await createHarness(QB_DIR, { probeQuotaChars: 16 * 1024 
    （与 scripts/ui-renderer.test.mjs 同一加载方式，不改共享 harness）；用于量测「首屏/答题」渲染侧成本。 */
 globalThis.location = { protocol: 'https:', href: 'https://qforge.local/' };
 window.location = globalThis.location;
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
 // DOM 增量更新的对账逻辑（plan 不触碰 DOM，可在 Node 量测；DOM 写入由浏览器验证）
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/dom-patch.js'), 'utf8'))(window, window);
@@ -1640,6 +1642,8 @@ let c018GetSeq = 0;
     storageEstimate: () => ({ usage: c009Idb.usageBytes(), quota: 0 })
   });
   h.window.location = globalThis.location;
+  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(h.window, h.window);
+  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views.js'), 'utf8'))(h.window, h.window);
   new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(h.window, h.window);
   const HQ = h.QB;
   HQ.Store.writeMarker('idb');

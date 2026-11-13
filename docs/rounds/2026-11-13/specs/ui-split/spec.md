@@ -81,3 +81,19 @@ node --expose-gc scripts/bench.mjs --assert
 - 不改 `app.js` 的调用路径（仍通过 `QB.UIRenderer.*`）。
 - 不引入构建步骤、不引入依赖、不改成 ES Module（保持 classic script + CSP 现状）。
 - 不把 renderer 改成按需包（首屏需要它们）。
+
+## 8. 实施记录与预算判定（2026-11-13）
+
+用户确认的预算：全部拆完后首屏 gzip 相对拆前（295.9 KB）累计增量 ≤ 3 KB；逐件方案改为合并方案。
+
+| 批次 | 动作 | 提交 | 首屏 gzip | 相对 295.9 |
+| --- | --- | --- | --- | --- |
+| B1 | 拆出 `ui-renderer-dialogs.js`（组卷/开始答题弹窗） | 42b6d1d | 296.9 KB | +1.0 KB |
+| — | 方向 E 409 可重放（非拆分，独立提交） | 5cb2859 | 297.3 KB | +1.4 KB |
+| B2 | 拆出 `ui-renderer-views.js`（home + quiz + lists，单切片） | 本批 | 298.9 KB | **+3.0 KB** |
+
+B2 后判定：
+- 导出键集合与 B1 后逐键相等（28 键，无缺失/无多出），`renderResult` 依赖的 `resultSelfButtons` 随结果页留在装配文件。
+- 门禁：38 套件 / 6197 断言（基线一致）、63 项 bench、check-modules 0 违约、check-layers 5/5。
+- **core 不再单独拆**：当前累计已到 3.0 KB 上限，core（toast/modal/fallback 段）再拆会增加文件级 gzip 开销，必然越线。取舍理由：拆分收益是维护性，预算优先级更高，且装配文件已从 1238 行降到约 250 行。
+

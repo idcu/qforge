@@ -128,6 +128,8 @@ async function makeEnv(opts) {
   window.innerHeight = 800;
   window.innerWidth = 1200;
 
+  loadFile(window, 'js/modules/ui-renderer-dialogs.js');
+  loadFile(window, 'js/modules/ui-renderer-views.js');
   loadFile(window, 'js/modules/ui-renderer.js');
   loadFile(window, 'js/modules/dom-patch.js');
   // 删库/新建题库走 QB.BankManager（真实确认弹窗与级联入口），运行时可替换 confirmDialog
