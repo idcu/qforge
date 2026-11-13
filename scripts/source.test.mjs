@@ -151,6 +151,19 @@ section('考试倒计时/刷新恢复关键接线（源码级回归）');
   ok(appSrc.indexOf('engine.remainingMs') >= 0, '倒计时统一走 QuizEngine.remainingMs（旧会话回退）');
 }
 
+section('历史成绩写入字段一致性（P1-8）');
+{
+  const sessionSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/quiz-session.js'), 'utf8');
+  const blockOf = (marker) => {
+    const i = sessionSrc.indexOf(marker);
+    return i < 0 ? '' : sessionSrc.slice(i, sessionSrc.indexOf('});', i));
+  };
+  ok(blockOf('QB.History.add({').indexOf('partial: score.partial') >= 0,
+    '交卷写入历史上报 partial（与自评回写同字段）');
+  ok(blockOf('QB.History.update(').indexOf('partial: score.partial') >= 0,
+    '自评回写历史上报 partial（两写路径一致）');
+}
+
 section('开始弹窗参数记忆接线（源码级回归）');
 {
   const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8')

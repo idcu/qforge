@@ -94,10 +94,20 @@
       return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     },
 
-    /** 计算正确率（0-100，整数） */
-    calculateAccuracy(correct, total) {
-      if (!total) return 0;
-      return Math.round((correct / total) * 100);
+    /**
+     * 正确率唯一口径（全应用唯一实现，判分侧为准）：
+     * 半对计入分子（与「得分半分」不同，正确率按「未被判错」计），待自评不计入分母。
+     * 历史记录保存的是写入时的快照，不回算旧记录。
+     * @param {{correct?:number, partial?:number, wrong?:number}} counts 结果计数
+     * @returns {number} 0-100 整数
+     */
+    accuracyOf(counts) {
+      const c = Number(counts && counts.correct) || 0;
+      const p = Number(counts && counts.partial) || 0;
+      const w = Number(counts && counts.wrong) || 0;
+      const decided = c + p + w;
+      if (!decided) return 0;
+      return Math.round(((c + p) / decided) * 100);
     },
 
     /**

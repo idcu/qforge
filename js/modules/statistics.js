@@ -34,22 +34,29 @@
       };
     },
 
-    /** 各题型表现（依赖历史记录里的 byType） */
+    /**
+     * 各题型表现（依赖历史记录里的 byType；正确率走 Helpers.accuracyOf 唯一口径）。
+     * 旧记录行没有 partial/wrong 字段：按 total-correct 归一为错误，保持旧显示值，不重算历史。
+     */
     typePerformance(records) {
       const agg = {};
-      QB.CONFIG.TYPES.forEach((t) => { agg[t] = { type: t, correct: 0, total: 0 }; });
+      QB.CONFIG.TYPES.forEach((t) => { agg[t] = { type: t, correct: 0, partial: 0, wrong: 0, total: 0 }; });
       (records || []).forEach((r) => {
         const bt = r.byType || {};
         QB.CONFIG.TYPES.forEach((t) => {
-          if (bt[t]) {
-            agg[t].correct += bt[t].correct || 0;
-            agg[t].total += bt[t].total || 0;
-          }
+          const row = bt[t];
+          if (!row) return;
+          agg[t].correct += row.correct || 0;
+          agg[t].partial += row.partial || 0;
+          agg[t].total += row.total || 0;
+          agg[t].wrong += row.wrong != null
+            ? row.wrong
+            : Math.max(0, (row.total || 0) - (row.correct || 0) - (row.partial || 0));
         });
       });
       return QB.CONFIG.TYPES
         .map((t) => Object.assign(agg[t], {
-          accuracy: QB.Helpers.calculateAccuracy(agg[t].correct, agg[t].total)
+          accuracy: QB.Helpers.accuracyOf(agg[t])
         }))
         .filter((x) => x.total > 0);
     },

@@ -1311,6 +1311,35 @@ eq(stEng.statusAt(1), 'empty', '未动过的题 = empty');
 eq(stEng.answeredCount(), 1, 'answeredCount 仅统计已选');
 
 /* ================= 8. 统计与搜索 ================= */
+section('正确率单一口径（判分侧唯一）');
+{
+  // 同一组结果：1 对 + 1 半对 + 1 错 + 1 待自评（同题型/同分类/同难度）
+  const mkAcc = (i) => ({
+    id: 'acc-' + i, type: 'single', question: '口径题' + i, category: '口径分类', difficulty: 2,
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }], answer: 'A'
+  });
+  const accEng = new QB.QuizEngine();
+  accEng.loadQuestions([mkAcc(1), mkAcc(2), mkAcc(3), mkAcc(4)], 'mixed', { shuffleOptions: false });
+  accEng.results[0] = { questionId: 'acc-1', type: 'single', isCorrect: true, partial: false };
+  accEng.results[1] = { questionId: 'acc-2', type: 'single', isCorrect: false, partial: true };
+  accEng.results[2] = { questionId: 'acc-3', type: 'single', isCorrect: false, partial: false };
+  accEng.results[3] = { questionId: 'acc-4', type: 'single', isCorrect: null, partial: false };
+  const accScore = accEng.getScore();
+  const accBt = accEng.byType();
+  const accBd = accEng.breakdown();
+  const accPerf = QB.Statistics.typePerformance([{ byType: accBt }]);
+  eq(accScore.accuracy, 67, '正确率：总成绩 (1 对 + 1 半对)/3 = 67%');
+  eq(accBt.single.accuracy, 67, '正确率：按题型与总成绩同口径');
+  eq(accBd.byCategory[0].accuracy, 67, '正确率：按分类与总成绩同口径');
+  eq(accBd.byDifficulty[0].accuracy, 67, '正确率：按难度与总成绩同口径');
+  eq(accPerf[0].accuracy, 67, '正确率：统计页题型表现同口径');
+  eq(accBt.single.partial, 1, '按题型：半对单独计数');
+  eq(accBt.single.total, 4, '按题型：total 仍为「有结果的题数」（含待自评）');
+  // 旧历史行无 partial/wrong：按 total-correct 归一为错误，显示值不回归、不重算
+  eq(QB.Statistics.typePerformance([{ byType: { single: { correct: 1, total: 3 } } }])[0].accuracy, 33,
+    '旧历史 byType 行保持旧显示口径');
+}
+
 section('统计与搜索');
 const recs = await QB.History.list(bankA.id);
 const ov = QB.Statistics.overview(recs);

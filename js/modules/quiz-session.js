@@ -171,6 +171,7 @@
       total: engine.questions.length,
       correct: score.correct,
       wrong: score.wrong,
+      partial: score.partial,
       pending: score.pending,
       score: score.score,
       accuracy: score.accuracy,

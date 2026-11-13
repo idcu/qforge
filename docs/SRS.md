@@ -59,14 +59,18 @@
   easy         → 直接毕业，按 FSRS 长期间隔到期
 学习中再次评分
   again → 回到 step 0（1m）
-  good  → step+1；越过最后一步即「毕业」，续接长期间隔
-  easy  → 随时直接毕业
-已毕业卡 again → learning{mode:'review'}，同样走 1m/10m；毕业后续接遗忘后重算出的长期间隔
+  good  → step+1；越过最后一步即「毕业」（mode='new'），以毕业评分重新初始化 S/D 后续接长期间隔
+  easy  → 随时直接毕业（同样 mode='new'）
+已毕业卡 again → learning{mode:'review'}，同样走 1m/10m；毕业沿用又错更新后的 S/D
 ```
 
 - 毕业前 `due` 为分钟级，只出现在「今日复习」队列，不参与长期预报。
-- 毕业后续接的长期间隔由 FSRS 公式用毕业时刻的 S/D 计算（不是固定一天）。
-- `reps` 在每次评分（含 learning/relearning）累计；learning 期间只推进步骤与分钟级 due，S/D 沿用。
+- 毕业 S/D 分两种模式（实现见 `fsrs.js` 的 `graduate`，二者不可混用）：
+  - `mode='new'`（新卡学完首次毕业）：**不继承** learning 期间的 S/D，而是用毕业评分按 FSRS 初始公式
+    重新初始化（`initStability` / `initDifficulty`）；learning 期间 S/D 本就不随步骤推进，只推进分钟级 due。
+  - `mode='review'`（已毕业卡遗忘后重学完）：**沿用**再次遗忘（again）更新后的 S/D。
+- 毕业后续接的长期间隔由 FSRS 公式用上述毕业时刻的 S/D 计算（不是固定一天）。
+- `reps` 在每次评分（含 learning/relearning）累计。
 - 已毕业卡遗忘（again）→ `learning{mode:'review'}`，同样走 1m/10m；毕业沿用又错更新后的 S/D。
 
 ## 5. FSRS-6 调度公式（`fsrs.js`）

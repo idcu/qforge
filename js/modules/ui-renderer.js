@@ -594,7 +594,7 @@
     };
     html += distCard('按题型', Object.keys(bd.byType).filter((t) => bd.byType[t].total).map((t) => ({
       key: t, correct: bd.byType[t].correct, total: bd.byType[t].total,
-      accuracy: QB.Helpers.calculateAccuracy(bd.byType[t].correct, bd.byType[t].total)
+      accuracy: bd.byType[t].accuracy
     })), (r) => QB.typeLabel(r.key));
     html += distCard('按分类', bd.byCategory, (r) => r.key);
     html += distCard('按难度', bd.byDifficulty, (r) => r.key === '难度 0' ? '未设置' : r.key);

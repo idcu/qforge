@@ -121,7 +121,7 @@
       // 未作答：考试交卷后客观题已有结果（判为错），需用交卷时快照区分「未做」与「做错」
       unanswered: this.unansweredAtSubmit != null ? this.unansweredAtSubmit : unanswered,
       pendingSelfAssess: pendingSelfAssess,
-      accuracy: QB.Helpers.calculateAccuracy(correct + partial, decided)
+      accuracy: QB.Helpers.accuracyOf({ correct: correct, partial: partial, wrong: wrong })
     };
   };
 
@@ -349,15 +349,23 @@
     return this.results;
   };
 
-  /** 按题型汇总本次结果 */
+  /** 按题型汇总本次结果（正确率走 Helpers.accuracyOf 唯一口径；total 为有结果的题数，含待自评） */
   QuizEngine.prototype.byType = function () {
     const agg = {};
-    QB.CONFIG.TYPES.forEach((t) => { agg[t] = { correct: 0, total: 0 }; });
+    QB.CONFIG.TYPES.forEach((t) => { agg[t] = { correct: 0, partial: 0, wrong: 0, total: 0, accuracy: 0 }; });
     this.questions.forEach((q, i) => {
       const r = this.results[i];
       if (!r) return;
-      agg[q.type].total++;
-      if (QB.ResultPolicy.kind(r) === 'correct') agg[q.type].correct++;
+      const row = agg[q.type];
+      if (!row) return;
+      row.total++;
+      const kind = QB.ResultPolicy.kind(r);
+      if (kind === 'correct') row.correct++;
+      else if (kind === 'partial') row.partial++;
+      else if (kind === 'wrong') row.wrong++;
+    });
+    QB.CONFIG.TYPES.forEach((t) => {
+      agg[t].accuracy = QB.Helpers.accuracyOf(agg[t]);
     });
     return agg;
   };
@@ -414,7 +422,7 @@
     return false;
   };
 
-  /** 多维成绩分布：题型 / 分类 / 难度（仅统计已判定题） */
+  /** 多维成绩分布：题型 / 分类 / 难度（仅统计已判定题，正确率走唯一口径） */
   QuizEngine.prototype.breakdown = function () {
     const agg = (keyOf) => {
       const m = {};
@@ -422,13 +430,17 @@
         const r = this.results[i];
         if (!r || !QB.ResultPolicy.isDecided(r)) return;
         const key = keyOf(q);
-        if (!m[key]) m[key] = { key: key, correct: 0, total: 0 };
-        m[key].total++;
-        if (QB.ResultPolicy.kind(r) === 'correct') m[key].correct++;
+        if (!m[key]) m[key] = { key: key, correct: 0, partial: 0, wrong: 0, total: 0 };
+        const o = m[key];
+        o.total++;
+        const kind = QB.ResultPolicy.kind(r);
+        if (kind === 'correct') o.correct++;
+        else if (kind === 'partial') o.partial++;
+        else o.wrong++;
       });
       return Object.keys(m).sort().map((k) => {
         const o = m[k];
-        o.accuracy = QB.Helpers.calculateAccuracy(o.correct, o.total);
+        o.accuracy = QB.Helpers.accuracyOf(o);
         return o;
       });
     };
