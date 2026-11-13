@@ -61,7 +61,7 @@ npm run verify
       **该工作流不部署**，线上内容只由 `main` 决定。
 - [ ] 本地复算产物（不写仓库）：
 ```powershell
-node scripts/build-staging.mjs --out .analysis\staging --version v1.0.1 --assert
+node scripts/build-staging.mjs --out .analysis\staging --version v1.0.2 --assert
 node scripts/build-staging.mjs --selftest
 ```
 - [ ] PR 上只跑 dry-run：生成产物后断言 `?v=` 数量 = `<script src>` 数、`CACHE` 与版本一致、`git status --porcelain` 为空。
