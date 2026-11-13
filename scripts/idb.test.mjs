@@ -1716,6 +1716,8 @@ section('C 步骤4 后半：3 处只读渲染路径（124 metaOf / 129 shardOf /
     H2.window, H2.window);
   new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer-views.js'), 'utf8'))(
     H2.window, H2.window);
+  new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer-core.js'), 'utf8'))(
+    H2.window, H2.window);
   new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer.js'), 'utf8'))(
     H2.window, H2.window);
 
@@ -1914,6 +1916,8 @@ section('C 步骤4 第三批：stateKeys 984 / readMap per-hash 1000（13/22）'
   new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(
     H2.window, H2.window);
   new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer-views.js'), 'utf8'))(
+    H2.window, H2.window);
+  new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer-core.js'), 'utf8'))(
     H2.window, H2.window);
   new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, 'js/modules/ui-renderer.js'), 'utf8'))(
     H2.window, H2.window);

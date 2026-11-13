@@ -566,6 +566,7 @@ section('路径级：三选一（真实 UIRenderer + 假 DOM）与 Esc 终态');
   // 浏览器加载顺序：ui-renderer 先于 data-io（data-io 在模块顶层捕获 UI）
   loadInto('js/modules/ui-renderer-dialogs.js');
   loadInto('js/modules/ui-renderer-views.js');
+  loadInto('js/modules/ui-renderer-core.js');
   loadInto('js/modules/ui-renderer.js');
   loadInto('js/modules/data-io.js');
   const Q2 = h2.QB;

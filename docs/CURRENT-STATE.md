@@ -9,15 +9,15 @@
 | 项 | 当前值 | 事实源 | 谁复核 |
 |---|---|---|---|
 | 应用版本 | **1.0.2** | `package.json` | `check-release`（≥ 台账） |
-| SW 缓存 | **qforge-v74** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
+| SW 缓存 | **qforge-v75** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
 | 上次对外发布 | 1.0.2 / qforge-v67 / 2026-11-13 | `docs/release-ledger.json` | `check-release` |
 | 存储 schema | **7** | `js/modules/migrate.js` | `migrate` 套件 |
 | contentHash 版本 | **3**（64 位） | `js/utils/question-id.js` | `smoke` / `shard` 套件 |
 | 测试规模 | **38 个运行项（冒烟 + 37 套件）**，**6245 / 6245 通过** | `scripts/test-all.mjs` | `test-all`、`docs-check --static` |
 | 性能门禁 | **63 项阈值** | `scripts/bench.mjs` | `bench --assert` |
-| 首屏体积 | 共 79 个文件（71 个 index 内联 js），**301.1 KB gzip / 823.2 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
+| 首屏体积 | 共 80 个文件（72 个 index 内联 js），**300.6 KB gzip / 823.1 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
 
-> 说明：`qforge-v74` 与本页读数属于**尚未提交**的 2026-11-13 缺陷复核批次；提交后以 `git log -1` 的提交号为准，但版本/CACHE 的复核方式不变。
+> 说明：`qforge-v75` 与本页读数属于**尚未提交**的 ui-renderer B3 拆分批次；提交后以 `git log -1` 的提交号为准，但版本/CACHE 的复核方式不变。
 
 ## 2. 什么叫“绿”
 

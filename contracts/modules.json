@@ -1041,6 +1041,7 @@
         "QB.UIRenderer.renderHistoryList",
         "QB.UIRenderer.renderStats",
         "QB.UIRenderer.renderSearch",
+        "QB.UIRenderer.renderResult",
         "QB.UIRenderer.renderQuizRegions",
         "QB.UIRenderer.renderWrongListRegions",
         "QB.UIRenderer.renderFavoritesListRegions",
@@ -1055,24 +1056,33 @@
       ]
     },
     {
-      "id": "modules.ui-renderer",
-      "file": "js/modules/ui-renderer.js",
+      "id": "modules.ui-renderer-core",
+      "file": "js/modules/ui-renderer-core.js",
       "layer": "modules",
       "tier": "L3",
       "at": 57,
       "requires": [
-        "config",
-        "utils.helpers",
-        "utils.rich-text",
-        "utils.quota",
-        "utils.answer-normalize",
-        "utils.result-policy",
-        "utils.question-id",
-        "utils.annotation",
-        "data.db",
-        "modules.statistics",
-        "modules.search-filter",
-        "modules.sched-settings"
+        "utils.helpers"
+      ],
+      "keeps": [
+        "QB.UIRenderer.toast",
+        "QB.UIRenderer.openModal",
+        "QB.UIRenderer.closeModal",
+        "QB.UIRenderer.confirmDialog",
+        "QB.UIRenderer.fallbackBanner"
+      ]
+    },
+    {
+      "id": "modules.ui-renderer",
+      "file": "js/modules/ui-renderer.js",
+      "layer": "modules",
+      "tier": "L3",
+      "at": 58,
+      "requires": [
+        "data.contracts",
+        "modules.ui-renderer-dialogs",
+        "modules.ui-renderer-views",
+        "modules.ui-renderer-core"
       ],
       "keeps": [
         "QB.UIRenderer"
@@ -1083,7 +1093,7 @@
       "file": "js/modules/dom-patch.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 58,
+      "at": 59,
       "requires": [],
       "keeps": [
         "QB.DomPatch"
@@ -1094,7 +1104,7 @@
       "file": "js/modules/bank-manager.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 59,
+      "at": 60,
       "requires": [
         "data.sample-data",
         "utils.helpers",
@@ -1134,7 +1144,7 @@
       "file": "js/modules/source.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 60,
+      "at": 61,
       "requires": [
         "config",
         "utils.fnv"
@@ -1205,7 +1215,7 @@
       "file": "js/modules/share-link.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 61,
+      "at": 62,
       "requires": [
         "config",
         "utils.base64"
@@ -1275,7 +1285,7 @@
       "file": "js/modules/migrate.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 62,
+      "at": 63,
       "requires": [
         "data.store",
         "utils.helpers",
@@ -1314,7 +1324,7 @@
       "file": "js/modules/blueprint.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 63,
+      "at": 64,
       "requires": [
         "config",
         "utils.shuffle"
@@ -1328,7 +1338,7 @@
       "file": "js/modules/practice-builder.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 64,
+      "at": 65,
       "requires": [
         "config",
         "utils.shuffle",
@@ -1344,7 +1354,7 @@
       "file": "js/modules/quiz-session.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 65,
+      "at": 66,
       "requires": [
         "config",
         "utils.helpers",
@@ -1372,7 +1382,7 @@
       "file": "js/modules/quiz-dialogs.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 66,
+      "at": 67,
       "requires": [
         "config",
         "modules.blueprint",
@@ -1391,7 +1401,7 @@
       "file": "js/modules/boot-diagnostics.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 67,
+      "at": 68,
       "requires": [
         "data.store",
         "utils.storage",
@@ -1411,14 +1421,14 @@
         "QB.Loader",
         "QB.BUNDLES"
       ],
-      "at": 68
+      "at": 69
     },
     {
       "id": "app",
       "file": "js/app.js",
       "layer": "entry",
       "tier": "L3",
-      "at": 69,
+      "at": 70,
       "requires": [
         "data.sample-data",
         "config",
@@ -1472,7 +1482,7 @@
       "file": "js/modules/action-router.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 70,
+      "at": 71,
       "loadAfterEntry": true,
       "requires": [
         "modules.ui-renderer",
@@ -1487,7 +1497,7 @@
       "file": "js/modules/view-router.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 71,
+      "at": 72,
       "loadAfterEntry": true,
       "requires": [
         "modules.ui-renderer",

@@ -84,8 +84,9 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `ui-renderer.js` | 合并壳：汇总各视图/弹窗，末尾 `QB.UIPort.register` 把 `toast/openModal/confirmDialog` 等交给 L2；**不承载具体页面 HTML** |
+| `ui-renderer.js` | 装配壳：保底 `QB.UIRenderer` 命名空间，末尾 `QB.UIPort.register` 把 UI 能力交给 L2；**不承载具体页面 HTML，也不定义渲染函数** |
 | `ui-renderer-views.js` | 页面视图：首页/答题/结果/题库列表/错题/收藏/历史/统计/搜索；区域数组变体（`renderQuizRegions` 等，顶层 `data-region`）；答题卡格级增量（`answerCardRegion` 返回 `{key,html,frame,sub}`） |
+| `ui-renderer-core.js` | 公共件：`toast` / `openModal` / `closeModal` / `confirmDialog` / `fallbackBanner`（焦点闭环与 IndexedDB 回落文案） |
 | `ui-renderer-dialogs.js` | 弹窗：组卷/开始/设置/导入预览/三选一；可访问性（`role=dialog`、首焦点、Tab 循环、`Esc`、回焦）统一经 `openModal/closeModal` |
 | `dom-patch.js` | `QB.DomPatch`：`plan` 纯对账 + `patch` 局部回填；未变区域保留原节点；`frame` + `sub` 子区域（`syncSub` 按 key 就地替换） |
 

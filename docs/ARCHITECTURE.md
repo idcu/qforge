@@ -11,7 +11,7 @@
 qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：题库、作答记录、复习调度全部存浏览器本地（LocalStorage 或 IndexedDB），可选连 REST 后端或 WebDAV 同步；没有账号体系、没有服务端渲染、没有运行时依赖。
 
 - **形态**：静态文件即产物。71 个首屏 classic `<script>` + 23 个按需模块，全部挂在单一全局 `QB` 上（`js/**` 实际 88 个文件 / 23,428 行），无打包器、无 ESM、无 npm 运行时依赖；`file://` 双击可用（SW 只在 http(s) 注册）。
-- **装配**：`contracts/modules.json` 94 条（71 首屏 + 23 按需），`index.html` 的 script 顺序必须逐条相等。
+- **装配**：`contracts/modules.json` 95 条（72 首屏 + 23 按需），`index.html` 的 script 顺序必须逐条相等。
 - **数据**：7 组 Repository 契约（`js/data/contracts.js`），默认 `QB.LocalAdapter`；`DATA_BACKEND='api'` 时切 `QB.ApiAdapter`。
 - **复习**：FSRS-6，21 维权重；学习步 / 每日限额 / 保留率可按题库覆盖。
 - **质量**：38 个运行项、6245 项断言、63 项性能门禁、CI 六格矩阵。
@@ -101,9 +101,9 @@ qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：�
 ### D7 表现层
 
 - 职责：把 State 渲染成 HTML 字符串；局部 patch；弹窗与 toast；导入预览。
-- 关键文件：`ui-renderer.js`（合并壳 + `UIPort` 注册）、`ui-renderer-views.js`（页面视图）、`ui-renderer-dialogs.js`（组卷/开始弹窗）、`dom-patch.js`。
+- 关键文件：`ui-renderer.js`（装配壳 + `UIPort` 注册）、`ui-renderer-views.js`（页面视图）、`ui-renderer-core.js`（toast/弹窗/确认框/回落文案）、`ui-renderer-dialogs.js`（组卷/开始弹窗）、`dom-patch.js`。
 - 边界：渲染函数纯输入输出，不读存储；`data-region` / `data-action` 是 DOM 契约。
-- 拆分现状：`ui-renderer.js` 只保留装配与 `UIPort.register`；views 与 dialogs 已拆出（见 [已知问题与风险](#8-已知问题与风险)）。
+- 拆分现状：`ui-renderer.js` 只保留命名空间保底与 `UIPort.register`；views（含结果页）、core、dialogs 均已拆出（见 [已知问题与风险](#8-已知问题与风险)）。
 
 ### D8 平台、构建与质量工具链
 

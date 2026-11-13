@@ -35,7 +35,7 @@
 | [ARCHITECTURE-LAYERS](ARCHITECTURE-LAYERS.md) | tier 判据、依赖方向、例外通道、新文件落位 | 层级规则或 `check-layers` 判据变化 |
 | [ARCHITECTURE-DATA](ARCHITECTURE-DATA.md) | 存储栈、键布局、三种分块、数据形状、schema/迁移、跨标签、按需边界、SW 缓存 | 任何键名、schema、缓存策略变化 |
 | [ARCHITECTURE-DATA-FLOWS](ARCHITECTURE-DATA-FLOWS.md) | 22 条端到端数据流、判据编号与实测证据（配套附录，数字为当时快照） | 数据流/判据变化时追加，不改写旧编号 |
-| [modules.md](modules.md) | 94 条装配清单总览、按需包、加载顺序 | `contracts/modules.json` / `index.html` / `loader.js` 变化 |
+| [modules.md](modules.md) | 95 条装配清单总览、按需包、加载顺序 | `contracts/modules.json` / `index.html` / `loader.js` 变化 |
 | [modules/entry.md](modules/entry.md) | 入口层逐文件职责 | `app.js` / router / loader 变化 |
 | [modules/utils.md](modules/utils.md) | 公共抽象逐文件职责 | `js/utils/**`、`js/data/**` 变化 |
 | [modules/data.md](modules/data.md) | 数据层与导入器逐文件职责 | 适配器、导入器、迁移变化 |

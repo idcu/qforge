@@ -92,10 +92,14 @@ node --expose-gc scripts/bench.mjs --assert
 | --- | --- | --- | --- | --- |
 | B1 | 拆出 `ui-renderer-dialogs.js`（组卷/开始答题弹窗） | 42b6d1d | 296.9 KB | +1.0 KB |
 | — | 方向 E 409 可重放（非拆分，独立提交） | 5cb2859 | 297.3 KB | +1.4 KB |
-| B2 | 拆出 `ui-renderer-views.js`（home + quiz + lists，单切片） | 本批 | 298.9 KB | **+3.0 KB** |
+| B2 | 拆出 `ui-renderer-views.js`（home + quiz + lists，单切片） | 5969150 | 298.9 KB | **+3.0 KB** |
+| B3 | 结果页并入 views；core 拆出 `ui-renderer-core.js`（装配文件只剩 UIPort） | 本批 | 300.6 KB* | **+2.5 KB**（拆分开销） |
 
-B2 后判定：
-- 导出键集合与 B1 后逐键相等（28 键，无缺失/无多出），`renderResult` 依赖的 `resultSelfButtons` 随结果页留在装配文件。
-- 门禁：38 套件 / 6197 断言（基线一致）、63 项 bench、check-modules 0 违约、check-layers 5/5。
-- **core 不再单独拆**：当前累计已到 3.0 KB 上限，core（toast/modal/fallback 段）再拆会增加文件级 gzip 开销，必然越线。取舍理由：拆分收益是维护性，预算优先级更高，且装配文件已从 1238 行降到约 250 行。
+\* B3 的绝对值含之后 §8 缺陷修复对 `js/**` 的 +2.2 KB（非拆分）；按拆分开销计，B3 两个纯移动净 −0.5 KB。
+
+B2/B3 后判定：
+- 导出键集合与 B1 后逐键相等（28 键，无缺失/无多出）；`renderResult` 与 `resultSelfButtons` 随视图层迁入 views，core 五件原样迁入新文件。
+- 拆分前后每个导出函数的 `toString()` 哈希与 `renderResult` 渲染字节哈希逐键相等（纯移动，无逻辑改动）。
+- 门禁：38 套件 / 6245 断言（基线一致）、63 项 bench、check-modules 95 条 / 0 违约、ui-renderer 220/0。
+- 装配文件从 1238 行降到约 30 行：只剩 `QB.UIRenderer` 保底与 `QB.UIPort.register`。
 

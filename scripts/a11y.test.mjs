@@ -33,6 +33,7 @@ const { QB, window } = await createHarness(QB_DIR);
 // 先加载方向 C 拆出的子文件挂载命名空间，再加载装配文件）
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-core.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
 const UI = window.QB.UIRenderer;
 
@@ -328,7 +329,7 @@ SNAPSHOTS.forEach(([name, html]) => {
 section('键盘：源码层禁止 tabindex 正数 / 自定义控件 Enter-Space 处理存在');
 {
   const files = ['index.html', 'js/app.js', 'js/modules/ui-renderer.js',
-    'js/modules/ui-renderer-dialogs.js', 'js/modules/ui-renderer-views.js'];
+    'js/modules/ui-renderer-dialogs.js', 'js/modules/ui-renderer-views.js', 'js/modules/ui-renderer-core.js'];
   let hits = [];
   files.forEach((f) => {
     const src = fs.readFileSync(path.join(QB_DIR, f), 'utf8');
@@ -345,7 +346,8 @@ section('键盘：源码层禁止 tabindex 正数 / 自定义控件 Enter-Space 
 
 section('焦点管理：模态焦点进入/回位/Tab 循环/Esc 关闭（源码约定 + 真机行为另验）');
 {
-  const uiSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8');
+  const uiSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-core.js'), 'utf8')
+    + '\n' + fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8');
   const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8')
     + '\n' + fs.readFileSync(path.join(QB_DIR, 'js/modules/action-router.js'), 'utf8');
   const ioSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/data-io.js'), 'utf8');
