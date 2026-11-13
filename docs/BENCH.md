@@ -8,6 +8,7 @@
 ```bash
 npm run bench                                # = node --expose-gc scripts/bench.mjs --assert（默认即门禁，63 项）
 npm run bench:observe                        # 只观测不判定（记录轮次/容量读数用）
+npm run bench:hotspots                       # 方向 F 热点夹具（50k 题 / 50k 状态 / 20k 日志）+ 12 条 [H] 红线，不计入 63 项（见 3-D）
 node --expose-gc scripts/bench.mjs --assert   # 性能门禁：63 项阈值 + heapUsed ≤40MB，超限退出码 1（CI 在 Node24/Asia-Shanghai 跑）
 node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalStorage 估算字节/迁移耗时/heap；不进门禁，口径见 DATABASE.md §9）
 ```
@@ -163,6 +164,61 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 结论：保持单轮的那几项最差中位数都在 45% 以内（峰值样本最高 58.1%），余量足够，**保持单轮**；若全部改成三轮，预计只多花约 13 s（computeTrain 一项 11 s、schema 1.2 s、其余 <1 s），属于为不需要的精度买单，故不做。
 
 `IDB 单次评分写入（50000）` 曾是唯一贴着上限的：中位 0.58 ms、最差一轮 0.83 ms（83% 预算），且随库存规模单调上升（0.10 / 0.42 / 0.58 ms 对应 5k / 20k / 50k）。实测三轮中位数后仍会随负载翻转（轮中位最高 **1.492 ms**、中位数最高 0.95 ms，见 3-B-2），故判定改为**最小样本 + 保持 1 ms**；若线上真触线，应查写入路径（尾段日志聚合与事务提交），而不是放宽阈值。
+
+### 3-D. 方向 F：50k IDB 热点夹具（`--hotspots`，2026-11-13）
+
+**为什么加**：P2-3 原判定是「未发现收益」，但那只是**读码推断**——既有 bench 的 50k 档只覆盖迁移、单次写入与 keys 视图，
+没有「50k 题 + 50k 复习状态 + 20k revlog 同库」下的读放大/全表扫描读数，无法证明某个热点到底有没有可测收益。
+`--hotspots` 用同一内存 IDB 建这个最坏用例，逐点给出读数与独立红线；结论与「不改」的理由都有数据支撑。
+
+**运行**
+
+```bash
+npm run bench:hotspots                                          # = node --expose-gc scripts/bench.mjs --hotspots --assert
+node --expose-gc scripts/bench.mjs --hotspots                    # 只观测，不判定
+node --expose-gc scripts/bench.mjs --hotspots --assert --snapshot # 绿灯也落快照到 .analysis/bench-snapshots/
+QF_BENCH_HOTSPOT_SCALE=10 npm run bench:hotspots                 # 负向证明：判定值 ×10，热点门禁判红
+```
+
+**口径**
+
+- 独立 `createMemoryIDB` + 独立 harness（与 12c/12d 同来源），不污染主 harness，也不进入默认 `npm run bench`。
+- 夹具固定为 **50k 题（250 分片）+ 50k per-hash 复习状态 + 20k revlog（FIFO 上限）**，建库约 0.23–0.38 s。
+- 热点行输出前缀 `  [H] ✓/✗`，**不匹配** `--assert` 自校验的 `^  [✓✗] `，因此 `GATE_TOTAL` 仍为 **63**；
+  `--hotspots --assert` 下同样打印「门禁条数：63 项（与声明一致）」，既有 63 项的阈值与判据**一条未改**。
+- 读路径 3 轮 × 5 样本取轮中位数；`commitReview` 写路径 5 轮 × 20 样本取**全局最小样本**（与 3-B-2 同口径）。
+- 红线只拦「量级回归」：按实测基线 × 5–12（2 ms 级小绝对值项放宽到约 50×），不追求跨机器严格；换机器应重测并同步本表。
+- 红灯取证沿用 `.analysis/bench-failures/`，新增 `hotspots` 段（逐项 `measuredMs/budgetMs/pass`）、`flags`
+  （`assert/hotspots/snapshot`）与 `QF_BENCH_HOTSPOT_SCALE`；绿灯默认不落文件，`--snapshot` 时写 `.analysis/bench-snapshots/`。
+- 口径声明：Node 内存 IDB 替身，**不是浏览器真实 IndexedDB**；绝对耗时只可与同机同口径比较，真实事务/磁盘语义未验证。
+
+**逐热点结论（Node 26.13.0；三次运行范围，原始值见 [BENCH-DATA.md](BENCH-DATA.md) D-10）**
+
+| 热点（50k 夹具） | 实测 | 红线 | 判定 | 依据 |
+|---|---|---|---|---|
+| `readMap` 整表合并 | 81.7–106.5 ms | 600 ms | 不改 | 需返回整表且走 scoped 读（fail-loud），逐 hash `getScopedFresh` 是语义要求；只在 home/search/stats 全量视图触发，评分热路径不经过 |
+| `commitReview` 单次评分写 | 0.48–0.54 ms（最小样本） | 1 ms | 不改 | 已 O(1)：只读写入 hash，无整表读（旧审计描述已被前序优化覆盖） |
+| `reviews.save` 整表重写 | 402–590 ms | 5000 ms | 不改 | 整表替换语义（clear + 50k 逐键写）；只有第三方适配器回退/导入合并路径调用，评分走 `patch` |
+| `SRSStore.writeMap` | 512–538 ms | 6000 ms | 不改 | 与 `reviews.save` 同实现，多一次 `confirmPersisted` |
+| `removeMany` 全库扫描 | 2.0–2.4 ms | 100 ms | 不改 | 按 meta 分片遍历（250 片），不是逐题全库反序列化 |
+| `Storage.usageBytes` 全量 | 51–53 ms | 500 ms | 不改 | 全量扫描是 API 语义；渲染路径已改走 Quota 快照（C009），不再每帧调用 |
+| `isBankHydrated` 未水合库 | 1.3–1.5 ms | 100 ms | 不改 | 扫 50k 键成本可忽略；加缓存会引入失效语义 |
+| `revlog.list` 全量（20k） | 0.9–1.2 ms | 200 ms | 不改 | 返回缓存数组；app 侧 `reviewLogFor` 按库缓存，评分后失效 |
+| `ReviewQueue.dailyFromLog`（20k） | 2.4 → 1.9 ms | 50 ms | **改** | 两遍遍历合并为单遍；同进程 A/B 两次比值 **0.524 / 0.797**（−20%～−48%），结果逐项一致 |
+| `ReviewQueue.build`（50k） | 11.4–13.5 ms | 200 ms | 不改 | 单遍分组 + 两次 sort 已是最小必要 |
+| `SRSStore.stats` | 84–94 ms | 700 ms | 不改 | 成本即 `readMap`，同上 |
+| `Statistics.reviewStats`（20k） | 0.66–0.84 ms | 20 ms | 不改 | 单遍聚合 Map，已是最小必要 |
+
+**本轮改了什么**：`js/modules/review-queue.js` 的 `dailyFromLog` 由「两遍遍历 + newHashes 中间表」改为「单遍收集
+firstSeen + 今日条数」，`reviewsDone = 今日全部条数 − 今日新卡条数`（新卡的日志必然都在今日，等价性已由单测与
+同进程 A/B 结果一致双重验证）。两次同进程 A/B 为 **2.42 → 1.93 ms（0.797）** 与 **3.36 → 1.76 ms（0.524）**，
+保守口径收益 **≥20%**，绝对收益约 **0.5–1.6 ms/次**（20k 日志）；不改变返回值结构与任何口径。
+
+**如实记录的限制**：
+- 其它热点全部「不改」——不是没测，而是测得收益不足以支撑改动，或改动会改语义（见上表「依据」）；
+  `readMap`/`stats`/`usageBytes`/`save` 的整表成本本身是接口语义，压平需要改调用面或缓存策略，超出「不改语义」边界。
+- 本夹具只覆盖内存 IDB 替身；真实浏览器 IndexedDB 的大库读放大（尤其 `readMap` 的逐键读）**未实测**。
+- 各次运行整体漂移可达约 20%（同机负载），因此 `dailyFromLog` 的收益只用**同进程 A/B** 归因，跨轮绝对耗时只作参考。
 
 ### 3.1 开发子任务计时埋点（`scripts/task-timer.mjs`）
 

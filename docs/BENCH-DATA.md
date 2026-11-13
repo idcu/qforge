@@ -63,7 +63,7 @@
 
 ### D-3. C 系列、存储与阶段 0/2/3 验收读数
 
-bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw，2026-11-13 阶段 2A 契约语义对等复测 294.0 KB gzip / 807.0 KB raw，2026-11-13 阶段 2B 判分与统计口径复测 294.5 KB gzip / 808.4 KB raw，2026-11-13 阶段 2C 备份/同步/导入复测 295.2 KB gzip / 810.0 KB raw，2026-11-13 阶段 3 P2 治理复测 295.5 KB gzip / 810.8 KB raw，2026-11-13 BL-1 删库清理导入历史复测 295.8 KB gzip / 811.6 KB raw）：**295.8 KB gzip / 811.6 KB raw**；按需包 23 个脚本另行随用随取（**跨包去重**合计 323.9 KB raw / 111.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 69 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 77 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw，2026-11-13 阶段 2A 契约语义对等复测 294.0 KB gzip / 807.0 KB raw，2026-11-13 阶段 2B 判分与统计口径复测 294.5 KB gzip / 808.4 KB raw，2026-11-13 阶段 2C 备份/同步/导入复测 295.2 KB gzip / 810.0 KB raw，2026-11-13 阶段 3 P2 治理复测 295.5 KB gzip / 810.8 KB raw，2026-11-13 BL-1 删库清理导入历史复测 295.8 KB gzip / 811.6 KB raw，2026-11-13 方向 F 热点夹具 + `dailyFromLog` 单遍复测 295.9 KB gzip / 811.9 KB raw）：**295.9 KB gzip / 811.9 KB raw**；按需包 23 个脚本另行随用随取（**跨包去重**合计 323.9 KB raw / 111.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
 
 > **逻辑键视图（C1）新增两行门禁（2026-11-07，50k/IDB 档，同机 `--expose-gc`，各 5/20 采样）**
 > - `keys()` 首次构建（50000 题 · IDB）：中位 **15.08–17.38 ms**（三次门禁最小 11.89–14.22 / 最大 32.83–40.61，门禁按中位数判定），门禁 **≤40 ms**；逻辑键 **5.0 万级（本次 50361 个字符串物化，随夹具哈希去重略有浮动）**。（**2026-11-12 起口径已变更**：判定改为 10 轮最小样本 ≤ Node 大版本基线×1.35，见 **3-B-1**；本行保留为历史读数。）
@@ -311,3 +311,51 @@ node --expose-gc scripts/bench.mjs --assert                                     
 - 与 D-6 不可直接相减：D-6 的 0.03–0.68 ms 是 Node 内存 IDB 的实现级写入，本项是浏览器真实 IDB 的完整用户路径（错题 + 提交 + 直读确认）。
 
 **复现与留档**：临时脚本 `.analysis/score-e2e/measure.mjs`（未入版本库），原始数据 `.analysis/score-e2e/out/measure-*.json`；负向对照通过环境变量 `QF_D9_INJECT_MS` 注入。仓库正式文件只追加本记录。
+
+### D-10. 方向 F：50k IDB 热点夹具读数与改前/改后对照（2026-11-13）
+
+**口径**：`node --expose-gc scripts/bench.mjs --hotspots`；独立 `createMemoryIDB` 夹具（50k 题 / 250 分片 + 50k per-hash 状态 + 20k revlog），读路径 3 轮 × 5 样本取轮中位数，`commitReview` 5 轮 × 20 样本取全局最小样本。**内存 IDB 替身，不是浏览器真实 IndexedDB**；只与同机同口径比较。
+
+**环境**：Node v26.13.0，Windows 10.0.19045 / i5-11400 12 核 / 32,534 MB。
+
+**三次运行（A=改前基线、B=改后、C=改后 `--assert`）**
+
+| 热点 | A 改前 | B 改后 | C 改后（assert） | 红线 |
+|---|---|---|---|---|
+| 建库（50k 题 + 50k 状态 + 20k 日志） | 231.7 ms | 271.0 ms | 384.4 ms | 仅观测 |
+| `readMap` 整表合并 | 106.48 | 81.74 | 82.24 | 600 ms |
+| `commitReview` 单次评分（min） | 0.54 | 0.49 | 0.48 | 1 ms |
+| `reviews.save` 整表重写 | 589.50 | 402.27 | 441.60 | 5000 ms |
+| `SRSStore.writeMap` | 512.09 | 528.70 | 538.07 | 6000 ms |
+| `removeMany`（每批 20 id） | 2.24 | 2.02 | 2.44 | 100 ms |
+| `Storage.usageBytes` | 53.32 | 51.62 | 51.07 | 500 ms |
+| `isBankHydrated` 未水合库 | 1.48 | 1.34 | 1.34 | 100 ms |
+| `revlog.list`（20k） | 0.98 | 0.92 | 1.18 | 200 ms |
+| `dailyFromLog`（20k） | 2.64 | 1.81 | 1.89 | 50 ms |
+| `ReviewQueue.build`（50k） | 13.49 | 11.44 | 13.21 | 200 ms |
+| `SRSStore.stats` | 93.63 | 84.38 | 93.58 | 700 ms |
+| `Statistics.reviewStats`（20k） | 0.76 | 0.66 | 0.84 | 20 ms |
+
+单位 ms。A→B 的整体下移约 20%（同机负载差异），**不能据此归因**；`dailyFromLog` 的收益用同进程 A/B 归因。
+
+**同进程 A/B（同一 20k 日志数组，新实现 vs 旧两遍实现，两次独立运行）**
+
+| 运行 | 旧：两遍遍历 + `newHashes` | 新：单遍 firstSeen + 今日条数 | 比值 | 结果一致 |
+|---|---|---|---|---|
+| 1（`--assert`） | 2.42 ms | 1.93 ms | 0.797 | 是 |
+| 2（`--snapshot`） | 3.36 ms | 1.76 ms | 0.524 | 是 |
+
+旧实现的中位数摆动较大（2.42–3.36），新实现稳定在 1.76–1.93；**保守口径收益 ≥20%（比值上界 0.797）**。
+每轮 10 样本 × 3 轮、同一进程。
+
+**负向注入（`QF_BENCH_HOTSPOT_SCALE=10`，只放大热点判定值，不改业务代码）**
+
+- 结果：`commitReview` 4.8>1、`readMap` 822>600、`usageBytes` 510>500、`SRSStore.stats` 936>700 四项判红；
+  其余热点仍绿（绝对值小、红线按量级设置）；**63 项既有门禁全绿**，打印「门禁条数：63 项（与声明一致）」，exit 1。
+- 取证：`.analysis/bench-failures/<ts>-bench-failure.json` 新增 `hotspots` 段，`pass:false` 项与 `inject.QF_BENCH_HOTSPOT_SCALE`
+  一并落盘；`flags.hotspots=true`。绿灯 `--snapshot` 时写 `.analysis/bench-snapshots/<ts>-bench-snapshot.json`（99 行读数 + 12 条热点 + 80 行门禁）。
+
+**已知边界**：
+- 夹具只覆盖内存 IDB；真实浏览器 IndexedDB 的大库逐键读（`readMap`）未实测，本表不代表真机。
+- 同机运行间整体漂移可达约 20%，红线按「量级回归」设置，不用于判定 <20% 的差异。
+- `removeMany` 每批删除会改变夹具规模（累计移除 120 题 / 50k，占比 0.24%），不影响量级结论。

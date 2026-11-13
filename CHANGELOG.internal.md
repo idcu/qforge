@@ -62,6 +62,32 @@
 
 ## 最新记录
 
+### perf(bench): 方向 F 50k IDB 热点夹具 + `dailyFromLog` 单遍化
+
+**Commit Hash**：`<本轮工作区，未提交>`
+
+**核心改动**
+- `scripts/bench.mjs`：新增 opt-in `--hotspots`（50k 题 / 250 分片 + 50k per-hash 状态 + 20k revlog，
+  独立 `createMemoryIDB` harness），输出 12 条 `  [H] ✓/✗` 热点红线；前缀不匹配 `^  [✓✗] `，
+  `GATE_TOTAL` 仍为 **63**，既有阈值与判据一条未改。新增 `--snapshot` / `QF_BENCH_SNAPSHOT=1`
+  绿灯快照（`.analysis/bench-snapshots/`）；红灯取证新增 `hotspots` 段与 `flags`；
+  负向注入 `QF_BENCH_HOTSPOT_SCALE`。
+- `package.json`：新增 `bench:hotspots`（零依赖，不改 lock）。
+- `js/modules/review-queue.js`：`dailyFromLog` 两遍遍历 → 单遍（firstSeen + 今日条数），返回结构与语义不变；
+  `sw.js` CACHE `qforge-v68` → `qforge-v69`。
+- 文档：`docs/BENCH.md` 新增 3-D、`docs/BENCH-DATA.md` 新增 D-10、`docs/rounds/2026-11-13/specs/p3/tasks.md`
+  的 P2-3 判定改为有证据版本。
+
+**验证数据（Node 26.13.0，内存 IDB 替身）**
+- `node --expose-gc scripts/bench.mjs --hotspots --assert`：**exit 0**，63 项全绿 + 12 条热点全绿。
+- `dailyFromLog` 同进程 A/B（两次）：2.42 → 1.93 ms（0.797）与 3.36 → 1.76 ms（0.524），保守收益 **≥20%**，结果逐项一致。
+- 负向：`QF_BENCH_HOTSPOT_SCALE=10` → 4 条热点判红、63 项仍绿、exit 1，取证含 `hotspots` 段。
+- `node scripts/review-queue.test.mjs` 全绿。
+
+**遗留 TODO / 风险**
+- 真实浏览器 IndexedDB 大库逐键读（`readMap`）未实测；本夹具只覆盖内存替身。
+- 其余热点按「收益不可测/改动会改语义」如实记「不改」，理由见 `docs/BENCH.md` 3-D。
+
 ### test(strict): 补 DOM 删库与 API 删库严格守卫回归（剩余真机缺口）
 
 **Commit Hash**：`9d9afa4`

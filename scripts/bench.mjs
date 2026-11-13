@@ -3,6 +3,7 @@
  * 用真实 541 题数据测量核心链路的耗时与内存占用，输出可复核的数据。
  * 运行：node --expose-gc scripts/bench.mjs
  *       node --expose-gc scripts/bench.mjs --assert（性能门禁）
+ *       node --expose-gc scripts/bench.mjs --hotspots [--assert] [--snapshot]（方向 F 大库热点夹具）
  *   **门禁必须以 --expose-gc 运行**：否则 heapUsed 增量含未回收垃圾，40MB 门禁不可信
  *   （同一基线 740512e 的独立 worktree 实测 91.07MB，亦超限）。CI 与 docs-check 均带该参数。
  *
@@ -1736,6 +1737,223 @@ let c018GetSeq = 0;
     + '；P95 ' + ms(t1.p95));
 }
 
+/* ---------- 12e. 方向 F：50k IDB 热点夹具（--hotspots，默认不跑） ----------
+ * 目的：让「最坏用例」可复现——50k 题 + 50k 复习状态 + 20k revlog 落在同一个 IDB 库，
+ * 给审计列出的每条热点一个可测读数与独立红线（输出前缀 `  [H] `，**不计入** GATE_TOTAL=63）。
+ * 口径：
+ *   - 独立 IDB harness + createMemoryIDB（与 12c/12d 同来源），不污染主 harness 与既有门禁；
+ *   - 读路径 3 轮 × 5 样本取轮中位数；写路径 5 轮 × 20 样本取**全局最小样本**（与 3-B-2 同口径）；
+ *   - 阈值只拦「量级回归」（实测基线 × 3–10），不放宽任何既有阈值，也不删除任何既有门禁；
+ *   - 负向证明：QF_BENCH_HOTSPOT_SCALE=10 把判定值放大 10×，热点门禁应判红（63 项仍全绿）。
+ */
+const hotspotRows = [];
+const HOT_INJECT = Number(process.env.QF_BENCH_HOTSPOT_SCALE || 1);
+const BENCH_SNAPSHOT = process.argv.indexOf('--snapshot') >= 0 || process.env.QF_BENCH_SNAPSHOT === '1';
+if (process.argv.indexOf('--hotspots') >= 0) {
+  const hotIdb = createMemoryIDB();
+  const h = await createHarness(QB_DIR, {
+    indexedDB: hotIdb,
+    storageEstimate: () => ({ usage: hotIdb.usageBytes(), quota: 0 })
+  });
+  const HQ = h.QB;
+  HQ.Store.writeMarker('idb');
+  await HQ.Storage.initStore();
+  HQ.DB.init();
+  const hotBank = await HQ.DB.banks.create({ name: '热点夹具 50k' });
+  await HQ.Storage.ensureBank(hotBank.id);
+
+  const NQ = 50000;
+  const hashes = [];
+  const questions = [];
+  for (let i = 0; i < NQ; i++) {
+    const q = {
+      type: 'single',
+      question: '热点夹具第 ' + i + ' 题？' + 'z'.repeat(i % 32),
+      options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }],
+      answer: 'A', category: 'c' + (i % 10), difficulty: (i % 5) + 1
+    };
+    q.contentHash = HQ.makeContentHash(q);
+    hashes.push(q.contentHash);
+    questions.push(q);
+  }
+  const tBuild = process.hrtime.bigint();
+  await HQ.DB.questions.insertMany(hotBank.id, questions, { dedupe: false, mode: 'overwrite' });
+  await HQ.Storage.flush();
+  const buildMs = Number(process.hrtime.bigint() - tBuild) / 1e6;
+
+  const now = Date.now();
+  const stateMap = {};
+  for (let i = 0; i < NQ; i++) {
+    stateMap[hashes[i]] = {
+      algo: 'fsrs', stability: 2 + (i % 100) * 0.1, difficulty: 4 + (i % 10) * 0.1,
+      due: now - (i % 30) * 86400000, reps: i % 7, lapses: i % 3,
+      last: now - (i % 5) * 1000
+    };
+  }
+  // 最坏用例写放大：整表 clear + 50k 逐键写 + 标记 + 版本递增（每次含 flush）
+  const saveMs = [];
+  for (let k = 0; k < 2; k++) {
+    const t0 = process.hrtime.bigint();
+    await HQ.DB.reviews.save(hotBank.id, stateMap);
+    await HQ.Storage.flush();
+    saveMs.push(Number(process.hrtime.bigint() - t0) / 1e6);
+  }
+  // 20k 日志（FIFO 上限）：5k 个不同 hash × 4 条，全部落在今日
+  const dayStart = HQ.Time.dayStart(now);
+  const logs = [];
+  for (let i = 0; i < 20000; i++) {
+    logs.push({ t: dayStart + 1000 + i * 1000, h: hashes[i % 5000], r: 3, b: hotBank.id });
+  }
+  await HQ.DB.revlog.append(logs);
+  await HQ.Storage.flush();
+  const log = await HQ.DB.revlog.list();
+  const ids = (await HQ.DB.questions.list(hotBank.id, { offset: 200, limit: 200 })).items.map((q) => q.id);
+
+  const hotRow = (name, measured, budget, note, detail) => {
+    hotspotRows.push({ name: name, measured: measured, budget: budget, note: note, detail: detail || '' });
+    report.push({
+      name: '[H] ' + name, median: measured, min: measured, max: measured,
+      extra: (detail ? detail + '；' : '') + '红线 ' + ms(budget)
+    });
+  };
+
+  report.push({
+    name: '[H] 夹具构建（50k 题 + 50k 状态 · IDB）', median: buildMs, min: buildMs, max: buildMs,
+    extra: '含建库/插题/整表状态/20k 日志，仅观测不设红线'
+  });
+
+  // H1：readMap 逐 hash 整表合并（keysScoped 全键过滤 + 每 hash getScopedFresh）
+  const readMapT = await stableTimed(() => HQ.SRSStore.readMap(hotBank.id), 5, 3);
+  const reviewMap = await HQ.SRSStore.readMap(hotBank.id);
+  hotRow('readMap 整表合并（50k 状态 · IDB）', readMapT.median, 600,
+    '返回 ' + Object.keys(reviewMap).length + ' 条，逐 hash getScopedFresh + keysScoped 全键过滤',
+    '3 轮×5 样本，p50 ' + ms(readMapT.p50) + ' / p95 ' + ms(readMapT.p95));
+
+  // H2：commitReview 单次评分（每 hash O(1)，不整表读）
+  const hotWrite = async (i) => {
+    const key = hashes[i % 200];
+    const d = {};
+    d[key] = { algo: 'fsrs', stability: 1, difficulty: 5, due: now + i, reps: i % 5, lapses: 0, last: now + i };
+    await HQ.DB.reviews.patch(hotBank.id, d, [{ t: now + i, h: key, r: 3, b: hotBank.id }]);
+    await HQ.Storage.flush();
+  };
+  let commitMin = Infinity;
+  const commitRounds = [];
+  for (let r = 0; r < 5; r++) {
+    bestEffortGc();
+    const t = await timed(hotWrite, 20);
+    commitRounds.push(t.median);
+    if (t.min < commitMin) commitMin = t.min;
+  }
+  hotRow('commitReview 单次评分写（50k 状态在库 · IDB）', commitMin, 1,
+    '判定取全局最小样本（5 轮×20），只读写入 hash（O(1)）',
+    '轮中位数 ' + commitRounds.map((x) => x.toFixed(3)).join('/'));
+
+  // H3：reviews.save 整表清空重写（最坏用例写放大）
+  hotRow('reviews.save 整表清空重写（50k 状态 · IDB）', median(saveMs), 5000,
+    'clear + 50k 逐键 setSync + 标记 + 版本递增（含 flush）',
+    '2 次实测 ' + saveMs.map((x) => x.toFixed(1)).join('/') + ' ms');
+
+  // H4：SRSStore.writeMap（save + 落盘确认，srs-store 调用面）
+  const tWM = process.hrtime.bigint();
+  await HQ.SRSStore.writeMap(hotBank.id, stateMap);
+  const writeMapMs = Number(process.hrtime.bigint() - tWM) / 1e6;
+  hotRow('SRSStore.writeMap 整表（50k 状态 · IDB）', writeMapMs, 6000,
+    'writeMap = reviews.save + confirmPersisted，与 H3 同实现',
+    '单次实测 ' + writeMapMs.toFixed(1) + ' ms');
+
+  // H5：removeMany 全库扫描（50k 题 = 250 分片，每批删 20 个 id）
+  let rmSeq = 0;
+  let rmTotal = 0;
+  const rmT = await stableTimed(async () => {
+    const start = (rmSeq++ * 20) % (ids.length - 20);
+    const res = await HQ.DB.questions.removeMany(ids.slice(start, start + 20));
+    rmTotal += res.removed;
+  }, 3, 2);
+  hotRow('removeMany 全库扫描（50k 题 · 250 分片）', rmT.median, 100,
+    '删除 20 个 id，实际移除 ' + rmTotal + ' 题；遍历全部库/分片',
+    '3 轮×2 样本，p50 ' + ms(rmT.p50));
+
+  // H6：usageBytes 全量（50k 状态逐值 JSON.stringify）
+  const usageT = await stableTimed(() => HQ.Storage.usageBytes(), 5, 3);
+  hotRow('Storage.usageBytes 全量（50k 状态 · IDB）', usageT.median, 500,
+    '遍历 _cache/_pending/_chunkStates，逐值 Quota.bytesOfValue（JSON.stringify）',
+    '3 轮×5 样本，p50 ' + ms(usageT.p50));
+
+  // H7：isBankHydrated 未水合库线性扫（分阶段视图下逐键扫 _chunkStates/_cache/_pending）
+  const partialView = !!HQ.Storage._hydratedBanks;
+  const hydT = await stableTimed(() => HQ.Storage.isBankHydrated('bench-hot-not-hydrated'), 20, 3);
+  hotRow('isBankHydrated 未水合库（50k 键 · IDB）', hydT.median, 100,
+    partialView ? '分阶段视图 → 逐键扫 _chunkStates/_cache/_pending' : '全量视图 → O(1) 提前返回（未覆盖线性扫）',
+    '3 轮×20 样本，p50 ' + ms(hydT.p50));
+
+  // H8：revlog.list 全量（app 每次评分重读全 revlog 的原始成本）
+  const rlT = await stableTimed(() => HQ.DB.revlog.list(), 5, 3);
+  hotRow('revlog.list 全量（20k 日志 · IDB）', rlT.median, 200,
+    '返回 ' + log.length + ' 条；app 侧 reviewLogFor 按库缓存，评分后失效',
+    '3 轮×5 样本，p50 ' + ms(rlT.p50));
+
+  // H9：ReviewQueue.dailyFromLog（单遍；旧两遍实现作为同进程 T0 对照）
+  const dailyT = await stableTimed(() => HQ.ReviewQueue.dailyFromLog(log, hotBank.id, now), 10, 3);
+  const daily = HQ.ReviewQueue.dailyFromLog(log, hotBank.id, now);
+  hotRow('ReviewQueue.dailyFromLog（20k 日志）', dailyT.median, 50,
+    '单遍扫描；今日新卡 ' + daily.newIntroduced + ' / 已复习 ' + daily.reviewsDone,
+    '3 轮×10 样本，p50 ' + ms(dailyT.p50));
+  // 同进程 A/B：旧实现（两次遍历）只在此处作 T0 参照，不进入业务代码。
+  const dailyOldFn = (list) => {
+    const firstSeen = {};
+    const newHashes = {};
+    let reviewsDone = 0;
+    (list || []).forEach((e) => {
+      if (!e || e.b !== hotBank.id || !e.h) return;
+      const t = Number(e.t) || 0;
+      if (firstSeen[e.h] === undefined || t < firstSeen[e.h]) firstSeen[e.h] = t;
+    });
+    Object.keys(firstSeen).forEach((h) => {
+      if (firstSeen[h] >= dayStart) newHashes[h] = true;
+    });
+    (list || []).forEach((e) => {
+      if (!e || e.b !== hotBank.id || !e.h) return;
+      const t = Number(e.t) || 0;
+      if (t < dayStart) return;
+      if (newHashes[e.h]) return;
+      reviewsDone++;
+    });
+    return { newIntroduced: Object.keys(newHashes).length, reviewsDone: reviewsDone };
+  };
+  const dOld = await stableTimed(() => dailyOldFn(log), 10, 3);
+  const dNew = await stableTimed(() => HQ.ReviewQueue.dailyFromLog(log, hotBank.id, now), 10, 3);
+  const oldRes = dailyOldFn(log);
+  const newRes = HQ.ReviewQueue.dailyFromLog(log, hotBank.id, now);
+  const dailySame = oldRes.newIntroduced === newRes.newIntroduced && oldRes.reviewsDone === newRes.reviewsDone;
+  report.push({
+    name: '[H] dailyFromLog 同进程 A/B（旧两遍 → 新单遍）',
+    median: dNew.median, min: dNew.min, max: dNew.max,
+    extra: '旧 ' + ms(dOld.median) + ' → 新 ' + ms(dNew.median) + '（比值 ' + (dNew.median / dOld.median).toFixed(3)
+      + '），同一 20k 日志数组；结果一致=' + dailySame
+  });
+  if (!dailySame) hotspotRows.push({
+    name: 'dailyFromLog 等价性', measured: 1, budget: 0,
+    note: '新单遍与旧两遍结果不一致', detail: '旧 ' + JSON.stringify(oldRes) + ' / 新 ' + JSON.stringify(newRes)
+  });
+
+  // H10：ReviewQueue.build（50k 题 + 50k 状态，单遍分组 + 一次 sort 到期桶）
+  const rqT = await stableTimed(
+    () => HQ.ReviewQueue.build(questions, reviewMap, { now: now, settings: {}, daily: daily }), 5, 3);
+  hotRow('ReviewQueue.build（50k 题 + 50k 状态）', rqT.median, 200,
+    '单遍分组 + learning/due 两次 sort（' + questions.length + ' 题）', '3 轮×5 样本，p50 ' + ms(rqT.p50));
+
+  // H11：SRSStore.stats（readMap + Object.keys 汇总）
+  const stT = await stableTimed(() => HQ.SRSStore.stats(hotBank.id, now), 5, 3);
+  hotRow('SRSStore.stats 汇总（50k 状态）', stT.median, 700,
+    '内部再走一次 readMap + Object.keys', '3 轮×5 样本，p50 ' + ms(stT.p50));
+
+  // H12：Statistics.reviewStats（20k 日志逐条聚合）
+  const rsT = await stableTimed(() => HQ.Statistics.reviewStats(log, hotBank.id), 10, 3);
+  hotRow('Statistics.reviewStats（20k 日志）', rsT.median, 20,
+    '逐条聚合到 Map（' + log.length + ' 条）', '3 轮×10 样本，p50 ' + ms(rsT.p50));
+}
+
 console.log('\n================ 性能打点报告 ================');
 console.log('环境：Node ' + process.version + '，采样 ' + N + ' 次取中位数，分片大小 ' + QB.QuestionShards.SHARD_SIZE + '\n');
 const pad = (s, n) => String(s) + ' '.repeat(Math.max(0, n - String(s).length));
@@ -1812,10 +2030,22 @@ function writeFailureEvidence(fails, gateLines) {
         QF_BENCH_INJECT_SLOW: process.env.QF_BENCH_INJECT_SLOW || '',
         QF_BENCH_INJECT_KEYS_REBUILD: process.env.QF_BENCH_INJECT_KEYS_REBUILD || '',
         QF_BENCH_INJECT_PERHASH_SLOW: process.env.QF_BENCH_INJECT_PERHASH_SLOW || '',
-        QF_BENCH_INJECT_IDB_WRITE_SLOW: process.env.QF_BENCH_INJECT_IDB_WRITE_SLOW || ''
+        QF_BENCH_INJECT_IDB_WRITE_SLOW: process.env.QF_BENCH_INJECT_IDB_WRITE_SLOW || '',
+        QF_BENCH_HOTSPOT_SCALE: process.env.QF_BENCH_HOTSPOT_SCALE || ''
+      },
+      flags: {
+        assert: process.argv.indexOf('--assert') >= 0,
+        hotspots: process.argv.indexOf('--hotspots') >= 0,
+        snapshot: process.argv.indexOf('--snapshot') >= 0 || process.env.QF_BENCH_SNAPSHOT === '1'
       },
       fails: fails,
-      gates: gateLines
+      gates: gateLines,
+      // 方向 F：热点夹具读数（未跑 --hotspots 时为空数组，字段形状保持不变）
+      hotspots: hotspotRows.map((r) => ({
+        name: r.name, measuredMs: +r.measured.toFixed(4), budgetMs: r.budget,
+        pass: r.measured * HOT_INJECT <= r.budget,
+        note: r.note, detail: r.detail
+      }))
     };
     const file = path.join(dir, stamp + '-bench-failure.json');
     fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n');
@@ -1823,6 +2053,58 @@ function writeFailureEvidence(fails, gateLines) {
   } catch (e) {
     // 取证失败不改变门禁结论（红仍是红），只提示
     console.log('  取证写入失败：' + e.message);
+    return null;
+  }
+}
+
+/* ---------- 绿灯快照（--snapshot / QF_BENCH_SNAPSHOT=1） ----------
+ * 绿灯默认不落文件（与上面的取证约定一致）；显式要求时把本轮全部读数与门禁行写成快照，
+ * 供「同一夹具改前/改后」逐项对照留档（.analysis/ 已 gitignore，不入库）。 */
+function writeBenchSnapshot(gateLines) {
+  try {
+    const dir = path.join(QB_DIR, '.analysis', 'bench-snapshots');
+    fs.mkdirSync(dir, { recursive: true });
+    const now = new Date();
+    const stamp = now.toISOString().replace(/[:.]/g, '-');
+    const cpus = os.cpus();
+    const payload = {
+      at: now.toISOString(),
+      node: process.version,
+      platform: os.platform() + ' ' + os.release() + ' ' + os.arch(),
+      cpu: (cpus[0] && cpus[0].model) || 'unknown',
+      cpuCount: cpus.length,
+      memMB: {
+        total: +(os.totalmem() / 1048576).toFixed(1),
+        free: +(os.freemem() / 1048576).toFixed(1),
+        heapUsed: +(process.memoryUsage().heapUsed / 1048576).toFixed(1)
+      },
+      flags: {
+        assert: true,
+        hotspots: process.argv.indexOf('--hotspots') >= 0,
+        snapshot: true
+      },
+      inject: {
+        QF_BENCH_INJECT_SLOW: process.env.QF_BENCH_INJECT_SLOW || '',
+        QF_BENCH_INJECT_KEYS_REBUILD: process.env.QF_BENCH_INJECT_KEYS_REBUILD || '',
+        QF_BENCH_INJECT_PERHASH_SLOW: process.env.QF_BENCH_INJECT_PERHASH_SLOW || '',
+        QF_BENCH_INJECT_IDB_WRITE_SLOW: process.env.QF_BENCH_INJECT_IDB_WRITE_SLOW || '',
+        QF_BENCH_HOTSPOT_SCALE: process.env.QF_BENCH_HOTSPOT_SCALE || ''
+      },
+      gates: gateLines,
+      rows: report.map((r) => ({
+        name: r.name, medianMs: r.median, minMs: r.min, maxMs: r.max,
+        p50Ms: r.p50, p95Ms: r.p95, extra: r.extra
+      })),
+      hotspots: hotspotRows.map((r) => ({
+        name: r.name, measuredMs: +r.measured.toFixed(4), budgetMs: r.budget,
+        note: r.note, detail: r.detail
+      }))
+    };
+    const file = path.join(dir, stamp + '-bench-snapshot.json');
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n');
+    return file;
+  } catch (e) {
+    console.log('  快照写入失败：' + e.message);
     return null;
   }
 }
@@ -2148,6 +2430,22 @@ if (process.argv.indexOf('--assert') >= 0) {
   const r19Ok = r19EstExact === 2;
   console.log((r19Ok ? '  ✓ ' : '  ✗ ') + 'R-19 分享前估算：估算字符数与真实编码一致 ' + r19EstExact + '/2（540 题 / 8MB 边界）');
   if (!r19Ok) fails.push('R-19 分享前估算与真实编码字符数不一致：' + r19EstExact + '/2');
+  // 方向 F 热点门禁（--hotspots，opt-in）：前缀 `  [H] ✓/✗ ` 不匹配 `^  [✓✗] `，
+  // 因此不进入 GATE_TOTAL=63 的自校验；既有 63 项的阈值与判据一条都没动。
+  // 判定值 = 实测 × HOT_INJECT（默认 1；QF_BENCH_HOTSPOT_SCALE=10 用于证明红线仍会红）。
+  if (hotspotRows.length) {
+    console.log('---- 热点夹具（--hotspots，独立于 63 项）----');
+    hotspotRows.forEach((r) => {
+      const judged = r.measured * HOT_INJECT;
+      const ok = judged <= r.budget;
+      console.log('  [H] ' + (ok ? '✓' : '✗') + ' ' + r.name + '：' + ms(judged) + ' ≤ ' + ms(r.budget)
+        + '（' + r.note + (r.detail ? '；' + r.detail : '')
+        + (HOT_INJECT > 1 ? '；负向注入 ×' + HOT_INJECT : '') + '）');
+      if (!ok) fails.push('[hotspot] ' + r.name + ' ' + ms(judged) + ' > ' + ms(r.budget));
+    });
+  } else if (process.argv.indexOf('--hotspots') >= 0) {
+    fails.push('[hotspot] 已指定 --hotspots 但未产生任何热点读数');
+  }
   // 门禁条数自校验：实跑 ✓/✗ 行数必须等于 GATE_TOTAL。
   // 正常时只打一条不带 ✓/✗ 的说明行（否则会把自己算进条数，形成自指）。
   const executedGates = gateLines.filter((l) => /^  [✓✗] /.test(l)).length;
@@ -2168,5 +2466,9 @@ if (process.argv.indexOf('--assert') >= 0) {
     process.exitCode = 1;
   } else {
     console.log('性能门禁全部通过 ✅\n');
+    if (BENCH_SNAPSHOT) {
+      const snap = writeBenchSnapshot(gateLines);
+      if (snap) console.log('  快照已写入：' + path.relative(QB_DIR, snap).split(path.sep).join('/'));
+    }
   }
 }

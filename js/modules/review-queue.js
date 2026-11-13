@@ -34,24 +34,27 @@
   function dailyFromLog(log, bankId, now) {
     const dayStart = QB.Time.dayStart(now);
     const firstSeen = {};
-    const newHashes = {};
-    let reviewsDone = 0;
+    const todayCount = {};
+    let todayTotal = 0;
+    // 单遍同时收集：每个 hash 的最早 t（判是否今日新卡）与今日条数（复习额度计数）。
+    // 等价于旧实现的两遍（先 firstSeen、再按 newHashes 过滤计数），语义逐条对齐：
+    //   reviewsDone = 今日全部条数 - 今日新卡条数（新卡的所有日志必然都在今日）。
     (log || []).forEach((e) => {
       if (!e || e.b !== bankId || !e.h) return;
       const t = Number(e.t) || 0;
       if (firstSeen[e.h] === undefined || t < firstSeen[e.h]) firstSeen[e.h] = t;
-    });
-    Object.keys(firstSeen).forEach((h) => {
-      if (firstSeen[h] >= dayStart) newHashes[h] = true;
-    });
-    (log || []).forEach((e) => {
-      if (!e || e.b !== bankId || !e.h) return;
-      const t = Number(e.t) || 0;
       if (t < dayStart) return;
-      if (newHashes[e.h]) return; // 新卡当天的多条 learning 步骤不计入复习额度
-      reviewsDone++;
+      todayCount[e.h] = (todayCount[e.h] || 0) + 1;
+      todayTotal++;
     });
-    return { newIntroduced: Object.keys(newHashes).length, reviewsDone: reviewsDone, dayStart: dayStart };
+    let newIntroduced = 0;
+    let newToday = 0;
+    Object.keys(firstSeen).forEach((h) => {
+      if (firstSeen[h] < dayStart) return;
+      newIntroduced++;
+      newToday += todayCount[h] || 0;
+    });
+    return { newIntroduced: newIntroduced, reviewsDone: todayTotal - newToday, dayStart: dayStart };
   }
 
   /**
