@@ -64,7 +64,7 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红�
 
 | 套件 | 断言数（2026-11-06 本机实跑；UTC 由 CI 矩阵覆盖） | 覆盖 |
 | --- | --- | --- |
-| `scripts/smoke-test.mjs` | **746** | **公共抽象黄金值（18 项：FNV 字符串/字节、mulberry32 序列、答案文本、权重仓归一、FSRSOpt 同源）**、**复习状态合并 ReviewMerge（9 项：双方独有键保留、last 相同保留远端、local/remote 更大 last、缺失/负 last 归零、不修改入参）**、**开始弹窗参数记忆 StartPrefs（20 项：默认/钳制/往返/模式隔离）**、全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v3（64 位）**、**解析类多列/多标记合并（15 项）**、**真实多列解题思路材料题（72 项）**、**真实问卷星 425/30 题（56 项）**、**按题型分值（15 项）**、**考试时长与练习正计时（8 项）**、**考试简答待自评（7 项）**、**`selfAssessAt` 按下标自评（材料小问改判/得分回算/普通简答，5 项）**、**M4 小问乱序与子问分值（22 项：contentHash 不变/同种子可复现/按新下标判分、score 1–100 归一/满分 20+30/本场显式覆盖/导入与 wire 保留）**、**填空空位/答案数不一致（9 项：按较大值保留、缺失补空、警告、一致不警告、splitFillAnswers）**、内置样例、xlsx/docx 解析、DOCX 图片、选项乱序、三格式 540 题往返、多题库隔离/级联删除、答题卡、**结果页错题重练（7 项）**；**搜索覆盖选项/填空/参考答案/材料正文与子问题（6 项）**、**考试会话恢复（7 项：startedAt/deadlineAt 保存与 restore、remainingMs 截止计算、旧会话 startedAt+durationMs 推导、极旧会话整段回退）**；**C019 判断题非法答案（5 项：题干答案非法→pending、作答非法→pending、未作答仍判错、文本对/错合法、pending 不计入 ResultPolicy 已判定/错误）** |
+| `scripts/smoke-test.mjs` | **731** | **公共抽象黄金值（18 项：FNV 字符串/字节、mulberry32 序列、答案文本、权重仓归一、FSRSOpt 同源）**、**复习状态合并 ReviewMerge（9 项：双方独有键保留、last 相同保留远端、local/remote 更大 last、缺失/负 last 归零、不修改入参）**、**开始弹窗参数记忆 StartPrefs（20 项：默认/钳制/往返/模式隔离）**、全局配置契约（分组/旧键兼容/模块读取配置）、**导入入口 File/快照分派（真实 File 读取、函数形态 text 拒绝、快照零回归、JSON 去 BOM，5 项）**、六题型判分（含不定项少选半分）、**材料题 M1/M2（夹具往返黄金断言、18 列多行块，100+ 项）**、**contentHash v3（64 位）**、**解析类多列/多标记合并（15 项）**、**真实多列解题思路材料题（72 项）**、**真实问卷星 425/30 题（56 项）**、**按题型分值（15 项）**、**考试时长与练习正计时（8 项）**、**考试简答待自评（7 项）**、**`selfAssessAt` 按下标自评（材料小问改判/得分回算/普通简答，5 项）**、**M4 小问乱序与子问分值（22 项：contentHash 不变/同种子可复现/按新下标判分、score 1–100 归一/满分 20+30/本场显式覆盖/导入与 wire 保留）**、**填空空位/答案数不一致（9 项：按较大值保留、缺失补空、警告、一致不警告、splitFillAnswers）**、内置样例、xlsx/docx 解析、DOCX 图片、选项乱序、三格式 540 题往返、多题库隔离/级联删除、答题卡、**结果页错题重练（7 项）**；**搜索覆盖选项/填空/参考答案/材料正文与子问题（6 项）**、**考试会话恢复（7 项：startedAt/deadlineAt 保存与 restore、remainingMs 截止计算、旧会话 startedAt+durationMs 推导、极旧会话整段回退）**；**C019 判断题非法答案（5 项：题干答案非法→pending、作答非法→pending、未作答仍判错、文本对/错合法、pending 不计入 ResultPolicy 已判定/错误）** |
 | `scripts/xml-lite.test.mjs` | **39** | 极简 XML：结构/深度先序、自闭合、属性引号、五类实体+字符引用、注释/PI/CDATA/DOCTYPE 跳过、NS getAttributeNS、畸形 XML 六类抛错、worksheet/document/rels 真实片段 |
 | `scripts/exporter.test.mjs` | **204** | 七格式注册（含 html 分享页）、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、**合并解析文本 CSV 往返**、**材料题五格式分流/18·19 列多行块/三格式 hash 往返/JSON 嵌套 material+children 往返/小问分值 MD·DOCX·CSV·XLSX·JSON 往返（M4，12 项）**、**JSON 内容校验和（导出/一致/篡改警告，4 项）**、**JSON 可选 `bank.sched`（已设置才写入/未设置与旧包同构，4 项）**、错题 wrongCount、乱序隔离、历史记录四格式；**只读分享页（23 项）：完整文档/UTF-8/标题描述/答案与解析/无脚本/XSS 转义/缺图占位/data URL 内嵌/材料父子编号/历史拒绝/kind 白名单** |
 | `scripts/office-export.test.mjs` | **1150** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
@@ -75,7 +75,7 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红�
 | `scripts/blueprint.test.mjs` | **18** | 题型×分类×难度筛选/抽题/缺口、种子可复现 |
 | `scripts/share-link.test.mjs` | **93** | **C011 分享回链/粘贴码（离线往返）**：Base64 与 Node Buffer 逐字节一致 + URL-safe 可逆、坏字符抛错；ShareLink 同字节同码、`#share=` 回链/纯码双形态、`buildLink` 去旧 fragment、空/错前缀/非法字符抛错；**三库（图片/公式/材料题）collect→qbk(manifest)→encode→decode→runImport 往返：题数 3/3、contentHash 集合 100% 相等、packageId/version/checksum 三字段一致、清单与题数复核通过、包字节校验和相等、零清单警告**；材料父子结构与材料正文往返；**全程 stub `fetch` 调用计数 0（离线可用）**；只读分享页无 `<script>`/无内联事件、图片 data URL 内嵌、公式 `rt-frac`；粘贴纯码与完整回链均解析出题；**R-19 分享体积（12 项）：`estimateChars` 1..256 字节与 540 题/8MB 边界逐字节等于 `encode(...).length`；540 题大包预计回链 > 64 KB 时先确认、取消后 `encode` 0 次、返回 null、不打开分享弹窗** |
 | `scripts/practice-builder.test.mjs` | **28** | **C010 错题/薄弱一键组卷（纯函数零写入）**：`Statistics.reviewStats` 按题库过滤与逐题聚合（r>=good 计正确、hard 计作答）、薄弱口径 4 组边界（3 次 1 对/2 次 2 对/1 次错/hard+good）、错题成员恒入、只含错题∪薄弱、内容键去重、limit、同 seed 确定性、空池 reason、材料题父子结构、**整库 raw 键值快照前后逐项一致** |
-| `scripts/source.test.mjs` | **47** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入）；**无响应文案不出现 undefined（运算符优先级回归）**；**考试倒计时/刷新恢复关键接线（5 项）：timerText 传入、#quiz-timer 渲染与每秒更新、pagehide flush、remainingMs 统一口径**；**历史成绩写入字段一致性（P1-8，2 项）：交卷 `History.add` 与自评 `History.update` 均上报 `partial`**；**开始弹窗参数记忆接线（4 项）：load/save、无题库守卫、index 加载 start-prefs**；**P1-17 xlsx 行列上限（6 项）：上限常量与 `readSheets` 透传、`maxRows/maxCols` 不再为 Infinity** |
+| `scripts/source.test.mjs` | **51** | 来源归一、URL 校验、checksum、快照拉取（fetch 注入）；**无响应文案不出现 undefined（运算符优先级回归）**；**考试倒计时/刷新恢复关键接线（5 项）：timerText 传入、#quiz-timer 渲染与每秒更新、pagehide flush、remainingMs 统一口径**；**历史成绩写入字段一致性（P1-8，2 项）：交卷 `History.add` 与自评 `History.update` 均上报 `partial`**；**组卷 seed 写回与恢复复用（P2-7，4 项）：新会话仍随机、集训把 seed 交给 beginQuiz、seed 写入快照、恢复时读取**；**开始弹窗参数记忆接线（4 项）：load/save、无题库守卫、index 加载 start-prefs**；**P1-17 xlsx 行列上限（6 项）：上限常量与 `readSheets` 透传、`maxRows/maxCols` 不再为 Infinity** |
 | `scripts/fsrs.test.mjs` | **136** | py-fsrs 6.3.2 黄金对照（S10/D5/R0.9/good→32.026729、R=1 不增长、D₀ 6.4133/5.112171/2.118104/1、D′(5) 8.341762/6.665995/4.990228/3.314461、S′_f 1.391987、同日 S′_s 3.051249/10/10/15.534308）、衰减校准 R(S,S)=0.9、间隔整日反解、同日 short-term 阈值、1m/10m learning steps、relearning、SM-2 迁移、难度钳制、opt-in fuzz（区间/分布/确定性） |
 | `scripts/fsrs-opt.test.mjs` | **114** | revlog/FIFO/作用域隔离、四门控、**留出门控（holdout 20%/gateBasis）+历史最佳权重-loss 自洽**、合成日志留出 logloss 改善、确定性复训、默认回退、preset 隔离与端到端；**增量重训（P1，23 项）：`trainedLogLen` 训练点、`shouldRetrain` 阈值与 `minNew` 可调、热启动 `warmStarted`、Worker 透传 `startWeights`/`WARM_ITERATIONS`**；Worker 化（Core 同源/门控不写盘/supported 矩阵/假 Worker 协议/构造与 onerror 回退/trainAsync 写盘） |
 | `scripts/srs.test.mjs` | **92** | 自然日时区无关、7 日预报、SM-2→FSRS 迁移、分钟级学习队列、一次作答一条 revlog 契约（collectGraded）、删库级联清理（review/wrong/fav/preset/revlog，10 项）；**崩溃/强杀不丢评分（16 项）：返回即落盘、重启补全+幂等、失败可观测（T10）、IDB 模式直读断言已提交**；**P1-10 无 patch 回退合并（5 项）：提交前重读并按 last 合并，不覆盖其他标签新状态** |
@@ -102,24 +102,10 @@ artifact 上传（`failure-evidence-node<版本>-<utc|asia-shanghai>`），红�
 | `scripts/importers-quizlet.test.mjs` | **75** | 分隔符自动识别（Tab/逗号/分号/竖线）与显式自定义覆盖、`Term/Definition` 表头跳过、非两列/空 term/重复行跳过与警告、空文件明确报错、全部落 essay（term 题干 + definition 参考答案）、明确「无选项/无图片/无在线进度」提示、与既有 CSV 的路由边界（表头 CSV 不被劫持）；**D1：粘贴入口复用注册表（Tab/逗号/全角逗号与文件入口结果全等，Markdown/JSON/无法识别分支不回归）** |
 | `scripts/import-commit.test.mjs` | **64** | **C006 导入事务（P1-02）**：容量预检拒绝时 0 次写且原因可见（先于预览）、写入中途超配额回滚到导入前（题数与占用字符数复原、无「导入完成」toast）、正常导入落盘回读一致与内容去重、四条入口共用 `commitImport` 且 `data-io` 只有 1 处 `insertMany`、IDB `flush` 失败不报成功并回滚；**C015 单小问材料题（P2-03/D5=A）：`runImport` 返回 1 条致命错误 → `commitImport` 返回 null、写入 0 次、题数不变（同包正常题也不落库）、弹窗含「至少 2 个」且未打开预览**；**C026 批注总量超限（7 项）：540 题满长汉字 8,100,000B > 2 MiB → 返回 null、写入 0 次、题数不变、弹窗含「批注总量/超过上限/删减批注」且未打开预览**；**R-20 导入体积预检（17 项）：上限常量 16 MiB；File-like 超限 → `FileReader` 构造 0 次、`Storage.set` 0 次、返回 null、弹窗含 `.import-error`/「超过导入上限」/「未读取文件」且未开预览；二进制快照按 `arrayBuffer.byteLength` 同样拒收；边界为开区间（=上限放行、+1 拒收），拒收结构标记 `migration.supported=false`；落盘顺序：成功 toast 严格晚于 `forceSync`/`flush`** |
 | `scripts/a11y.test.mjs` | **103** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、**弹窗快照注册自检（每个导出的 `render*Dialog` 必须至少登记一份快照，新增弹窗漏登记即转红）**、全仓禁止 tabindex>0、模态焦点进入/异步回位链路/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖、**14 项视觉结构回归（含 `.import-error` 10 项：规则唯一、danger 前景/弱底/边框/圆角/换行均为语义令牌、无硬编码色值、两处失败弹窗共用该类且 JS 无内联样式）**；**变异 `--mutate`：删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked` → 95 通过 / 8 失败（exit 1）**；CI 以独立 `a11y` job 运行本命令 |
-| **合计** | **6170 / 6170 通过 · 38 个运行项**（2026-11-13 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+| **合计** | **6179 / 6179 通过 · 38 个运行项**（2026-11-13 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
 
-**真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）**：
-- 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。
-- 关闭标签后重新打开：自动恢复考试「第 1 / 3 题」，提示剩余 29:11；刷新后仍自动回到同一题，倒计时 28:48→27:26 持续递减（PASS）。
-- CSP 基线（同日 `serve.mjs` 127.0.0.1:8777）：首页渲染正常、控制台无 CSP 违规；选择示例题库 → 练习模式（单选 3 题）→ 出现「单选 第 1 / 3 题」→ 错误选项提交后出现「❌ 回答错误」、正确答案与解析（PASS）。
-- 开始参数记忆（2026-10-31 同日）：选择示例题库 → 练习模式设置判断题 3 题 → 开始 → 结束练习 → 返回首页 → 再次打开练习模式，判断题数量仍为 3，控制台无错误（PASS）。
-- 截图：`qforge-exam-timer.png`（本地临时目录）。
-
-**真实浏览器端到端验收（2026-11-06，手动门禁，不进 CI）**：
-
-```powershell
-node scripts/e2e-browser.mjs                 # 全跑：C020/C025/C007/C008/IDB50K，49/49 exit 0
-node scripts/e2e-browser.mjs --only=sw       # 单场景复验
-```
-
-- 启动本机 Edge（CDP）+ 进程内静态服务器，覆盖：C020 跨源 CSP 默认拦截与三处白名单部署模拟、C025 install 预缓存失败/导航 500 不覆盖离线壳/CACHE 版本生效、C007 InPrivate 与 IDB 不可用回落及可恢复标记、C008 双标签并发评分、IDB 50k `storage.estimate` 与渲染帧时间。
-- 证据（`result.json`、`run.log`、截图）写入 `.screenshots/e2e-browser/`，**不入库**；场景无法真机执行时脚本明确标记「未测」并 exit 1，禁止用 Node 替身冒充真机结果。
+> 手动浏览器验收记录、偶发 `exit 134` 的现象与复现步骤见
+> [DEVELOPMENT.md 第 8 节](DEVELOPMENT.md#8-手动验收与已知环境问题)；本节只保留自动化总闸的跑法。
 
 **浏览器端到端 CI 门禁（`e2e` job）**：独立 job（ubuntu + Node 24 + headless chromium，8 分钟上限），六场景、确定性写法、边界与失败取证见 [E2E-CI.md](E2E-CI.md)。
 
@@ -131,47 +117,18 @@ Get-ChildItem scripts\*.test.mjs, scripts\smoke-test.mjs | ForEach-Object { node
 node scripts/test-all.mjs
 ```
 
-## 已知环境问题：偶发 `exit 134`（V8 分配失败）
+## 附：纪律看板（成熟度自评）
 
-**现象**：串行跑 `storage.test.mjs`（`node storage.test.mjs`，在 `scripts/` 下）时偶发 `FATAL ERROR: AlignedAlloc Allocation failed - process out of memory`
-或 `FATAL ERROR: Zone Allocation failed - process out of memory`，退出码 134（SIGABRT）。崩溃位置不固定——实测两次分别在
-「P2-06 reviewMeta」段首和打印完「汇总」之后。崩溃时存活堆 12.6–13.9 MB、已提交堆 18.6–19.8 MB，此前 GC 全是 Scavenge
-（单次 0.22–0.35 ms，`mu = 1.000`），native 栈只有地址无符号，日志不含失败分配的 size / alignment 与 `GetLastError`。
-日志：`.analysis/flake/`（已 gitignore，不入库）。
-
-**已排除**：
-
-| 假设 | 排除依据 |
-|---|---|
-| 测试数据量过大 | 全套数据 <1 MB；`--max-old-space-size=48` 下 109 条断言稳定通过 |
-| 并发争抢 | 当时是串行循环（`1..20`，一次一个 node 进程），两次崩溃在同一 shell 内 |
-| V8 堆上限 | 实测 `heap_size_limit` = 4192 MB（`--max-old-space-size=48` 时为 144 MB） |
-| `NODE_OPTIONS` 设了小堆 | 进程 / 用户 / 系统 / `HKCU\Environment` 四处皆空 |
-| 提交内存不足 | Commit Limit 37.4 GB（物理 32.5 GB + 4.9 GB 页面文件），崩溃时余量约 17 GB，进程峰值工作集 65 MB |
-
-**结论**：进程向系统申请内存被外部拒绝，最可能是沙箱 Job 对象配额或 EDR / 杀软钩子。日志本身不带失败分配的
-size / alignment 与 `GetLastError`，无法再往下定性。同一命令 40 次里仅在 3 秒窗口内崩过 2 次，之后不复现。
-
-**复发时怎么抓**：
-
-1. 抓崩溃瞬间的 Job 对象内存限额（Process Hacker → `JobObjectExtendedLimitInformation`）、进程虚拟内存与句柄数；
-2. 查 EDR / 杀软事件日志，确认是否有 mmap 拦截记录；
-3. 在 CI 上出现时，抓 runner 的 Commit Limit 与失败瞬间进程虚拟内存（runner 是独立 16 GB VM，无本机沙箱层，理论上不复现）。
-
-> **不要**通过放宽或改写测试断言来消除该现象：它不反映被测代码的问题，改断言只会掩盖环境故障。
-
----
-
-## 附：十问看板（成熟度自评）
-
-> `engineering-discipline.md` §8 的十问清单，做成了一个脚本：它**不替代**任何判据，
-> 只回答"这个仓库现在几档、缺哪一条"。
+> `engineering-discipline.md` §8 的十问清单 + 本项目追加的 4 条（文档规模、总闸覆盖、命令可解析、
+> 异步卫生），做成了一个脚本：它**不替代**任何判据，只回答"这个仓库现在几档、缺哪一条"。
 
 ```bash
 npm run discipline
 ```
 
-结构上不适用的问写在 `docs/discipline-exemptions.json`（理由必须写清为什么结构上不成立；
-"暂时没做"不是理由）。不适用项从分母剔除，而不是从分子加分。
+`docs/discipline-exemptions.json` 支持两种声明：**不适用**（字符串；理由必须写清为什么结构上不成立，
+"暂时没做"不是理由）与**临时跳过**（`{reason, expires}`；到期当天自动变成缺口，不算永久豁免）。
+两者都不计入分母的"具备"比例，但临时跳过会在看板上单列并带到期日。
 
-当前：**8/8 → L4**。第 4、5 问声明了不适用（运行时断言即契约、纯静态无构建），理由在 `docs/discipline-exemptions.json`。
+当前：**13/13 项具备 · 不适用 1（第 5 问）→ L4**；`--strict` 无缺口。
+第 14 问由 `scripts/check-async-hygiene.mjs` 提供读数（空 catch / 未处理 Promise）。

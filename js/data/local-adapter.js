@@ -1315,7 +1315,7 @@
       try {
         ReviewStore.writeMarker(bankId);
       } catch (e) {
-        try { Storage.set(K.reviewMeta(bankId), raw); } catch (_) { /* 保留旧视图 */ }
+        try { Storage.set(K.reviewMeta(bankId), raw); } catch (_) { /* 回写旧视图失败时保留内存统计 */ }
         stats.failed = String((e && e.message) || e);
         return stats;
       }
@@ -1737,7 +1737,7 @@
           if (prevLegacy != null) Storage.set(K.review(bankId), prevLegacy);
           Storage.set(K.reviewRev(bankId), prevRev);
           Storage.forceSync();
-        } catch (_) { /* 尽力回滚 */ }
+        } catch (_) { /* 回滚失败保留原始错误向上抛 */ }
         throw e;
       }
     },

@@ -188,12 +188,12 @@
     /** 打开弹窗（参数与 UIRenderer.openModal 一致） */
     openModal(html, onMount, onClose, returnFocusTo) {
       const fn = this._implFn('openModal');
-      if (fn) { try { return fn(html, onMount, onClose, returnFocusTo); } catch (e) { /* no-op */ } }
+      if (fn) { try { return fn(html, onMount, onClose, returnFocusTo); } catch (e) { /* 视图实现未就绪时忽略 */ } }
     },
     /** 关闭弹窗 */
     closeModal() {
       const fn = this._implFn('closeModal');
-      if (fn) { try { return fn(); } catch (e) { /* no-op */ } }
+      if (fn) { try { return fn(); } catch (e) { /* 视图实现未就绪时忽略 */ } }
     },
     /** 导入预览的校验和 HTML；实现缺席时返回空串（预览仍可正常显示） */
     renderImportChecksum(meta) {

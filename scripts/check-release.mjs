@@ -8,6 +8,9 @@
  *      不随发布变化，只校验格式，避免再被误读成"版本不一致"）；
  *   3. sw.js 的 CACHE 形如 qforge-vNN，且不低于发布台账（docs/release-ledger.json）里
  *      记录的上次已发布值——把 CACHE 回退到老值会被拦下；
+ *      **本检查只针对源码树**：`build-staging.mjs` 产出的发布目录会把 CACHE 换成
+ *      `qforge-<semver>`（如 `qforge-v1.0.2`），那是产物命名而不是台账口径，
+ *      由 `build-staging --assert` 自证；不要把产物目录拿来跑本脚本。
  *   4. 应用版本不低于台账记录的上次已发布版本；
  *   5. index.html 的 classic <script> 数量与 contracts/modules.json 的模块数相等
  *      （顺序与 requires 由 check-modules.mjs 负责，这里只做发布视角的数量核对）。

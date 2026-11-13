@@ -122,7 +122,7 @@
       if (typeof navigator !== 'undefined' && navigator && typeof navigator.userAgent === 'string') {
         return navigator.userAgent;
       }
-    } catch (_) { /* 受限环境 */ }
+    } catch (_) { /* 无 navigator 的受限环境用 unknown */ }
     return 'unknown';
   }
 

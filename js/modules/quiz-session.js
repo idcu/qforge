@@ -36,10 +36,11 @@
     // 考试截止时间随会话持久化：刷新/崩溃恢复后按剩余时间继续，而不是重新计时
     if (engine.mode === 'exam' && engine.durationMs > 0) engine.deadlineAt = engine.startedAt + engine.durationMs;
     State.engine = engine;
-    State.quizMeta = { startTs: engine.startedAt, title: title || '', focusLeaves: 0, locked: false };
+    State.quizMeta = { startTs: engine.startedAt, title: title || '', focusLeaves: 0, locked: false, composeSeed: engine.composeSeed || 0 };
     State.view = 'quiz';
     startQuizTimer(engine);
-    QB.ProgressSaver.save(State.bankId, engine);
+    const saved = QB.ProgressSaver.save(State.bankId, engine);
+    if (saved && typeof saved.catch === 'function') saved.catch((e) => notifyBackgroundError('保存会话失败', e));
     hydrateQuizReviewContext(State.bankId, engine);
     render();
   }
@@ -244,13 +245,14 @@
       QB.DB.loadQuestions(State.bankId),
       reviewLogFor(State.bankId)
     ]);
+    const seed = Date.now() % 2147483647;
     const built = QB.PracticeBuilder.build({
       questions: items || [],
       wrongKeys: (wrongList || []).map((w) => w.questionKey),
       revlog: log,
       bankId: State.bankId,
       limit: QB.CONFIG.LIMITS.QUESTIONS_PER_QUIZ,
-      seed: Date.now() % 2147483647
+      seed
     });
     if (!built.questions.length) {
       UI.toast('没有错题或薄弱点（薄弱 = 作答≥' + QB.CONFIG.LIMITS.WEAK_MIN_ATTEMPTS +
@@ -258,7 +260,8 @@
       return;
     }
     beginQuiz(built.questions, 'practice',
-      '错题+薄弱集训（' + built.counts.total + ' 题：错题 ' + built.counts.wrong + ' / 薄弱 ' + built.counts.weak + '）');
+      '错题+薄弱集训（' + built.counts.total + ' 题：错题 ' + built.counts.wrong + ' / 薄弱 ' + built.counts.weak + '）',
+      { composeSeed: seed });
   }
 
   /** 当前题 FSRS 状态（本场开练时快照；无快照返回 null） */
@@ -380,7 +383,7 @@
     engine.restore(s);
     State.engine = engine;
     // 考试保留原始开始时间（历史用时含刷新/关闭期间，剩余时间由 deadlineAt 决定）；练习从恢复时刻重新计时
-    State.quizMeta = { startTs: isExam ? (engine.startedAt || Date.now()) : Date.now(), title: '继续上次' };
+    State.quizMeta = { startTs: isExam ? (engine.startedAt || Date.now()) : Date.now(), title: '继续上次', composeSeed: engine.composeSeed || 0 };
     State.view = 'quiz';
     hydrateQuizReviewContext(State.bankId, engine);
     if (isExam && engine.durationMs > 0) {

@@ -838,7 +838,7 @@
   }
 
   function byteLengthOf(text) {
-    try { if (typeof Blob !== 'undefined') return new Blob([text]).size; } catch (_) { /* 退化 */ }
+    try { if (typeof Blob !== 'undefined') return new Blob([text]).size; } catch (_) { /* Blob 不可用时退化到 TextEncoder */ }
     try { return new TextEncoder().encode(text).byteLength; } catch (_) { return text.length; }
   }
 

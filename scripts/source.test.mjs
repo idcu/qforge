@@ -164,6 +164,16 @@ section('历史成绩写入字段一致性（P1-8）');
     '自评回写历史上报 partial（两写路径一致）');
 }
 
+section('组卷 seed 写回与恢复复用（P2-7）');
+{
+  const sessionSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/quiz-session.js'), 'utf8');
+  const engineSrc = fs.readFileSync(path.join(QB_DIR, 'js/modules/quiz-engine.js'), 'utf8');
+  ok(/seed\s*=\s*Date\.now\(\)\s*%\s*2147483647/.test(sessionSrc), '新会话仍按开练时刻生成随机 seed');
+  ok(sessionSrc.indexOf('composeSeed: seed') >= 0, '集训把本次 seed 交给 beginQuiz');
+  ok(engineSrc.indexOf('composeSeed: this.composeSeed || 0') >= 0, 'seed 写入会话快照');
+  ok(engineSrc.indexOf('this.composeSeed = Number(state.composeSeed)') >= 0, '恢复会话时读取并复用 seed');
+}
+
 section('开始弹窗参数记忆接线（源码级回归）');
 {
   const appSrc = fs.readFileSync(path.join(QB_DIR, 'js/app.js'), 'utf8')

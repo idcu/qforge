@@ -55,7 +55,7 @@
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        try { worker.terminate(); } catch (e) { /* 忽略 */ }
+        try { worker.terminate(); } catch (e) { /* worker 可能已终止，忽略清理异常 */ }
         fn(arg);
       };
       const timer = setTimeout(() => finish(reject, new Error('Worker 训练超时')), Core.WORKER_TIMEOUT_MS);

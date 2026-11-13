@@ -10,7 +10,7 @@
 
 | 读数 | 当前值 | 事实源 |
 | --- | --- | --- |
-| SW 缓存版本 | qforge-v65 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+| SW 缓存版本 | qforge-v66 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
 | 数据 schemaVersion | 7 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
 | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
 
@@ -134,7 +134,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 - 已覆盖的复习设置弹窗（三档宽度）：弹窗内容 `scrollWidth == clientWidth`；11 个控件（`#sched-fuzz`、`#sched-fuzzmax`、`#sched-ed0..6`、`#sched-leech-action`、`#sched-leech`）实际点击矩形 ≥44×44（复选框量包裹 label）；复选框 `Space`、下拉 `↓` 可切换；`Esc` 后焦点回位。
 - **未覆盖**：拖拽导入（无稳定可聚焦触发元素，`activeElement` 为 `BODY` 时不回焦）；`backup.js` 恢复确认等「外层弹窗内再开内层弹窗」只验证了 `openModal` 保留外层入口的源码约定，未做真机 Esc 断言；`confirmDialog` 在无弹窗的异步回调中调用；`SyncDAV` 弹窗；键盘操作（仅复习设置弹窗做了真机断言：Tab 循环、复选框 Space、下拉 ↓）；14 份渲染快照之外的动态题型/材料题子问。新增弹窗或入口时必须先补静态断言，再按需补真机用例。
 
-**本地全量门禁**：`npm run verify` = `npm run verify:fast`（check-ngm → check-modules → check-layers → check-changelog → check-deletions → docs-links → check-ci-coverage → test-all → docs-check --static）→ `npm run bench`（默认带 `--assert`）→ `node scripts/check-discipline.mjs --strict`。只想快速回归用 `npm run verify:fast`（不含性能与纪律，省一轮 bench）。历史缺陷：`bench` 曾不带 `--assert`、`verify` 也不含 bench/discipline，注入 10% 慢化时 `npm run verify` 仍可全绿。
+**本地全量门禁**：`npm run verify` = `npm run verify:fast`（check-ngm → check-modules → check-layers → check-deps → check-csp → check-changelog → check-deletions → docs-links → check-ci-coverage → test-all → docs-check --static → check-release）→ `npm run bench`（默认带 `--assert`）→ `node scripts/check-discipline.mjs --strict`。只想快速回归用 `npm run verify:fast`（不含性能与纪律，省一轮 bench）。**第 14 问**由 `scripts/check-async-hygiene.mjs` 提供读数（空 catch / 未处理 Promise，历史存量走 `scripts/hygiene-baseline.json` 的带到期日豁免；CI 的 `docs-check` job 也直接跑它）。纪律看板区分 ✅ 通过 / ⚠️ 不适用（结构上不成立，不计分母）/ ⏭️ 临时跳过（`{reason, expires}`，到期自动转缺口）/ ❌ 缺口，`--strict` 遇任一缺口即 exit 1。历史缺陷：`bench` 曾不带 `--assert`、`verify` 也不含 bench/discipline，注入 10% 慢化时 `npm run verify` 仍可全绿。
 
 ## 5. 扩展指南（最小改动路径）
 
@@ -194,3 +194,52 @@ python scripts/gen_fixtures.py --docx-image    # 仅生成含内嵌 PNG 的 docx
 - 业务逻辑变更必须在**同一提交**内同步文档：API 签名 → API-CONTRACT；架构/策略 → ARCHITECTURE；CLI/行为 → user-guide；导入导出格式 → IMPORT/EXPORT-FORMAT；调度算法 → SRS。
 - 每次提交在 `CHANGELOG.internal.md` 留痕：Commit Hash、核心改动、验证数据、遗留 TODO/风险（该文件不对外发布）。
 - 仅本地 `git commit`，**禁止自动 push**（除非明确要求）。
+
+## 8. 手动验收与已知环境问题
+
+### 8.1 真实浏览器验收（2026-10-30，`serve.mjs` 127.0.0.1:8777）
+
+- 导入示例题库（18 题）→ 考试模式（单选 5 题、30 分钟）→ 答题页出现 `⏱ 29:53`，3 秒后 29:45（PASS）。
+- 关闭标签后重新打开：自动恢复考试「第 1 / 3 题」，提示剩余 29:11；刷新后仍自动回到同一题，倒计时 28:48→27:26 持续递减（PASS）。
+- CSP 基线（同日 `serve.mjs` 127.0.0.1:8777）：首页渲染正常、控制台无 CSP 违规；选择示例题库 → 练习模式（单选 3 题）→ 出现「单选 第 1 / 3 题」→ 错误选项提交后出现「❌ 回答错误」、正确答案与解析（PASS）。
+- 开始参数记忆（2026-10-31 同日）：选择示例题库 → 练习模式设置判断题 3 题 → 开始 → 结束练习 → 返回首页 → 再次打开练习模式，判断题数量仍为 3，控制台无错误（PASS）。
+- 截图：`qforge-exam-timer.png`（本地临时目录）。
+
+### 8.2 真实浏览器端到端验收（2026-11-06，手动门禁，不进 CI）
+
+```powershell
+node scripts/e2e-browser.mjs                 # 全跑：C020/C025/C007/C008/IDB50K，49/49 exit 0
+node scripts/e2e-browser.mjs --only=sw       # 单场景复验
+```
+
+- 启动本机 Edge（CDP）+ 进程内静态服务器，覆盖：C020 跨源 CSP 默认拦截与三处白名单部署模拟、C025 install 预缓存失败/导航 500 不覆盖离线壳/CACHE 版本生效、C007 InPrivate 与 IDB 不可用回落及可恢复标记、C008 双标签并发评分、IDB 50k `storage.estimate` 与渲染帧时间。
+- 证据（`result.json`、`run.log`、截图）写入 `.screenshots/e2e-browser/`，**不入库**；场景无法真机执行时脚本明确标记「未测」并 exit 1，禁止用 Node 替身冒充真机结果。
+
+### 8.3 已知环境问题：偶发 `exit 134`（V8 分配失败）
+
+**现象**：串行跑 `storage.test.mjs`（`node storage.test.mjs`，在 `scripts/` 下）时偶发 `FATAL ERROR: AlignedAlloc Allocation failed - process out of memory`
+或 `FATAL ERROR: Zone Allocation failed - process out of memory`，退出码 134（SIGABRT）。崩溃位置不固定——实测两次分别在
+「P2-06 reviewMeta」段首和打印完「汇总」之后。崩溃时存活堆 12.6–13.9 MB、已提交堆 18.6–19.8 MB，此前 GC 全是 Scavenge
+（单次 0.22–0.35 ms，`mu = 1.000`），native 栈只有地址无符号，日志不含失败分配的 size / alignment 与 `GetLastError`。
+日志：`.analysis/flake/`（已 gitignore，不入库）。
+
+**已排除**：
+
+| 假设 | 排除依据 |
+|---|---|
+| 测试数据量过大 | 全套数据 <1 MB；`--max-old-space-size=48` 下 109 条断言稳定通过 |
+| 并发争抢 | 当时是串行循环（`1..20`，一次一个 node 进程），两次崩溃在同一 shell 内 |
+| V8 堆上限 | 实测 `heap_size_limit` = 4192 MB（`--max-old-space-size=48` 时为 144 MB） |
+| `NODE_OPTIONS` 设了小堆 | 进程 / 用户 / 系统 / `HKCU\Environment` 四处皆空 |
+| 提交内存不足 | Commit Limit 37.4 GB（物理 32.5 GB + 4.9 GB 页面文件），崩溃时余量约 17 GB，进程峰值工作集 65 MB |
+
+**结论**：进程向系统申请内存被外部拒绝，最可能是沙箱 Job 对象配额或 EDR / 杀软钩子。日志本身不带失败分配的
+size / alignment 与 `GetLastError`，无法再往下定性。同一命令 40 次里仅在 3 秒窗口内崩过 2 次，之后不复现。
+
+**复发时怎么抓**：
+
+1. 抓崩溃瞬间的 Job 对象内存限额（Process Hacker → `JobObjectExtendedLimitInformation`）、进程虚拟内存与句柄数；
+2. 查 EDR / 杀软事件日志，确认是否有 mmap 拦截记录；
+3. 在 CI 上出现时，抓 runner 的 Commit Limit 与失败瞬间进程虚拟内存（runner 是独立 16 GB VM，无本机沙箱层，理论上不复现）。
+
+> **不要**通过放宽或改写测试断言来消除该现象：它不反映被测代码的问题，改断言只会掩盖环境故障。

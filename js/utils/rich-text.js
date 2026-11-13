@@ -27,7 +27,7 @@
   let activeUrls = [];
   function revokeActive() {
     if (typeof URL !== 'undefined' && URL.revokeObjectURL) {
-      activeUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) { /* 已失效 */ } });
+      activeUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) { /* URL 已被回收时忽略重复释放 */ } });
     }
     activeUrls = [];
   }

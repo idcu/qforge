@@ -21,6 +21,8 @@ jobs:
           node-version: '24'
       - name: 文档数字校验（静态基线；README / docs/DEVELOPMENT.md）
         run: node scripts/docs-check.mjs --static
+      - name: 异步卫生（空 catch / 未处理 Promise；历史存量走有到期日的基线）
+        run: node scripts/check-async-hygiene.mjs
       - name: CI 覆盖自检（logic-tests 单步 + ORDER 与磁盘双向一致）
         run: node scripts/check-ci-coverage.mjs
       - name: 文档链接 / 锚点 / 版本读数

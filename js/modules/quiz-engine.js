@@ -48,6 +48,8 @@
     this.pointsMap = opts.pointsMap && Object.keys(opts.pointsMap).length ? opts.pointsMap : null;
     this.durationMs = Number(opts.durationMs) > 0 ? Number(opts.durationMs) : 0;
     this.showTimer = !!opts.showTimer;
+    // 组卷 seed（P2-7）：随会话快照持久化，恢复时复用；0 表示未指定（如手动选题）
+    this.composeSeed = Number(opts.composeSeed) > 0 ? Number(opts.composeSeed) : 0;
     this.startedAt = 0;
     this.deadlineAt = 0;
     this.reset();
@@ -465,7 +467,8 @@
       durationMs: this.durationMs,
       showTimer: this.showTimer,
       startedAt: this.startedAt || 0,
-      deadlineAt: this.deadlineAt || 0
+      deadlineAt: this.deadlineAt || 0,
+      composeSeed: this.composeSeed || 0
     };
   };
 
@@ -482,6 +485,7 @@
     this.showTimer = !!state.showTimer;
     this.startedAt = Number(state.startedAt) > 0 ? Number(state.startedAt) : 0;
     this.deadlineAt = Number(state.deadlineAt) > 0 ? Number(state.deadlineAt) : 0;
+    this.composeSeed = Number(state.composeSeed) > 0 ? Number(state.composeSeed) : 0;
     // 旧版会话只有 startedAt、没有 deadlineAt：用 startedAt + durationMs 推导截止时间，避免恢复后重新计时
     if (this.durationMs > 0 && !this.deadlineAt && this.startedAt > 0) {
       this.deadlineAt = this.startedAt + this.durationMs;

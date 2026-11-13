@@ -1,0 +1,5 @@
+{
+  "generatedAt": "2026-11-13T01:54:52.673Z",
+  "note": "历史存量豁免。每条必须有 reason 与 expires；到期未清零时门禁失败。刷新增量用 --write-baseline。",
+  "entries": []
+}

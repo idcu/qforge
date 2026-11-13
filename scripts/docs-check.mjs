@@ -407,7 +407,9 @@ markdownFiles().forEach((rel) => {
 
 console.log('\n================ 文档数字校验 ================');
 if (!problems.length) {
-  console.log('全部一致 ✅');
+  console.log('全部一致 ✅' + (MODE === 'static'
+    ? '（静态基线模式：套件数/断言数/门禁项数取 docs-baseline.json；运行项与首屏体积仍实时读取）'
+    : ''));
 } else {
   problems.forEach((p) => console.log('  ✗ ' + p));
   console.log('共 ' + problems.length + ' 处漂移，请更新文档。');

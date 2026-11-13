@@ -657,17 +657,17 @@
     // C009：存储用量基线只在这里算一次；渲染只读 QB.Quota.view()（O(1)），
     // 之后由 Storage 写入/删除的字节增量维护（整库清空/后端切换会 reset 后重建）。
     try { await QB.Quota.refresh(); } catch (e) { /* 用量只影响展示，失败不阻断启动 */ }
-    QB.DB.init();
+    try { await QB.DB.init(); } catch (e) { notifyBackgroundError('数据层初始化失败', e); }
     // 刷新/切后台时冲刷会话防抖：考试中最后一次作答不在 500ms 窗口内也能恢复
     const flushSession = () => {
       try {
         const p = QB.ProgressSaver.flush();
         if (p && typeof p.catch === 'function') p.catch(() => { /* 尽力而为，不产生未处理拒绝 */ });
-      } catch (e) { /* 尽力而为 */ }
+      } catch (e) { /* 会话冲刷失败不阻断卸载 */ }
       try {
         const q = QB.Storage.flush();
         if (q && typeof q.catch === 'function') q.catch(() => { /* IDB 异步落盘尽力而为 */ });
-      } catch (e) { /* 尽力而为 */ }
+      } catch (e) { /* 存储冲刷失败不阻断卸载 */ }
     };
     if (window.addEventListener) window.addEventListener('pagehide', flushSession);
     if (document.addEventListener) {

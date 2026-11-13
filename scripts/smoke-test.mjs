@@ -1209,7 +1209,7 @@ eq(hs.avgAccuracy, 78, '历史平均正确率 78');
 eq((await QB.History.list(bankB.id)).length, 0, '历史按题库隔离');
 
 const engine0 = new QB.QuizEngine();
-engine0.loadQuestions(listA.items.slice(0, 3), 'mixed');
+engine0.loadQuestions(listA.items.slice(0, 3), 'mixed', { composeSeed: 4242 });
 engine0.mode = 'exam';
 engine0.durationMs = 60000;
 engine0.startedAt = 1700000000000;
@@ -1220,10 +1220,13 @@ eq(savedSession.bankId, bankA.id, '进度会话已保存');
 eq(savedSession.questions.length, 3, '进度会话题目数 3');
 eq(savedSession.startedAt, 1700000000000, '考试开始时间随会话保存');
 eq(savedSession.deadlineAt, 1700000060000, '考试截止时间随会话保存（刷新后按剩余计时）');
+eq(savedSession.composeSeed, 4242, '组卷 seed 随会话快照持久化');
 const restoredExam = new QB.QuizEngine();
 ok(restoredExam.restore(savedSession), '考试会话可恢复');
 eq(restoredExam.deadlineAt, 1700000060000, 'restore 保留截止时间');
 eq(restoredExam.startedAt, 1700000000000, 'restore 保留开始时间');
+eq(restoredExam.composeSeed, 4242, 'restore 复用同一组卷 seed');
+ok(JSON.stringify(restoredExam.questions) === JSON.stringify(engine0.questions), '恢复后题目顺序与快照一致');
 eq(restoredExam.remainingMs(1700000030000), 30000, 'remainingMs：按 deadlineAt 计算剩余');
 // 旧版会话只有 startedAt、没有 deadlineAt：restore 推导截止时间，不重新计时
 const legacyExam = new QB.QuizEngine();
@@ -1236,6 +1239,13 @@ veryOldExam.restore({ mode: 'exam', durationMs: 60000, questions: [{}] });
 eq(veryOldExam.deadlineAt, 0, '极旧会话：无开始时间不推导截止');
 eq(veryOldExam.remainingMs(), 60000, '极旧会话：回退整段时长');
 eq(new QB.QuizEngine().remainingMs(), 0, '不限时：剩余 0（不启动倒计时）');
+// 未指定 seed（手动选题/旧会话）不伪造：快照里为 0，恢复后仍为 0
+const noSeed = new QB.QuizEngine();
+noSeed.loadQuestions(listA.items.slice(0, 2), 'mixed');
+eq(noSeed.getState().composeSeed, 0, '未指定组卷 seed 时会话快照为 0');
+const noSeedBack = new QB.QuizEngine();
+noSeedBack.restore(noSeed.getState());
+eq(noSeedBack.composeSeed, 0, '未指定 seed 的旧会话恢复后仍为 0');
 
 /* ================= 7. 答题引擎 ================= */
 section('答题引擎（练习 + 考试）');

@@ -1,11 +1,12 @@
 /**
  * check-discipline.mjs —— 方法论自检看板（零依赖）
  *
- * 对应 `engineering-discipline.md` §8 的十问。它**不替代**任何判据，只回答一件事：
+ * 对应 `engineering-discipline.md` §8 的十问，外加本项目追加的 4 条（文档规模、总闸覆盖、
+ * 命令可解析、异步卫生）。它**不替代**任何判据，只回答一件事：
  * **这个仓库现在处于哪一档，缺的是哪一条**。
  *
  * 为什么需要它：纪律不均衡是常态——每个仓库都有几条做得很好、几条从来没做。
- * 单看"CI 绿了"看不出缺口；单看"文档写了"更看不出。十问逐条给 ✅/⚠️/❌ 与读数，
+ * 单看"CI 绿了"看不出缺口；单看"文档写了"更看不出。逐条给 ✅/⚠️/⏭️/❌ 与读数，
  * 缺口就变成一张可执行的清单。
  *
  * 用法：node scripts/check-discipline.mjs [--strict]
@@ -14,7 +15,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -37,24 +38,42 @@ const pkg = (() => { try { return JSON.parse(read('package.json')); } catch { re
 const scripts = (pkg && pkg.scripts) || {};
 const workflows = list('.github/workflows').filter((f) => /\.ya?ml$/.test(f)).map((f) => read('.github/workflows/' + f)).join('\n');
 
-/* 不适用声明：有些问对某些项目**结构上就不成立**（包仓库没有构建产物、纯静态站点没有依赖锁）。
+/* 不适用 / 临时跳过：有些问对某些项目**结构上就不成立**（包仓库没有构建产物、纯静态站点没有依赖锁）。
    与其让它长期挂红、训练人忽略红色，不如把"不适用 + 理由"写下来，由看板标 ⚠️ 并排出计分。
-   理由必须写清"为什么结构上不成立"，不写或写得太短（<10 字）仍按缺口算。 */
+   理由必须写清"为什么结构上不成立"，不写或写得太短（<10 字）仍按缺口算。
+
+   两种声明必须分开：
+     - 不适用（na）  ：结构上不成立，无到期日，永远排除在分母外；
+     - 临时跳过（skip）：现在欠账、约定了到期日（expires）。到期即变红——
+       否则"先挂豁免、以后再说"会变成永久豁免。 */
 const exemptions = (() => {
   try {
     const raw = JSON.parse(read('docs/discipline-exemptions.json'));
     const out = {};
     for (const [k, v] of Object.entries(raw.exemptions || {})) {
-      if (typeof v === 'string' && v.trim().length >= 10) out[k] = v.trim();
+      if (typeof v === 'string') {
+        if (v.trim().length >= 10) out[k] = { reason: v.trim(), expires: '' };
+      } else if (v && typeof v.reason === 'string' && v.reason.trim().length >= 10) {
+        out[k] = { reason: v.reason.trim(), expires: String(v.expires || '') };
+      }
     }
     return out;
   } catch { return {}; }
 })();
 
+const todayStr = new Date().toISOString().slice(0, 10);
 const checks = [];
 const add = (id, ask, ok, note) => {
-  if (exemptions[id]) {
-    checks.push({ id, ask, state: 'na', note: '不适用：' + exemptions[id] });
+  const ex = exemptions[id];
+  if (ex) {
+    if (ex.expires && ex.expires < todayStr) {
+      checks.push({ id, ask, state: 'gap', note: '豁免已到期（' + ex.expires + '）：' + ex.reason });
+    } else {
+      checks.push({
+        id, ask, state: ex.expires ? 'skip' : 'na',
+        note: (ex.expires ? '临时跳过（至 ' + ex.expires + '）：' : '不适用：') + ex.reason
+      });
+    }
     return;
   }
   checks.push({ id, ask, state: ok === true ? 'ok' : ok === 'na' ? 'na' : 'gap', note });
@@ -249,23 +268,38 @@ add(13, '文档里的命令都指向真实存在的脚本', missingCmds.length =
     ? '断 ' + missingCmds.length + ' 条（如 ' + missingCmds[0] + '）'
     : cmdCount + ' 条命令全部可解析');
 
+/* 14. 异步卫生（P2-1 / D5：空 catch 与未处理 Promise） */
+// 不引入 ESLint：两条规则由 check-async-hygiene.mjs 守，历史存量走有到期日的基线。
+// 这里只取它的退出码——门禁脚本自己对"新增 vs 豁免到期"负责解释。
+const hygiene = spawnSync(process.execPath, [path.join(ROOT, 'scripts/check-async-hygiene.mjs')], {
+  cwd: ROOT, encoding: 'utf8'
+});
+const hygieneTail = ((hygiene.stdout || '') + (hygiene.stderr || '')).trim().split('\n').pop() || '';
+add(14, '异步卫生（空 catch / 未处理 Promise）', hygiene.status === 0,
+  hygiene.status === 0 ? hygieneTail : '存在新增违规或豁免已到期（node scripts/check-async-hygiene.mjs）');
+
 /* ---------------- 成熟度 ---------------- */
 const okCount = checks.filter((c) => c.state === 'ok').length;
-const applicable = checks.filter((c) => c.state !== 'na').length;
+const naCount = checks.filter((c) => c.state === 'na').length;
+const skipCount = checks.filter((c) => c.state === 'skip').length;
+const applicable = checks.filter((c) => c.state === 'ok' || c.state === 'gap').length;
 const ratio = applicable ? okCount / applicable : 0;
 // 按"具备比例"算档，而不是按绝对条数：声明了不适用的项目不该被它无解的那几问拖住。
+// 临时跳过（skip）不计入分母——它已明确欠账，到期会自动变成缺口。
 const level = ratio === 1 && okCount >= 6 ? 'L4'
   : ratio >= 0.8 ? 'L3'
     : ratio >= 0.6 ? 'L2'
       : okCount >= 2 ? 'L1' : 'L0';
 
-console.log(`discipline: ${okCount}/${applicable} 项具备 → ${level}`);
+console.log(`discipline: ${okCount}/${applicable} 项具备`
+  + (naCount ? ` · 不适用 ${naCount}` : '') + (skipCount ? ` · 临时跳过 ${skipCount}` : '')
+  + ` → ${level}`);
 for (const c of checks) {
-  const mark = c.state === 'ok' ? '✅' : c.state === 'na' ? '⚠️ ' : '❌';
+  const mark = c.state === 'ok' ? '✅' : c.state === 'na' ? '⚠️ ' : c.state === 'skip' ? '⏭️ ' : '❌';
   console.log(`  ${mark} ${String(c.id).padStart(2)}. ${c.ask} —— ${c.note}`);
 }
 const gaps = checks.filter((c) => c.state === 'gap').map((c) => c.id);
-if (gaps.length) console.log(`  缺口：第 ${gaps.join('、')} 问`);
+if (gaps.length) console.log(`  缺口：第 ${gaps.join('、')} 问${skipCount ? `（另有临时跳过：第 ${checks.filter((c) => c.state === 'skip').map((c) => c.id).join('、')} 问）` : ''}`);
 
 if (STRICT && gaps.length) {
   console.error(`\n--strict：存在 ${gaps.length} 个缺口（第 ${gaps.join('、')} 问），成熟度 ${level} 不予放行`);

@@ -47,7 +47,7 @@
       if (typeof indexedDB === 'undefined' || !indexedDB) return resolve(null);
       try {
         const req = indexedDB.open(SECRET_DB, 1);
-        req.onupgradeneeded = () => { try { req.result.createObjectStore(SECRET_STORE); } catch (e) { /* 已存在 */ } };
+        req.onupgradeneeded = () => { try { req.result.createObjectStore(SECRET_STORE); } catch (e) { /* 对象存储已由前一次升级创建 */ } };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => resolve(null);
         req.onblocked = () => resolve(null);
@@ -304,7 +304,7 @@
     const ms = timeoutMs == null ? DEFAULT_TIMEOUT_MS : Number(timeoutMs);
     if (!(ms > 0) || typeof AbortController !== 'function') return await fetchImpl(url, init);
     const ctrl = new AbortController();
-    const timer = setTimeout(() => { try { ctrl.abort(); } catch (_) { /* 已结束 */ } }, ms);
+    const timer = setTimeout(() => { try { ctrl.abort(); } catch (_) { /* 定时器已清理后 abort 无副作用 */ } }, ms);
     try {
       return await fetchImpl(url, Object.assign({}, init, { signal: ctrl.signal }));
     } catch (e) {
@@ -334,7 +334,7 @@
         method: 'HEAD',
         headers: { Authorization: authHeader(checked.user, checked.pass) }
       }, timeoutMs);
-      try { if (res && typeof res.arrayBuffer === 'function') await res.arrayBuffer(); } catch (_) { /* 消费响应体 */ }
+      try { if (res && typeof res.arrayBuffer === 'function') await res.arrayBuffer(); } catch (_) { /* HEAD 响应体可丢弃，读取失败不影响判定 */ }
       if (!res) return { supported: false };
       if (res.status === 401 || res.status === 403) throw new Error('WebDAV 认证失败（401/403）：检查账号与应用密码');
       if (res.status === 404) return { supported: true, exists: false };
