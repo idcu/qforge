@@ -241,7 +241,7 @@ function checkManifest(mods, sources, today = new Date(), srcList = srcs, bundle
     for (const keep of m.keeps || []) {
       const re = definitionRe(keep);
       if (!re) {
-        out.push(`${m.id} 的 keeps 路径非法：${keep}（仅支持 QB.X / window.X / globalThis.X）`);
+        out.push(`${m.id} 的 keeps 路径非法：${keep}（仅支持 QB.X / window.X / globalThis.X，可带点路径）`);
         continue;
       }
       const src = sources.get(m.file);
@@ -255,9 +255,10 @@ function checkManifest(mods, sources, today = new Date(), srcList = srcs, bundle
 }
 
 function definitionRe(keep) {
-  const m = /^(QB|window|globalThis)\.([A-Za-z_$][\w$]*)$/.exec(String(keep));
+  // 允许点路径（如 QB.UIRenderer.renderMixDialog）：拆分后的子文件按符号挂载，仍需逐条可判。
+  const m = /^(QB|window|globalThis)\.([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)$/.exec(String(keep));
   if (!m) return null;
-  const name = m[2].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const name = m[2].split('.').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\.');
   if (m[1] === 'QB') return new RegExp('\\bQB\\.' + name + '\\s*=');
   // vendor 的 UMD 可能把根别名写成 global/root/self
   return new RegExp('\\b(?:window|globalThis|global|root|self)\\.' + name + '\\s*=');
@@ -357,6 +358,14 @@ if (process.argv.includes('--selftest')) {
       const src = sources.get(target.file);
       sources.set(target.file, src.replace(/\bQB\.Storage\s*=/, '/* removed */'));
       return checkManifest(bad, sources).problems.some((p) => p.includes('未导出声明的 QB.Storage'));
+    }],
+    ['删点路径导出（移除 QB.UIRenderer.renderMixDialog 赋值）', () => {
+      const bad = mods.map((m) => ({ ...m }));
+      const sources = new Map(baseSources);
+      const target = bad.find((m) => (m.keeps || []).includes('QB.UIRenderer.renderMixDialog'));
+      const src = sources.get(target.file);
+      sources.set(target.file, src.replace(/\bQB\.UIRenderer\.renderMixDialog\s*=/, '/* removed */'));
+      return checkManifest(bad, sources).problems.some((p) => p.includes('未导出声明的 QB.UIRenderer.renderMixDialog'));
     }],
     ['core 直接依赖按需模块（未走 lazyRequires）', () => {
       const bad = cloneMods();

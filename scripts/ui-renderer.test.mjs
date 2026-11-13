@@ -18,6 +18,8 @@ const QB_DIR = path.resolve(__dirname, '..');
 const { QB, window } = await createHarness(QB_DIR);
 
 // 手动加载纯 HTML 渲染器（与 _harness 的加载方式一致：以 window 作为 global 执行 IIFE）
+// 方向 C 拆分后按 index.html 的顺序：先子文件挂载命名空间，再由 ui-renderer.js 合并装配。
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
 // DOM 增量更新的纯对账逻辑（plan 不触碰 DOM，可直接在 Node 跑）
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/dom-patch.js'), 'utf8'))(window, window);

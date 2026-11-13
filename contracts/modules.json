@@ -1001,11 +1001,26 @@
       ]
     },
     {
+      "id": "modules.ui-renderer-dialogs",
+      "file": "js/modules/ui-renderer-dialogs.js",
+      "layer": "modules",
+      "tier": "L3",
+      "at": 55,
+      "requires": [
+        "config",
+        "utils.helpers"
+      ],
+      "keeps": [
+        "QB.UIRenderer.renderMixDialog",
+        "QB.UIRenderer.renderStartDialog"
+      ]
+    },
+    {
       "id": "modules.ui-renderer",
       "file": "js/modules/ui-renderer.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 55,
+      "at": 56,
       "requires": [
         "config",
         "utils.helpers",
@@ -1029,7 +1044,7 @@
       "file": "js/modules/dom-patch.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 56,
+      "at": 57,
       "requires": [],
       "keeps": [
         "QB.DomPatch"
@@ -1040,7 +1055,7 @@
       "file": "js/modules/bank-manager.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 57,
+      "at": 58,
       "requires": [
         "data.sample-data",
         "utils.helpers",
@@ -1080,7 +1095,7 @@
       "file": "js/modules/source.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 58,
+      "at": 59,
       "requires": [
         "config",
         "utils.fnv"
@@ -1149,7 +1164,7 @@
       "file": "js/modules/share-link.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 59,
+      "at": 60,
       "requires": [
         "config",
         "utils.base64"
@@ -1218,7 +1233,7 @@
       "file": "js/modules/migrate.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 60,
+      "at": 61,
       "requires": [
         "data.store",
         "utils.helpers",
@@ -1257,7 +1272,7 @@
       "file": "js/modules/blueprint.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 61,
+      "at": 62,
       "requires": [
         "config",
         "utils.shuffle"
@@ -1271,7 +1286,7 @@
       "file": "js/modules/practice-builder.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 62,
+      "at": 63,
       "requires": [
         "config",
         "utils.shuffle",
@@ -1287,7 +1302,7 @@
       "file": "js/modules/quiz-session.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 63,
+      "at": 64,
       "requires": [
         "config",
         "utils.helpers",
@@ -1315,7 +1330,7 @@
       "file": "js/modules/quiz-dialogs.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 64,
+      "at": 65,
       "requires": [
         "config",
         "modules.blueprint",
@@ -1334,7 +1349,7 @@
       "file": "js/modules/boot-diagnostics.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 65,
+      "at": 66,
       "requires": [
         "data.store",
         "utils.storage",
@@ -1354,14 +1369,14 @@
         "QB.Loader",
         "QB.BUNDLES"
       ],
-      "at": 66
+      "at": 67
     },
     {
       "id": "app",
       "file": "js/app.js",
       "layer": "entry",
       "tier": "L3",
-      "at": 67,
+      "at": 68,
       "requires": [
         "data.sample-data",
         "config",
@@ -1415,7 +1430,7 @@
       "file": "js/modules/action-router.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 68,
+      "at": 69,
       "loadAfterEntry": true,
       "requires": [
         "modules.ui-renderer",
@@ -1430,7 +1445,7 @@
       "file": "js/modules/view-router.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 69,
+      "at": 70,
       "loadAfterEntry": true,
       "requires": [
         "modules.ui-renderer",

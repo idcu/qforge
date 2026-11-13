@@ -29,7 +29,9 @@ const QB_DIR = path.resolve(__dirname, '..');
 const MUTATE = process.argv.slice(2).includes('--mutate');
 const { QB, window } = await createHarness(QB_DIR);
 
-// ui-renderer 是纯 HTML 构建器，按 index.html 的方式手动加载（与 ui-renderer.test.mjs 同法）
+// ui-renderer 是纯 HTML 构建器，按 index.html 的方式手动加载（与 ui-renderer.test.mjs 同法：
+// 先加载方向 C 拆出的子文件挂载命名空间，再加载装配文件）
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
 const UI = window.QB.UIRenderer;
 
