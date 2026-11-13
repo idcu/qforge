@@ -62,6 +62,28 @@
     return estimateQuestions(list) <= remain;
   }
 
+  /**
+   * 异步容量预检（P0-6）：IDB 模式同步 API 拿不到上限，改用 navigator.storage.estimate()。
+   * - 非 IDB：checked=false（容量预检仍由导入入口的同步 canFitQuestions 负责，避免两套口径）；
+   * - IDB 且 estimate 可用：按 available 与估算比较，checked=true；
+   * - IDB 且 estimate 不可用（隐私模式/无权限/quota=0）：checked=false 显式退化，
+   *   由写入路径的异常捕获 + 回滚兜底，绝不冒充「已检查」。
+   * @param {Array<Object>} list
+   * @returns {Promise<{ok:boolean, checked:boolean, need:number, available:number|null}>}
+   */
+  async function canFitQuestionsAsync(list) {
+    const need = estimateQuestions(list);
+    // 非 IDB：沿用既有同步预检（data-io 入口），此处显式标记未检查，避免重复口径/误拒压测夹具
+    if (!isIdb()) {
+      return { ok: true, checked: false, need: need, available: null };
+    }
+    const est = await estimateAsync();
+    if (!est || !(est.quota > 0)) {
+      return { ok: true, checked: false, need: need, available: null };
+    }
+    return { ok: need <= est.available, checked: true, need: need, available: est.available };
+  }
+
   /** IDB 模式异步估算（navigator.storage.estimate()；不可用时返回 null） */
   async function estimateAsync() {
     try {
@@ -189,7 +211,8 @@
   Object.assign(Q, {
     isIdb: isIdb, limitBytes: limitBytes, usageBytes: usageBytes, remainingBytes: remainingBytes,
     shardOverheadBytes: shardOverheadBytes, estimateQuestions: estimateQuestions,
-    canFitQuestions: canFitQuestions, estimateAsync: estimateAsync, formatBytes: formatBytes,
+    canFitQuestions: canFitQuestions, canFitQuestionsAsync: canFitQuestionsAsync,
+    estimateAsync: estimateAsync, formatBytes: formatBytes,
     bytesOfValue: bytesOfValue, diskBytes: diskBytes,
     trackWrite: trackWrite, trackDelete: trackDelete, reset: reset, view: view, refresh: refresh
   });

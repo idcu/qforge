@@ -123,10 +123,19 @@
     metaOf(bankId) {
       return QuestionShards.parseMeta(Storage.getScoped(K.questionsMeta(bankId), bankId, null));
     },
+    /** 磁盘权威清单（跨标签并发时绕过本页缓存；append 的读-改-写基线） */
+    metaOfFresh(bankId) {
+      return QuestionShards.parseMeta(Storage.getScopedFresh(K.questionsMeta(bankId), bankId, null));
+    },
     setMeta(bankId, meta) { Storage.set(K.questionsMeta(bankId), meta); },
 
     shardOf(bankId, i) {
       const s = Storage.getScoped(K.questionShard(bankId, i), bankId, []);
+      return Array.isArray(s) ? s : [];
+    },
+    /** 磁盘权威分片（绕过本页缓存） */
+    shardOfFresh(bankId, i) {
+      const s = Storage.getScopedFresh(K.questionShard(bankId, i), bankId, []);
       return Array.isArray(s) ? s : [];
     },
     setShard(bankId, i, arr) { Storage.set(K.questionShard(bankId, i), arr); },
@@ -172,6 +181,13 @@
       const meta = QuestionShards.metaOf(bankId);
       if (!meta) return QuestionShards.legacyOf(bankId).slice();
       return QuestionShards.concatShards(meta, (i) => QuestionShards.shardOf(bankId, i));
+    },
+
+    /** 全量题目（绕过本页缓存，读磁盘权威分片；回滚与并发校验用） */
+    readAllFresh(bankId) {
+      const meta = QuestionShards.metaOfFresh(bankId);
+      if (!meta) return QuestionShards.legacyOf(bankId).slice();
+      return QuestionShards.concatShards(meta, (i) => QuestionShards.shardOfFresh(bankId, i));
     },
 
     /** 按需读取 [start,end)：只解析覆盖该区间的分片，前置分片仅按清单长度跳过 */
@@ -226,27 +242,58 @@
       QuestionShards.setMeta(bankId, p.meta);
     },
 
-    /** 追加题目到尾部：只重写尾分片与新增分片，前置分片零写入 */
+    /**
+     * 追加题目到尾部：只重写尾分片与新增分片，前置分片零写入。
+     * P0-3：并发安全 = 以磁盘权威清单/尾分片为基线（不用本页可能过期的缓存），
+     * 按 id 取并集后写入，写后回读校验；被其它标签覆盖则重试，仍冲突则显式报错（不静默丢题）。
+     */
     append(bankId, items) {
       if (!items || !items.length) return;
-      const meta = QuestionShards.metaOf(bankId);
-      if (!meta) { QuestionShards.writeAll(bankId, QuestionShards.readAll(bankId).concat(items)); return; }
-      let idx = meta.sizes.length ? meta.sizes.length - 1 : 0;
-      let shard = meta.sizes.length ? QuestionShards.shardOf(bankId, idx) : [];
-      items.forEach((it) => {
-        if (shard.length >= SHARD_SIZE) {
-          QuestionShards.setShard(bankId, idx, shard);
-          meta.sizes[idx] = shard.length;
-          idx += 1;
-          shard = [];
+      const ATTEMPTS = 3;
+      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        const meta = QuestionShards.metaOfFresh(bankId);
+        if (!meta) {
+          // 旧单 blob 或空库：权威读取后整表写入（writeAll 内部按分片重建）
+          QuestionShards.writeAll(bankId, QuestionShards.legacyOf(bankId).concat(items));
+          return;
         }
-        shard.push(it);
-      });
-      QuestionShards.setShard(bankId, idx, shard);
-      meta.sizes[idx] = shard.length;
-      meta.count += items.length;
-      QuestionShards.setMeta(bankId, meta);
-      invalidateQuestionIndex(); // C018：追加改变位置 → 索引失效（下次按需重建）
+        let idx = meta.sizes.length ? meta.sizes.length - 1 : 0;
+        let shard = meta.sizes.length ? QuestionShards.shardOfFresh(bankId, idx) : [];
+        const present = new Set();
+        shard.forEach((q) => { if (q && q.id) present.add(q.id); });
+        const pending = items.filter((it) => !(it && it.id && present.has(it.id)));
+        if (!pending.length) { invalidateQuestionIndex(); return; }
+        const sizes = meta.sizes.slice();
+        pending.forEach((it) => {
+          if (shard.length >= SHARD_SIZE) {
+            QuestionShards.setShard(bankId, idx, shard);
+            sizes[idx] = shard.length;
+            idx += 1;
+            shard = [];
+          }
+          shard.push(it);
+        });
+        QuestionShards.setShard(bankId, idx, shard);
+        sizes[idx] = shard.length;
+        const nextMeta = { v: META_VERSION, shardSize: SHARD_SIZE, count: meta.count + pending.length, sizes: sizes };
+        QuestionShards.setMeta(bankId, nextMeta);
+        // LS 模式立即落盘，保证回读校验看到的是磁盘权威值（IDB 模式由持久化层排队）
+        try {
+          const flushing = Storage.forceSync();
+          if (flushing && typeof flushing.catch === 'function') flushing.catch(() => {});
+        } catch (e) { throw e; }
+        // 回读校验：期间若有其它标签覆盖，重新以权威值合并（并集保证幂等）
+        const checkMeta = QuestionShards.metaOfFresh(bankId);
+        const checkTail = QuestionShards.shardOfFresh(bankId, idx);
+        const metaOk = checkMeta && checkMeta.count === nextMeta.count &&
+          checkMeta.sizes.length === nextMeta.sizes.length && checkMeta.sizes[idx] === sizes[idx];
+        const tailOk = JSON.stringify(checkTail) === JSON.stringify(shard);
+        if (metaOk && tailOk) { invalidateQuestionIndex(); return; }
+      }
+      invalidateQuestionIndex();
+      const e = new Error('题目追加冲突：检测到其它标签页并发写入，重试 ' + ATTEMPTS + ' 次仍未合并');
+      e.code = 'APPEND_CONFLICT';
+      throw e;
     },
 
     /** 定位题目所在分片（逐分片读取，命中即止）：{legacy} | {idx,pos} | null */
@@ -381,10 +428,33 @@
     return questionIndex;
   }
 
-  /** 外部（另一标签页）写题目键：任何 questions:* 合并后整表失效（返回 incoming 保持覆盖语义） */
+  /**
+   * 外部（另一标签页）写题目键：P0-3 合并策略
+   * - 清单键：取 count 较大者（分片内容各自并集合并，避免直接覆盖丢条目）
+   * - 分片键：按题目 id 并集（保留本地顺序，追加 incoming 中缺失项），跨标签追加不互相覆盖
+   */
+  Storage.registerMerge(
+    (key) => key.indexOf('questions:') === 0 && /:meta$/.test(key),
+    (local, incoming) => {
+      invalidateQuestionIndex();
+      const a = QuestionShards.parseMeta(local);
+      const b = QuestionShards.parseMeta(incoming);
+      if (!a) return incoming;
+      if (!b) return local;
+      return a.count >= b.count ? a : b;
+    }
+  );
   Storage.registerMerge(
     (key) => key.indexOf('questions:') === 0,
-    (local, incoming) => { invalidateQuestionIndex(); return incoming; }
+    (local, incoming) => {
+      invalidateQuestionIndex();
+      if (!Array.isArray(local) || !Array.isArray(incoming)) return incoming;
+      const seen = new Set();
+      local.forEach((q) => { if (q && q.id) seen.add(q.id); });
+      const out = local.slice();
+      incoming.forEach((q) => { if (!(q && q.id && seen.has(q.id))) out.push(q); });
+      return out;
+    }
   );
 
   /* ---------------- BankRepository ---------------- */
@@ -632,6 +702,19 @@
       const mode = options.mode || 'merge'; // 'merge' | 'overwrite'
       const overwrite = mode === 'overwrite';
 
+      // P0-6：IDB 模式同步上限为 Infinity（浏览器引擎管理磁盘配额），这里用 estimate 做写入前预检；
+      // 放不下就整包拒绝、不写任何键，避免「写到一半失败 + 回滚」把半批数据暴露给并发读者。
+      if (QB.Quota && typeof QB.Quota.canFitQuestionsAsync === 'function') {
+        const fit = await QB.Quota.canFitQuestionsAsync(incoming || []);
+        if (fit.checked && !fit.ok) {
+          const e = new Error('可用空间不足：本题库约需 ' +
+            QB.Quota.formatBytes(fit.need) + '，当前仅剩 ' + QB.Quota.formatBytes(fit.available) + '');
+          e.name = 'QuotaExceededError';
+          e.code = 'QUOTA_PRECHECK';
+          throw e;
+        }
+      }
+
       // 回滚基线（C006）：overwrite 必须保留原库全量（失败时整库恢复）；
       // merge 只追加尾部分片，失败时用「索引前的总数」截断即可，无需预先 readAll（C018）。
       const before = overwrite ? QuestionShards.readAll(bankId) : null;
@@ -655,6 +738,8 @@
       let duplicates = 0;
       let skipped = 0;
       const fresh = [];
+      /** P0-4：本次真正新增的去重 hash（失败时只回退这些，不动索引中既有项） */
+      const addedHashes = [];
 
       (incoming || []).forEach((raw) => {
         const item = stampQuestion(raw, bankId);
@@ -666,6 +751,7 @@
           duplicates++;
           return;
         }
+        if (!seen.has(item.contentHash)) addedHashes.push(item.contentHash);
         seen.add(item.contentHash);
         fresh.push(item);
         inserted++;
@@ -691,14 +777,17 @@
           if (actual !== total) throw new Error('导入落盘校验失败：期望 ' + total + ' 题，回读 ' + actual + ' 题');
           return;
         }
-        const meta = QuestionShards.metaOf(bankId);
+        // P0-3：并发追加下并集可能大于本批预期，只能断言「不少于本批总数」；
+        // 同时校验清单自洽（sizes 之和 == count），仍能发现落盘丢失/清单损坏。
+        const meta = QuestionShards.metaOfFresh(bankId);
         const actualCount = meta ? meta.count : QuestionShards.legacyOf(bankId).length;
-        if (actualCount !== total) throw new Error('导入落盘校验失败：期望 ' + total + ' 题，清单回读 ' + actualCount + ' 题');
-        if (meta && meta.sizes.length) {
-          const lastIdx = meta.sizes.length - 1;
-          const actualTail = QuestionShards.shardOf(bankId, lastIdx).length;
-          if (actualTail !== meta.sizes[lastIdx]) {
-            throw new Error('导入落盘校验失败：尾分片期望 ' + meta.sizes[lastIdx] + ' 题，回读 ' + actualTail + ' 题');
+        if (actualCount < total) {
+          throw new Error('导入落盘校验失败：期望至少 ' + total + ' 题，清单回读 ' + actualCount + ' 题');
+        }
+        if (meta) {
+          const sum = meta.sizes.reduce((n, x) => n + (Number(x) || 0), 0);
+          if (sum !== meta.count) {
+            throw new Error('导入落盘校验失败：清单总数 ' + meta.count + ' 与分片长度合计 ' + sum + ' 不一致');
           }
         }
       };
@@ -712,10 +801,17 @@
         await persist();
         verify();
       } catch (e) {
+        // P0-4：先回退本批新增的去重 hash，避免失败批次污染索引导致重试被判重复
+        addedHashes.forEach((h) => { seen.delete(h); });
         try {
-          // merge：append 只会动尾部分片，截断到导入前总数即恢复原状；
-          // overwrite：整库恢复为导入前快照。
-          const rollback = before || QuestionShards.readAll(bankId).slice(0, existingCount);
+          let rollback;
+          if (before) {
+            rollback = before; // overwrite：整库恢复为导入前快照
+          } else {
+            // merge：按 id 差集只撤销本批条目，保留其它标签并发新增（不能按 count 截断）
+            const own = new Set(fresh.map((q) => q.id));
+            rollback = QuestionShards.readAllFresh(bankId).filter((q) => !(q && own.has(q.id)));
+          }
           QuestionShards.writeAll(bankId, rollback);
           // 回滚也要真的落盘：否则「回滚成功」同样只是内存幻觉
           await persist();

@@ -329,6 +329,48 @@ const c1 = await makeQB({});
     '成功 toast 在落盘确认之后（persist@' + persistIdx + ', flush@' + flushIdx + ', success@' + successIdx + '）');
 }
 
+/* ================= 10. P0-6 IDB 配额预检 ================= */
+{
+  section('P0-6 IDB 配额预检：接近上限时写入前拒绝、0 键变化');
+  const raw = new Map();
+  const H = await createHarness(ROOT, {
+    raw: raw,
+    storageEstimate: () => ({ quota: 100000, usage: 95000 })
+  });
+  H.QB.DB.init();
+  const b = await H.QB.DB.banks.create({ name: 'P0-6库' });
+  H.QB.Storage._isIdb = () => true;
+  const keysBefore = H.QB.Storage.keys().slice().sort().join('|');
+  const big = {
+    type: 'single',
+    question: 'x'.repeat(4000),
+    options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }],
+    answer: 'A'
+  };
+  let err = null;
+  try { await H.QB.DB.questions.insertMany(b.id, [big]); } catch (e) { err = e; }
+  ok(!!err, '可用空间不足时 insertMany 抛错');
+  eq(err && err.code, 'QUOTA_PRECHECK', '错误码标记为配额预检拒绝');
+  eq(H.QB.Storage.keys().slice().sort().join('|'), keysBefore, '拒绝发生在写入前：键集合零变化');
+  eq(await H.QB.DB.questions.count(b.id), 0, '题库仍为 0 题（未写半批）');
+}
+
+{
+  section('P0-6 estimate 不可用：显式退化，不误拒');
+  const raw = new Map();
+  const H = await createHarness(ROOT, { raw: raw });
+  H.QB.DB.init();
+  const b = await H.QB.DB.banks.create({ name: 'P0-6退化库' });
+  H.QB.Storage._isIdb = () => true;
+  const fit = await H.QB.Quota.canFitQuestionsAsync([{ question: '普通题' }]);
+  eq(fit.checked, false, 'estimate 不可用 → checked:false（不冒充已检查）');
+  eq(fit.ok, true, 'estimate 不可用 → 不误拒');
+  const res = await H.QB.DB.questions.insertMany(b.id, [{
+    type: 'judge', question: '退化路径写入', answer: '正确'
+  }]);
+  eq(res.inserted, 1, '退化为原有写入路径，导入成功');
+}
+
 /* ================= 汇总 ================= */
 console.log('\n========================================');
 console.log('import-commit 断言: ' + (pass + failures.length) + '，通过: ' + pass + '，失败: ' + failures.length);

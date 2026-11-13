@@ -144,6 +144,37 @@ ok(QB.Storage.get('roll:onlyOld') && QB.Storage.get('roll:onlyOld').keep === tru
 eq(QB.Storage.get('roll:onlyNew', null), null, '新写入键被撤销');
 clearAll();
 
+section('P0-2 覆盖恢复：删除已生效后落盘失败，旧键必须整份恢复');
+clearAll();
+QB.Storage.setSync('roll2:shared', { v: 'old' });
+QB.Storage.setSync('roll2:onlyOld', { keep: true });
+const lateFailBackup = {
+  app: 'qforge-backup',
+  version: QB.CONFIG.VERSION,
+  exportedAt: new Date().toISOString(),
+  data: {
+    'roll2:shared': { v: 'new' },
+    'roll2:onlyNew': { fresh: true }
+  }
+};
+const origForceSync = QB.Storage.forceSync.bind(QB.Storage);
+// 仅在「载荷外旧键已被删除」之后再注入落盘失败，复现旧实现回滚只回写 written 的缺口
+QB.Storage.forceSync = function () {
+  if (QB.Storage.get('roll2:onlyOld', null) === null) {
+    return Promise.reject(new Error('模拟恢复第二次落盘失败'));
+  }
+  return origForceSync();
+};
+let lateThrew = false;
+try { await QB.Backup.applyBackup(lateFailBackup); } catch (e) { lateThrew = true; }
+QB.Storage.forceSync = origForceSync;
+ok(lateThrew, '删除后落盘失败：错误上抛');
+eq(QB.Storage.get('roll2:shared') && QB.Storage.get('roll2:shared').v, 'old', '已覆盖键恢复旧值');
+ok(!!(QB.Storage.get('roll2:onlyOld', null) && QB.Storage.get('roll2:onlyOld').keep === true),
+  '已删除的载荷外旧键被恢复（不再丢失）');
+eq(QB.Storage.get('roll2:onlyNew', null), null, '本次新写入键被撤销');
+clearAll();
+
 section('异常输入');
 let threw = false;
 try { await QB.Backup.applyBackup({ app: 'other', data: {} }); } catch (e) { threw = true; }

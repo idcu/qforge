@@ -211,19 +211,24 @@ async function main() {
   // 按库 keysScoped(id) 兜底」，新增 2 个调用点（local-adapter 49 → 51、合计 88 → 90）。
   // 归类结论（均为已前置/已收窄）：`Storage.keys()` 处于 try/catch，仅在全量视图成立时使用；
   // 命中 STORAGE_NOT_HYDRATED 才回退，且回退只对 isBankHydrated(id) 为真的库调用 keysScoped(id)。
+  // 2026-11-13 P0-3：`append` 增加磁盘权威读取 `metaOfFresh` / `shardOfFresh`（后者也被 readAllFresh 复用），
+  // 两处均为 getScopedFresh，作用域读取同样受「先水合」约束（与既有 getScoped 同错误码），故纳入冻结口径：
+  // local-adapter 51 → 53。
+  // 2026-11-13 P0-1：`migrate.run` 读取引导键 `meta:migrationPending`（全局键，非库作用域）；
+  // migrate 19 → 20，与既有 meta:schemaVersion 读取同类。
   const EXPECTED_SITES = {
     'js/app.js': 2,
     'js/data/db.js': 1,
-    'js/data/local-adapter.js': 51,
+    'js/data/local-adapter.js': 53,
     'js/modules/backup.js': 10,
-    'js/modules/migrate.js': 19,
+    'js/modules/migrate.js': 20,
     'js/modules/package.js': 1,
     'js/modules/start-prefs.js': 2,
     'js/modules/sync-dav.js': 3,
     'js/utils/hash-remap.js': 1
   };
   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
-  A.eq(scan.total, 90, '可执行调用点合计 90（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
+  A.eq(scan.total, 93, '可执行调用点合计 93（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
 
   // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
   A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');

@@ -438,6 +438,71 @@ section('C018 题目内存索引：单题 O(1) 定位、merge 去重免全量读
   eq((await QB.DB.questions.get('q-7')).id, 'q-7', 'removeMany 后索引失效，余题读取正确');
 }
 
+section('P0-3 跨标签 append：并发追加取并集，不互相覆盖');
+{
+  const raw = new Map();
+  const ROOT = path.resolve(__dirname, '..');
+  const H1 = await createHarness(ROOT, { raw: raw });
+  H1.QB.DB.init();
+  const b = await H1.QB.DB.banks.create({ name: '并发追加库' });
+  const H2 = await createHarness(ROOT, { raw: raw });
+  H2.QB.DB.init();
+  const a = [mkQ(101)];
+  const a2 = [mkQ(102)];
+  const c = [mkQ(103), mkQ(104)];
+  await H1.QB.DB.questions.insertMany(b.id, a, { dedupe: false });
+  // H2 先读取一次完成缓存预热；随后 H1 再写入时 H2 尚未收到跨标签事件（并发窗口）
+  eq((await H2.QB.DB.questions.list(b.id, {})).items.length, 1, '预热：H2 看到 1 题');
+  await H1.QB.DB.questions.insertMany(b.id, a2, { dedupe: false });
+  await H2.QB.DB.questions.insertMany(b.id, c, { dedupe: false });
+  const H3 = await createHarness(ROOT, { raw: raw });
+  H3.QB.DB.init();
+  const list = (await H3.QB.DB.questions.list(b.id, {})).items;
+  const ids = list.map((q) => q.id).sort();
+  eq(list.length, 4, '两标签交错追加后为并集（实际 ' + list.length + ' 题）');
+  eq(ids.join(','), ['q-101', 'q-102', 'q-103', 'q-104'].sort().join(','), '并集包含双方题目 id');
+  eq(await H3.QB.DB.questions.count(b.id), 4, '清单 count 与并集一致');
+}
+
+section('P0-4 insertMany 失败原子回退：不误删并发新增、去重索引不污染');
+{
+  const raw = new Map();
+  const ROOT = path.resolve(__dirname, '..');
+  const H1 = await createHarness(ROOT, { raw: raw });
+  H1.QB.DB.init();
+  const b = await H1.QB.DB.banks.create({ name: '原子回退库' });
+  const H2 = await createHarness(ROOT, { raw: raw });
+  H2.QB.DB.init();
+  await H1.QB.DB.questions.insertMany(b.id, [mkQ(201)], { dedupe: false });
+  eq((await H2.QB.DB.questions.list(b.id, {})).items.length, 1, '预热：H2 看到 1 题');
+  // 另一标签并发追加（H2 尚未收到事件）
+  await H1.QB.DB.questions.insertMany(b.id, [mkQ(202)], { dedupe: false });
+
+  const origForce = H2.QB.Storage.forceSync.bind(H2.QB.Storage);
+  let failOnce = true;
+  H2.QB.Storage.forceSync = function () {
+    if (failOnce) { failOnce = false; throw new Error('injected persist failure'); }
+    return origForce();
+  };
+  let threw = false;
+  try { await H2.QB.DB.questions.insertMany(b.id, [mkQ(203)]); } catch (e) { threw = true; }
+  H2.QB.Storage.forceSync = origForce;
+  ok(threw, '落盘失败时 insertMany 抛错');
+
+  const H3 = await createHarness(ROOT, { raw: raw });
+  H3.QB.DB.init();
+  const after = (await H3.QB.DB.questions.list(b.id, {})).items;
+  const ids = after.map((q) => q.id).sort();
+  eq(ids.join(','), 'q-201,q-202', '回滚只撤销本批 q-203，保留另一标签并发新增的 q-202');
+
+  const retry = await H2.QB.DB.questions.insertMany(b.id, [mkQ(203)]);
+  eq(retry.inserted, 1, '重试同批成功插入（去重索引未被失败批次污染）');
+  eq(retry.duplicates, 0, '重试不误判为重复');
+  const H4 = await createHarness(ROOT, { raw: raw });
+  H4.QB.DB.init();
+  eq((await H4.QB.DB.questions.list(b.id, {})).items.length, 3, '最终并集 3 题');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

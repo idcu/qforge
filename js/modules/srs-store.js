@@ -121,7 +121,7 @@
    * 同一结果不会被第二次收集，从根上保证一次作答只写一条评分/一条 revlog
    * （待自评结果不收集也不标记，材料题多步自评在聚合定论后才计入）。
    * @param {Array<{question:Object, result:Object}>} pairs
-   * @returns {Array<{question:Object, rating:number}>}
+   * @returns {Array<{question:Object, rating:number, result:Object}>}
    */
   function collectGraded(pairs) {
     const out = [];
@@ -131,9 +131,20 @@
       const rating = ratingForResult(r);
       if (rating === null) return;
       r.srsRecorded = true;
-      out.push({ question: p.question, rating: rating });
+      out.push({ question: p.question, rating: rating, result: r });
     });
     return out;
+  }
+
+  /**
+   * 写盘失败时回滚收集置位（P0-5）：把本次收集的 result 恢复为「待记录」，
+   * 交卷/重试会再次收集，避免一次瞬时写失败导致该题永久丢失复习进度。
+   * @param {Array<{result?:Object}>} entries collectGraded 的返回值
+   */
+  function unmarkGraded(entries) {
+    (entries || []).forEach((e) => {
+      if (e && e.result) e.result.srsRecorded = false;
+    });
   }
 
   /** 取某题状态（无记录返回 null） */
@@ -276,6 +287,6 @@
 
   QB.SRSStore = {
     getState, grade, gradeMany, dueToday, countDue, stats, forecast, clear,
-    keyFor, ratingForResult, collectGraded, readMap, writeMap, fuzzSeedFor
+    keyFor, ratingForResult, collectGraded, unmarkGraded, readMap, writeMap, fuzzSeedFor
   };
 })(window);

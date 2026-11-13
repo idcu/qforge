@@ -66,6 +66,9 @@
     metaMigrationLock: 'meta:migrationLock',
     // 迁移前自动备份（schema/时间戳/进度标记；只在 IndexedDB 不可用时回落本键，运行期元数据，不进备份）
     metaMigrationBackup: 'meta:migrationBackup',
+    // 迁移进行中标记（P0-1）：进入业务键改写前写入，成功后清除；残留即表示上次迁移未提交完成，
+    // 启动时据此跳过「版本已最新」的快速路径并重跑幂等迁移（自愈）。
+    metaMigrationPending: 'meta:migrationPending',
     metaHashMap: (bankId) => 'meta:hashMap:' + bankId
   };
 

@@ -664,7 +664,12 @@
    */
   function run(opts) {
     const force = !!(opts && opts.force);
-    if (currentVersion() >= SCHEMA_VERSION && !force) {
+    // P0-1：上次迁移未提交完成（进程被杀/写盘失败）时，"版本已最新"不可信，
+    // 必须忽略快速路径按 force 语义重跑一次幂等迁移完成自愈。
+    let pending = null;
+    try { pending = QB.Storage.get(QB.KEYS.metaMigrationPending, null); } catch (_) { pending = null; }
+    const needHeal = !!pending;
+    if (currentVersion() >= SCHEMA_VERSION && !force && !needHeal) {
       // 版本已最新也可能残留旧 reviewMeta v3 清单（P2-06）：每次启动做一次幂等压缩。
       // fail-loud：未水合库显式跳过（结果带 skipped），真实转换错误直接上抛中止，不静默吞。
       const reviewMeta = QB.ReviewStore && typeof QB.ReviewStore.convertMetaLayouts === 'function'
@@ -673,7 +678,7 @@
       return Promise.resolve({ fromVersion: SCHEMA_VERSION, version: SCHEMA_VERSION, reviewMeta: reviewMeta });
     }
     if (inflight) return inflight;
-    inflight = doRun(force).finally(() => { inflight = null; });
+    inflight = doRun(force || needHeal).finally(() => { inflight = null; });
     return inflight;
   }
 
@@ -728,6 +733,12 @@
         throw e;
       }
 
+      // P0-1：进入任何业务键改写前先落「迁移进行中」标记。残留标记 = 上次未提交完成，
+      // 下次启动 run() 会忽略版本快速路径重跑幂等迁移；仅成功后清除。
+      QB.Storage.setSync(QB.KEYS.metaMigrationPending, {
+        from: fromVersion, to: SCHEMA_VERSION, at: Date.now()
+      });
+
       // 分阶段水合（Phase 0 批次2）：迁移按逻辑键全量枚举（v6→v7 建块/校验、v4→v5 逐库遍历），
       // 必须先补齐全部物理记录；否则只看到当前库，会出现「只迁移一个库」的静默数据缺口。
       if (idbUsable && QB.Storage.mode === 'idb') {
@@ -763,9 +774,12 @@
         result.backend = await migrateV5ToV6();
         // v6→v7：已有 IDB 安装的复习状态分块（新装/从 LS 升级在复制时已按块写入，无需再跑）
         if (idbUsable && fromVersion >= 6) result.reviewChunks = await migrateV6ToV7();
-        QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
-        await QB.Storage.flush();
+        // P0-1：提交顺序 = 先结束缓冲并落盘业务数据，再写 schema 版本，最后清迁移标记。
+        // 任一中间点崩溃都可由重启自愈（标记仍在 → 重跑幂等迁移）。
         QB.Storage.endMigrationBuffer(buffer, true);
+        await QB.Storage.flush();
+        QB.Storage.setSync(QB.KEYS.metaSchema, SCHEMA_VERSION);
+        QB.Storage.remove(QB.KEYS.metaMigrationPending);
         try { await backup.markAutoBackupDone(); } catch (_) { /* 进度标记失败不影响迁移结果 */ }
         releaseLock(owner);
         return result;

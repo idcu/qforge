@@ -265,7 +265,7 @@ section('v2→v5：旧单 blob 分片 + 450 条日志分段（幂等）');
   // 追加只重写尾段（其余分段对象不变）
   const seg0 = JSON.stringify(QB.Storage.get(QB.KEYS.revlogSeg(0)));
   const seg1 = JSON.stringify(QB.Storage.get(QB.KEYS.revlogSeg(1)));
-  QB.DB.revlog.append([{ t: T0 + 500, h: hashes[0], r: 3 }]);
+  await QB.DB.revlog.append([{ t: T0 + 500, h: hashes[0], r: 3 }]);
   eq(JSON.stringify(QB.Storage.get(QB.KEYS.revlogSeg(0))), seg0, '追加不触碰段 0');
   eq(JSON.stringify(QB.Storage.get(QB.KEYS.revlogSeg(1))), seg1, '追加不触碰段 1');
   eq(QB.Storage.get(QB.KEYS.revlogSeg(2)).length, 51, '追加只写入尾段');
@@ -1044,6 +1044,40 @@ section('P2-06 reviewMeta v3→v4：逐键一致、迁移失败保留原清单')
   eq(QB.ReviewStore.stateKeys(bank.id).length, 3, '失败后物理状态键未丢');
   eq(QB.ReviewStore.count(bank.id), 3, '失败后计数不变');
   console.log('  [P2-06] 迁移前 v3 清单 3 键 → v4 标记 7B；逐键一致、错题/收藏未变、失败保留原清单');
+}
+
+section('P0-1 迁移提交顺序：落盘失败不提前提交版本，重启自愈');
+{
+  const raw = new Map();
+  const H = await createHarness(ROOT, { raw: raw });
+  H.QB.DB.init();
+  H.QB.Storage.setSync(H.QB.KEYS.metaSchema, 5);
+  await H.QB.Storage.flush();
+  eq(H.QB.Storage.mode, 'ls', '前置：无 IDB，LS 是迁移目标');
+
+  // 注入最终提交失败的落盘：旧实现会先写版本再 flush，导致版本已 7 但数据未提交。
+  // 记录「失败瞬间」的持久版本，避开回滚还原对结论的掩盖（等价于进程在两次写入之间被杀）。
+  let seenAtFailure = null;
+  const origFlush = H.QB.Storage.flush;
+  H.QB.Storage.flush = function () {
+    seenAtFailure = H.QB.Storage.getFresh(H.QB.KEYS.metaSchema, null);
+    return Promise.reject(new Error('injected flush failure'));
+  };
+  let err = null;
+  try { await H.QB.Migration.run(); } catch (e) { err = e; }
+  H.QB.Storage.flush = origFlush;
+  ok(!!err, '落盘失败时迁移抛错（fail-loud）');
+  eq(seenAtFailure, 5, '落盘失败瞬间持久版本仍为 5（未提前提交）');
+  eq(H.QB.Storage.get(H.QB.KEYS.metaSchema), 5, '失败后 schema 版本仍为 5（未提前提交）');
+  const marker = H.QB.Storage.get(H.QB.KEYS.metaMigrationPending, null);
+  ok(!!(marker && marker.from === 5 && marker.to === 7), '迁移进行中标记保留（供重启自愈）');
+  ok(!H.QB.Storage.getFresh(H.QB.KEYS.metaMigrationLock, null), '失败后迁移锁已释放');
+
+  const r2 = await H.QB.Migration.run();
+  eq(r2.fromVersion, 5, '残留标记使快速路径失效：自愈重跑 fromVersion=5');
+  eq(H.QB.Storage.get(H.QB.KEYS.metaSchema), 7, '自愈成功后版本=7');
+  eq(H.QB.Storage.get(H.QB.KEYS.metaMigrationPending, null), null, '成功后清除迁移进行中标记');
+  ok(!H.QB.Storage.getFresh(H.QB.KEYS.metaMigrationLock, null), '自愈完成后迁移锁已释放');
 }
 
 console.log('\n================ 汇总 ================');

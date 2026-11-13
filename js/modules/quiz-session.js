@@ -108,7 +108,11 @@
     }
     try {
       await QB.SRSStore.grade(State.bankId, entry.question, entry.rating);
-    } catch (e) { notifyBackgroundError('保存复习进度失败', e); }
+    } catch (e) {
+      // P0-5：写盘失败必须把「已记录」置位回滚，否则该题本场永久不再收集
+      QB.SRSStore.unmarkGraded([entry]);
+      notifyBackgroundError('保存复习进度失败', e);
+    }
     return entry;
   }
 
@@ -152,7 +156,11 @@
     invalidateReviewLog();
     if (srsEntries.length) {
       try { await QB.SRSStore.gradeMany(State.bankId, srsEntries); }
-      catch (e) { notifyBackgroundError('保存成绩失败', e); }
+      catch (e) {
+        // P0-5：整批写失败时回滚置位，下一次交卷/重试仍会收集这批结果
+        QB.SRSStore.unmarkGraded(srsEntries);
+        notifyBackgroundError('保存成绩失败', e);
+      }
     }
     const score = engine.getScore();
     const durationMs = Date.now() - (State.quizMeta.startTs || engine.startedAt || Date.now());

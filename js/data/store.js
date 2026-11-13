@@ -48,6 +48,7 @@
     'meta:schemaVersion',
     'meta:migrationLock',
     'meta:migrationBackup',
+    'meta:migrationPending',
     PROBE_KEY,
     QUOTA_CACHE_KEY
   ];
@@ -55,7 +56,7 @@
      也不参与「恢复 replace 时删除旧键」——否则会把新设备的后端选择一起删掉。 */
   const BACKUP_EXCLUDED_KEYS = [
     BACKEND_KEY, PROGRESS_KEY, 'meta:lsMigratedAt', 'meta:lsCleanupAt', 'meta:lsBackupState',
-    PROBE_KEY, QUOTA_CACHE_KEY
+    PROBE_KEY, QUOTA_CACHE_KEY, 'meta:migrationPending'
   ];
   /* 探测失败时回退的保守预算（= 名义 5MiB − 32KiB），来源标记为 conservative-constant */
   const QUOTA_FALLBACK_CHARS = 5 * 1024 * 1024 - 32 * 1024;

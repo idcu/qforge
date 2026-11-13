@@ -333,6 +333,39 @@ section('写失败仍可观测：同步落盘失败抛错 + onWriteError 通知�
   ok(errs.length >= 1, 'onWriteError 已通知（可观测，不静默）');
 }
 
+section('P0-5 评分置位与落盘顺序：写失败不永久丢失');
+{
+  const raw = new Map();
+  const H = await createHarness(ROOT, { raw });
+  H.QB.DB.init();
+  const bank = await H.QB.DB.banks.create({ name: 'P0-5库' });
+  await H.QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: 'P0-5 评分题', options: [{ letter: 'A', text: '对' }, { letter: 'B', text: '错' }], answer: 'A' }
+  ], { dedupe: false });
+  const q = (await H.QB.DB.questions.list(bank.id, {})).items[0];
+  const key = H.QB.SRSStore.keyFor(q);
+  const result = { isCorrect: true, partial: false, srsRecorded: false };
+  const [entry] = H.QB.SRSStore.collectGraded([{ question: q, result }]);
+  eq(!!(entry && entry.result), true, '收集条目附带 result 引用（供失败回滚复位）');
+  await H.QB.Storage.flush();
+  // 注入同步落盘失败：grade 必须抛错，且本次置位可回滚
+  H.controls.failWrites = true;
+  let threw = false;
+  try { await H.QB.SRSStore.grade(bank.id, entry.question, entry.rating, T0); } catch (e) { threw = true; }
+  H.controls.failWrites = false;
+  ok(threw, '注入写失败：grade 抛错（不假成功）');
+  eq(result.srsRecorded, true, '写失败时置位暂留（等待调用方回滚）');
+  ok(typeof H.QB.SRSStore.unmarkGraded === 'function', '提供 unmarkGraded 回滚入口');
+  if (typeof H.QB.SRSStore.unmarkGraded === 'function') H.QB.SRSStore.unmarkGraded([entry]);
+  eq(result.srsRecorded, false, '回滚后恢复为待记录');
+  const again = H.QB.SRSStore.collectGraded([{ question: q, result }]);
+  eq(again.length, 1, '同一结果可再次收集（不永久丢失）');
+  await H.QB.SRSStore.grade(bank.id, again[0].question, again[0].rating, T0);
+  eq(result.srsRecorded, true, '重试写入成功后置位');
+  const logs = (await H.QB.FSRSOpt.readLog()).filter((e) => e.h === key);
+  eq(logs.length, 1, '重试后 revlog 恰 1 条（无重复）');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

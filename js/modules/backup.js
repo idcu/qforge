@@ -546,11 +546,11 @@
     } catch (e) {
       console.error('[Backup] 恢复失败，尝试回滚到恢复前快照：', e);
       try {
-        written.forEach((k) => {
-          const old = snapshot.find((pair) => pair[0] === k);
-          if (old) QB.Storage.set(k, old[1]);
-          else QB.Storage.remove(k);
-        });
+        // P0-2：按快照整份恢复（含本次已删除的载荷外旧键），再撤销本次新增的、快照中不存在的键。
+        // 只回写 written 会漏掉「删除已生效、随后落盘失败」时被误删的旧数据。
+        const snapMap = new Map(snapshot);
+        snapshot.forEach((pair) => QB.Storage.set(pair[0], pair[1]));
+        written.forEach((k) => { if (!snapMap.has(k)) QB.Storage.remove(k); });
         await QB.Storage.forceSync();
       } catch (rollbackErr) {
         console.error('[Backup] 回滚也失败：', rollbackErr);
