@@ -130,5 +130,6 @@ npm run discipline
 "暂时没做"不是理由）与**临时跳过**（`{reason, expires}`；到期当天自动变成缺口，不算永久豁免）。
 两者都不计入分母的"具备"比例，但临时跳过会在看板上单列并带到期日。
 
-当前：**13/13 项具备 · 不适用 1（第 5 问）→ L4**；`--strict` 无缺口。
+当前：**14/14 项具备 · 不适用 0 → L4**；`--strict` 无缺口。
+第 5 问按「`.gitignore` 非空 + 存在 `scripts/build-*.mjs` 构建入口」判具备（产品无构建步骤，但仓库有发布产物的复算/校验入口）。
 第 14 问由 `scripts/check-async-hygiene.mjs` 提供读数（空 catch / 未处理 Promise）。

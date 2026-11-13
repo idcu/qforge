@@ -117,13 +117,14 @@ Remove-Item Env:QF_BENCH_INJECT_SLOW
 
 ## 审计补充-5 check-discipline"不适用"项的判定依据（原 §13-5）
 
-**结论：唯一的"不适用"是第 5 问「生成物有明确归宿」，依据是结构性理由（纯静态站点无构建步骤），
-且属于显式豁免而非判据不可用；本轮还发现其机械条件其实已满足，是否保留该豁免需决策。**
+**结论：唯一的"不适用"原为第 5 问「生成物有明确归宿」，理由是结构性（产品无构建步骤），
+但机械条件实际已满足。本轮已按决策撤回该豁免：看板改判 ✅（14/14 项具备 · 不适用 0），
+并把 README 的"无构建步骤"修正为"产品无构建步骤，仓库有发布产物的复算/校验入口"。**
 
 依据：
 
-- 豁免声明：`docs/discipline-exemptions.json:5`，理由为"纯静态单页：源码即产物，没有构建步骤。
-  唯一的生成物是发行包与首屏统计，前者从不入库、后者由 docs-check 实测复算"。
+- 豁免声明（已撤回）：`docs/discipline-exemptions.json`，原第 5 键理由为"纯静态单页：源码即产物，
+  没有构建步骤。唯一的生成物是发行包与首屏统计，前者从不入库、后者由 docs-check 实测复算"。
 - 加载与分档：`scripts/check-discipline.mjs:49-78`（理由 <10 字不生效；无 `expires` 记为 `na`，
   有 `expires` 记为 `skip`，到期转 `gap`）；输出与分档打印在 `:282-302`。
 - 第 5 问的机械判据：`scripts/check-discipline.mjs:127-132`——`.gitignore` 非空且存在构建入口。
@@ -135,10 +136,10 @@ node scripts/check-discipline.mjs --strict
 Get-Content docs/discipline-exemptions.json
 ```
 
-**本轮新发现**：机械判据里的"构建入口"用 `scripts/build-*.mjs` 匹配，仓库存在 `scripts/build-staging.mjs`，
-所以即便撤掉豁免，第 5 问也会判 ✅。也就是说这条 `na` 是**语义豁免**（"没有构建步骤"），
-不是"判据跑不通"。移除豁免会让看板从 ⚠️ 变 ✅，但会与"纯静态、无构建"的表述产生张力——
-保留还是移除属于项目口径决策，本文件不擅自改动。
+**判定过程**：机械判据里的"构建入口"用 `scripts/build-*.mjs` 匹配，仓库存在 `scripts/build-staging.mjs`，
+所以撤掉豁免后第 5 问直接判 ✅。也就是说这条 `na` 是**语义豁免**（"没有构建步骤"），不是"判据跑不通"。
+本轮已执行移除，并把 README 与 TESTING 的表述改为"产品无构建步骤，仓库有发布产物复算/校验入口"，
+不再自相矛盾。
 
 ## 审计补充-6 汇总
 
@@ -148,6 +149,6 @@ Get-Content docs/discipline-exemptions.json
 | 2 assets / pkgHistory 清理 | **已关闭（均不自动清理）** | `git grep` 三连（见补充-2） |
 | 3 空 catch 63 vs 17 | **已关闭（口径差异）** | `tools/count-empty-catch.mjs` |
 | 4 bench 红灯样本 | **已关闭（可稳定复现）** | `QF_BENCH_INJECT_SLOW=0.1` + 取证 JSON |
-| 5 "不适用"依据 | **已关闭（并发现机械条件已满足）** | `docs/discipline-exemptions.json` + 看板源码 |
+| 5 "不适用"依据 | **已关闭（豁免已移除，改判具备）** | `docs/discipline-exemptions.json` + 看板源码 |
 
 遗留：补充-2 的"残留体积典型值"属运行时数据，静态无法给出；其余 4 项均有可执行复现。

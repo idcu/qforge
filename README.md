@@ -94,7 +94,7 @@ qb/
 
 ## 部署
 
-- 产物就是仓库根目录的静态文件，无构建步骤；推送到 GitHub Pages（子路径可用，`.nojekyll` 已就位）或任意静态服务器即可。
+- 产物就是仓库根目录的静态文件：产品本身无构建步骤（源码即产物）。仓库里的 `scripts/build-staging.mjs` 只用于发布产物的复算与校验（输出到临时目录、不入库），不参与运行；推送到 GitHub Pages（子路径可用，`.nojekyll` 已就位）或任意静态服务器即可。
 - 发布唯一需要手改的两处：`package.json` 的 `version` 与 `sw.js` 的 `CACHE`（改过 `js/`、`css/` 必须 bump CACHE，否则老用户继续命中旧缓存）。
 - 发布前跑 `npm run verify`；再跑 `node scripts/check-release.mjs --release` 校验并写回 `docs/release-ledger.json`。完整步骤见 [发布检查单](docs/RELEASE-CHECKLIST.md)。
 
