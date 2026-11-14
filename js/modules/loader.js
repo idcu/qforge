@@ -45,6 +45,7 @@
       'ngm.vendor/gitee.com/idcu/ngm-repo/packages/format/xlsx-read/src/core.js',
       'js/modules/office-writer.js',
       'js/modules/share-page.js',
+      'js/modules/exporter-formats.js',
       'js/modules/exporter.js'
     ],
     // 题目编辑器（与 import 共享 adapters，重复项按 URL 去重）

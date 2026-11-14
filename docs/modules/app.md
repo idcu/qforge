@@ -72,7 +72,8 @@
 | --- | --- |
 | `data-io.js` | 文件/粘贴/拖拽/URL/分享码导入编排，统一「解析 → 预览 → insertMany → 记录来源」；`refreshUrlFlow` 按 checksum 刷新；失败文案 `importFailureText` |
 | `source.js` | 题库来源溯源（local/file/paste/drop/url 归一化）+ URL 校验/checksum/`fetchSnapshot`（8MB/15s，fetch 可注入） |
-| `exporter.js` | 导出注册表（kind × format）：`collect/buildContent/buildAsync/openFlow`，QBK/JSON/CSV/XLSX/DOCX/Markdown/TXT/只读分享页；`shareFlow` 与 `distributeFlow` 共用 `prepareDistribution`；分享前 `ShareLink.estimateChars` 估算，超 64KB 先确认；非题集 `history` 白名单 json/csv/xlsx/txt；材料题在 MD/DOCX/TXT 经 `materialBlock` 分流 |
+| `exporter-formats.js` | 导出格式层（`QB.ExporterFormats`）：七种格式构建器 + `FORMATS` 注册表 + 历史归档纯函数（`toPlain/toTable/toDocLines/historyToTable/buildJSON/CSV/XLSX/DOCX/Markdown/TXT/QBK`）；无 DOM 依赖，可单测 | 
+| `exporter.js` | 导出外壳（`QB.Exporters`）：`KINDS` 收集入口（`collect`）、`buildContent/buildAsync` 分发、`openFlow` 选格式下载；`shareFlow` 与 `distributeFlow` 共用 `prepareDistribution`；分享前 `ShareLink.estimateChars` 估算，超 64KB 先确认；格式构建全部委托 `QB.ExporterFormats` |
 | `office-writer.js` | `QB.OfficeWriter.buildXlsx/buildDocx`：由二维表/文本行生成最小 OOXML 部件并交 ZipWriter 打包 |
 | `share-page.js` | `QB.SharePage`：只读分享页（复用 `RichText.questionAssetIds`、`Assets.getMap` 内嵌 data URL、`RichText.render` 转义）；`buildHTML` 纯构建可测；无脚本/无网络/可打印 |
 | `share-link.js` | `QB.ShareLink`：分享码 `qfshare1:` + URL-safe Base64；`encode` 确定性、`decode` 校验前缀/字符集/8MB 上限、`buildLink/readHash/extractCode`；`estimateChars` 纯算术且精确等于编码长度；纯函数、零网络 |

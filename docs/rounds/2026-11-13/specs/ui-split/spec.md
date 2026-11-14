@@ -1,16 +1,16 @@
 # 方向 C｜ui-renderer 拆分方案（分批迁移）
 
-- 状态：**方案定稿，开始第一批（B1 dialogs）**
+- 状态：**已执行完毕（B1–B3 收口）**；`ui-renderer.js` 只剩 `UIPort.register` 装配，实测与预算判定见 §8。本文其余章节保留为方案原文，与现状不符处以 §8 为准。
 - 对象：`js/modules/ui-renderer.js`（1238 行，约 45 个内部函数，1 个 `QB.UIRenderer` 装配对象）
 - 约束：CSP `script-src 'self'`（禁内联）；classic `<script>` 顺序即依赖图；`contracts/modules.json` 是装配唯一事实源；每批独立可回滚；断言不得减少、门禁不得放宽
 
 ## 1. 现状与约束
 
-- `index.html` 按固定顺序加载 69 个 core 脚本（`js/modules/ui-renderer.js` 在 at=55，紧跟 `dom-patch`）。
-- `check-modules.mjs` 校验：`at` 连续、`index.html` 与清单逐条相等、`requires` 必须排在本条之前、`keeps` 的每个符号必须在源码里有对应赋值、无孤儿脚本、按需包必须进 `sw.js` CORE 预缓存。
-- `keeps` 目前只支持 `QB.X` / `window.X` / `globalThis.X` 单段路径（`definitionRe`），**不支持 `QB.UIRenderer.renderX`**。
+- `index.html` 按固定顺序加载 72 个 core 脚本（`js/modules/ui-renderer.js` 在 at=58，紧跟在 core/dialogs/views 之后）。
+- `check-modules.mjs` 校验：`at` 连续、`index.html` 与清单逐条相等、`requires` 必须排在本条之前、`keeps` 的每个符号必须在源码里有对应赋值、无孤儿脚本、`load: on-demand` 的模块必须进 `sw.js` CORE 预缓存。
+- `keeps` 已按 §6.2 扩展为支持单层点路径（`QB.UIRenderer.renderResult` 等已实际用于清单校验），不再是方案阶段的单段限制。
 - `check-layers.mjs` 只限制 `js/data/*` 不得点名 `QB.UIRenderer`（L3）。拆分文件仍在 `js/modules`，**无需改动**（已核对 `FORBIDDEN` 与扫描范围）。
-- `ui-renderer.js` 内部有模块级状态：`lastFocus`、`modalOnClose`（弹窗焦点归还/关闭钩子）。**必须与 modal 四件套留在同一文件**，否则行为改变。
+- `toast`/`openModal`/`closeModal`/`confirmDialog` 与模块级状态（`lastFocus`、`modalOnClose`）最终同处 `ui-renderer-core.js`，满足「弹窗四件套必须同文件」的约束。
 
 ## 2. 拆分边界与目标文件
 
@@ -30,7 +30,9 @@ QB.UIRenderer = QB.UIRenderer || {};
 QB.UIRenderer.renderMixDialog = renderMixDialog;
 ```
 
-`ui-renderer.js` 的装配从 `QB.UIRenderer = { ... }` 改为 `QB.UIRenderer = Object.assign(QB.UIRenderer || {}, { ... })`，避免覆盖已挂载的函数；`UIPort.register` 保持在最后。
+`ui-renderer.js` 的装配从 `QB.UIRenderer = { ... }` 改为逐文件挂载合并（各文件自行 `QB.UIRenderer = QB.UIRenderer || {}` 后逐符号赋值），避免覆盖已挂载的函数；`UIPort.register` 保持在最后。
+
+> **实际落地与上表的差异（以 §8 B1–B3 为准）**：home/quiz/lists 未拆成三个文件，而是合并为 `ui-renderer-views.js`（预算原因，B2）；`ui-renderer-core.js` 最终只包含 `toast/openModal/closeModal/confirmDialog/focusablesIn/lastFocus/modalOnClose/FALLBACK_TEXT/fallbackBanner`。上表原列在 core 的 `esc/rich/plain/JUDGE_OPTIONS/progressBar/emptyState/optionHtml/annotationBlock/renderAnswerText/LIST_PAGE_SIZE` 实际留在 `ui-renderer-views.js`（作为视图层公共原语），未迁入 core。
 
 ## 3. 迁移顺序（每批一个提交，可单独 revert）
 
@@ -72,7 +74,7 @@ node --expose-gc scripts/bench.mjs --assert
 1. **`contracts/modules.json`**：新增条目（`layer: modules`、`tier: L3`、`at` 连续重排）。插入 at=55 后，原 55–69 共 15 条依次 +1（脚本重排，逐条核对 diff 只改 `at`）。
 2. **`check-modules.mjs` 的 `keeps`**：扩展 `definitionRe` 支持单层点路径（如 `QB.UIRenderer.renderMixDialog`），否则 split 文件只能声明命名空间级 `QB.UIRenderer`，**会弱化导出校验**。扩展必须同步加 selftest 负例：删掉该赋值必须判红。
 3. **`index.html`**：新增 `<script src>` 插在 `ui-renderer.js` 之前；CSP 不变（无内联）。
-4. **`sw.js`**：新文件加入 `CORE` 预缓存；`CACHE` 递增（改 `js/**` 的既有规则）。
+4. **`sw.js`**：只有 `load: "on-demand"` 的新文件加入 `CORE` 预缓存；首屏新脚本**不进** `CORE`（首屏脚本不在 install 期预缓存，靠 fetch 时的 stale-while-revalidate 落盘）。`CACHE` 递增仍然必须（改 `js/**` 的既有规则）。
 5. **`scripts/sw-baseline.json`**：`node scripts/sw-runtime.test.mjs --write-baseline` 刷新。
 6. **`check-layers.mjs`**：无需改动（新文件不在 `js/data`）；方案阶段已核对。
 7. **文档**：`docs/DEVELOPMENT.md` 的模块/装配段落若列出 renderer 结构，同步补文件名；否则只改 `docs/ARCHITECTURE.md` 对应小节（若存在）。
@@ -93,7 +95,7 @@ node --expose-gc scripts/bench.mjs --assert
 | B1 | 拆出 `ui-renderer-dialogs.js`（组卷/开始答题弹窗） | 42b6d1d | 296.9 KB | +1.0 KB |
 | — | 方向 E 409 可重放（非拆分，独立提交） | 5cb2859 | 297.3 KB | +1.4 KB |
 | B2 | 拆出 `ui-renderer-views.js`（home + quiz + lists，单切片） | 5969150 | 298.9 KB | **+3.0 KB** |
-| B3 | 结果页并入 views；core 拆出 `ui-renderer-core.js`（装配文件只剩 UIPort） | 本批 | 300.6 KB* | **+2.5 KB**（拆分开销） |
+| B3 | 结果页并入 views；core 拆出 `ui-renderer-core.js`（装配文件只剩 UIPort） | eb7b835 | 300.6 KB* | **+2.5 KB**（拆分开销） |
 
 \* B3 的绝对值含之后 §8 缺陷修复对 `js/**` 的 +2.2 KB（非拆分）；按拆分开销计，B3 两个纯移动净 −0.5 KB。
 

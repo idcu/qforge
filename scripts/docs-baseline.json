@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-13T23:41:00.122Z",
+  "generatedAt": "2026-11-14T01:17:43.559Z",
   "runItems": 38,
   "suiteFiles": 37,
   "totalAssertions": 6245,
@@ -47,7 +47,7 @@
   "firstScreen": {
     "scripts": 72,
     "files": 80,
-    "rawKB": "823.1",
+    "rawKB": "823.2",
     "gzipKB": "300.6"
   }
 }

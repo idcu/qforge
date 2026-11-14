@@ -1225,8 +1225,8 @@
       ]
     },
     {
-      "id": "modules.exporter",
-      "file": "js/modules/exporter.js",
+      "id": "modules.exporter-formats",
+      "file": "js/modules/exporter-formats.js",
       "layer": "modules",
       "tier": "L2",
       "requires": [
@@ -1236,19 +1236,35 @@
         "utils.judge-answer",
         "utils.annotation",
         "utils.assets",
-        "data.db",
         "modules.package",
         "modules.qbk",
-        "modules.wrong-book",
-        "modules.favorites",
-        "modules.history",
         "modules.sched-settings",
-        "data.contracts",
         "modules.source",
         "modules.office-writer",
         "modules.share-page",
-        "modules.share-link",
         "vendor.format.dsv.dsv"
+      ],
+      "keeps": [
+        "QB.ExporterFormats"
+      ],
+      "load": "on-demand"
+    },
+    {
+      "id": "modules.exporter",
+      "file": "js/modules/exporter.js",
+      "layer": "modules",
+      "tier": "L2",
+      "requires": [
+        "config",
+        "utils.helpers",
+        "utils.annotation",
+        "data.db",
+        "modules.wrong-book",
+        "modules.favorites",
+        "modules.history",
+        "modules.share-page",
+        "modules.share-link",
+        "modules.exporter-formats"
       ],
       "keeps": [
         "QB.Exporters"
