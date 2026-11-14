@@ -82,7 +82,13 @@ section('运行时导出集合与全仓引用对账');
   const { QB, window } = await createHarness(ROOT);
   // 纯 DOM 模块在浏览器中会挂载 QB.UIRenderer / QB.DomPatch / QB.BankManager；harness 默认跳过，
   // 这里按浏览器顺序补载，使导出集合贴近真实运行时（仍不接受手写符号白名单）。
-  for (const rel of ['js/modules/ui-renderer.js', 'js/modules/dom-patch.js', 'js/modules/bank-manager.js']) {
+  for (const rel of [
+    'js/modules/ui-renderer-dialogs.js', 'js/modules/ui-renderer-view-base.js',
+    'js/modules/ui-renderer-views-home.js', 'js/modules/ui-renderer-views-quiz.js',
+    'js/modules/ui-renderer-views-lists.js', 'js/modules/ui-renderer-views-result.js',
+    'js/modules/ui-renderer-core.js', 'js/modules/ui-renderer.js',
+    'js/modules/dom-patch.js', 'js/modules/bank-manager.js'
+  ]) {
     new Function('window', 'globalThis', fs.readFileSync(path.join(ROOT, rel), 'utf8'))(window, window);
   }
   const exported = new Set(Object.keys(QB));

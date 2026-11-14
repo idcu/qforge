@@ -88,7 +88,11 @@
 | 文件 | 职责 |
 | --- | --- |
 | `ui-renderer.js` | 装配壳：保底 `QB.UIRenderer` 命名空间，末尾 `QB.UIPort.register` 把 UI 能力交给 L2；**不承载具体页面 HTML，也不定义渲染函数** |
-| `ui-renderer-views.js` | 页面视图：首页/答题/结果/题库列表/错题/收藏/历史/统计/搜索；区域数组变体（`renderQuizRegions` 等，顶层 `data-region`）；答题卡格级增量（`answerCardRegion` 返回 `{key,html,frame,sub}`） |
+| `ui-renderer-view-base.js` | 视图共享原语：`esc` / `rich` / `plain` / `emptyState`；以 `QB.UIRendererViewBase` 供同层页面域文件取用，不进入 `QB.UIRenderer` 公开 API |
+| `ui-renderer-views-home.js` | 首页域：题库列表、存储健康、首页 |
+| `ui-renderer-views-quiz.js` | 答题域：材料/单题/整体答题区、反馈、答题卡、`renderQuizRegions`、复习历史；答题卡格级增量（`answerCardRegion` 返回 `{key,html,frame,sub}`） |
+| `ui-renderer-views-lists.js` | 列表域：错题/收藏/历史/统计/搜索/复习计划/导入校验和；区域数组变体（`renderWrongListRegions` 等，顶层 `data-region`） |
+| `ui-renderer-views-result.js` | 结果域：成绩总览与逐题回顾 |
 | `ui-renderer-core.js` | 公共件：`toast` / `openModal` / `closeModal` / `confirmDialog` / `fallbackBanner`（焦点闭环与 IndexedDB 回落文案） |
 | `ui-renderer-dialogs.js` | 弹窗：组卷/开始/设置/导入预览/三选一；可访问性（`role=dialog`、首焦点、Tab 循环、`Esc`、回焦）统一经 `openModal/closeModal` |
 | `dom-patch.js` | `QB.DomPatch`：`plan` 纯对账 + `patch` 局部回填；未变区域保留原节点；`frame` + `sub` 子区域（`syncSub` 按 key 就地替换） |
@@ -119,7 +123,7 @@
 
 ## 6. 已知薄弱点（模块层）
 
-- `ui-renderer-views.js` 的 `renderStats` 在有 forecast 数据时重写 `prefix`，会丢掉 FSRS 个性化入口（见 [ARCHITECTURE.md](../ARCHITECTURE.md) §8 问题 3）。
+- `ui-renderer-views-lists.js` 的 `renderStats` 在有 forecast 数据时重写 `prefix`，会丢掉 FSRS 个性化入口（见 [ARCHITECTURE.md](../ARCHITECTURE.md) §8 问题 3）。
 - `quiz-session.js` 交卷顺序存在"历史已写、清会话失败"时重复历史的可能（问题 5）。
 - `fsrs-train-core.js` 保存权重是无互斥的整 store 读改写（问题 9）。
 - `data-io.js` 粘贴/分享导入丢失 `errors`（问题 6）。

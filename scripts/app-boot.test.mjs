@@ -129,7 +129,11 @@ async function makeEnv(opts) {
   window.innerWidth = 1200;
 
   loadFile(window, 'js/modules/ui-renderer-dialogs.js');
-  loadFile(window, 'js/modules/ui-renderer-views.js');
+  loadFile(window, 'js/modules/ui-renderer-view-base.js');
+  loadFile(window, 'js/modules/ui-renderer-views-home.js');
+  loadFile(window, 'js/modules/ui-renderer-views-quiz.js');
+  loadFile(window, 'js/modules/ui-renderer-views-lists.js');
+  loadFile(window, 'js/modules/ui-renderer-views-result.js');
   loadFile(window, 'js/modules/ui-renderer-core.js');
   loadFile(window, 'js/modules/ui-renderer.js');
   loadFile(window, 'js/modules/dom-patch.js');

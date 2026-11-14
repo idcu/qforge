@@ -36,7 +36,11 @@ const loadInto = (rel) => new Function('window', 'globalThis',
 
 // ui-renderer 必须先于 question-editor 载入（编辑器在模块顶层捕获 QB.UIRenderer）
 loadInto('js/modules/ui-renderer-dialogs.js');
-loadInto('js/modules/ui-renderer-views.js');
+loadInto('js/modules/ui-renderer-view-base.js');
+loadInto('js/modules/ui-renderer-views-home.js');
+loadInto('js/modules/ui-renderer-views-quiz.js');
+loadInto('js/modules/ui-renderer-views-lists.js');
+loadInto('js/modules/ui-renderer-views-result.js');
 loadInto('js/modules/ui-renderer-core.js');
 loadInto('js/modules/ui-renderer.js');
 loadInto('js/modules/question-editor.js');

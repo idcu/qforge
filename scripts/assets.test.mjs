@@ -565,7 +565,11 @@ section('路径级：三选一（真实 UIRenderer + 假 DOM）与 Esc 终态');
     fs.readFileSync(path.join(ROOT, rel), 'utf8'))(h2.window, h2.window);
   // 浏览器加载顺序：ui-renderer 先于 data-io（data-io 在模块顶层捕获 UI）
   loadInto('js/modules/ui-renderer-dialogs.js');
-  loadInto('js/modules/ui-renderer-views.js');
+  loadInto('js/modules/ui-renderer-view-base.js');
+  loadInto('js/modules/ui-renderer-views-home.js');
+  loadInto('js/modules/ui-renderer-views-quiz.js');
+  loadInto('js/modules/ui-renderer-views-lists.js');
+  loadInto('js/modules/ui-renderer-views-result.js');
   loadInto('js/modules/ui-renderer-core.js');
   loadInto('js/modules/ui-renderer.js');
   loadInto('js/modules/data-io.js');

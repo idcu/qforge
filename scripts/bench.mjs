@@ -79,7 +79,11 @@ const { QB, window } = await createHarness(QB_DIR, { probeQuotaChars: 16 * 1024 
 globalThis.location = { protocol: 'https:', href: 'https://qforge.local/' };
 window.location = globalThis.location;
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(window, window);
-new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-view-base.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-home.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-quiz.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-lists.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-result.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-core.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
 // DOM 增量更新的对账逻辑（plan 不触碰 DOM，可在 Node 量测；DOM 写入由浏览器验证）
@@ -1644,7 +1648,11 @@ let c018GetSeq = 0;
   });
   h.window.location = globalThis.location;
   new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(h.window, h.window);
-  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views.js'), 'utf8'))(h.window, h.window);
+  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-view-base.js'), 'utf8'))(h.window, h.window);
+  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-home.js'), 'utf8'))(h.window, h.window);
+  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-quiz.js'), 'utf8'))(h.window, h.window);
+  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-lists.js'), 'utf8'))(h.window, h.window);
+  new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-result.js'), 'utf8'))(h.window, h.window);
   new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-core.js'), 'utf8'))(h.window, h.window);
   new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(h.window, h.window);
   const HQ = h.QB;

@@ -32,7 +32,11 @@ const { QB, window } = await createHarness(QB_DIR);
 // ui-renderer 是纯 HTML 构建器，按 index.html 的方式手动加载（与 ui-renderer.test.mjs 同法：
 // 先加载方向 C 拆出的子文件挂载命名空间，再加载装配文件）
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-dialogs.js'), 'utf8'))(window, window);
-new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-view-base.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-home.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-quiz.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-lists.js'), 'utf8'))(window, window);
+new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-views-result.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer-core.js'), 'utf8'))(window, window);
 new Function('window', 'globalThis', fs.readFileSync(path.join(QB_DIR, 'js/modules/ui-renderer.js'), 'utf8'))(window, window);
 const UI = window.QB.UIRenderer;
@@ -329,7 +333,7 @@ SNAPSHOTS.forEach(([name, html]) => {
 section('键盘：源码层禁止 tabindex 正数 / 自定义控件 Enter-Space 处理存在');
 {
   const files = ['index.html', 'js/app.js', 'js/modules/ui-renderer.js',
-    'js/modules/ui-renderer-dialogs.js', 'js/modules/ui-renderer-views.js', 'js/modules/ui-renderer-core.js'];
+    'js/modules/ui-renderer-dialogs.js', 'js/modules/ui-renderer-view-base.js', 'js/modules/ui-renderer-views-home.js', 'js/modules/ui-renderer-views-quiz.js', 'js/modules/ui-renderer-views-lists.js', 'js/modules/ui-renderer-views-result.js', 'js/modules/ui-renderer-core.js'];
   let hits = [];
   files.forEach((f) => {
     const src = fs.readFileSync(path.join(QB_DIR, f), 'utf8');

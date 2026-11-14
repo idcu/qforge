@@ -10,7 +10,7 @@
 
 qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：题库、作答记录、复习调度全部存浏览器本地（LocalStorage 或 IndexedDB），可选连 REST 后端或 WebDAV 同步；没有账号体系、没有服务端渲染、没有运行时依赖。
 
-- **形态**：静态文件即产物。80 个首屏 classic `<script>` + 27 个按需模块，全部挂在单一全局 `QB` 上（`js/**` 实际 102 个文件 / 23,876 行），无打包器、无 ESM、无 npm 运行时依赖；`file://` 双击可用（SW 只在 http(s) 注册）。
+- **形态**：静态文件即产物。84 个首屏 classic `<script>` + 27 个按需模块，全部挂在单一全局 `QB` 上（`js/**` 实际 106 个文件 / 24,040 行），无打包器、无 ESM、无 npm 运行时依赖；`file://` 双击可用（SW 只在 http(s) 注册）。
 - **装配**：`contracts/modules.json` 100 条（72 首屏 + 28 按需），`index.html` 的 script 顺序必须逐条相等。
 - **数据**：7 组 Repository 契约（`js/data/contracts.js`），默认 `QB.LocalAdapter`；`DATA_BACKEND='api'` 时切 `QB.ApiAdapter`。
 - **复习**：FSRS-6，21 维权重；学习步 / 每日限额 / 保留率可按题库覆盖。
@@ -101,9 +101,9 @@ qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：�
 ### D7 表现层
 
 - 职责：把 State 渲染成 HTML 字符串；局部 patch；弹窗与 toast；导入预览。
-- 关键文件：`ui-renderer.js`（装配壳 + `UIPort` 注册）、`ui-renderer-views.js`（页面视图）、`ui-renderer-core.js`（toast/弹窗/确认框/回落文案）、`ui-renderer-dialogs.js`（组卷/开始弹窗）、`dom-patch.js`。
+- 关键文件：`ui-renderer.js`（装配壳 + `UIPort` 注册）、`ui-renderer-view-base.js`（视图共享原语）、`ui-renderer-views-home.js`（首页/题库列表）、`ui-renderer-views-quiz.js`（答题/答题卡）、`ui-renderer-views-lists.js`（错题/收藏/历史/统计/搜索）、`ui-renderer-views-result.js`（结果页）、`ui-renderer-core.js`（toast/弹窗/确认框/回落文案）、`ui-renderer-dialogs.js`（组卷/开始弹窗）、`dom-patch.js`。
 - 边界：渲染函数纯输入输出，不读存储；`data-region` / `data-action` 是 DOM 契约。
-- 拆分现状：`ui-renderer.js` 只保留命名空间保底与 `UIPort.register`；views（含结果页）、core、dialogs 均已拆出（见 [已知问题与风险](#8-已知问题与风险)）。
+- 拆分现状：`ui-renderer.js` 只保留命名空间保底与 `UIPort.register`；views（按页面域拆为 base/home/quiz/lists/result）、core、dialogs 均已拆出（见 [已知问题与风险](#8-已知问题与风险)）。
 
 ### D8 平台、构建与质量工具链
 
@@ -232,8 +232,8 @@ qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：�
 |---|---|---|---|---|---|
 | 1 | 高 | `js/data/local-adapter.js` `buildQuestionIndex`；`js/utils/storage.js` `getScoped*` | 分阶段水合下索引构建遍历**所有库**的分片，访问非当前库时抛 `NotHydratedError`，导致导入/编辑/去重链路中断 | **已修复**（本地改动，未提交）：`get/update/remove/insertMany` 前置 `ensureIndexBanksHydrated()` → `ensureAll()`，失败仍上抛 | `scripts/idb.test.mjs` 分阶段水合 section（修复前 4 红，修复后绿） |
 | 2 | 高 | `js/modules/loader.js` 的 `export` BUNDLES；`js/modules/exporter.js` 的 CSV/XLSX 分支 | `export` 包不含 `DSV` / xlsx vendor，而导出器直接调 `global.DSV.formatRows`；新页面首次导出 CSV/XLSX 报 `ReferenceError` | **已修复**（本地改动，未提交）：export 包补 3 个 vendor；`modules.json` 补 requires；CACHE 递增（本批收口 v74） | `scripts/exporter.test.mjs` «export 按需包依赖完整»（修复前 3 红） |
-| 3 | 中 | `js/modules/ui-renderer-views.js` `renderStats` | 有 forecast 数据时 `prefix` 被重写，`renderFsrsCard`（个性化/训练入口）被丢弃；无 forecast 时入口正常 | **已修复**（本地改动，未提交）：forecast 分支同样拼 `renderFsrsCard(fsrsInfo)` | `scripts/ui-renderer.test.mjs` «有预测数据时保留 FSRS 入口»（修复前 1 红） |
-| 4 | 中 | `sw.js` 的 `CORE` | 预缓存含 shell/图标/worker 链/27 个按需文件，但**不含首屏 80 个 js**；首屏脚本靠受控页面的运行时缓存，首访后立刻断网刷新可能缺脚本 | **已复核**（`CORE` 实读） | 干净 profile：首访 → 立刻离线刷新 |
+| 3 | 中 | `js/modules/ui-renderer-views-lists.js` `renderStats` | 有 forecast 数据时 `prefix` 被重写，`renderFsrsCard`（个性化/训练入口）被丢弃；无 forecast 时入口正常 | **已修复**（本地改动，未提交）：forecast 分支同样拼 `renderFsrsCard(fsrsInfo)` | `scripts/ui-renderer.test.mjs` «有预测数据时保留 FSRS 入口»（修复前 1 红） |
+| 4 | 中 | `sw.js` 的 `CORE` | 预缓存含 shell/图标/worker 链/27 个按需文件，但**不含首屏 84 个 js**；首屏脚本靠受控页面的运行时缓存，首访后立刻断网刷新可能缺脚本 | **已复核**（`CORE` 实读） | 干净 profile：首访 → 立刻离线刷新 |
 | 5 | 中 | `js/modules/quiz-session.js` 交卷顺序 | 顺序为 错题→SRS→历史→`locked`→清会话；"历史已写、清会话失败"时下次续答再交卷可能产生重复历史（`History.add` 失败有锁释放） | **已修复**（本地改动，未提交）：engine 持久化 `sessionId/historyId`，`clear` 失败降级为可观测错误不阻断结果页；local `historyAdd` 按 `sessionId` 去重 | `scripts/storage.test.mjs` «#5 交卷幂等»（修复前 4 红；残留：api 跨设备未做会话唯一约束） |
 | 6 | 中 | `js/modules/data-io.js` 粘贴/分享导入 | 丢失 `errors`，可绕过致命校验 | **已修复**（本地改动，未提交）：`importTextFlow` 透传 `errors`，与文件/URL 入口一致 | `scripts/import-commit.test.mjs` «粘贴入口保留致命 errors»（修复前 3 红） |
 | 7 | 中 | `js/modules/backup.js` 导出 | `.qfbk` 导出无上限，导入端有 64 MiB 上限，可能自产不可恢复备份 | **已修复**（本地改动，未提交）：导出前 `assertExportableBundle` 与导入共用上限，超限明确拒绝并给分库/压缩图片的下一步；**不变量：可导出必可导入** | `scripts/backup.test.mjs` «#7 资产包导出与导入共用同一上限»（修复前 5 红） |
