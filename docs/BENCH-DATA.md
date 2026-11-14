@@ -211,3 +211,11 @@
   - 首窗口（外壳会话第一次读 0..200）：5000 **0.83 ms**（`ensureQuestions` 0.77 + `readRange` 0.06，补读 1 片，返回 200 题）；50000 **0.62 ms**（0.55 + 0.08，补读 1 片，返回 200 题）。
 - **判读**：确定性收益是“搬了多少”——50k 序列化字节 −64%、`_cache` 键 −70%、GC 后驻留 −56%；题目正文由首屏全读变成 1 片窗口。墙钟在 Node 替身上持平（5k +7%、50k −1%）：内存 IDB 的 `getAll` 是 JS 深拷贝 + 微任务事务，跳读省下的克隆被“先等 `getAllKeys` 再判定跳读”的串行往返吃掉。浏览器里该往返是真实 IPC、省下的是反序列化与主线程解析，方向相反；真机读数须在浏览器用 Performance API 采，本表不外推。
 - **不设门禁的理由**：与 §3-B-3 冷读相同——Node 内存替身无磁盘 I/O / IPC / 跨进程序列化，绝对毫秒是下界；三行只做版本间趋势与“读了多少”的存档。
+
+### D-17. 外壳水合真机启动分阶段（2026-11-15，Edge + 真实 IndexedDB，50k）
+
+- **协议**：真实 Edge（CDP 驱动）+ 磁盘 IndexedDB；同一夹具 50k 题 / 50k 状态 / 20k 日志（250 个题目分片），两版各自独立 profile、同一份播种脚本；页面内 `wrap` 阶段计时与 `scripts/coldstart-breakdown.mjs` 同口径；`fb6451d`（worktree）与 HEAD **交替各 6 轮取中位数**，各预热 1 轮（SW 接管 + 磁盘缓存稳定）。
+- **读数（ms，p50/p95）**：`initStore` 333.4/341.0 → **189.1/232.9**；`Store.readAll` 301.9 → 172.1；`loadQuestions` 1.4 → **122.7/139.4**（其中 `ensureQuestions` 121.1，补读 250 片）；`Migration.run` 0.6 → 0.5；`SRSStore.readMap` 11.0 → 10.2；`ReviewQueue.build` 26.7 → 27.0；存储侧小计 373 → **337（−9.7%）**；DCL 492/511 → 448/524；首屏总计 889/939 → **833/1005（p50 −6.3%，p95 +7%）**。
+- **判读**：整库题目分片读出（≈130 ms）没有离开首屏关键路径，只是从 `initStore` 移到 `DB.loadQuestions`（首页仍 `needsFullQuestions`），净减少 36 ms；p95 落在轮间抖动（±50 ms）内，不宣称改善。物理占用两侧相同（9.38 vs 9.41 MB）。
+- **顺带修掉的缺陷**：外壳态 rest 过滤漏掉当前库 `reviewMeta`/`reviewRev` → `convertMetaLayout` 每次启动枚举整库状态键（`Migration.run` 41.1 ms、`ReviewQueue.build` 46.1 ms）。补回后回到上表。
+- **为何不外推**：结论绑定本机（系统盘缓存、Edge 版本、CPU）；脚本在 `.analysis/`，不入库。

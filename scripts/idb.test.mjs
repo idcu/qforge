@@ -2462,6 +2462,12 @@ section('外壳水合（M1/M2）：按需扩窗 + 配额口径不返回部分值
   ok(rk(Q2.KEYS.questionShard(bankId, 0), bankId, true) === false, 'restKeep：外壳态不逐键补读题目分片');
   ok(rk('user:reviewMeta:other', bankId, true) === true, 'restKeep：其它库保留复习布局标记');
   ok(rk('questions:other:0', bankId, true) === false, 'restKeep：其它库不读题目分片');
+  // 当前库的复习布局标记必须保留：缺了 convertMetaLayout 走不进稳态快速路径，每次启动枚举整库状态键
+  ok(rk(Q2.KEYS.reviewMeta(bankId), bankId, true) === true, 'restKeep：外壳态保留当前库 reviewMeta（布局稳态判定）');
+  ok(rk(Q2.KEYS.reviewRev(bankId), bankId, true) === true, 'restKeep：外壳态保留当前库 reviewRev');
+  const shellReviewMeta = S.get(Q2.KEYS.reviewMeta(bankId));
+  ok(!!shellReviewMeta && typeof shellReviewMeta === 'object',
+    '外壳视图含当前库 reviewMeta（convertMetaLayout 稳态快速路径依据）');
   eq(await Q2.DB.questions.count(bankId), total, 'count 直读清单 O(1)：' + total + ' 题');
 
   // 未加载分片必须响亮失败（不得返回空数组/伪空）

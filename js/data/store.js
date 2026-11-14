@@ -280,8 +280,11 @@
    *   它们不随作用域裁剪，且 `banks`/`meta:*` 是首屏启动必需。早期实现在外壳态只放行
    *   `questionsMeta`，把全局键一起滤掉，真机 reload 后题库列表变空（idb.test 因 Node 走
    *   另一条降级路径未覆盖到）。导出到 `Store.restKeep` 供测试钉死这条契约。
-   * - 其它库只留复习布局标记 + （外壳态）题目清单；当前库在外壳态留题目清单（正文区间读
-   *   已跳过）；非外壳态由区间读覆盖块/分片，rest 不再补读。
+   * - 其它库只留复习布局标记 + （外壳态）题目清单；当前库在外壳态留题目清单与复习布局标记
+   *   （正文区间读已跳过）；非外壳态由区间读覆盖块/分片，rest 不再补读。
+   *   **当前库的 `reviewMeta`/`reviewRev` 必须保留**：它们只有几十字节，却是
+   *   `ReviewStore.convertMetaLayout` 稳态快速路径的判定依据；缺了会退化成每次启动枚举
+   *   整库 50k 状态键（真机实测 +50 ms，见 docs/BENCH.md §3-E）。
    */
   function restKeep(key, want, shell) {
     if (isBootstrap(key)) return false;
@@ -290,7 +293,9 @@
       if (t.kind === 'reviewMeta' || t.kind === 'reviewRev') return true;
       return shell && t.kind === 'questionsMeta';
     }
-    if (shell) return !t.bank || t.kind === 'questionsMeta';
+    if (shell) {
+      return !t.bank || t.kind === 'questionsMeta' || t.kind === 'reviewMeta' || t.kind === 'reviewRev';
+    }
     return t.kind !== 'reviewChunk' && t.kind !== 'questionShard' &&
       t.kind !== 'questionsMeta' && t.kind !== 'questionsLegacy';
   }
