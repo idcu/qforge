@@ -2,7 +2,7 @@
 
 > **这份文档是什么**：回答接手时最常问的四件事——现在什么算“绿”、怎么用一条命令验、出问题怎么退回上一个 good state、当前版本与 CACHE 读数各是多少。
 > **读数的唯一声明处**：第 1 节的数字由 `scripts/docs-check.mjs --static` 逐项复算（本文件已加入 `DOCS_WITH_NUMBERS`）；版本与 CACHE 另由 `scripts/check-release.mjs` 对 `sw.js` 与 `docs/release-ledger.json` 复核。
-> 本页只记“当前值”；历史读数在 [BENCH-DATA](BENCH-DATA.md)，逐套件断言数在 [TESTING-SUITES](TESTING-SUITES.md)。
+> 本页只记“当前值”；历史读数在 [BENCH-DATA](BENCH-DATA.md)（D-10 起）与 [BENCH-DATA-HISTORY](BENCH-DATA-HISTORY.md)（D-1 ~ D-9），逐套件断言数在 [TESTING-SUITES](TESTING-SUITES.md)。
 
 ## 1. 当前读数（2026-11-14）
 

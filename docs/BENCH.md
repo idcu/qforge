@@ -3,7 +3,7 @@
 > **这份文件是什么**：`DEVELOPMENT.md` 原 §3。
 > **为什么单独成文**：它是读数档案 + 红线，随每次复测追加，与"怎么装环境"无关。
 > **读数口径**：本文里的数字由 `scripts/docs-check.mjs` 复算校验（它同时读 README / DEVELOPMENT / 本文 / BENCH-DATA）。
-> **实测数据**：历史实测读数与实验记录见 [BENCH-DATA.md](BENCH-DATA.md)（只存读数、只增不改，口径以本文为准）。
+> **实测数据**：近年实测读数与实验记录见 [BENCH-DATA.md](BENCH-DATA.md)（D-10 起）；2026-10-19 ~ 2026-11-13 的 D-1 ~ D-9 已冻结在 [BENCH-DATA-HISTORY.md](BENCH-DATA-HISTORY.md)（只存读数、只增不改，口径以本文为准）。
 
 ## 0. 接管速览
 
@@ -45,11 +45,11 @@ node --expose-gc scripts/bench.mjs --scale=50000   # 可选规模测量（LocalS
 > 已在 `.gitignore`）；绿时不产生任何文件。报告性能红灯时**须附上该文件内容**，否则视为无证据——
 > 曾出现过「bench 整体 exit 1 但没记录到哪一项红」，此后不再接受这种报告。
 
-> 2026-10-19 中位数表及各阶段验收读数、漂移记录与注入结果见 [BENCH-DATA.md](BENCH-DATA.md)。
+> 2026-10-19 中位数表及各阶段验收读数、漂移记录与注入结果见 [BENCH-DATA-HISTORY.md](BENCH-DATA-HISTORY.md)。
 
 > **SRS 门禁口径变更（2026-11-03 替换绝对毫秒基线；2026-11-12 重定统计量与容差）**：历史基线 grade **0.0771 ms** / gradeMany **0.2480 ms**（×1.05 → 0.0810 / 0.2604）经同机复测失效——HEAD 实测 **0.0902 / 0.2787**，同机旧代码 `e772e60` 亦为 **0.0882 / 0.2784**（同样超限），属机器漂移而非代码回退；且绝对毫秒口径在机器变快时会同等幅度漏报回退。已改为「同轮标定比值」判定。**2026-11-12 再修订**：旧判定量（11 轮比值的中位数）跨运行摆动 18% / 40%，阈值 5.29 / 9.48 压在实测分布中部（20 次里 9 次红），故改为 **21 轮比值的 p25**、标定窗口拉到与样本批次同量级，并由 20 次实测分布**推导**每指标容差（Node 26：grade 基线 **4.69**×**1.08**=**5.07**、gradeMany **8.40**×**1.07**=**8.99**；Node 24：**2.43**×**1.09**、**4.54**×**1.06**）。原始数值、推导过程、可抓最小回归幅度与注入结果见 **3-B**。首评较基线多一次 `GET /api/banks/<id>`（按库读取 `bank.sched`，之后缓存命中；热态仍为 1 次 PATCH），`api-backend.test.mjs` 已断言该调用只发生一次。
 
-> 各阶段 A/B/UI/DOM/C 验收读数与首屏体积历史见 [BENCH-DATA.md](BENCH-DATA.md)。
+> 各阶段 A/B/UI/DOM/C 验收读数与首屏体积历史见 [BENCH-DATA-HISTORY.md](BENCH-DATA-HISTORY.md)（D-1 ~ D-9）；近期读数见 [BENCH-DATA.md](BENCH-DATA.md)。
 
 > 红线：不允许凭感觉声称性能。改动后必须重跑 bench，把新数据写进提交信息与 `CHANGELOG.internal.md`；内存/P95 不达标继续改，不强行提交。
 
@@ -327,4 +327,4 @@ node scripts/task-timer.mjs report                      # 明细表 + 已完成�
   `import 85.7 > 62.0（超 23.7）`、`editor 51.0 > 27.0（超 24.0）`、`全包去重 147.8 > 125.0（超 22.8）`，退出码 1；
   还原文件（SHA256 与追加前一致）后回到 60.3 / 25.6 / 122.4，门禁通过。
 
-> 启动分阶段水合验收（Phase 0 批次2）的协议、数据与判定见 [BENCH-DATA.md](BENCH-DATA.md)。
+> 启动分阶段水合验收（Phase 0 批次2）的协议、数据与判定见 [BENCH-DATA-HISTORY.md](BENCH-DATA-HISTORY.md)。
