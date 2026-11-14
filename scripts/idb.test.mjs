@@ -22,6 +22,14 @@ import { createAssert } from './lib/assert.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
+/** local-adapter 已按职责拆分：静态护栏对「数据适配器全量源码」判定（拼接顺序 = 加载顺序）。 */
+const ADAPTER_FILES = [
+  'core', 'shard', 'review', 'revlog', 'banks', 'questions', 'progress', 'cascade', ''
+].map((f) => 'js/data/local-adapter' + (f ? '-' + f : '') + '.js');
+function readAdapterSources() {
+  return ADAPTER_FILES.map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+}
+
 let pass = 0;
 const failures = [];
 const A = createAssert({ failures: failures, onPass: () => { pass++; }, deep: true });
@@ -1380,7 +1388,7 @@ section('B 段迁移（C 步骤3 前半：哈希重映射 3 处）');
   const edSrc = fs.readFileSync(path.join(ROOT, 'js/modules/question-editor.js'), 'utf8');
   const bkSrc2 = fs.readFileSync(path.join(ROOT, 'js/modules/backup.js'), 'utf8');
   const appSrc = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
-  const laSrc = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const laSrc = readAdapterSources();
   ok(edSrc.indexOf("errBox.textContent = '保存失败：' + ex.message") >= 0,
     '兜底①：编辑器保存 catch 写入 errBox「保存失败：…」（question-editor.js:602/713）');
   ok(bkSrc2.indexOf("QB.UIPort.toast('恢复失败：' + e.message, 'err')") >= 0,
@@ -1488,7 +1496,7 @@ section('B 段前置：建库/进入新库 ensureBank（C 步骤3 后半：legac
   const appSrc2 = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8')
     + '\n' + fs.readFileSync(path.join(ROOT, 'js/modules/action-router.js'), 'utf8')
     + '\n' + fs.readFileSync(path.join(ROOT, 'js/modules/quiz-session.js'), 'utf8');
-  const laSrc2 = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const laSrc2 = readAdapterSources();
   const ensureNear = (marker, span) => {
     const i = appSrc2.indexOf(marker);
     return i >= 0 && appSrc2.slice(i, i + (span || 420)).indexOf('QB.Storage.ensureBank(') >= 0;
@@ -1645,7 +1653,7 @@ section('C 步骤4 冷路径：8 处作用域读取（818/826/832/845/142/152/11
     '（实测 ' + (nCvt ? nCvt.name : '未抛错') + '）');
 
   // 静态护栏：8 处均改走作用域读取，且默认 get/keys 语义未被改
-  const laSrc3 = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const laSrc3 = readAdapterSources();
   ok(laSrc3.indexOf('Storage.getScopedFresh(K.wrong(bankId), bankId, [])') >= 0 &&
      laSrc3.indexOf('Storage.getScopedFresh(K.favorite(bankId), bankId, [])') >= 0,
     '静态：错题/收藏 4 处（818/826/832/845）改走 getScopedFresh');
@@ -1777,7 +1785,7 @@ section('C 步骤4 后半：3 处只读渲染路径（124 metaOf / 129 shardOf /
     '（实测 ' + (n841.error ? n841.error.name + ' key=' + n841.error.key : '未抛错，返回 []') + '）');
 
   // 静态护栏：3 处改走缓存态作用域读取（getScoped），且默认 get/keys 语义未改
-  const laSrc4 = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const laSrc4 = readAdapterSources();
   ok(laSrc4.indexOf('Storage.getScoped(K.questionsMeta(bankId), bankId, null)') >= 0,
     '静态：124 metaOf 改走 getScoped');
   ok(laSrc4.indexOf('Storage.getScoped(K.questionShard(bankId, i), bankId, [])') >= 0,
@@ -1845,7 +1853,7 @@ section('C 步骤4 第三批：stateKeys 984 / readMap per-hash 1000（13/22）'
   eq(S2.isBankHydrated(B.id), false, '前置：B 未水合但物理数据存在');
 
   // 静态护栏：984/1000 已改作用域入口
-  const laSrcS = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const laSrcS = readAdapterSources();
   ok(laSrcS.indexOf('return stateKeysOf(Storage.keysScoped(bankId), bankId);') >= 0,
     '静态：984 stateKeys 改走 keysScoped');
   ok(laSrcS.indexOf('const st = Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null);') >= 0,
@@ -2008,7 +2016,7 @@ section('C 步骤4 收尾：评分写路径 6 处 + removeHash（22/22）');
   eq(S2.isBankHydrated(C.id), false, '前置：C 未水合但物理数据存在');
 
   // 静态护栏：7 处热路径全部改走作用域入口
-  const laSrcF = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const laSrcF = readAdapterSources();
   const has = (s) => laSrcF.indexOf(s) >= 0;
   ok(has('const m = Storage.getScoped(K.reviewMeta(bankId), bankId, null);'),
     '静态：meta 改走 getScoped');
@@ -2171,7 +2179,7 @@ section('C 步骤4 B 段补完：convertMetaLayouts 指示键 + HashRemap（B5/B
   ok(conv.skipped.indexOf(B.id) >= 0, 'B5 等价：未水合 v3 库仍上报 skipped（不静默、不水合）');
   ok(conv.skipped.indexOf(C.id) < 0, 'B5 等价：未水合 v4 库不误报 skipped');
   ok(conv.migrated >= 0 && conv.banks >= 3, 'B5 等价：候选库计数不变（含空库/未水合库）');
-  const laSrcB = fs.readFileSync(path.join(ROOT, 'js/data/local-adapter.js'), 'utf8');
+  const laSrcB = readAdapterSources();
   ok(laSrcB.indexOf('Storage.getScopedIndicator(K.reviewMeta(bankId), bankId, null)') >= 0,
     'B5 静态：convertMetaLayouts 的 reviewMeta 读取改走 getScopedIndicator');
 

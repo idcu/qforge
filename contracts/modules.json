@@ -465,11 +465,147 @@
       ]
     },
     {
+      "id": "data.local-adapter-core",
+      "file": "js/data/local-adapter-core.js",
+      "layer": "data",
+      "tier": "L1",
+      "requires": [
+        "data.contracts",
+        "utils.storage"
+      ],
+      "keeps": [
+        "QB.LocalAdapterCore"
+      ],
+      "at": 33
+    },
+    {
+      "id": "data.local-adapter-shard",
+      "file": "js/data/local-adapter-shard.js",
+      "layer": "data",
+      "tier": "L1",
+      "requires": [
+        "config",
+        "data.contracts",
+        "utils.storage",
+        "data.local-adapter-core"
+      ],
+      "keeps": [
+        "QB.QuestionShards"
+      ],
+      "at": 34
+    },
+    {
+      "id": "data.local-adapter-review",
+      "file": "js/data/local-adapter-review.js",
+      "layer": "data",
+      "tier": "L1",
+      "requires": [
+        "data.contracts",
+        "utils.helpers",
+        "utils.review-merge",
+        "utils.storage",
+        "data.local-adapter-core"
+      ],
+      "keeps": [
+        "QB.ReviewStore",
+        "QB.REVIEW_LAYOUT_VERSION"
+      ],
+      "at": 35
+    },
+    {
+      "id": "data.local-adapter-revlog",
+      "file": "js/data/local-adapter-revlog.js",
+      "layer": "data",
+      "tier": "L1",
+      "requires": [
+        "config",
+        "data.contracts",
+        "utils.helpers",
+        "utils.storage",
+        "data.local-adapter-core"
+      ],
+      "keeps": [
+        "QB.RevlogStore",
+        "QB.REVLOG_LAYOUT_VERSION"
+      ],
+      "at": 36
+    },
+    {
+      "id": "data.local-adapter-banks",
+      "file": "js/data/local-adapter-banks.js",
+      "layer": "data",
+      "tier": "L1",
+      "requires": [
+        "data.contracts",
+        "utils.helpers",
+        "utils.storage",
+        "data.local-adapter-core"
+      ],
+      "keeps": [],
+      "at": 37
+    },
+    {
+      "id": "data.local-adapter-questions",
+      "file": "js/data/local-adapter-questions.js",
+      "layer": "data",
+      "tier": "L1",
+      "requires": [
+        "data.contracts",
+        "utils.annotation",
+        "utils.answer-normalize",
+        "utils.hash-remap",
+        "utils.helpers",
+        "utils.judge-answer",
+        "utils.question-id",
+        "utils.quota",
+        "utils.storage",
+        "data.local-adapter-core",
+        "data.local-adapter-shard",
+        "data.local-adapter-review",
+        "data.local-adapter-revlog",
+        "data.local-adapter-banks"
+      ],
+      "keeps": [],
+      "at": 38
+    },
+    {
+      "id": "data.local-adapter-progress",
+      "file": "js/data/local-adapter-progress.js",
+      "layer": "data",
+      "tier": "L1",
+      "requires": [
+        "config",
+        "data.contracts",
+        "utils.helpers",
+        "utils.question-id",
+        "utils.storage",
+        "data.local-adapter-core"
+      ],
+      "keeps": [],
+      "at": 39
+    },
+    {
+      "id": "data.local-adapter-cascade",
+      "file": "js/data/local-adapter-cascade.js",
+      "layer": "data",
+      "tier": "L1",
+      "requires": [
+        "data.contracts",
+        "utils.storage",
+        "data.local-adapter-core",
+        "data.local-adapter-shard",
+        "data.local-adapter-review",
+        "data.local-adapter-revlog"
+      ],
+      "keeps": [],
+      "at": 40
+    },
+    {
       "id": "data.local-adapter",
       "file": "js/data/local-adapter.js",
       "layer": "data",
       "tier": "L1",
-      "at": 33,
+      "at": 41,
       "requires": [
         "config",
         "utils.helpers",
@@ -481,15 +617,18 @@
         "utils.weights",
         "utils.review-merge",
         "utils.hash-remap",
-        "data.contracts"
+        "data.contracts",
+        "data.local-adapter-core",
+        "data.local-adapter-shard",
+        "data.local-adapter-review",
+        "data.local-adapter-revlog",
+        "data.local-adapter-banks",
+        "data.local-adapter-questions",
+        "data.local-adapter-progress",
+        "data.local-adapter-cascade"
       ],
       "keeps": [
-        "QB.LocalAdapter",
-        "QB.QuestionShards",
-        "QB.REVIEW_LAYOUT_VERSION",
-        "QB.REVLOG_LAYOUT_VERSION",
-        "QB.ReviewStore",
-        "QB.RevlogStore"
+        "QB.LocalAdapter"
       ]
     },
     {
@@ -497,7 +636,7 @@
       "file": "js/data/api-adapter.js",
       "layer": "data",
       "tier": "L1",
-      "at": 34,
+      "at": 42,
       "requires": [
         "config",
         "utils.question-id",
@@ -514,7 +653,7 @@
       "file": "js/data/db.js",
       "layer": "data",
       "tier": "L1",
-      "at": 35,
+      "at": 43,
       "requires": [
         "config",
         "utils.storage",
@@ -533,7 +672,7 @@
       "file": "js/modules/package.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 36,
+      "at": 44,
       "requires": [
         "config",
         "utils.storage",
@@ -549,7 +688,7 @@
       "file": "js/modules/qbk.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 37,
+      "at": 45,
       "requires": [
         "utils.rich-text",
         "utils.zip-reader",
@@ -780,7 +919,7 @@
       "file": "js/modules/quiz-engine.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 38,
+      "at": 46,
       "requires": [
         "config",
         "utils.helpers",
@@ -798,7 +937,7 @@
       "file": "js/modules/wrong-book.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 39,
+      "at": 47,
       "requires": [
         "utils.result-policy",
         "data.db"
@@ -812,7 +951,7 @@
       "file": "js/modules/favorites.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 40,
+      "at": 48,
       "requires": [
         "utils.question-id",
         "data.db"
@@ -826,7 +965,7 @@
       "file": "js/modules/history.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 41,
+      "at": 49,
       "requires": [
         "data.db"
       ],
@@ -839,7 +978,7 @@
       "file": "js/modules/statistics.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 42,
+      "at": 50,
       "requires": [
         "config",
         "utils.helpers",
@@ -854,7 +993,7 @@
       "file": "js/modules/search-filter.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 43,
+      "at": 51,
       "requires": [
         "utils.helpers",
         "utils.answer-normalize"
@@ -868,7 +1007,7 @@
       "file": "js/modules/fsrs.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 44,
+      "at": 52,
       "requires": [
         "utils.random"
       ],
@@ -881,7 +1020,7 @@
       "file": "js/modules/fsrs-train-core.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 45,
+      "at": 53,
       "requires": [
         "modules.fsrs"
       ],
@@ -894,7 +1033,7 @@
       "file": "js/modules/fsrs-opt.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 46,
+      "at": 54,
       "requires": [
         "utils.weights",
         "data.local-adapter",
@@ -911,7 +1050,7 @@
       "file": "js/modules/fsrs-train-client.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 47,
+      "at": 55,
       "requires": [
         "config",
         "modules.fsrs",
@@ -926,7 +1065,7 @@
       "file": "js/modules/srs.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 48,
+      "at": 56,
       "requires": [
         "utils.question-id"
       ],
@@ -939,7 +1078,7 @@
       "file": "js/modules/srs-store.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 49,
+      "at": 57,
       "requires": [
         "utils.time",
         "utils.fnv",
@@ -959,7 +1098,7 @@
       "file": "js/modules/sched-settings.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 50,
+      "at": 58,
       "requires": [
         "config",
         "utils.storage",
@@ -975,7 +1114,7 @@
       "file": "js/modules/start-prefs.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 51,
+      "at": 59,
       "requires": [
         "config",
         "utils.storage",
@@ -990,7 +1129,7 @@
       "file": "js/modules/review-queue.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 52,
+      "at": 60,
       "requires": [
         "utils.time",
         "utils.shuffle",
@@ -1006,7 +1145,7 @@
       "file": "js/modules/progress-saver.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 53,
+      "at": 61,
       "requires": [
         "utils.helpers",
         "utils.storage",
@@ -1021,7 +1160,7 @@
       "file": "js/modules/exam-timer.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 54,
+      "at": 62,
       "requires": [],
       "keeps": [
         "QB.createExamTimer"
@@ -1032,7 +1171,7 @@
       "file": "js/modules/ui-renderer-dialogs.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 55,
+      "at": 63,
       "requires": [
         "config",
         "utils.helpers"
@@ -1047,7 +1186,7 @@
       "file": "js/modules/ui-renderer-views.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 56,
+      "at": 64,
       "requires": [
         "config",
         "utils.helpers",
@@ -1087,7 +1226,7 @@
       "file": "js/modules/ui-renderer-core.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 57,
+      "at": 65,
       "requires": [
         "utils.helpers"
       ],
@@ -1104,7 +1243,7 @@
       "file": "js/modules/ui-renderer.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 58,
+      "at": 66,
       "requires": [
         "data.contracts",
         "modules.ui-renderer-dialogs",
@@ -1120,7 +1259,7 @@
       "file": "js/modules/dom-patch.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 59,
+      "at": 67,
       "requires": [],
       "keeps": [
         "QB.DomPatch"
@@ -1131,7 +1270,7 @@
       "file": "js/modules/bank-manager.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 60,
+      "at": 68,
       "requires": [
         "data.sample-data",
         "utils.helpers",
@@ -1190,7 +1329,7 @@
       "file": "js/modules/source.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 61,
+      "at": 69,
       "requires": [
         "config",
         "utils.fnv"
@@ -1261,7 +1400,7 @@
       "file": "js/modules/share-link.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 62,
+      "at": 70,
       "requires": [
         "config",
         "utils.base64"
@@ -1372,7 +1511,7 @@
       "file": "js/modules/migrate.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 63,
+      "at": 71,
       "requires": [
         "data.store",
         "utils.helpers",
@@ -1411,7 +1550,7 @@
       "file": "js/modules/blueprint.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 64,
+      "at": 72,
       "requires": [
         "config",
         "utils.shuffle"
@@ -1425,7 +1564,7 @@
       "file": "js/modules/practice-builder.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 65,
+      "at": 73,
       "requires": [
         "config",
         "utils.shuffle",
@@ -1441,7 +1580,7 @@
       "file": "js/modules/quiz-session.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 66,
+      "at": 74,
       "requires": [
         "config",
         "utils.helpers",
@@ -1469,7 +1608,7 @@
       "file": "js/modules/quiz-dialogs.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 67,
+      "at": 75,
       "requires": [
         "config",
         "modules.blueprint",
@@ -1488,7 +1627,7 @@
       "file": "js/modules/boot-diagnostics.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 68,
+      "at": 76,
       "requires": [
         "data.store",
         "utils.storage",
@@ -1508,14 +1647,14 @@
         "QB.Loader",
         "QB.BUNDLES"
       ],
-      "at": 69
+      "at": 77
     },
     {
       "id": "app",
       "file": "js/app.js",
       "layer": "entry",
       "tier": "L3",
-      "at": 70,
+      "at": 78,
       "requires": [
         "data.sample-data",
         "config",
@@ -1569,7 +1708,7 @@
       "file": "js/modules/action-router.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 71,
+      "at": 79,
       "loadAfterEntry": true,
       "requires": [
         "modules.ui-renderer",
@@ -1584,7 +1723,7 @@
       "file": "js/modules/view-router.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 72,
+      "at": 80,
       "loadAfterEntry": true,
       "requires": [
         "modules.ui-renderer",

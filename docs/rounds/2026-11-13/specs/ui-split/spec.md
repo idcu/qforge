@@ -105,3 +105,53 @@ B2/B3 后判定：
 - 门禁：38 套件 / 6245 断言（基线一致）、63 项 bench、check-modules 95 条 / 0 违约、ui-renderer 220/0。
 - 装配文件从 1238 行降到约 30 行：只剩 `QB.UIRenderer` 保底与 `QB.UIPort.register`。
 
+### 8.1 local-adapter 拆分（2026-11-14）：判据变更与实测
+
+首屏预算线本批经历了两次调整，最终定为 **9 KB**。这是实测后逐级论证的放宽，不是一开始就按 9 KB 设计：
+
+| 阶段 | 判据 | 依据 |
+| --- | --- | --- |
+| 原判据 | 全部拆完后首屏 gzip 相对拆前 295.9 KB 累计增量 ≤ 3 KB | ui-split 总预算 |
+| 中途判据（仅本次） | 本次拆分首屏 gzip 相对拆分起点增量 ≤ 5 KB | 本批开工指令；明确要求超线即停、不得自行放宽 |
+| 最终判据（本批按接受处理） | 本次拆分首屏 gzip 相对拆分起点增量 ≤ 9 KB | 实测 +8.2 KB 后，复核结构性成本，决定接受；9 KB = 实测值向上留 0.8 KB 余量 |
+
+| 项 | 值 |
+| --- | --- |
+| 拆分起点实测 | 300.7 KB gzip / 823.6 KB raw（80 文件 / 72 内联 js） |
+| 拆分后实测 | **308.9 KB gzip / 828.9 KB raw**（88 文件 / 80 内联 js） |
+| 本次增量 | **+8.2 KB gzip**（raw +5.3 KB） |
+| 判定 | 中途 5 KB 线超 3.2 KB（已按规定停下报数）；最终 9 KB 线内，余 0.8 KB → **本批按接受处理** |
+
+增量构成（逐文件 `gzip -9` 实测，拆分前单文件 27,671 B）：
+
+| 文件 | raw | gzip |
+| --- | --- | --- |
+| `local-adapter-core.js` | 2,297 | 1,271 |
+| `local-adapter-shard.js` | 18,398 | 6,142 |
+| `local-adapter-review.js` | 18,295 | 6,412 |
+| `local-adapter-revlog.js` | 12,764 | 4,517 |
+| `local-adapter-banks.js` | 3,357 | 1,602 |
+| `local-adapter-questions.js` | 23,349 | 7,647 |
+| `local-adapter-progress.js` | 6,270 | 2,527 |
+| `local-adapter-cascade.js` | 2,601 | 1,417 |
+| `local-adapter.js`（装配器） | 10,649 | 4,501 |
+| 合计 | 97,980 | 36,036（+8,365 B） |
+
+**结构性成因**（为什么不是手滑写胖）：首屏口径是「逐文件 `gzip -9` 后求和」。同一份代码拆成 9 个文件后，(1) 每个文件都要重付 IIFE 与 `const Storage/K/Core` 前缀；(2) deflate 窗口不跨文件，`Storage.` / `getScopedFresh` / `bankId` 等高频标识符无法共用字典，压缩率从整体 0.298 恶化到 0.368。实测把 8 个新文件的文件头注释全删只省 733 B，仍 +7.5 KB；要压回 5 KB 必须折回约 4 个文件，等于放弃按职责拆分。因此 +8.2 KB 是这一拆分粒度的下限，不是可优化项。
+
+**为什么值得**：`local-adapter.js` 是本仓库唯一一个「拆分后每个单元都有独立、可命名职责」的文件——题库/题目/进度三仓储、题目分片、per-hash 复习布局、revlog 分段、级联删除各归其位，每个单元 50–530 行，读一个不变量只需打开一个文件；此前 2037 行单文件里这些职责交织，任何一处修改都要通读全文才能确认不越界。8.2 KB 换来的可读性与修改安全性，是本轮拆分里收益最实的一笔。
+
+
+回滚方式（提交后同样可逆，四步）：
+1. `js/data/local-adapter.js` 用 `2026-11-14/local-adapter-split/local-adapter.orig.js` 覆盖，删除 8 个 `local-adapter-*.js`；
+2. `contracts/modules.json` 删除 8 条并重编号（或 `git revert` 本批提交），`index.html` / `scripts/_harness.mjs` 删除对应 8 行；
+3. `sw.js` 的 `CACHE` 回落 `qforge-v79` 并 `node scripts/sw-runtime.test.mjs --write-baseline`；
+4. `scripts/idb.test.mjs`、`scripts/backup-hydration.test.mjs` 的静态读取口径随文件恢复（`git revert` 即可）。
+
+拆分本身的质量取证（与预算判定独立）：
+- 等价指纹：拆分前后 `storageDigest` 均为 `1322377215c4a2…d139454d`，22 个操作返回值逐条相同；
+- 41 套件 / 6379 断言全绿（与基线一致，未减少/放宽）；
+- check-modules 108 条 / 0 违约；check-deps 未登记向上引用 0、未登记双向环 0；
+- 按需包不变：import 60.3 / export 27.6 / editor 25.6 / backup 28.7 / 全包 122.4 KB gzip。
+
+
