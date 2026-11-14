@@ -86,10 +86,12 @@
      */
     concatShards(meta, getShard) {
       if (!meta || !meta.sizes) return [];
-      let out = [];
+      const out = [];
       for (let i = 0; i < meta.sizes.length; i++) {
         const part = getShard(i);
-        if (Array.isArray(part) && part.length) out = out.concat(part);
+        if (Array.isArray(part) && part.length) {
+          for (let j = 0; j < part.length; j++) out.push(part[j]);
+        }
       }
       return out;
     },

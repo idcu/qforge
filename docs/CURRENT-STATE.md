@@ -9,7 +9,7 @@
 | 项 | 当前值 | 事实源 | 谁复核 |
 |---|---|---|---|
 | 应用版本 | **1.0.2** | `package.json` | `check-release`（≥ 台账） |
-| SW 缓存 | **qforge-v85** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
+| SW 缓存 | **qforge-v86** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
 | 上次对外发布 | 1.0.2 / qforge-v67 / 2026-11-13 | `docs/release-ledger.json` | `check-release` |
 | 存储 schema | **7** | `js/modules/migrate-core.js` | `migrate` 套件 |
 | contentHash 版本 | **3**（64 位） | `js/utils/question-id.js` | `smoke` / `shard` 套件 |
@@ -17,7 +17,7 @@
 | 性能门禁 | **64 项阈值** | `scripts/bench.mjs` | `bench --assert` |
 | 首屏体积 | 共 95 个文件（87 个 index 内联 js），**317.5 KB gzip / 840.3 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
 
-> 说明：`qforge-v82` 覆盖 2026-11-14 的两次纯移动拆分——切片 A 把 `ui-renderer-views.js` 按页面域拆为 base/home/quiz/lists/result 5 个文件（+3.2 KB gzip），切片 E 把 `migrate.js` 拆为 core/legacy/backend/entry 4 个文件（+3.3 KB gzip）。合计相对拆分前 +6.5 KB gzip / +3.6 KB raw，成因是逐文件 gzip 丢失跨文件窗口红利与每文件头部/包装开销。自 2026-11-14 起首屏体积仅测量与报告，不再作为拆分停手门禁；按需包上限门禁不变。判据变更见 `docs/rounds/2026-11-14/specs/split-roadmap/spec.md` §0 与 ui-split spec §8.2。`qforge-v83` 为 revlog 追加去重解析（`appendInternal` 的 `readSeg` 复用已读分段，净解析次数减半，首屏 +0.4 KB gzip）。`qforge-v84` 为写路径复用序列化文本（`setSync` 的 JSON 文本同时供落盘与 Quota 计费，旧值长度取自缓存条目，首屏 +1.1 KB gzip / +4.4 KB raw）。`qforge-v85` 为写路径序列化收口（IDB 计费复用 `_charLens` 长度、防抖 `set` 预序列化，首屏 +0.6 KB gzip / +2.3 KB raw）。
+> 说明：`qforge-v82` 覆盖 2026-11-14 的两次纯移动拆分——切片 A 把 `ui-renderer-views.js` 按页面域拆为 base/home/quiz/lists/result 5 个文件（+3.2 KB gzip），切片 E 把 `migrate.js` 拆为 core/legacy/backend/entry 4 个文件（+3.3 KB gzip）。合计相对拆分前 +6.5 KB gzip / +3.6 KB raw，成因是逐文件 gzip 丢失跨文件窗口红利与每文件头部/包装开销。自 2026-11-14 起首屏体积仅测量与报告，不再作为拆分停手门禁；按需包上限门禁不变。判据变更见 `docs/rounds/2026-11-14/specs/split-roadmap/spec.md` §0 与 ui-split spec §8.2。`qforge-v83` 为 revlog 追加去重解析（`appendInternal` 的 `readSeg` 复用已读分段，净解析次数减半，首屏 +0.4 KB gzip）。`qforge-v84` 为写路径复用序列化文本（`setSync` 的 JSON 文本同时供落盘与 Quota 计费，旧值长度取自缓存条目，首屏 +1.1 KB gzip / +4.4 KB raw）。`qforge-v85` 为写路径序列化收口（IDB 计费复用 `_charLens` 长度、防抖 `set` 预序列化，首屏 +0.6 KB gzip / +2.3 KB raw）。`qforge-v86` 为分片拼接线性化（`concatShards` 由逐片 `Array#concat` 改为原地 `push`；50k 题整库 `readAll` 34.2→1.2 ms，逐项引用与顺序不变；首屏体积 317.5 KB gzip 无可显示变化）。
 
 ## 2. 什么叫“绿”
 
