@@ -524,6 +524,56 @@ section('R-07 字节口径唯一化：fullKeyOf / bytesOfValue 与 usageBytes �
 }
 
 
+section('R-09 配额计费复用写路径序列化：单次序列化 / 计数等价 / 缓存失配回退 diskBytes / 拒绝仍抛');
+{
+  const S = QB.Storage;
+  const Q = QB.Quota;
+  S.clearAll();
+  Q.reset();
+  S.setSync('r08-k0', { a: 'v0' });
+  await Q.refresh();
+
+  // 1) 单次 setSync：写入与配额计费共用同一份 JSON 文本，只序列化一次
+  const origStr = JSON.stringify;
+  let strCalls = 0;
+  JSON.stringify = function () { strCalls++; return origStr.apply(JSON, arguments); };
+  try { S.setSync('r08-once', { a: 'x'.repeat(40), b: [1, 2, 3] }); } finally { JSON.stringify = origStr; }
+  eq(strCalls, 1, 'setSync 只序列化一次（实测 ' + strCalls + ' 次）');
+  eq(Q.view().usedBytes, S.usageBytes(), '复用长度后增量计数与全量估算逐字节一致');
+
+  // 2) 覆盖 / 中文 / 删除：旧值长度取缓存，仍逐字节一致
+  S.setSync('r08-cn', '中文值');
+  S.setSync('r08-once', { a: 'short' });
+  S.remove('r08-cn');
+  eq(Q.view().usedBytes, S.usageBytes(), '覆盖/中文/删除后逐字节一致');
+
+  // 3) 缓存失配：键在磁盘、缓存未命中 → 回退 diskBytes（仍精确）
+  S.clearAll();
+  Q.reset();
+  ls.setItem(S.fullKeyOf('r08-disk'), JSON.stringify({ v: 'from-other-tab', pad: 'y'.repeat(30) }));
+  S.keys(); // 重建键视图（含旁路键），但不读值 → 缓存仍缺
+  await Q.refresh();
+  eq(Q.view().usedBytes, S.usageBytes(), '基线按 diskBytes 计入旁路写入的键');
+  S.setSync('r08-disk', { v: 'local-new', pad: 'z'.repeat(50) });
+  eq(Q.view().usedBytes, S.usageBytes(), '缓存失配回退 diskBytes 后逐字节一致');
+
+  // 4) 上限拒绝：仍抛 QuotaExceededError，refresh 自愈后计数回到全量口径
+  const rawSet = ls.setItem.bind(ls);
+  ls.setItem = (k, v) => {
+    if (k === S.fullKeyOf('r08-fail')) { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+    return rawSet(k, v);
+  };
+  let threw = null;
+  try { S.setSync('r08-fail', { big: 'x'.repeat(100) }); } catch (e) { threw = e; }
+  ls.setItem = rawSet;
+  ok(threw !== null && threw.name === 'QuotaExceededError', '配额拒绝仍抛 QuotaExceededError');
+  await Q.refresh();
+  eq(Q.view().usedBytes, S.usageBytes(), 'refresh 自愈后与全量估算一致');
+  S.clearAll();
+  Q.reset();
+}
+
+
 section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
 {
   S.clearAll();

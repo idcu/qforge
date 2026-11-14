@@ -119,6 +119,11 @@
     }
   }
 
+  /** 同口径的「已知序列化字符数」版本：写路径已 stringify 过时直接换算，免二次序列化 */
+  function bytesOfChars(key, chars) {
+    return (chars + String(key).length + 2) * 2;
+  }
+
   function diskBytes(key) {
     if (isIdb()) return 0;
     try {
@@ -130,21 +135,27 @@
     }
   }
 
-  /** 写入后按增量调整快照（oldKnown=false 时旧值从磁盘探测） */
-  function trackWrite(key, newValue, oldValue, oldKnown) {
+  /**
+   * 写入后按增量调整快照（oldKnown=false 时旧值从磁盘探测）。
+   * newChars/oldChars：调用方已持有的 JSON 文本长度（Storage 写路径的序列化结果或磁盘原文长度）；
+   * 传 undefined 则回退 bytesOfValue，计费口径完全一致。
+   */
+  function trackWrite(key, newValue, oldValue, oldKnown, newChars, oldChars) {
     if (!meter.ready) return; // 基线未建立：等 refresh 时全量算
-    const nb = bytesOfValue(key, newValue);
-    const ob = oldKnown ? bytesOfValue(key, oldValue) : diskBytes(key);
+    const nb = typeof newChars === 'number' ? bytesOfChars(key, newChars) : bytesOfValue(key, newValue);
+    const ob = typeof oldChars === 'number' ? bytesOfChars(key, oldChars)
+      : oldKnown ? bytesOfValue(key, oldValue) : diskBytes(key);
     if (ob == null) { meter.dirty = true; meter.used += nb; return; }
     meter.used += nb - ob;
     meter.at = Date.now();
     if (meter.used < 0) { meter.used = 0; meter.dirty = true; }
   }
 
-  /** 删除后按增量调整快照（旧值未知 → dirty，等全量校正） */
-  function trackDelete(key, oldValue, oldKnown) {
+  /** 删除后按增量调整快照（旧值未知 → dirty，等全量校正）；oldChars 同上 */
+  function trackDelete(key, oldValue, oldKnown, oldChars) {
     if (!meter.ready) return;
-    const ob = oldKnown ? bytesOfValue(key, oldValue) : diskBytes(key);
+    const ob = typeof oldChars === 'number' ? bytesOfChars(key, oldChars)
+      : oldKnown ? bytesOfValue(key, oldValue) : diskBytes(key);
     if (ob == null) { meter.dirty = true; return; }
     meter.used = Math.max(0, meter.used - ob);
     meter.at = Date.now();

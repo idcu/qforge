@@ -137,6 +137,17 @@
     _keysRev: 0,
     _keysRevCached: -1,
     _pending: new Map(),
+    /**
+     * 预序列化文本（key → JSON 文本）。setSync 为 LS 落盘本来就要 stringify 一次，
+     * 把这份文本留到这里，_writeNow 直接复用，写入与配额计费共用同一次序列化。
+     */
+    _pendingStr: new Map(),
+    /**
+     * 已序列化字符数缓存（key → 当前缓存值的 JSON 文本长度）：供 Quota 免二次 stringify。
+     * 只在长度确实来自本次序列化或磁盘原文时登记；缓存值来源不明（合并/外部变更/水合）处删除，
+     * 失配即回退旧口径（bytesOfValue / diskBytes），保证计费与改动前逐字节一致。
+     */
+    _charLens: new Map(),
     _timer: null,
     _errorListeners: [],
     _mergeHooks: [],
@@ -258,6 +269,8 @@
       this._flushScheduled = false;
       this._flushChain = Promise.resolve();
       this._pending.clear();
+      this._pendingStr.clear();
+      this._charLens.clear();
       this._awaiting = false;
       this._awaitDeletes.clear();
       this._chunkStates = new Map();
@@ -329,6 +342,7 @@
           return;
         }
         this._cache.set(k, v);
+        this._charLens.delete(k); // 物理记录来源，长度未知 → 计费回退旧口径
       });
     },
 
@@ -649,7 +663,11 @@
         this._ops = new Map();
         this._clearPending = false;
         this._awaitDeletes.clear();
-        if (!success && !this._isIdb()) this._cache.clear();
+        if (!success && !this._isIdb()) {
+          this._cache.clear();
+          this._charLens.clear();
+          this._pendingStr.clear();
+        }
       }
       // success 但未切换（IDB 中途不可用 → 回落 LS）：保留待写，由调用方 flush 按 LS
       // 既有语义落盘；失败则待写保留重试，本页不丢数据。
@@ -716,6 +734,8 @@
         pending.forEach((value, key) => {
           this._cache.set(key, value);
           this._pending.set(key, value);
+          this._charLens.delete(key);
+          this._pendingStr.delete(key);
         });
         this._awaiting = true;
         this._invalidateKeys();
@@ -731,11 +751,15 @@
       pending.forEach((value, key) => {
         this._cache.set(key, value);
         this._pending.set(key, value);
+        this._charLens.delete(key);
+        this._pendingStr.delete(key);
         this._enqueue({ op: 'set', key: key, value: value });
       });
       deletes.forEach((key) => {
         this._cache.delete(key);
         this._pending.delete(key);
+        this._charLens.delete(key);
+        this._pendingStr.delete(key);
         this._enqueue({ op: 'del', key: key });
       });
       if (clear) this._clearPending = true;
@@ -836,6 +860,8 @@
         pending.forEach((value, key) => {
           this._cache.set(key, value);
           this._pending.set(key, value);
+          this._charLens.delete(key);
+          this._pendingStr.delete(key);
         });
         deletes.forEach((key) => this._awaitDeletes.add(key));
         if (clear) this._clearPending = true;
@@ -881,14 +907,18 @@
         if (v === undefined) {
           this._cache.delete(k);
           this._pending.delete(k);
+          this._charLens.delete(k);
+          this._pendingStr.delete(k);
           // 块视图同步遗忘，否则被外部删除的状态会从二级缓存里被 keys()/get 重新看到
           this._chunkForget(k);
         } else if (hook) {
           const merged = hook.merge(this._cache.get(k), v);
           this._cache.set(k, merged);
+          this._charLens.delete(k);
           if (this._pending.has(k)) this._pending.set(k, merged);
         } else {
           this._cache.set(k, v);
+          this._charLens.delete(k);
           this._pending.delete(k);
         }
         if (beforeVisible !== this._logicalKeyVisible(k)) changed = true;
@@ -915,8 +945,10 @@
     /**
      * C009：把本次写入的字节增量交给 QB.Quota 快照（渲染只读 view()，不再全量 stringify）。
      * 旧值在缓存里就算精确差值；不在缓存则让 Quota 从磁盘原文探测（LS）或按 0（IDB 缓存权威）。
+     * 新增 `newChars`/`_charLens`：写路径已经序列化过的长度直接复用，Quota 不再重复 stringify；
+     * 任一侧长度未知（IDB 无序列化、值来源不明）就传 undefined，由 Quota 走原口径。
      */
-    _trackQuotaSet(key, value) {
+    _trackQuotaSet(key, value, newChars) {
       if (!QB.Quota || typeof QB.Quota.trackWrite !== 'function') return;
       let oldKnown = this._cache.has(key);
       let oldValue = oldKnown ? this._cache.get(key) : undefined;
@@ -924,7 +956,8 @@
         const chunked = this._chunkLookup(key);
         if (chunked !== undefined) { oldKnown = true; oldValue = chunked; }
       }
-      QB.Quota.trackWrite(key, value, oldValue, oldKnown);
+      const oldChars = oldKnown && this._charLens.has(key) ? this._charLens.get(key) : undefined;
+      QB.Quota.trackWrite(key, value, oldValue, oldKnown, newChars, oldChars);
     },
 
     _notifyError(e) {
@@ -939,7 +972,13 @@
       const snapshot = Array.from(this._pending.entries());
       try {
         snapshot.forEach(([key, value]) => {
-          global.localStorage.setItem(fullKeyOf(key), JSON.stringify(value));
+          // setSync 已提前序列化（_pendingStr）→ 直接复用；防抖 set 才需要在这里序列化
+          let str = this._pendingStr.get(key);
+          if (typeof str !== 'string') str = JSON.stringify(value);
+          global.localStorage.setItem(fullKeyOf(key), str);
+          if (typeof str === 'string') this._charLens.set(key, str.length);
+          else this._charLens.delete(key);
+          this._pendingStr.delete(key);
         });
         snapshot.forEach(([key]) => this._pending.delete(key));
       } catch (e) {
@@ -959,9 +998,12 @@
         this._cancelSchedule();
         this._writeNow();
       }
-      global.localStorage.setItem(fullKeyOf(key), JSON.stringify(value));
+      const str = JSON.stringify(value);
+      global.localStorage.setItem(fullKeyOf(key), str);
       this._cache.set(key, value);
+      this._charLens.set(key, str.length);
       this._pending.delete(key);
+      this._pendingStr.delete(key);
       this._invalidateKeysIfChanged(key, beforeVisible);
       return true;
     },
@@ -970,6 +1012,8 @@
       global.localStorage.removeItem(fullKeyOf(key));
       this._cache.delete(key);
       this._pending.delete(key);
+      this._charLens.delete(key);
+      this._pendingStr.delete(key);
       this._invalidateKeysIfChanged(key, beforeVisible);
     },
 
@@ -1055,10 +1099,19 @@
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
       this._demoteFallbackOnBusinessWrite(key);
-      this._trackQuotaSet(key, value);
+      // LS 落盘本来就要 stringify 一次：提前做，配额计费与 setItem 共用同一份文本，
+      // 省掉 Quota 的二次序列化。序列化异常（循环引用等）时保持原路径，由 _writeNow 抛出。
+      let str = null;
+      if (!this._isIdb() && !this._awaiting) {
+        try { str = JSON.stringify(value); } catch (_) { str = null; }
+        if (typeof str !== 'string') str = null;
+      }
+      this._trackQuotaSet(key, value, str === null ? undefined : str.length);
       const beforeVisible = this._logicalKeyVisible(key);
       this._cache.set(key, value);
       this._pending.set(key, value);
+      if (str === null) this._pendingStr.delete(key);
+      else this._pendingStr.set(key, str);
       this._invalidateKeysIfChanged(key, beforeVisible);
       if (this._awaiting) return true; // F2：只排队，不落 LS
       if (this._isIdb()) {
@@ -1079,6 +1132,8 @@
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
       this._demoteFallbackOnBusinessWrite(key);
+      // 防抖写入不额外序列化；值已更新，上一份预序列化文本作废
+      this._pendingStr.delete(key);
       this._trackQuotaSet(key, value);
       const beforeVisible = this._logicalKeyVisible(key);
       this._cache.set(key, value);
@@ -1160,9 +1215,12 @@
         const chunked = this._chunkLookup(key);
         if (chunked !== undefined) { oldKnown = true; oldValue = chunked; }
       }
-      if (QB.Quota && typeof QB.Quota.trackDelete === 'function') QB.Quota.trackDelete(key, oldValue, oldKnown);
+      const oldChars = oldKnown && this._charLens.has(key) ? this._charLens.get(key) : undefined;
+      if (QB.Quota && typeof QB.Quota.trackDelete === 'function') QB.Quota.trackDelete(key, oldValue, oldKnown, oldChars);
       this._cache.delete(key);
       this._pending.delete(key);
+      this._charLens.delete(key);
+      this._pendingStr.delete(key);
       this._chunkForget(key);
       // 引导键（迁移锁/后端标记）删除也必须立即可见：等待期释放锁不能被 _awaitDeletes 拖延
       if (isBootstrapKey(key)) {
@@ -1222,6 +1280,8 @@
       if (ev.newValue === null) {
         this._cache.delete(key);
         this._pending.delete(key);
+        this._charLens.delete(key);
+        this._pendingStr.delete(key);
       } else {
         try {
           const incoming = JSON.parse(ev.newValue);
@@ -1229,10 +1289,13 @@
           if (hook) {
             const merged = hook.merge(this._cache.get(key), incoming);
             this._cache.set(key, merged);
+            this._charLens.delete(key);
             if (this._pending.has(key)) this._pending.set(key, merged);
           } else {
             this._cache.set(key, incoming);
+            this._charLens.set(key, ev.newValue.length);
             this._pending.delete(key);
+            this._pendingStr.delete(key);
           }
         } catch (e) {
           // fail-loud：解析失败 ≠ 删除。保留本地缓存并通知，避免把不可解析的对端值当作删除。
@@ -1284,10 +1347,15 @@
       if (value === undefined) {
         this._cache.delete(key);
         this._pending.delete(key);
+        this._charLens.delete(key);
+        this._pendingStr.delete(key);
         this._invalidateKeysIfChanged(key, beforeVisible);
         return defaultValue;
       }
       this._cache.set(key, value);
+      // 磁盘原文长度 = JSON 文本长度，直接登记给配额计费复用（不再二次 stringify）
+      if (raw !== null) this._charLens.set(key, raw.length);
+      else this._charLens.delete(key);
       this._invalidateKeysIfChanged(key, beforeVisible);
       return value;
     },
@@ -1334,6 +1402,7 @@
         value = raw === null ? undefined : JSON.parse(raw);
       } catch (e) {
         this._cache.delete(key);
+        this._charLens.delete(key);
         value = undefined;
       }
       // 本函数不回退缓存：磁盘缺失而缓存仍有旧值时也属于键集合变化
@@ -1342,10 +1411,13 @@
       if (value === undefined) {
         this._cache.delete(key);
         this._pending.delete(key);
+        this._charLens.delete(key);
+        this._pendingStr.delete(key);
         this._invalidateKeysIfChanged(key, beforeVisible);
         return defaultValue;
       }
       this._cache.set(key, value);
+      this._charLens.set(key, raw.length);
       this._pending.delete(key);
       this._invalidateKeysIfChanged(key, beforeVisible);
       return value;
@@ -1408,6 +1480,8 @@
       // C009：整库清空后用量快照必然失效，交给下一次 refresh 重建基线
       if (QB.Quota && typeof QB.Quota.reset === 'function') QB.Quota.reset();
       this._chunkStates.clear();
+      this._charLens.clear();
+      this._pendingStr.clear();
       this._invalidateKeys();
       if (this._awaiting) {
         // F2：等待期清空只作用于内存；切换后由 _completeMigrationSwitch 补发 clear 到 IDB

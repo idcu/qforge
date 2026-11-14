@@ -64,7 +64,7 @@
 
 ### D-3. C 系列、存储与阶段 0/2/3 验收读数
 
-bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 87 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 95 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw，2026-11-13 阶段 2A 契约语义对等复测 294.0 KB gzip / 807.0 KB raw，2026-11-13 阶段 2B 判分与统计口径复测 294.5 KB gzip / 808.4 KB raw，2026-11-13 阶段 2C 备份/同步/导入复测 295.2 KB gzip / 810.0 KB raw，2026-11-13 阶段 3 P2 治理复测 295.5 KB gzip / 810.8 KB raw，2026-11-13 BL-1 删库清理导入历史复测 295.8 KB gzip / 811.6 KB raw，2026-11-13 方向 F 热点夹具 + `dailyFromLog` 单遍复测 295.9 KB gzip / 811.9 KB raw，2026-11-13 方向 C B1 拆出 `ui-renderer-dialogs.js` 复测 296.9 KB gzip / 812.8 KB raw，2026-11-13 方向 E 409 可重放复测 297.3 KB gzip / 813.3 KB raw，2026-11-13 方向 C B2 拆出 `ui-renderer-views.js` 复测 298.9 KB gzip / 815.0 KB raw，2026-11-13 三缺陷修复（export 按需包补 DSV/XLSX vendor + 分阶段水合索引前置 + renderStats 保留 FSRS 入口）复测 299.3 KB gzip / 816.3 KB raw，2026-11-13 §8 #5–#11 缺陷复核与修复复测 301.1 KB gzip / 823.2 KB raw，2026-11-13 方向 C B3（结果页并入 views + core 拆出）复测 300.6 KB gzip / 823.1 KB raw，2026-11-14 导出器拆分（格式层 `exporter-formats.js`，按需包）复测 300.6 KB gzip / 823.2 KB raw，2026-11-14 导入适配器拆分（`adapters-normalize.js` + `adapters-table.js`，按需包）复测 300.6 KB gzip / 823.4 KB raw，2026-11-14 备份拆分（`backup-pack.js`，按需包）复测 300.6 KB gzip / 823.5 KB raw，2026-11-14 编辑器拆分（`question-manager.js`，按需包 + `sw.js` CORE 一行）复测 300.7 KB gzip / 823.6 KB raw，2026-11-14 local-adapter 拆分（数据层 1 → 9 个文件，首屏 +8 个脚本）复测 308.9 KB gzip / 828.9 KB raw，2026-11-14 方向 D 切片 A（views 按页面域拆为 base/home/quiz/lists/result 5 个文件，首屏 +4 个脚本）复测 312.1 KB gzip / 830.7 KB raw，2026-11-14 方向 D 切片 E（migrate 拆为 core/legacy/backend/entry 4 个文件，首屏 +3 个脚本）复测 315.4 KB gzip / 832.8 KB raw，2026-11-14 revlog 追加去重解析（`appendInternal` 的 `readSeg` 复用已读分段，净解析次数减半）复测 315.8 KB gzip / 833.6 KB raw）：**315.8 KB gzip / 833.6 KB raw**；按需包 28 个脚本另行随用随取（**跨包去重**合计 343.5 KB raw / 122.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包、`js/modules/backup.js` 只在 backup 包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
+bench 全程 heapUsed：8.98 → 13.85 MB（**+4.86 MB**，`--expose-gc` 实跑；3000 题规模库末态 37.94 MB；DOM 增量末态 38.14 MB）。首屏静态体积（index.html + css + 87 个 index 内联 js（含 `@idcu` 模块适配层）+ FSRS 训练 Worker + sw.js + manifest/icon，共 95 个文件，逐文件 `gzip -9` 合计；2026-11-08 C 步骤1 复测 385.8 KB gzip / 1088.7 KB raw，C 步骤3 前半复测 386.0 KB gzip / 1089.3 KB raw，C 步骤3 后半复测 386.5 KB gzip / 1090.4 KB raw，C 步骤4 冷路径复测 386.6 KB gzip / 1090.6 KB raw，C 步骤4 后半只读渲染复测 386.6 KB gzip / 1090.7 KB raw，C 步骤4 第三批复测 386.7 KB gzip / 1090.9 KB raw，C 步骤4 收尾复测 387.6 KB gzip / 1093.4 KB raw，B 段补完复测 388.4 KB gzip / 1095.6 KB raw，C 步骤5 严格模式复测 388.7 KB gzip / 1096.9 KB raw，C 步骤6 收尾（删库作用域枚举）复测 389.1 KB gzip / 1098.0 KB raw，2026-11-11 T04/T06 复测 390.0 KB gzip / 1099.6 KB raw，2026-11-11 M2-T07 复测 391.0 KB gzip / 1102.0 KB raw，2026-11-11 M3-T09 抽出 action/view 路由复测 394.3 KB gzip / 1107.2 KB raw，2026-11-12 M3-T09 收尾抽出会话流程/开练弹窗/启动诊断复测 398.0 KB gzip / 1111.5 KB raw，2026-11-12 首屏功能级按需加载（23 个按需脚本移出首屏，另加 loader.js）复测 289.7 KB gzip / 794.4 KB raw，2026-11-12 R-18 等待计时注入缝复测 290.0 KB gzip / 794.9 KB raw，2026-11-12 崩溃/强杀丢评分修复复测 290.2 KB gzip / 795.4 KB raw，2026-11-13 P0 数据安全修复复测 293.0 KB gzip / 803.6 KB raw，2026-11-13 阶段 2A 契约语义对等复测 294.0 KB gzip / 807.0 KB raw，2026-11-13 阶段 2B 判分与统计口径复测 294.5 KB gzip / 808.4 KB raw，2026-11-13 阶段 2C 备份/同步/导入复测 295.2 KB gzip / 810.0 KB raw，2026-11-13 阶段 3 P2 治理复测 295.5 KB gzip / 810.8 KB raw，2026-11-13 BL-1 删库清理导入历史复测 295.8 KB gzip / 811.6 KB raw，2026-11-13 方向 F 热点夹具 + `dailyFromLog` 单遍复测 295.9 KB gzip / 811.9 KB raw，2026-11-13 方向 C B1 拆出 `ui-renderer-dialogs.js` 复测 296.9 KB gzip / 812.8 KB raw，2026-11-13 方向 E 409 可重放复测 297.3 KB gzip / 813.3 KB raw，2026-11-13 方向 C B2 拆出 `ui-renderer-views.js` 复测 298.9 KB gzip / 815.0 KB raw，2026-11-13 三缺陷修复（export 按需包补 DSV/XLSX vendor + 分阶段水合索引前置 + renderStats 保留 FSRS 入口）复测 299.3 KB gzip / 816.3 KB raw，2026-11-13 §8 #5–#11 缺陷复核与修复复测 301.1 KB gzip / 823.2 KB raw，2026-11-13 方向 C B3（结果页并入 views + core 拆出）复测 300.6 KB gzip / 823.1 KB raw，2026-11-14 导出器拆分（格式层 `exporter-formats.js`，按需包）复测 300.6 KB gzip / 823.2 KB raw，2026-11-14 导入适配器拆分（`adapters-normalize.js` + `adapters-table.js`，按需包）复测 300.6 KB gzip / 823.4 KB raw，2026-11-14 备份拆分（`backup-pack.js`，按需包）复测 300.6 KB gzip / 823.5 KB raw，2026-11-14 编辑器拆分（`question-manager.js`，按需包 + `sw.js` CORE 一行）复测 300.7 KB gzip / 823.6 KB raw，2026-11-14 local-adapter 拆分（数据层 1 → 9 个文件，首屏 +8 个脚本）复测 308.9 KB gzip / 828.9 KB raw，2026-11-14 方向 D 切片 A（views 按页面域拆为 base/home/quiz/lists/result 5 个文件，首屏 +4 个脚本）复测 312.1 KB gzip / 830.7 KB raw，2026-11-14 方向 D 切片 E（migrate 拆为 core/legacy/backend/entry 4 个文件，首屏 +3 个脚本）复测 315.4 KB gzip / 832.8 KB raw，2026-11-14 revlog 追加去重解析（`appendInternal` 的 `readSeg` 复用已读分段，净解析次数减半）复测 315.8 KB gzip / 833.6 KB raw，2026-11-14 写路径复用序列化文本（`setSync` 的 JSON 文本传给 Quota 计费并在落盘时复用）复测 316.9 KB gzip / 838.0 KB raw）：**316.9 KB gzip / 838.0 KB raw**；按需包 28 个脚本另行随用随取（**跨包去重**合计 343.5 KB raw / 122.4 KB gzip；`js/importers/adapters.js` 同属 import 与 editor 两包、`js/modules/backup.js` 只在 backup 包，按 URL 去重只计一次，逐文件 `gzip -9`），不计入首屏；图片字节在 IndexedDB，不计入首屏包。
 
 > **逻辑键视图（C1）新增两行门禁（2026-11-07，50k/IDB 档，同机 `--expose-gc`，各 5/20 采样）**
 > - `keys()` 首次构建（50000 题 · IDB）：中位 **15.08–17.38 ms**（三次门禁最小 11.89–14.22 / 最大 32.83–40.61，门禁按中位数判定），门禁 **≤40 ms**；逻辑键 **5.0 万级（本次 50361 个字符串物化，随夹具哈希去重略有浮动）**。（**2026-11-12 起口径已变更**：判定改为 10 轮最小样本 ≤ Node 大版本基线×1.35，见 **3-B-1**；本行保留为历史读数。）
@@ -360,3 +360,34 @@ node --expose-gc scripts/bench.mjs --assert                                     
 - 夹具只覆盖内存 IDB；真实浏览器 IndexedDB 的大库逐键读（`readMap`）未实测，本表不代表真机。
 - 同机运行间整体漂移可达约 20%，红线按「量级回归」设置，不用于判定 <20% 的差异。
 - `removeMany` 每批删除会改变夹具规模（累计移除 120 题 / 50k，占比 0.24%），不影响量级结论。
+
+### D-11. 写路径配额计费复用序列化：配对量化（2026-11-14，门禁看不见的部分）
+
+**为什么单列**：`gradeMany` 门禁的 harness 里 `Quota.meter.ready=false`（未建立基线），而真实应用启动后配额探测完成，每次写入都会额外做「新值 + 旧值」两次 `JSON.stringify` 用于计费。**这部分开销在门禁口径下恒为 0，任何门禁读数都看不见**，只能配对实测存档。
+
+**口径**：同一 harness、同一批 20 题、同一 revlog 稳态（`REVLOG_MAX=20000` 预热到满），三种模式**交错**执行（抵消整机漂移），每种模式每轮先预热 20 次再计时 200 次 `SRSStore.gradeMany`：
+
+- `off`：`Quota.reset()`，`meter.ready=false`（门禁现状）；
+- `legacy`：`Quota.refresh()` 后按改动前口径计费（丢弃字符长度，让 Quota 自己序列化新/旧值）；
+- `new`：`Quota.refresh()` 后走写路径复用的序列化长度（`_charLens` / `_pendingStr`）。
+
+每轮结束核对 `Quota.view().usedBytes` 与 `Storage.usageBytes()`，偏差即计费漂移。
+
+**四次实测（ms/次调用，p50；括号为同轮 `off` 的比值）**
+
+| 运行 | 轮数×每轮 | off | legacy | new | new vs legacy | 计费漂移 |
+|---|---|---|---|---|---|---|
+| 1 | 8×200 | 0.2636 | 0.3670（+39.2%） | 0.2690（+2.1%） | −26.7% | 0 ppm |
+| 2 | 12×200 | 0.2380 | 0.3081（+29.5%） | 0.2217（−6.9%） | −28.0% | 0 ppm |
+| 3 | 16×200 | 0.2181 | 0.2829（+29.7%） | 0.2283（+4.7%） | −19.3% | 0 ppm |
+| 4 | 16×200 | 0.2348 | 0.3050（+29.9%） | 0.2265（−3.5%） | −25.7% | 0 ppm |
+
+- **改动前**：Quota ready 让真实写路径变慢 **+29.5%～+39.2%**（四次中三次落在 29.5–29.9%，首次运行整机偏慢故比值更大）。
+- **改动后**：与定额未就绪的差值落在 **−6.9%～+4.7%**，即已被运行间噪声吞没，不再有可分辨的额外开销。
+- **计费漂移四轮均为 0 ppm**（`usedBytes` 与全量 `usageBytes()` 逐字节相等），说明「复用长度」没有换来计数误差。
+- 门禁口径本身也略降（本轮 `gradeMany` p25 比值 **6.97**，A 收口时为 7.15），但那只反映去重解析的收益；上表的差值才是门禁看不见的那部分。
+
+**适用边界**：`_charLens` / `_pendingStr` 只在 LocalStorage 后端填充。IndexedDB 模式以结构化克隆存值，**没有可复用的 JSON 文本**，`_charLens` 不填充，计费自动回退旧口径（`bytesOfValue`），行为与改动前逐字一致——本表收益仅适用于 LS 真实路径。
+
+**复现与留档**：一次性脚本 `2026-11-14/opt-a/quota-paired.mjs`（gitignored，`PAIRED_ROUNDS` / `PAIRED_PER` 控制轮数），原始输出 `2026-11-14/opt-a/logs/quota-paired-*.log`。
+
