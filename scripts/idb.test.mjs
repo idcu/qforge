@@ -1929,8 +1929,10 @@ section('C 步骤4 第三批：stateKeys 984 / readMap per-hash 1000（13/22）'
   const laSrcS = readAdapterSources();
   ok(laSrcS.indexOf('return stateKeysOf(Storage.keysScoped(bankId), bankId);') >= 0,
     '静态：984 stateKeys 改走 keysScoped');
-  ok(laSrcS.indexOf('const st = Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null);') >= 0,
-    '静态：1000 readMap per-hash 改走 getScopedFresh');
+  ok(laSrcS.indexOf('const st = Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null);') < 0,
+    '静态：1000 readMap 不再逐键 getScopedFresh（消除 50k 次解析回块）');
+  ok(laSrcS.indexOf('const per = Storage.reviewStatesScoped(bankId);') >= 0,
+    '静态：1000 readMap 改走一次 reviewStatesScoped 快照');
   ok(laSrcS.indexOf('return stateKeysOf(Storage.keys(), bankId);') < 0,
     '静态：stateKeys 不再使用全量 Storage.keys()');
 
@@ -1946,28 +1948,36 @@ section('C 步骤4 第三批：stateKeys 984 / readMap per-hash 1000（13/22）'
   ok(n1000 && n1000.name === 'NotHydratedError' && n1000.key === Q2.KEYS.review(B.id),
     '1000 readMap 未水合仍 fail-loud（首个抛错点为上游 legacyMap，per-hash 读取被前置拦截）',
     '（实测 key=' + (n1000 ? n1000.key : '无') + '）');
+  const nSnap = errOf(() => S2.reviewStatesScoped(B.id));
+  ok(nSnap && nSnap.name === 'NotHydratedError' && nSnap.bankId === B.id,
+    '1000 快照入口自身也拒绝未水合库（不返回残缺空表）',
+    '（实测 ' + (nSnap ? nSnap.name : '未抛错') + '）');
 
-  // 已水合等价性 + 运行时探针（红：per-hash 走 getFresh 3 次 / scoped 仅 legacy 1 次）
+  // 已水合等价性 + 运行时探针（红：per-hash 走 50k 次 getScopedFresh；现改为一次物理快照）
   // 注意：getScopedFresh 内部会调用 this.getFresh，故 getFresh 探针需排除 scoped 内部嵌套调用，
   // 只统计「readMap 直接走宽松入口」的次数。
-  const calls = { directFresh: 0, scoped: 0 };
+  const calls = { directFresh: 0, scoped: 0, snapshot: 0 };
   let inScoped = 0;
   const origFresh = S2.getFresh;
   const origScoped = S2.getScopedFresh;
+  const origSnapshot = S2.reviewStatesScoped;
   S2.getFresh = function (...a) { if (!inScoped) calls.directFresh++; return origFresh.apply(S2, a); };
   S2.getScopedFresh = function (...a) {
     calls.scoped++;
     inScoped++;
     try { return origScoped.apply(S2, a); } finally { inScoped--; }
   };
+  S2.reviewStatesScoped = function (...a) { calls.snapshot++; return origSnapshot.apply(S2, a); };
   const mapA = Q2.ReviewStore.readMap(A.id);
   S2.getFresh = origFresh;
   S2.getScopedFresh = origScoped;
+  S2.reviewStatesScoped = origSnapshot;
   eq(Object.keys(mapA).sort().join(','), h.slice().sort().join(','),
     '等价 1000：已水合 readMap 的 4 个 hash 与迁移前一致');
   eq(mapA[h[0]].stability, 5, '等价 1000：per-hash 状态值不变（q0 stability=5）');
   eq(mapA[h[3]].difficulty, 2, '等价 1000：旧整表合并值不变（q3 difficulty=2）');
-  eq(calls.scoped, 4, '1000 运行时探针：readMap 的 4 次读取全走 getScopedFresh（legacy 1 + per-hash 3）');
+  eq(calls.snapshot, 1, '1000 运行时探针：per-hash 只做 1 次物理快照（不再 50k 次逐键查表建对象）');
+  eq(calls.scoped, 1, '1000 运行时探针：仅旧整表 1 次作用域读取（不再每 hash 一次 getScopedFresh）');
   eq(calls.directFresh, 0, '1000 运行时探针：readMap 不再直接走宽松 getFresh');
   eq(Q2.ReviewStore.stateKeys(A.id).sort().join(','), h.slice(0, 3).sort().join(','),
     '等价 984：已水合 stateKeys 返回 3 个物理状态键');

@@ -578,6 +578,75 @@
       return out;
     },
 
+    /**
+     * 同步视图中「带复习布局元数据」的题库 id（迁移快速路径的候选集合，**不**展开 50k 状态键）。
+     * IDB 分阶段水合下，reviewMeta/reviewRev 与旧整表键本就常驻同步视图（见 txGetAllSplit），
+     * 因此扫 `_cache/_pending` 的键前缀即可得到候选；只有真的带 v3 清单的库才需要后续枚举物理键。
+     * LS 模式同步视图可能未覆盖磁盘，退回既有 `keys()` 全键视图（LS 无块展开成本差异）。
+     * @returns {string[]}
+     */
+    reviewBankIds() {
+      const ids = new Set();
+      const metaPrefix = String(QB.KEYS.reviewMeta(''));
+      const reviewPrefix = String(QB.KEYS.review(''));
+      const collect = (k) => {
+        if (k.indexOf(metaPrefix) === 0) { ids.add(k.slice(metaPrefix.length)); return; }
+        if (k.indexOf(reviewPrefix) !== 0) return;
+        const rest = k.slice(reviewPrefix.length);
+        const cut = rest.indexOf(':');
+        ids.add(cut < 0 ? rest : rest.slice(0, cut));
+      };
+      const scan = (map) => map.forEach((v, k) => { if (v !== undefined) collect(k); });
+      scan(this._cache);
+      scan(this._pending);
+      if (!this._isIdb()) this.keys().forEach(collect);
+      return Array.from(ids).filter(Boolean);
+    },
+
+    /**
+     * 某库 per-hash 复习状态快照（hash → state；`ReviewStore.readMap` 的唯一数据源）。
+     * 直接合并「物理块二级缓存 → 逻辑键缓存 → 待写」三级视图，与 `get` 的优先级一致
+     * （待写/缓存覆盖块）。旧路径 `stateKeys + 逐键 getScopedFresh` 会先把 50k 块内状态
+     * 展开成 50k 逻辑键字符串，再逐键解析回块查找——这里省掉那次往返，语义不变。
+     * 未水合库抛 NotHydratedError（与 keysScoped 同口径）。
+     * @param {string} bankId
+     * @returns {Object<string, Object>}
+     */
+    reviewStatesScoped(bankId) {
+      const id = String(bankId == null ? '' : bankId);
+      if (this._hydratedBanks !== null && !this.isBankHydrated(id)) {
+        throw new NotHydratedError(id, null, 'reviewStatesScoped 要求目标库已水合：先 await Storage.ensureBank(bankId)');
+      }
+      const out = {};
+      // 旧整表键 `user:review:<bank>` 无尾随冒号，天然被前缀排除；`<hash>` 自身含一个冒号（'3:…'）。
+      const statePrefix = String(QB.KEYS.review(id)) + ':';
+      const hashOf = (k) => (k.indexOf(statePrefix) === 0 ? k.slice(statePrefix.length) || null : null);
+      if (this._isIdb()) {
+        const chunkPrefix = 'user:reviewChunk:' + id + ':';
+        this._chunkStates.forEach((states, chunkKey) => {
+          if (!states || chunkKey.indexOf(chunkPrefix) !== 0) return;
+          Object.keys(states).forEach((h) => { out[h] = states[h]; });
+        });
+      } else {
+        this.keysScoped(id).forEach((k) => {
+          const h = hashOf(k);
+          if (h === null) return;
+          const v = this._freshValue(k, null);
+          if (v && typeof v === 'object') out[h] = v;
+        });
+        return out;
+      }
+      const overlay = (map) => map.forEach((v, k) => {
+        const h = hashOf(k);
+        if (h === null) return;
+        if (v === undefined || this._awaitDeletes.has(k)) delete out[h];
+        else out[h] = v;
+      });
+      overlay(this._cache);
+      overlay(this._pending);
+      return out;
+    },
+
     _subscribeBroadcast() {
       if (this._bc || typeof global.BroadcastChannel !== 'function') return;
       try {

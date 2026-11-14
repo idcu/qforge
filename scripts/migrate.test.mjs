@@ -1046,7 +1046,111 @@ section('P2-06 reviewMeta v3→v4：逐键一致、迁移失败保留原清单')
   console.log('  [P2-06] 迁移前 v3 清单 3 键 → v4 标记 7B；逐键一致、错题/收藏未变、失败保留原清单');
 }
 
-section('P0-1 迁移提交顺序：落盘失败不提前提交版本，重启自愈');
+section('迁移稳态快速路径：v7 无清单零键展开；非 v7/半迁移/损坏态仍走完整检查');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const mkHarness = () => createHarness(ROOT, { raw: raw, indexedDB: idb, BroadcastChannel: globalThis.BroadcastChannel });
+  const H = await mkHarness();
+  const Q = H.QB;
+  Q.DB.init();
+  await Q.Storage.initStore();
+  if (Q.Storage.mode !== 'idb') {
+    // 空 LS 新装：先切 IDB（等价于 Migration v6 的空库分支），再按 v7 分块写入
+    await Q.Store.migrateToIdb(Q.Store.lsSource());
+    Q.Storage.adoptStore({ mode: 'idb', records: await Q.Store.readAll(true) });
+  }
+  eq(Q.Storage.mode, 'idb', '前置：IDB 后端（v7 物理分块）');
+  Q.Storage.setSync(Q.KEYS.metaSchema, 7);
+  const bank = await Q.DB.banks.create({ name: '稳态报表库' });
+  const hashes = [];
+  for (let i = 0; i < 256; i++) {
+    const h = '3:' + i.toString(16).padStart(16, '0');
+    hashes.push(h);
+    Q.Storage.setSync(Q.KEYS.reviewState(bank.id, h), { last: 100 + i, due: 2000 + i, s: 1, d: 1 });
+  }
+  Q.ReviewStore.writeMarker(bank.id);
+  await Q.Storage.flush();
+
+  // 下一次启动：块/meta 已落盘，重新水合
+  const H2 = await mkHarness();
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  eq((await Q2.Storage.initStore()).mode, 'idb', '重启后仍为 IDB');
+  await Q2.Storage.ensureBank(bank.id);
+  const counter = { stateKeys: 0, keysScoped: 0, keys: 0 };
+  const spies = [
+    ['stateKeys', Q2.ReviewStore, 'stateKeys'],
+    ['keysScoped', Q2.Storage, 'keysScoped'],
+    ['keys', Q2.Storage, 'keys']
+  ].map(([k, obj, name]) => {
+    const orig = obj[name];
+    obj[name] = function () { counter[k]++; return orig.apply(this, arguments); };
+    return () => { obj[name] = orig; };
+  });
+  const steady = await Q2.Migration.run();
+  spies.forEach((restore) => restore());
+  eq(steady.fromVersion, 7, '稳态：fromVersion=7');
+  eq(steady.reviewMeta.migrated, 0, '稳态：无清单需要压缩');
+  eq(steady.reviewMeta.banks, 1, '稳态：候选库仍被统计（banks=1）');
+  eq(counter.stateKeys + counter.keysScoped + counter.keys, 0,
+    '稳态零键展开（stateKeys/keysScoped/keys 调用 0 次，实测 ' + JSON.stringify(counter) + '）');
+
+  // 等价证据：新 readMap 与旧实现（stateKeys + 逐键 getScopedFresh）逐项一致
+  const legacyHash = hashes[0];
+  Q2.Storage.setSync(Q2.KEYS.review(bank.id), { [legacyHash]: { last: 999999, due: 1, s: 9, d: 9 } });
+  Q2.Storage.setSync(Q2.KEYS.reviewState(bank.id, hashes[1]), { last: 500000, due: 3, s: 2, d: 2 });
+  Q2.ReviewStore.removeHash(bank.id, hashes[2]);
+  const oldReadMap = () => {
+    const legacy = Q2.ReviewStore.legacyMap(bank.id);
+    const per = {};
+    Q2.ReviewStore.stateKeys(bank.id).forEach((h) => {
+      const st = Q2.Storage.getScopedFresh(Q2.KEYS.reviewState(bank.id, h), bank.id, null);
+      if (st && typeof st === 'object') per[h] = st;
+    });
+    if (!Object.keys(legacy).length) return per;
+    return Q2.ReviewMerge.mergeMaps(legacy, per);
+  };
+  const canon = (m) => JSON.stringify(Object.keys(m).sort().map((k) => [k, m[k]]));
+  const newMap = Q2.ReviewStore.readMap(bank.id);
+  eq(Object.keys(newMap).length, 255, 'readMap 条数 = 256 − 删除 1（旧整表条目已被 per-hash 覆盖/合并）');
+  eq(canon(newMap), canon(oldReadMap()), '新 readMap 与旧实现（stateKeys+逐键查表）逐项一致');
+
+  // 负向 1：标记缺失（半迁移：有物理状态、无 reviewMeta）→ 必须走完整检查
+  Q2.Storage.remove(Q2.KEYS.reviewMeta(bank.id));
+  await Q2.Storage.flush();
+  let called = 0;
+  const origStateKeys = Q2.ReviewStore.stateKeys;
+  Q2.ReviewStore.stateKeys = function () { called++; return origStateKeys.apply(this, arguments); };
+  const half = await Q2.Migration.run();
+  Q2.ReviewStore.stateKeys = origStateKeys;
+  ok(called > 0, '标记缺失仍走完整检查（stateKeys 调用 ' + called + ' 次）');
+  eq(Q2.Storage.getFresh(Q2.KEYS.reviewMeta(bank.id), null), null, '标记缺失不会被伪造为已迁移');
+
+  // 负向 2：损坏 meta（v3 但 keys 非数组）→ 完整检查，且不写 v4 标记
+  Q2.Storage.setSync(Q2.KEYS.reviewMeta(bank.id), { v: 3, keys: 'corrupted' });
+  await Q2.Storage.flush();
+  called = 0;
+  Q2.ReviewStore.stateKeys = function () { called++; return origStateKeys.apply(this, arguments); };
+  const broken = await Q2.Migration.run();
+  Q2.ReviewStore.stateKeys = origStateKeys;
+  ok(called > 0, '损坏 meta 仍走完整检查（stateKeys 调用 ' + called + ' 次）');
+  const brokenMeta = Q2.Storage.getFresh(Q2.KEYS.reviewMeta(bank.id), null);
+  eq(brokenMeta && brokenMeta.v, 3, '损坏 meta 保持原样（未被静默判成已迁移）');
+  eq(broken.reviewMeta.migrated, 0, '损坏 meta 不计入已迁移');
+
+  // 负向 3：旧库（schema=6）+ 完整 v3 清单 → 忽略快速路径，真正压缩到 v4
+  Q2.Storage.setSync(Q2.KEYS.metaSchema, 6);
+  Q2.Storage.setSync(Q2.KEYS.reviewMeta(bank.id), { v: 3, keys: Q2.ReviewStore.stateKeys(bank.id) });
+  await Q2.Storage.flush();
+  const old = await Q2.Migration.run();
+  eq(old.fromVersion, 6, '旧库走完整迁移（fromVersion=6，不是快速路径的 7）');
+  eq(old.reviewMeta && old.reviewMeta.migrated, 1, '旧库 v3 清单被压缩 1 个库');
+  eq(Q2.Storage.getFresh(Q2.KEYS.reviewMeta(bank.id), null).v, 4, '旧库最终为 v4 紧凑标记');
+  eq(half.reviewMeta.migrated, 0, '半迁移结果未被误判为已压缩');
+}
+
+
 {
   const raw = new Map();
   const H = await createHarness(ROOT, { raw: raw });

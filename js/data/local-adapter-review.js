@@ -90,12 +90,8 @@
     /** 整表合并视图（per-hash 优先；同 last 保留 per-hash，语义与 ReviewMerge 一致） */
     readMap(bankId) {
       const legacy = legacyReviewMap(bankId);
-      const per = {};
-      ReviewStore.stateKeys(bankId).forEach((h) => {
-        // C 步骤4：per-hash 读取走作用域入口（未水合必抛，不静默跳过）
-        const st = Storage.getScopedFresh(reviewStateKey(bankId, h), bankId, null);
-        if (st && typeof st === 'object') per[h] = st;
-      });
+      // 唯一数据源：Storage 直接合并「物理块 → 缓存 → 待写」，不再先展开 50k 逻辑键再逐键查回。
+      const per = Storage.reviewStatesScoped(bankId);
       if (!Object.keys(legacy).length) return per;
       return QB.ReviewMerge.mergeMaps(legacy, per);
     },
@@ -267,6 +263,11 @@
      */
     convertMetaLayout(bankId) {
       const raw = Storage.getScopedFresh(K.reviewMeta(bankId), bankId, null);
+      // 稳态快速路径：已是 v4 紧凑标记（无 keys 清单）就没有可压缩内容，不枚举物理状态键。
+      // 标记缺失 / 版本不符 / 仍带清单（含 {v:4,keys} 损坏态）一律继续走下方完整检查。
+      if (raw && raw.v === REVIEW_LAYOUT_VERSION && !Array.isArray(raw.keys)) {
+        return { migrated: false, listed: 0, physical: 0, missing: 0, unlisted: 0, verified: true, steady: true };
+      }
       const physical = ReviewStore.stateKeys(bankId);
       const base = { migrated: false, listed: 0, physical: physical.length, missing: 0, unlisted: 0, verified: true };
       if (!raw || !(raw.v === 3 && Array.isArray(raw.keys))) return base;
@@ -308,7 +309,9 @@
      */
     convertMetaLayouts() {
       const out = { banks: 0, migrated: 0, failed: 0, skipped: [], anomalies: [] };
-      const ids = new Set(ReviewStore.bankIds());
+      // 候选集合：同步视图中的复习布局键（不展开 50k 状态键；见 Storage.reviewBankIds）。
+      // v3 清单只可能出现在这些库上；没有清单的库无需逐库枚举——结果与逐库完整检查一致。
+      const ids = new Set(Storage.reviewBankIds());
       // 补充 banks 元数据中的库：库可能没有复习物理键（空库），不应漏计；
       // 未水合库是否真有数据由 Storage.isBankHydrated 判定，这里只补全候选集合。
       const banks = Storage.get(QB.KEYS.banks, []);

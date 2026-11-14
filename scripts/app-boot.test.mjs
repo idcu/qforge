@@ -413,12 +413,12 @@ section('作用域读取抛错：render 顶层 catch 的可见反馈（124/129/8
   }, () => { QB.QuestionShards.shardOf = origShard; });
 
   // C 步骤4 第三批：984 / 1000 在 render 内的抛错同样必须被顶层 catch 接住
-  const origStateKeys = QB.ReviewStore.stateKeys;
-  QB.App.State.favoriteBankId = bank.id; // 跳过收藏读取，让 readMap → stateKeys 成为首个抛错点
+  const origStatesScoped = QB.Storage.reviewStatesScoped;
+  QB.App.State.favoriteBankId = bank.id; // 跳过收藏读取，让 readMap → reviewStatesScoped 成为首个抛错点
   QB.App.State.banksLoaded = false;
   await scenario('复习键枚举', () => {
-    QB.ReviewStore.stateKeys = () => { throw notHydrated('复习键枚举'); };
-  }, () => { QB.ReviewStore.stateKeys = origStateKeys; });
+    QB.Storage.reviewStatesScoped = () => { throw notHydrated('复习键枚举'); };
+  }, () => { QB.Storage.reviewStatesScoped = origStatesScoped; });
 
   const origReadMap = QB.ReviewStore.readMap;
   QB.App.State.favoriteBankId = bank.id;
