@@ -3194,3 +3194,4 @@ convert-v3 2.383 / backup-export 5.641（该路径 0 处 C 段读取）。
 | 17 | 14 | `56c0c8b` | `1059fa2` | [part-17.md](changelog/part-17.md) |
 | 18 | 10 | `8c4fdcd` | `7ecc912` | [part-18.md](changelog/part-18.md) |
 | 19 | 2 | `9382053` | `b1edf1b` | [part-19.md](changelog/part-19.md) |
+| 20 | 4 | `a25e4c1` | `bbaa41f` | [part-20.md](changelog/part-20.md) |

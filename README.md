@@ -15,8 +15,8 @@
 - **分层**：`sample → config → data → utils → vendor → modules → importers → entry`，依赖只允许从高 tier 指向低 tier；数据层不许点名领域模块，领域模块不许直接碰 DOM/渲染器。
 - **数据**：7 组 Repository 契约（banks / questions / progress / reviews / revlog / weights / backup），默认 `QB.LocalAdapter`；`DATA_BACKEND='api'` 时切 `QB.ApiAdapter`。
 - **复习**：FSRS-6，21 维权重，学习步 / 每日限额 / 保留率可按题库覆盖。
-- **质量**：41 个运行项（冒烟 + 40 套件）、6379 项断言、64 项性能门禁、CI 六格矩阵（Node 20 / 24 / 26 × UTC / Asia-Shanghai）。
-- **当前版本**：1.0.2；SW 缓存 `qforge-v79`；本地 schema `v7`；contentHash 去重键 `3:`。
+- **质量**：41 个运行项（冒烟 + 40 套件）、6441 项断言、64 项性能门禁、CI 六格矩阵（Node 20 / 24 / 26 × UTC / Asia-Shanghai）。
+- **当前版本**：1.0.3；SW 缓存 `qforge-v89`；本地 schema `v7`；contentHash 去重键 `3:`。
 
 一句话心智模型：**`app.js` 编排状态与渲染，Repository 负责持久化，领域模块只经契约与端口访问外部，UI 只读 State 并输出字符串 HTML。**
 
