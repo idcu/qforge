@@ -11,7 +11,7 @@
 qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：题库、作答记录、复习调度全部存浏览器本地（LocalStorage 或 IndexedDB），可选连 REST 后端或 WebDAV 同步；没有账号体系、没有服务端渲染、没有运行时依赖。
 
 - **形态**：静态文件即产物。72 个首屏 classic `<script>` + 27 个按需模块，全部挂在单一全局 `QB` 上（`js/**` 实际 93 个文件 / 23,713 行），无打包器、无 ESM、无 npm 运行时依赖；`file://` 双击可用（SW 只在 http(s) 注册）。
-- **装配**：`contracts/modules.json` 99 条（72 首屏 + 27 按需），`index.html` 的 script 顺序必须逐条相等。
+- **装配**：`contracts/modules.json` 100 条（72 首屏 + 28 按需），`index.html` 的 script 顺序必须逐条相等。
 - **数据**：7 组 Repository 契约（`js/data/contracts.js`），默认 `QB.LocalAdapter`；`DATA_BACKEND='api'` 时切 `QB.ApiAdapter`。
 - **复习**：FSRS-6，21 维权重；学习步 / 每日限额 / 保留率可按题库覆盖。
 - **质量**：38 个运行项、6245 项断言、63 项性能门禁、CI 六格矩阵。
@@ -70,7 +70,7 @@ qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：�
 - 职责：把外部文件/文本/URL/分享码变成合法题目并原子落库；题库 CRUD；题目编辑。
 - 关键文件：`js/modules/data-io.js`（导入事务：预检 → 解析 → 去重 → 落盘 → 回读校验 → 回滚）、`js/importers/*`（12 个格式适配 + registry）、`js/importers/adapters.js`（统一规范化/校验/contentHash）、`js/utils/sqlite-reader.js`（Anki）、`question-editor.js`、`bank-manager.js`、`source.js`、`package.js`、`qbk.js`。
 - 边界：导入器只产出"候选题目数组 + 错误清单"，不写存储；落库只发生在 `data-io.js`。
-- 按需包：`import`（17 个文件）、`editor`（adapters + question-editor）。
+- 按需包：`import`（17 个文件）、`editor`（adapters + question-editor + question-manager）。
 
 ### D3 答题、判分与组卷
 

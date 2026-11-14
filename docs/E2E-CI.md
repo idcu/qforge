@@ -1,7 +1,7 @@
 # 浏览器端到端 CI 门禁（E2E-CI）
 
 > **这份文件是什么**：在真实 Chromium 里跑完整产品链路的六个场景，回答「改完还能不能用」。逻辑层套件见 [TESTING.md](TESTING.md)；真机手动取证（CSP / 多标签 / IDB 50k）仍是 `scripts/e2e-browser.mjs`。
-> 入口 `scripts/e2e-ci.mjs`（`npm run e2e`）；CI 中是独立的 `e2e` job（`timeout-minutes: 8`），**不进** `logic-tests` 的六格矩阵，也不计入 40 个运行项。
+> 入口 `scripts/e2e-ci.mjs`（`npm run e2e`）；CI 中是独立的 `e2e` job（`timeout-minutes: 8`），**不进** `logic-tests` 的六格矩阵，也不计入 41 个运行项。
 
 ## 怎么跑
 

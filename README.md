@@ -10,13 +10,13 @@
 
 ## 0. 30 秒认识
 
-- **形态**：72 个首屏 classic `<script>` + 27 个按需模块，全部挂在单一全局 `QB` 上；`js/**` 实际 93 个文件 / 23,713 行。无打包器、无 ESM、无运行时依赖。
-- **装配事实源**：`contracts/modules.json` 共 99 条（72 core + 27 on-demand），`index.html` 的 script 顺序必须逐条相等，`scripts/check-modules.mjs` 强制对账。
+- **形态**：72 个首屏 classic `<script>` + 28 个按需模块，全部挂在单一全局 `QB` 上；`js/**` 实际 94 个文件 / 23,711 行。无打包器、无 ESM、无运行时依赖。
+- **装配事实源**：`contracts/modules.json` 共 100 条（72 core + 28 on-demand），`index.html` 的 script 顺序必须逐条相等，`scripts/check-modules.mjs` 强制对账。
 - **分层**：`sample → config → data → utils → vendor → modules → importers → entry`，依赖只允许从高 tier 指向低 tier；数据层不许点名领域模块，领域模块不许直接碰 DOM/渲染器。
 - **数据**：7 组 Repository 契约（banks / questions / progress / reviews / revlog / weights / backup），默认 `QB.LocalAdapter`；`DATA_BACKEND='api'` 时切 `QB.ApiAdapter`。
 - **复习**：FSRS-6，21 维权重，学习步 / 每日限额 / 保留率可按题库覆盖。
-- **质量**：40 个运行项（冒烟 + 39 套件）、6335 项断言、63 项性能门禁、CI 六格矩阵（Node 20 / 24 / 26 × UTC / Asia-Shanghai）。
-- **当前版本**：1.0.2；SW 缓存 `qforge-v78`；本地 schema `v7`；contentHash 去重键 `3:`。
+- **质量**：41 个运行项（冒烟 + 40 套件）、6379 项断言、63 项性能门禁、CI 六格矩阵（Node 20 / 24 / 26 × UTC / Asia-Shanghai）。
+- **当前版本**：1.0.2；SW 缓存 `qforge-v79`；本地 schema `v7`；contentHash 去重键 `3:`。
 
 一句话心智模型：**`app.js` 编排状态与渲染，Repository 负责持久化，领域模块只经契约与端口访问外部，UI 只读 State 并输出字符串 HTML。**
 
@@ -87,7 +87,7 @@ qforge/
 │   │                          #   / statistics / ui-renderer* / action-router / view-router / loader
 │   ├── workers/fsrs-worker.js # FSRS 训练 Worker
 │   └── app.js                 # boot / State / render / 切库 / 全局事件 / SW 注册
-├── sw.js                      # 离线壳（CACHE=qforge-v78）
+├── sw.js                      # 离线壳（CACHE=qforge-v79）
 ├── manifest.webmanifest       # PWA 清单
 ├── contracts/                 # modules.json（装配事实源）、adapters.json 等
 ├── scripts/                   # 开发工具与门禁（不随应用发布）

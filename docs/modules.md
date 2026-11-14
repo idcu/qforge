@@ -56,7 +56,7 @@
 |---|---|---|
 | `import` | 17 个：`adapters` → `line-parser` → `json/csv/dsv/xlsx/sqlite/docx/qbk/md/anki-package/anki/quizlet` → `registry` → `data-io` | 导入文件/拖拽/URL/粘贴/分享码 |
 | `export` | 6 个：`dsv` vendor → xlsx `vendor/xlsx` → xlsx `core` → `office-writer` → `share-page` → `exporter` | 导出、分享页、分享码 |
-| `editor` | 2 个：`adapters` → `question-editor` | 新建/编辑题目 |
+| `editor` | 3 个：`adapters` → `question-editor` → `question-manager` | 新建/编辑题目 |
 | `backup` | 3 个：`backup-pack` → `backup` → `sync-dav` | 备份/恢复/WebDAV |
 
 加载规则：

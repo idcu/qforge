@@ -1,10 +1,10 @@
 # 套件矩阵（TESTING-SUITES）
 
-> **这份文件是什么**：`docs/TESTING.md` §3 的展开表——40 个运行项（1 冒烟 + 39 套件）的逐套件断言数与覆盖范围。主文档只留摘要与入口，避免 TESTING.md 逼近 60KB 上限。
-> **读数来源**：各套件末尾打印的「通过: N」，合计 **6335**；`node scripts/docs-check.mjs --static` 逐行复算本文件并与 `scripts/docs-baseline.json` 对账（本文件已在 `DOCS_WITH_NUMBERS` 白名单内）。
+> **这份文件是什么**：`docs/TESTING.md` §3 的展开表——41 个运行项（1 冒烟 + 40 套件）的逐套件断言数与覆盖范围。主文档只留摘要与入口，避免 TESTING.md 逼近 60KB 上限。
+> **读数来源**：各套件末尾打印的「通过: N」，合计 **6379**；`node scripts/docs-check.mjs --static` 逐行复算本文件并与 `scripts/docs-baseline.json` 对账（本文件已在 `DOCS_WITH_NUMBERS` 白名单内）。
 > 数字有意变化时运行 `node scripts/docs-check.mjs --write` 刷新基线并**同 commit** 提交；不放宽、不加容差。
 
-## 套件矩阵（40 个运行项）
+## 套件矩阵（41 个运行项）
 
 | 套件 | 断言数（2026-11-13 本机 Asia/Shanghai 实跑；UTC 由 CI 六格矩阵覆盖） | 覆盖 |
 | --- | --- | --- |
@@ -13,6 +13,7 @@
 | `scripts/exporter.test.mjs` | **207** | 七格式注册（含 html 分享页）、六题型、CSV 转义/BOM、难度标签列、JSON/CSV/MD 往返、**合并解析文本 CSV 往返**、**材料题五格式分流/18·19 列多行块/三格式 hash 往返/JSON 嵌套 material+children 往返/小问分值 MD·DOCX·CSV·XLSX·JSON 往返（M4，12 项）**、**JSON 内容校验和（导出/一致/篡改警告，4 项）**、**JSON 可选 `bank.sched`（已设置才写入/未设置与旧包同构，4 项）**、错题 wrongCount、乱序隔离、历史记录四格式；**只读分享页（23 项）：完整文档/UTF-8/标题描述/答案与解析/无脚本/XSS 转义/缺图占位/data URL 内嵌/材料父子编号/历史拒绝/kind 白名单** |
 | `scripts/office-export.test.mjs` | **1150** | CRC32 标准向量、ZIP 部件、540 题 xlsx/docx 全量判分自洽、错题 17 列、Python openpyxl/zipfile 独立校验 |
 | `scripts/editor.test.mjs` | **82** | `buildQuestion` 纯函数、增删改、编辑元数据不改变 contentHash；**M3 材料题（31 项）：子问题构建与字段清理、父题校验（≥2 小问/材料或题干/禁嵌套）、编辑器 HTML（data-cc 作用域/转义）、Repository 新增/编辑往返、insertMany 保留 material+children（P0 回归）**；**M4 小问分值（6 项）：未填=0 未设置（按默认 10 计）/可设 25/上限 100/编辑器 data-cc=score/落库回读/insertMany 保留**；**C012 本地批注（10 项）：普通题 `data-qe=annotation` + 最大长度公共常量 + 转义、API 模式禁用与原因、材料题父题 `data-me=annotation` + 归一落库、子问题不单独携带** |
+| `scripts/editor-dom.test.mjs` | **44** | **编辑器 DOM 接线与图片资产路径（拆分前安全网）**：openModal 挂载/题型切换重建作答区/空题干错误进 errBox 且不落库/合法保存落库（题干·填空答案·难度·标签）；📷 → `Assets.put` → 光标处 `![](asset:<id>)` 且资产字节一致、保存后引用保留；材料题父题 + 两小问、小问分值 25、小问不带分类、少于 2 小问报错不落库；管理器首屏 10 行→第 2 页 2 行、题型筛选重置与空态、批删二次确认与 toast、普通题/材料题编辑路由 |
 | `scripts/annotation.test.mjs` | **90** | **C012 本地批注全链路（纯本地、零网络）**：`QB.Annotation.normalize/present`（CRLF→LF、trim、5000 截断、空值）；本地落库后 contentHash 不变与题目顺序稳定；JSON 导出仅带批注题携带 `annotation`（CSV/MD 不携带）；qbk `collect→分发→runImport` 批注逐字符一致、顺序对齐、manifest checksum/count 通过；材料题父题批注往返且子问题不携带、分享页只展示一次；旧包（无字段）照常导入；旧客户端丢弃 annotation 后 `Package.verify` 仍 `checksumOk=true`；分享页只读展示、`<script>` 转义、换行保留（pre-wrap）、无 `<script>`/内联事件、`fetch` 0 次（双桩计数）；**C026 总量上限（32 项）：UTF-8 字节口径（ASCII/汉字/emoji/trim/单题截断）、只计顶层批注、恰好等于上限放行与 +1B 拒绝、540 题真实批注 40,392B 实测与满长汉字 8,100,000B 超限负例、导出闸门取消/确认省略批注/非批注格式不弹窗/实际构建不含 annotation 键** |
 | `scripts/rich-text.test.mjs` | **66** | 转义防注入、上标/下标、**公式子集 `\frac`/`\sqrt`（指数根号、嵌套参数组、内部递归上下标/公式、未闭合原样保留、公式内部转义、alt 剥离公式标签）**、`toPlain` 公式去记号、图片占位、collectAssets、材料题资产递归（材料正文+小问）、hydrate 假 DOM、光标插入 |
 | `scripts/assets.test.mjs` | **182** | IDB 内存驱动、内容寻址去重、qbk/qfbk ZIP 往返、缺图警告、孤儿清理、qbk 落库去重、材料题 qbk 往返（材料正文+小问图片）、**qbk bank.json 内容校验和与导入复核（2 项，P4）**；**分发题包（52 项）：manifest 生成/往返（题数·题型·子问分值·资产·checksum）/packageId 稳定/体积增量/重复识别（同 id+版本 vs 新版本）、manifest 缺失（旧包零警告）/损坏/校验和不符/题数不符均只警告不阻断、并存/覆盖落库语义**；**接线级回归（31 项）：`Importers.runImport` 返回值透传 `meta`（含 manifest/packageId/version/manifestOk）且经 `findDuplicate` 可见、`openPreview` 交给 Blob 的是 `build().content` 字符串（对象直塞会失败）、`Source.fetchSnapshot` 对 `.qbk` 走 arrayBuffer 而非 text 并可直接进 qbk 解析器、同秒/同毫秒连续导出文件名不同（`_packageFilename`）**；**路径级回归（27 项）：真实 `UIRenderer.openModal/closeModal` + 假 DOM 驱动 `commitImport`——三选一弹窗渲染与 `dup-skip`/`dup-merge`/`dup-over` 三个 action、跳过/并存（预选 merge）/覆盖（预选 overwrite）返回值与库内题数、`QB.Helpers.formatDate` 渲染、Esc=跳过（Promise 有终态、无异常、无写入）、预览弹窗 Esc=取消导入** |
@@ -48,7 +49,7 @@
 | `scripts/import-commit.test.mjs` | **67** | **C006 导入事务（P1-02）**：容量预检拒绝时 0 次写且原因可见（先于预览）、写入中途超配额回滚到导入前（题数与占用字符数复原、无「导入完成」toast）、正常导入落盘回读一致与内容去重、四条入口共用 `commitImport` 且 `data-io` 只有 1 处 `insertMany`、IDB `flush` 失败不报成功并回滚；**C015 单小问材料题（P2-03/D5=A）：`runImport` 返回 1 条致命错误 → `commitImport` 返回 null、写入 0 次、题数不变（同包正常题也不落库）、弹窗含「至少 2 个」且未打开预览**；**C026 批注总量超限（7 项）：540 题满长汉字 8,100,000B > 2 MiB → 返回 null、写入 0 次、题数不变、弹窗含「批注总量/超过上限/删减批注」且未打开预览**；**R-20 导入体积预检（17 项）：上限常量 16 MiB；File-like 超限 → `FileReader` 构造 0 次、`Storage.set` 0 次、返回 null、弹窗含 `.import-error`/「超过导入上限」/「未读取文件」且未开预览；二进制快照按 `arrayBuffer.byteLength` 同样拒收；边界为开区间（=上限放行、+1 拒收），拒收结构标记 `migration.supported=false`；落盘顺序：成功 toast 严格晚于 `forceSync`/`flush`** |
 | `scripts/import-roundtrip.test.mjs` | **51** | **跨格式往返（adapters 拆分前加的安全网）**：同一批标准题（判断/单选/多选/填空/简答/材料带分值）经 json / csv / markdown / xlsx / docx / qbk 导出后走真实 `QB.Importers.runImport`，逐题 `contentHash` 与源题完全相等（6 格式 × 6 题 = 36 项）、题数与警告数逐格式断言（12 项）、qbk 小问分值保留（1 项）；TXT 为打印稿不参与往返，仅断言题干/答案可读（2 项） |
 | `scripts/a11y.test.mjs` | **103** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、**弹窗快照注册自检（每个导出的 `render*Dialog` 必须至少登记一份快照，新增弹窗漏登记即转红）**、全仓禁止 tabindex>0、模态焦点进入/异步回位链路/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖、**14 项视觉结构回归（含 `.import-error` 10 项：规则唯一、danger 前景/弱底/边框/圆角/换行均为语义令牌、无硬编码色值、两处失败弹窗共用该类且 JS 无内联样式）**；**变异 `--mutate`：删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked` → 95 通过 / 8 失败（exit 1）**；CI 以独立 `a11y` job 运行本命令 |
-| **合计** | **6335 / 6335 通过 · 40 个运行项**（2026-11-14 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+| **合计** | **6379 / 6379 通过 · 41 个运行项**（2026-11-14 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
 
 > 表中日期是本机一次实跑快照；UTC 腿由 CI 六格矩阵覆盖。
 

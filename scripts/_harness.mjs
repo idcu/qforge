@@ -83,6 +83,7 @@ const MODULES = [
   'js/modules/review-queue.js',
   'js/modules/progress-saver.js',
   'js/modules/question-editor.js',
+  'js/modules/question-manager.js',
   'js/modules/office-writer.js',
   'js/modules/share-page.js',
   'js/modules/share-link.js',

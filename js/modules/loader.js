@@ -55,7 +55,8 @@
       'js/importers/adapters-normalize.js',
       'js/importers/adapters-table.js',
       'js/importers/adapters.js',
-      'js/modules/question-editor.js'
+      'js/modules/question-editor.js',
+      'js/modules/question-manager.js'
     ],
     // 备份/恢复链路（迁移前的自动备份也会走这里）
     backup: [

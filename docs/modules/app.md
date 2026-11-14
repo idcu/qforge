@@ -59,7 +59,8 @@
 | 文件 | 职责 |
 | --- | --- |
 | `bank-manager.js` | `create / rename / remove（级联）/ importSample` |
-| `question-editor.js` | 题目 CRUD：`buildQuestion` 纯函数 + 编辑器/管理器界面（走 QuestionRepo）；材料题专用嵌套编辑器：`buildChildQuestion` / `buildMaterialQuestion`（材料/总题干至少一项、≥2 小问、禁嵌套）/ `materialEditorBody` / `openMaterialEditor`；`data-cc` 与 `data-qe` 作用域隔离；按 `isMaterialQuestion` 路由 |
+| `question-editor.js` | 题目 CRUD：`buildQuestion` 纯函数 + 编辑表单界面（走 QuestionRepo）；材料题专用嵌套编辑器：`buildChildQuestion` / `buildMaterialQuestion`（材料/总题干至少一项、≥2 小问、禁嵌套）/ `materialEditorBody` / `openMaterialEditor`；`data-cc` 与 `data-qe` 作用域隔离；按 `isMaterialQuestion` 路由；图片插入（`fileToAsset` → `Assets.put` → 光标处 `asset:` 占位） |
+| `question-manager.js` | 题库内题目管理：`openManager`（列表 / 题型·标签·难度·关键词筛选 / 分页 `PAGE_SIZE=10` / 批量删除 / 编辑路由）、`openReservedDialog`；只向 `QB.QuestionEditor` 挂管理入口，表单与校验仍在上方文件 |
 | `wrong-book.js` | 错题本薄封装（`QB.DB.progress` + `buildIndex`）；`isWrongResult/sessionWrongs` 统一"是否错题"（错且非半对，不定项少选不算）；`addMany` 批量写入口 |
 | `favorites.js` | 收藏夹薄封装 |
 | `history.js` | 历史记录 + `stats` 聚合 |

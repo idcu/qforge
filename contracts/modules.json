@@ -1150,7 +1150,6 @@
       "requires": [
         "config",
         "utils.helpers",
-        "utils.rich-text",
         "utils.answer-normalize",
         "utils.answer-text",
         "utils.judge-answer",
@@ -1158,11 +1157,31 @@
         "utils.assets",
         "data.db",
         "importers.adapters",
-        "modules.search-filter",
         "modules.ui-renderer"
       ],
       "keeps": [
         "QB.QuestionEditor"
+      ],
+      "load": "on-demand"
+    },
+    {
+      "id": "modules.question-manager",
+      "file": "js/modules/question-manager.js",
+      "layer": "modules",
+      "tier": "L3",
+      "requires": [
+        "config",
+        "utils.helpers",
+        "utils.rich-text",
+        "utils.answer-text",
+        "data.db",
+        "modules.search-filter",
+        "modules.ui-renderer",
+        "modules.question-editor"
+      ],
+      "keeps": [
+        "QB.QuestionEditor.openManager",
+        "QB.QuestionEditor.openReservedDialog"
       ],
       "load": "on-demand"
     },

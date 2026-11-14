@@ -9,22 +9,22 @@
 | 项 | 当前值 | 事实源 | 谁复核 |
 |---|---|---|---|
 | 应用版本 | **1.0.2** | `package.json` | `check-release`（≥ 台账） |
-| SW 缓存 | **qforge-v78** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
+| SW 缓存 | **qforge-v79** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
 | 上次对外发布 | 1.0.2 / qforge-v67 / 2026-11-13 | `docs/release-ledger.json` | `check-release` |
 | 存储 schema | **7** | `js/modules/migrate.js` | `migrate` 套件 |
 | contentHash 版本 | **3**（64 位） | `js/utils/question-id.js` | `smoke` / `shard` 套件 |
-| 测试规模 | **40 个运行项（冒烟 + 39 套件）**，**6335 / 6335 通过** | `scripts/test-all.mjs` | `test-all`、`docs-check --static` |
+| 测试规模 | **41 个运行项（冒烟 + 40 套件）**，**6379 / 6379 通过** | `scripts/test-all.mjs` | `test-all`、`docs-check --static` |
 | 性能门禁 | **63 项阈值** | `scripts/bench.mjs` | `bench --assert` |
-| 首屏体积 | 共 80 个文件（72 个 index 内联 js），**300.6 KB gzip / 823.5 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
+| 首屏体积 | 共 80 个文件（72 个 index 内联 js），**300.7 KB gzip / 823.6 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
 
-> 说明：`qforge-v78` 与本页读数属于**尚未提交**的备份拆分批次（ui-renderer B3 已提交 `eb7b835`，导出器拆分已提交 `154111b`，导入适配器拆分已提交 `9fe5392`）；提交后以 `git log -1` 的提交号为准，但版本/CACHE 的复核方式不变。
+> 说明：`qforge-v79` 与本页读数属于**尚未提交**的编辑器拆分批次（备份拆分已提交 `1110fdc`，导入适配器拆分已提交 `9fe5392`，导出器拆分已提交 `154111b`，ui-renderer B3 已提交 `eb7b835`）；提交后以 `git log -1` 的提交号为准，但版本/CACHE 的复核方式不变。
 
 ## 2. 什么叫“绿”
 
 一次判定要同时满足：
 
 1. `npm run verify` **退出码 0**，且输出中没有 `✗` / `FAIL` / `失败` 行；
-2. `test-all` 打印 `40` 个运行项、`6335 / 6335 通过`、`0 失败`；
+2. `test-all` 打印 `41` 个运行项、`6379 / 6379 通过`、`0 失败`；
 3. `bench --assert` 的 63 项门禁全部通过（不是“允许若干项超阈值”）；
 4. `docs-check --static` 全部一致，`check-release` 通过；
 5. `check-discipline --strict` 0 新增豁免、0 新增问题。
@@ -47,7 +47,7 @@ npm run verify
 
 只想快速看代码与测试是否还活：`npm run test`（等价于 `check-ngm` + `test-all`，不覆盖文档、发布与性能门禁）。
 
-期望读数：`test-all` 40 个运行项 / 6335 断言 / 0 失败；`bench` 63/63；全部退出码 0。任何一步非 0 都不算绿。
+期望读数：`test-all` 41 个运行项 / 6379 断言 / 0 失败；`bench` 63/63；全部退出码 0。任何一步非 0 都不算绿。
 
 ## 4. 出问题怎么退回上一个 good state
 
@@ -55,7 +55,7 @@ npm run verify
 
 1. **先保住数据**：让用户/自己导出全量备份（含图片资产的 `.qfbk`）。本批起导出端与导入端共用同一体积上限（64 MiB），超限会明确拒绝并提示“分库导出”；不要手工绕过。
 2. **代码回退**：对坏提交做 `git revert <commit>`，或把分支指回上一个已验证提交；**不要用 tag 回滚**，也不要把 `CACHE` 退回旧号。
-3. **CACHE 前进**：回滚本身也改动 `js/**` 或 `index.html` 时，`CACHE` 必须 +1（例如 `qforge-v78`），再用 SW 运行时套件的 `--write-baseline` 刷新基线；否则已装 SW 的用户会继续拿坏缓存。
+3. **CACHE 前进**：回滚本身也改动 `js/**` 或 `index.html` 时，`CACHE` 必须 +1（例如 `qforge-v79`），再用 SW 运行时套件的 `--write-baseline` 刷新基线；否则已装 SW 的用户会继续拿坏缓存。
 4. **数据兼容**：schema 当前为 7；若坏版本已写入新布局，回退版本可能读不懂。此时不要反复启动旧版本，先用备份恢复；迁移类修复必须带“旧数据向前修复”路径（见 [审计决策档案](decisions/audit-2026-11-13.md) §2）。
 5. **复验**：回到 good state 后重跑 `npm run verify`，逐项对照本页第 1 节读数；数字不符说明回退不完整。
 

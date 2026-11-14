@@ -42,8 +42,8 @@
 | --- | --- | --- |
 | `L0` | 基础能力 | `sample` / `config` / `utils`（除 `storage`、`quota`、`hash-remap`）/ `vendor` |
 | `L1` | 数据访问 | `data` / `utils.storage` / `utils.quota` / `utils.hash-remap`（后三者直接操作存储门面，归数据访问） |
-| `L2` | 领域 | `importers` / `modules`（除 `ui-renderer*`、`dom-patch`、`question-editor`） |
-| `L3` | 表现与编排 | `modules.ui-renderer*` / `modules.dom-patch` / `modules.question-editor` / `app` |
+| `L2` | 领域 | `importers` / `modules`（除 `ui-renderer*`、`dom-patch`、`question-editor`、`question-manager`） |
+| `L3` | 表现与编排 | `modules.ui-renderer*` / `modules.dom-patch` / `modules.question-editor` / `modules.question-manager` / `app` |
 
 硬规则：
 

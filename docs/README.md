@@ -41,7 +41,7 @@
 | [modules/data.md](modules/data.md) | 数据层与导入器逐文件职责 | 适配器、导入器、迁移变化 |
 | [modules/app.md](modules/app.md) | 业务模块逐文件职责 | `js/modules/**`、`js/workers/**` 变化 |
 | [TESTING](TESTING.md) | 跑法、总闸、失败取证、CI 矩阵；逐套件表见附录 | 新增/删除测试、门禁变化 |
-| [TESTING-SUITES](TESTING-SUITES.md) | 40 个运行项的逐套件断言数与覆盖范围（由 `docs-check` 复算） | 新增/删除套件、断言数变化 |
+| [TESTING-SUITES](TESTING-SUITES.md) | 41 个运行项的逐套件断言数与覆盖范围（由 `docs-check` 复算） | 新增/删除套件、断言数变化 |
 | [BENCH](BENCH.md) | 63 项性能门禁、测量口径、稳定性红线 | `bench.mjs`、预算、基线变化 |
 | [E2E-CI](E2E-CI.md) | 无头浏览器 e2e 的跑法、夹具、CI 腿 | e2e 脚本或 CI job 变化 |
 | [RELEASE-CHECKLIST](RELEASE-CHECKLIST.md) | 发版步骤、版本号、ledger、回滚 | 发布流程变化 |

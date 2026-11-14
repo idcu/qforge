@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 本地 schemaVersion | `7` | `js/modules/migrate.js` |
 | contentHash 版本 | `3:` + 16 位 hex | `js/utils/question-id.js` |
-| SW 缓存 | `qforge-v78`，前缀 `qforge-` | `sw.js` |
+| SW 缓存 | `qforge-v79`，前缀 `qforge-` | `sw.js` |
 | IDB 业务库 | `qforge-kv` / store `kv`（DB_VERSION=1，keyPath `key`） | `js/data/store.js` |
 | IDB 资产库 | `qforge` / store `assets` | `js/config.js` |
 | LS 物理前缀 | `qb:` | `js/config.js` 的 `STORAGE.PREFIX` |
@@ -156,7 +156,7 @@ QB.LocalAdapter | QB.ApiAdapter   实现（DATA_BACKEND='local' 默认 / 'api'�
 | `import` | 17 | 导入/拖拽/URL/粘贴/分享码 | 解析器、ZIP/SQLite 读取、适配器 |
 | `export` | 3 | 导出/分享页 | **缺 `DSV` / xlsx vendor，见 [ARCHITECTURE §8](ARCHITECTURE.md) 问题 2** |
 | `backup` | 2 | 备份/恢复/WebDAV | 复用导出载荷 |
-| `editor` | 2 | 新建/编辑题目 | `adapters` + `question-editor` |
+| `editor` | 3 | 新建/编辑题目 | `adapters` + `question-editor` + `question-manager` |
 
 - 唯一事实源是 `js/modules/loader.js` 的 `BUNDLES`；`modules.json` 的 `load:"on-demand"` 必须与之一致，`sw.js` 的 `CORE` 必须覆盖这些文件。
 - 相同包只加载一次（Promise 去重）；加载失败必须 toast + 保留可重试状态，不得静默吞掉。
@@ -164,7 +164,7 @@ QB.LocalAdapter | QB.ApiAdapter   实现（DATA_BACKEND='local' 默认 / 'api'�
 
 ## 8. Service Worker 与缓存
 
-- `sw.js` 顶部 `CACHE='qforge-v78'`，`CACHE_PREFIX='qforge-'`；**任何 `js/**` / `index.html` 改动都要 CACHE +1**。
+- `sw.js` 顶部 `CACHE='qforge-v79'`，`CACHE_PREFIX='qforge-'`；**任何 `js/**` / `index.html` 改动都要 CACHE +1**。
 - install：预缓存 `CORE`（shell、图标、worker 链、27 个按需文件）；首屏 72 个 js **不在 CORE**，靠运行时缓存（已知缺口，见 [ARCHITECTURE §8](ARCHITECTURE.md) 问题 4）。
 - activate：只删除 `qforge-` 命名空间的旧缓存，然后 `clients.claim()`；不得删除同源其他应用的 CacheStorage。
 - fetch：同源 GET 走 stale-while-revalidate；导航请求回退 `index.html`；跨源/非 GET 直连网络。
