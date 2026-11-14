@@ -562,17 +562,44 @@
       ]
     },
     {
+      "id": "importers.adapters-normalize",
+      "file": "js/importers/adapters-normalize.js",
+      "layer": "importers",
+      "tier": "L2",
+      "requires": [
+        "utils.answer-normalize",
+        "utils.answer-text",
+        "utils.judge-answer",
+        "utils.annotation"
+      ],
+      "keeps": [
+        "QB.AdaptersNormalize"
+      ],
+      "load": "on-demand"
+    },
+    {
+      "id": "importers.adapters-table",
+      "file": "js/importers/adapters-table.js",
+      "layer": "importers",
+      "tier": "L2",
+      "requires": [
+        "importers.adapters-normalize"
+      ],
+      "keeps": [
+        "QB.AdaptersTable"
+      ],
+      "load": "on-demand"
+    },
+    {
       "id": "importers.adapters",
       "file": "js/importers/adapters.js",
       "layer": "importers",
       "tier": "L2",
       "requires": [
         "config",
-        "utils.answer-normalize",
-        "utils.answer-text",
-        "utils.judge-answer",
         "utils.question-id",
-        "utils.annotation"
+        "importers.adapters-normalize",
+        "importers.adapters-table"
       ],
       "keeps": [
         "QB.Adapters"

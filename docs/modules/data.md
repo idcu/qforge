@@ -39,7 +39,9 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `importers/adapters.js` | 公共适配器：`toStandard` / `sniffAndAdapt` / `adaptArray` / `adaptNested` / `tableToQuestions` / `validateQuestions`；题型映射、表头别名；`tableToQuestions` 含材料多行块扫描；解析类多列经 `ANALYSIS_FIELDS` + `mergeAnalysisPieces` 合并为单一 `analysis` |
+| `importers/adapters-normalize.js` | 适配器字段层（`QB.AdaptersNormalize`）：题型映射/类型推断、难度/标签/选项/判断/填空规范化、`ANALYSIS_FIELDS` + `mergeAnalysisPieces` 解析合并、`toStandard` / `toStandardMaterial`；行式与表格解析共用的唯一实现 |
+| `importers/adapters-table.js` | 适配器表格层（`QB.AdaptersTable`）：CSV/XLSX 表头别名与 `matchHeader`、`tableToQuestions`（含材料多行块扫描），字段解析复用 `QB.AdaptersNormalize` |
+| `importers/adapters.js` | 适配器门面（`QB.Adapters`）：JSON 结构适配 `sniffAndAdapt` / `adaptArray` / `adaptNested` 与 `validateQuestions`；对外契约不变，字段/表格实现已拆至上述两文件 |
 | `importers/line-parser.js` | 行式切题公共解析器：`parseLines` / `blocksToQuestions`（题号/选项/答案/解析/分类标记识别 + 题型推断）；docx 与 md 共用；含材料块状态机（`[材料题]` 开块 / `材料：` / `(i)` 小问 / 顶层题号收块） |
 | `importers/registry.js` | `QB.Importers.runImport(file)`：按扩展名分派 QBK/JSON/CSV/MD/XLSX/DOCX/Anki/Quizlet；同扩展名多解析器按 `priority` 降序 + `sniff` 选择；`.txt` 由 Quizlet 与 CSV 竞争；二进制按 `arrayBuffer`，文本按 `text`；区分真实 `File/Blob` 与内存快照 `{name,text}` / `{name,arrayBuffer}` |
 | `importers/qbk-importer.js` | `.qbk` 题库包：`Qbk.parseBundle` 解包 → 复用 JSON 导入 → 资产写 `QB.Assets`（缺图警告） |

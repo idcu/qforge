@@ -1,10 +1,10 @@
 # 套件矩阵（TESTING-SUITES）
 
-> **这份文件是什么**：`docs/TESTING.md` §3 的展开表——38 个运行项（1 冒烟 + 37 套件）的逐套件断言数与覆盖范围。主文档只留摘要与入口，避免 TESTING.md 逼近 60KB 上限。
-> **读数来源**：各套件末尾打印的「通过: N」，合计 **6245**；`node scripts/docs-check.mjs --static` 逐行复算本文件并与 `scripts/docs-baseline.json` 对账（本文件已在 `DOCS_WITH_NUMBERS` 白名单内）。
+> **这份文件是什么**：`docs/TESTING.md` §3 的展开表——39 个运行项（1 冒烟 + 38 套件）的逐套件断言数与覆盖范围。主文档只留摘要与入口，避免 TESTING.md 逼近 60KB 上限。
+> **读数来源**：各套件末尾打印的「通过: N」，合计 **6296**；`node scripts/docs-check.mjs --static` 逐行复算本文件并与 `scripts/docs-baseline.json` 对账（本文件已在 `DOCS_WITH_NUMBERS` 白名单内）。
 > 数字有意变化时运行 `node scripts/docs-check.mjs --write` 刷新基线并**同 commit** 提交；不放宽、不加容差。
 
-## 套件矩阵（38 个运行项）
+## 套件矩阵（39 个运行项）
 
 | 套件 | 断言数（2026-11-13 本机 Asia/Shanghai 实跑；UTC 由 CI 六格矩阵覆盖） | 覆盖 |
 | --- | --- | --- |
@@ -45,8 +45,9 @@
 | `scripts/importers-anki.test.mjs` | **148** | 最小 SQLite 只读（页大小/UTF-16LE/freelist/被删记录/内部页递归/overflow 80KB/rowid 别名/`--` 注释剥离/坏库）、`.apkg` 包识别（Legacy1/Legacy2 取 anki21/缺 anki21 回退/Latest 拒绝并指引导出旧版/损坏 ZIP）、note 粒度导入（Front/Back 字段名映射、judge/single/essay 判定、`1`/`0` 不误判、cloze 降级 essay、媒体入库与缺失占位、多卡丢失项警告、HTML 剥离）、Legacy1/UTF-16/深分页全量、落库去重与 v3 contentHash、首次评分 revlog 写入；**D2：0 题拒绝原因在 UI 可见（.anki21b Legacy 指引 / 坏 SQLite 原因，不再只提示「未解析出任何题目」），错误弹窗挂 `.import-error` 类且无内联颜色** |
 | `scripts/importers-quizlet.test.mjs` | **75** | 分隔符自动识别（Tab/逗号/分号/竖线）与显式自定义覆盖、`Term/Definition` 表头跳过、非两列/空 term/重复行跳过与警告、空文件明确报错、全部落 essay（term 题干 + definition 参考答案）、明确「无选项/无图片/无在线进度」提示、与既有 CSV 的路由边界（表头 CSV 不被劫持）；**D1：粘贴入口复用注册表（Tab/逗号/全角逗号与文件入口结果全等，Markdown/JSON/无法识别分支不回归）** |
 | `scripts/import-commit.test.mjs` | **67** | **C006 导入事务（P1-02）**：容量预检拒绝时 0 次写且原因可见（先于预览）、写入中途超配额回滚到导入前（题数与占用字符数复原、无「导入完成」toast）、正常导入落盘回读一致与内容去重、四条入口共用 `commitImport` 且 `data-io` 只有 1 处 `insertMany`、IDB `flush` 失败不报成功并回滚；**C015 单小问材料题（P2-03/D5=A）：`runImport` 返回 1 条致命错误 → `commitImport` 返回 null、写入 0 次、题数不变（同包正常题也不落库）、弹窗含「至少 2 个」且未打开预览**；**C026 批注总量超限（7 项）：540 题满长汉字 8,100,000B > 2 MiB → 返回 null、写入 0 次、题数不变、弹窗含「批注总量/超过上限/删减批注」且未打开预览**；**R-20 导入体积预检（17 项）：上限常量 16 MiB；File-like 超限 → `FileReader` 构造 0 次、`Storage.set` 0 次、返回 null、弹窗含 `.import-error`/「超过导入上限」/「未读取文件」且未开预览；二进制快照按 `arrayBuffer.byteLength` 同样拒收；边界为开区间（=上限放行、+1 拒收），拒收结构标记 `migration.supported=false`；落盘顺序：成功 toast 严格晚于 `forceSync`/`flush`** |
+| `scripts/import-roundtrip.test.mjs` | **51** | **跨格式往返（adapters 拆分前加的安全网）**：同一批标准题（判断/单选/多选/填空/简答/材料带分值）经 json / csv / markdown / xlsx / docx / qbk 导出后走真实 `QB.Importers.runImport`，逐题 `contentHash` 与源题完全相等（6 格式 × 6 题 = 36 项）、题数与警告数逐格式断言（12 项）、qbk 小问分值保留（1 项）；TXT 为打印稿不参与往返，仅断言题干/答案可读（2 项） |
 | `scripts/a11y.test.mjs` | **103** | 无障碍静态门禁：两套主题 20 组色对对比度（WCAG 相对亮度，实测值见下）、14 份代表性渲染快照的 ARIA/键盘扫描（图标按钮名称、role=radio/checkbox 状态、data-action 容器可达性、表单控件名称）、**弹窗快照注册自检（每个导出的 `render*Dialog` 必须至少登记一份快照，新增弹窗漏登记即转红）**、全仓禁止 tabindex>0、模态焦点进入/异步回位链路/Tab 循环/Esc 源码约定、prefers-reduced-motion 全覆盖、**14 项视觉结构回归（含 `.import-error` 10 项：规则唯一、danger 前景/弱底/边框/圆角/换行均为语义令牌、无硬编码色值、两处失败弹窗共用该类且 JS 无内联样式）**；**变异 `--mutate`：删浅色 `--on-solid` 令牌 + 剥离快照 `aria-checked` → 95 通过 / 8 失败（exit 1）**；CI 以独立 `a11y` job 运行本命令 |
-| **合计** | **6245 / 6245 通过 · 38 个运行项**（2026-11-13 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
+| **合计** | **6296 / 6296 通过 · 39 个运行项**（2026-11-14 本机 Asia/Shanghai 实跑；UTC 由 CI 矩阵覆盖） | |
 
 > 表中日期是本机一次实跑快照；UTC 腿由 CI 六格矩阵覆盖。
 

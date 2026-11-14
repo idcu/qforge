@@ -34,6 +34,7 @@ export const ORDER = [
   'importers-anki.test.mjs',
   'importers-quizlet.test.mjs',
   'import-commit.test.mjs',
+  'import-roundtrip.test.mjs',
   'shard.test.mjs',
   'contract.test.mjs',
   'ui-port.test.mjs',

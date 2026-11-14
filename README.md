@@ -10,13 +10,13 @@
 
 ## 0. 30 秒认识
 
-- **形态**：72 个首屏 classic `<script>` + 24 个按需模块，全部挂在单一全局 `QB` 上；`js/**` 实际 90 个文件 / 23,699 行。无打包器、无 ESM、无运行时依赖。
-- **装配事实源**：`contracts/modules.json` 共 96 条（72 core + 24 on-demand），`index.html` 的 script 顺序必须逐条相等，`scripts/check-modules.mjs` 强制对账。
+- **形态**：72 个首屏 classic `<script>` + 26 个按需模块，全部挂在单一全局 `QB` 上；`js/**` 实际 92 个文件 / 23,689 行。无打包器、无 ESM、无运行时依赖。
+- **装配事实源**：`contracts/modules.json` 共 98 条（72 core + 26 on-demand），`index.html` 的 script 顺序必须逐条相等，`scripts/check-modules.mjs` 强制对账。
 - **分层**：`sample → config → data → utils → vendor → modules → importers → entry`，依赖只允许从高 tier 指向低 tier；数据层不许点名领域模块，领域模块不许直接碰 DOM/渲染器。
 - **数据**：7 组 Repository 契约（banks / questions / progress / reviews / revlog / weights / backup），默认 `QB.LocalAdapter`；`DATA_BACKEND='api'` 时切 `QB.ApiAdapter`。
 - **复习**：FSRS-6，21 维权重，学习步 / 每日限额 / 保留率可按题库覆盖。
-- **质量**：38 个运行项（冒烟 + 37 套件）、6245 项断言、63 项性能门禁、CI 六格矩阵（Node 20 / 24 / 26 × UTC / Asia-Shanghai）。
-- **当前版本**：1.0.2；SW 缓存 `qforge-v76`；本地 schema `v7`；contentHash 去重键 `3:`。
+- **质量**：39 个运行项（冒烟 + 38 套件）、6296 项断言、63 项性能门禁、CI 六格矩阵（Node 20 / 24 / 26 × UTC / Asia-Shanghai）。
+- **当前版本**：1.0.2；SW 缓存 `qforge-v77`；本地 schema `v7`；contentHash 去重键 `3:`。
 
 一句话心智模型：**`app.js` 编排状态与渲染，Repository 负责持久化，领域模块只经契约与端口访问外部，UI 只读 State 并输出字符串 HTML。**
 
@@ -87,7 +87,7 @@ qforge/
 │   │                          #   / statistics / ui-renderer* / action-router / view-router / loader
 │   ├── workers/fsrs-worker.js # FSRS 训练 Worker
 │   └── app.js                 # boot / State / render / 切库 / 全局事件 / SW 注册
-├── sw.js                      # 离线壳（CACHE=qforge-v76）
+├── sw.js                      # 离线壳（CACHE=qforge-v77）
 ├── manifest.webmanifest       # PWA 清单
 ├── contracts/                 # modules.json（装配事实源）、adapters.json 等
 ├── scripts/                   # 开发工具与门禁（不随应用发布）
@@ -143,7 +143,7 @@ node scripts/check-discipline.mjs --strict
 - [开发与验证](docs/DEVELOPMENT.md) —— 环境、运行时配置、扩展指南、CI、文档规约；**§0 是版本读数的唯一声明处**
 - [架构设计](docs/ARCHITECTURE.md) —— 分层、功能域、运行链路、不变量、**已知问题与风险**
 - [数据契约](docs/ARCHITECTURE-DATA.md) —— 存储栈、键布局、分块、schema、跨标签、按需边界、SW 缓存
-- [模块清单](docs/modules.md) —— 96 条装配清单；细则分 [入口](docs/modules/entry.md) / [公共抽象](docs/modules/utils.md) / [数据与导入](docs/modules/data.md) / [业务模块](docs/modules/app.md)
+- [模块清单](docs/modules.md) —— 98 条装配清单；细则分 [入口](docs/modules/entry.md) / [公共抽象](docs/modules/utils.md) / [数据与导入](docs/modules/data.md) / [业务模块](docs/modules/app.md)
 - [测试矩阵](docs/TESTING.md) · [性能打点](docs/BENCH.md) · [E2E 与 CI](docs/E2E-CI.md) · [发布检查单](docs/RELEASE-CHECKLIST.md)
 - [数据存放与备份](docs/BACKUP.md) · [使用指南](docs/user-guide.md) · [REST 契约](docs/API-CONTRACT.md) · [间隔重复](docs/SRS.md)
 

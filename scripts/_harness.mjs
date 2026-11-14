@@ -49,6 +49,8 @@ const MODULES = [
   'js/data/db.js',
   'js/modules/package.js',
   'js/modules/qbk.js',
+  'js/importers/adapters-normalize.js',
+  'js/importers/adapters-table.js',
   'js/importers/adapters.js',
   'js/importers/json-importer.js',
   'js/importers/csv-importer.js',

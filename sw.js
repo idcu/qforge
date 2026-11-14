@@ -12,7 +12,7 @@
  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
  */
-const CACHE = 'qforge-v76';
+const CACHE = 'qforge-v77';
 // 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
 const CACHE_PREFIX = 'qforge-';
 const CORE = [
@@ -25,6 +25,8 @@ const CORE = [
   // 功能级按需包（QB.BUNDLES）：首屏不加载，但必须预缓存，
   // 否则「联网用过一次之前断网」时这些功能会因脚本未缓存而不可用。
   // 与 js/modules/loader.js 的清单逐项对应（check-modules / sw 预缓存覆盖断言会核对）。
+  './js/importers/adapters-normalize.js',
+  './js/importers/adapters-table.js',
   './js/importers/adapters.js',
   './js/importers/line-parser.js',
   './js/importers/json-importer.js',

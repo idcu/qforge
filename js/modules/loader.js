@@ -19,6 +19,8 @@
   const BUNDLES = {
     // 导入链路：文件/文本/URL/分享码 → 解析 → 落库
     import: [
+      'js/importers/adapters-normalize.js',
+      'js/importers/adapters-table.js',
       'js/importers/adapters.js',
       'js/importers/line-parser.js',
       'js/importers/json-importer.js',
@@ -50,6 +52,8 @@
     ],
     // 题目编辑器（与 import 共享 adapters，重复项按 URL 去重）
     editor: [
+      'js/importers/adapters-normalize.js',
+      'js/importers/adapters-table.js',
       'js/importers/adapters.js',
       'js/modules/question-editor.js'
     ],
