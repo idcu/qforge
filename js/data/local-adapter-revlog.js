@@ -150,9 +150,19 @@
       if (!normalized.length) return { added: 0, rollback: function () {} };
       RevlogStore.convertLegacy();
       const prevMeta = revlogMetaOf();
-      const touched = new Map();
-      const touch = (i) => {
-        if (!touched.has(i)) touched.set(i, Storage.getFresh(K.revlogSeg(i), null));
+      const touched = new Map(); // i -> 变更前快照（null=不存在），回滚用
+      const written = new Set(); // 本批已重写过的分段键
+      // 读分段并登记变更前快照；返回可变副本（后续 push/splice 不会污染回滚快照）。
+      // 同一段在本批只解析一次：原实现 revlogSegOf() 取值后 touch() 会对同一个键再 getFresh 一次。
+      const readSeg = (i) => {
+        if (!touched.has(i)) {
+          const raw = Storage.getFresh(K.revlogSeg(i), null);
+          touched.set(i, raw);
+          return Array.isArray(raw) ? raw.slice() : [];
+        }
+        // 已登记快照：本批重写过该段时保持原语义（读回落盘值），否则直接复用快照，省掉重复 JSON.parse
+        const raw = written.has(i) ? Storage.getFresh(K.revlogSeg(i), null) : touched.get(i);
+        return Array.isArray(raw) ? raw.slice() : [];
       };
       const meta = Object.assign({ v: REVLOG_LAYOUT_VERSION, segSize: REVLOG_SEG_SIZE, first: 0, last: 0, count: 0 }, prevMeta || {});
       let idx = meta.count ? meta.last : 0;
@@ -168,34 +178,35 @@
         else Storage.remove(K.revlogMeta);
       };
       try {
-        let seg = revlogSegOf(idx).slice(); // 副本：失败时不能污染 touched 中用于回滚的旧数组
-        touch(idx);
+        let seg = readSeg(idx); // 副本：失败时不能污染 touched 中用于回滚的旧数组
         normalized.forEach((entry) => {
           if (seg.length >= REVLOG_SEG_SIZE) {
             Storage.setSync(K.revlogSeg(idx), seg);
+            written.add(idx);
             idx += 1;
-            seg = revlogSegOf(idx).slice();
-            touch(idx);
+            seg = readSeg(idx);
           }
           seg.push(entry);
         });
         Storage.setSync(K.revlogSeg(idx), seg);
+        written.add(idx);
         meta.last = idx;
         meta.count += normalized.length;
 
         // FIFO：只裁首段
         let overflow = meta.count - REVLOG_MAX;
         while (overflow > 0) {
-          const first = revlogSegOf(meta.first).slice();
-          touch(meta.first);
+          const first = readSeg(meta.first);
           if (!first.length) { meta.first += 1; continue; }
           if (first.length <= overflow) {
             overflow -= first.length;
             Storage.remove(K.revlogSeg(meta.first));
+            written.add(meta.first);
             meta.first += 1;
           } else {
             first.splice(0, overflow);
             Storage.setSync(K.revlogSeg(meta.first), first);
+            written.add(meta.first);
             overflow = 0;
           }
         }

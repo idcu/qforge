@@ -5,7 +5,7 @@
 
 ## 0. 发布前须知
 
-- 当前已发布 **1.0.2**（`docs/release-ledger.json` 的 `lastReleased`），下一版必须严格大于它，起点 **1.0.3**；SW 缓存当前为 **qforge-v82**（以 `sw.js` 实读为准）。
+- 当前已发布 **1.0.2**（`docs/release-ledger.json` 的 `lastReleased`），下一版必须严格大于它，起点 **1.0.3**；SW 缓存当前为 **qforge-v83**（以 `sw.js` 实读为准）。
 - 发布只允许手改两个数值：`package.json` 的 `version`、`sw.js` 的 `CACHE`。其余数字（断言数、模块数、脚本数）由门禁复算，不得手改。
 - 本仓库零运行时依赖；不要引入 `npm install`、打包器或 TypeScript。
 - `js/`、`css/`、`index.html` 任一文件变更后 **必须** bump `sw.js` 的 `CACHE`，否则老用户会继续命中旧缓存；**回滚也要用更大的新号**，不能退回旧号。

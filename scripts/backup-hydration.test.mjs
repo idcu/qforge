@@ -227,6 +227,10 @@ async function main() {
   // 函数体未改、水合前置关系未变，合计仍 96（口径不变，不是放宽）。
   // 2026-11-14 local-adapter 拆分：54 处「按原函数整体搬移」分布到 7 个分片（questions 无
   // Storage.* 直读），逐文件计数因文件边界变化而重排，合计仍 96（口径不变，不是放宽）。
+  // 2026-11-14 revlog 去重解析：`appendInternal` 的 `readSeg` 直接 `getFresh` 取分段原文快照
+  // （原 `revlogSegOf` + `touch` 对同一键解析两次），revlog 9 → 10、合计 96 → 97。
+  // 归类：全局键（user:revlog:<i>），不归属题库、无作用域水合前置，与既有 `revlogSegOf` 同口径；
+  // 净读取次数从每批 4.2 次降到 2.1 次（见 docs/BENCH-DATA 剖面），不是放宽。
   const EXPECTED_SITES = {
     'js/app.js': 2,
     'js/data/db.js': 1,
@@ -234,7 +238,7 @@ async function main() {
     'js/data/local-adapter-cascade.js': 3,
     'js/data/local-adapter-progress.js': 11,
     'js/data/local-adapter-review.js': 16,
-    'js/data/local-adapter-revlog.js': 9,
+    'js/data/local-adapter-revlog.js': 10,
     'js/data/local-adapter-shard.js': 7,
     'js/data/local-adapter.js': 7,
     'js/modules/backup-pack.js': 2,
@@ -251,7 +255,7 @@ async function main() {
     'js/utils/hash-remap.js': 1
   };
   A.deepEq(scan.perFile, EXPECTED_SITES, '调用点逐文件计数与冻结清单一致（新增点必须先归类并前置 ensure）');
-  A.eq(scan.total, 96, '可执行调用点合计 96（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
+  A.eq(scan.total, 97, '可执行调用点合计 97（去注释/字符串；逐文件：' + prettyMap(scan.perFile) + '）');
 
   // ---------- C 步骤2：A 段（全量跨库）20 处前置静态护栏 ----------
   A.section('C 步骤2：A 段跨库读取前置（20 处逐处核对）');
