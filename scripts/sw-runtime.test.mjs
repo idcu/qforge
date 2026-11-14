@@ -124,10 +124,11 @@ if (WRITE_BASELINE) {
    */
   function createEnv(opts) {
     const o = opts || {};
-    const calls = { skip: 0, claim: 0, deleted: [], opened: [], puts: [], addAll: [], fetches: [] };
+    const calls = { skip: 0, claim: 0, deleted: [], opened: [], puts: [], addAll: [], fetches: [], matches: [] };
     const stores = new Map();
     const ensure = (name) => { if (!stores.has(name)) stores.set(name, new Map()); return stores.get(name); };
     const keyOf = (k) => (typeof k === 'string' ? new URL(k, ORIGIN).href : k.url);
+    const stripQuery = (u) => u.split('?')[0];
 
     function cacheObj(name) {
       return {
@@ -142,14 +143,36 @@ if (WRITE_BASELINE) {
           ensure(name).set(keyOf(k), res);
           return Promise.resolve();
         },
-        match(k) { return Promise.resolve(ensure(name).get(keyOf(k))); }
+        match(k, opts) {
+          const key = keyOf(k);
+          const ignoreSearch = !!(opts && opts.ignoreSearch);
+          calls.matches.push({ cache: name, key: key, ignoreSearch: ignoreSearch });
+          if (ignoreSearch) {
+            const want = stripQuery(key);
+            for (const [stored, res] of ensure(name)) {
+              if (stripQuery(stored) === want) return Promise.resolve(res);
+            }
+            return Promise.resolve(undefined);
+          }
+          return Promise.resolve(ensure(name).get(key));
+        },
+        keys() { return Promise.resolve([...ensure(name).keys()].map((url) => ({ url: url }))); }
       };
     }
 
     const caches = {
       open(name) { calls.opened.push(name); ensure(name); return Promise.resolve(cacheObj(name)); },
-      match(k) {
+      match(k, opts) {
         const key = keyOf(k);
+        const ignoreSearch = !!(opts && opts.ignoreSearch);
+        calls.matches.push({ cache: '*', key: key, ignoreSearch: ignoreSearch });
+        if (ignoreSearch) {
+          const want = stripQuery(key);
+          for (const s of stores.values()) {
+            for (const [stored, res] of s) if (stripQuery(stored) === want) return Promise.resolve(res);
+          }
+          return Promise.resolve(undefined);
+        }
         for (const s of stores.values()) if (s.has(key)) return Promise.resolve(s.get(key));
         return Promise.resolve(undefined);
       },
@@ -177,6 +200,7 @@ if (WRITE_BASELINE) {
       handlers: handlers,
       calls: calls,
       stores: stores,
+      caches: caches,
       seed(name, key, res) { ensure(name).set(keyOf(key), res); }
     };
   }
@@ -311,7 +335,80 @@ if (WRITE_BASELINE) {
     ok(env.calls.deleted.indexOf(CACHE) < 0, '当前版本缓存保留（' + CACHE + '）');
     ok(env.calls.deleted.indexOf('other-app-v1') < 0, '同源其他应用缓存不被删除（R-11：只清理本站前缀）');
     ok(env.stores.has('other-app-v1'), '其他应用缓存内容仍在（未被误删）');
+    ok(!env.stores.has('qforge-v1'), 'activate 后旧缓存对象不存在（不能被扫描重新创建为空缓存）');
     eq(env.calls.claim, 1, '调用 clients.claim（首次加载即受控）');
+  }
+
+  /* ============================ 7. 查询键探针 ============================ */
+
+  section('查询键探针：标志假时纯路径跳过 ignoreSearch，且跳过为 no-op');
+  ok(CORE.every((p) => p.indexOf('?') < 0), 'CORE 预缓存清单不含查询串（install 不会写入查询键）');
+  {
+    // CORE 预缓存形态：activate 全量重算 → 缓存里只有纯路径键 → 标志为假
+    const env = createEnv();
+    env.seed(CACHE, './index.html', makeResponse(200, 'shell'));
+    await dispatch(env, 'activate').pending;
+    const allKeys = [...env.stores.values()].flatMap((s) => [...s.keys()]);
+    ok(allKeys.length > 0 && allKeys.every((k) => k.indexOf('?') < 0), 'activate 重算后缓存中确实没有查询键（fixture 前提）');
+
+    const req = { method: 'GET', mode: 'cors', url: ORIGIN + '/js/app.js' };
+    env.calls.matches.length = 0;
+    const res = await dispatch(env, 'fetch', req).response;
+    eq(res, undefined, '未缓存的纯路径 + 离线：请求失败（没有可回退的查询键）');
+    eq(env.calls.matches.filter((m) => m.ignoreSearch).length, 0, '标志假 → 纯路径请求不发起 ignoreSearch 回退');
+    const exact = await env.caches.match(req);
+    const fuzzy = await env.caches.match(req, { ignoreSearch: true });
+    eq(exact, fuzzy, '无查询键时 ignoreSearch 与精确匹配返回同一结果（跳过回退不改变返回值）');
+  }
+  {
+    // 查询串请求 + 按需包加载：?v= 离线回退到 CORE 纯路径键
+    const env = createEnv();
+    env.seed(CACHE, './js/modules/backup.js', makeResponse(200, 'bundle'));
+    const req = { method: 'GET', mode: 'cors', url: ORIGIN + '/js/modules/backup.js?v=9.9.9' };
+    const res = await dispatch(env, 'fetch', req).response;
+    eq(res.body, 'bundle', '按需包 ?v= 请求离线回退到 CORE 纯路径键');
+    eq(env.calls.matches.filter((m) => m.ignoreSearch).length, 1, '带查询串请求仍执行 ignoreSearch 回退');
+  }
+  {
+    // ?r=1 重试写入必须置位：标志假 → 写入查询键 → 纯路径恢复回退
+    let online = false;
+    const env = createEnv({
+      fetch: () => (online
+        ? Promise.resolve(makeResponse(200, 'fresh'))
+        : Promise.reject(new Error('offline')))
+    });
+    env.seed(CACHE, './index.html', makeResponse(200, 'shell'));
+    await dispatch(env, 'activate').pending;
+
+    const plain = { method: 'GET', mode: 'cors', url: ORIGIN + '/js/app.js' };
+    env.calls.matches.length = 0;
+    const missing = await dispatch(env, 'fetch', plain).response;
+    eq(missing, undefined, '写入查询键之前断网：纯路径请求无缓存可用');
+    eq(env.calls.matches.filter((m) => m.ignoreSearch).length, 0, '写入查询键之前：纯路径请求不走回退');
+
+    online = true;
+    const retry = { method: 'GET', mode: 'cors', url: ORIGIN + '/js/app.js?r=1' };
+    const res0 = await dispatch(env, 'fetch', retry).response;
+    await flush();
+    eq(res0.body, 'fresh', '?r=1 在线响应正常');
+    ok([...env.stores.values()].some((s) => [...s.keys()].some((k) => k.indexOf('?') >= 0)), '?r=1 响应写入了带查询串的缓存键');
+
+    online = false;
+    env.calls.matches.length = 0;
+    const res = await dispatch(env, 'fetch', plain).response;
+    eq(res && res.body, 'fresh', '?r=1 写入后断网，纯路径请求靠回退命中查询键');
+    ok(env.calls.matches.some((m) => m.ignoreSearch), '带查询串写入已置位 → 纯路径请求保留回退');
+  }
+  {
+    // activate 全量重算必须发现已存在的查询键：标志保持为真
+    const env = createEnv();
+    env.seed(CACHE, './js/app.js?r=1', makeResponse(200, 'q'));
+    await dispatch(env, 'activate').pending;
+    const req = { method: 'GET', mode: 'cors', url: ORIGIN + '/js/app.js' };
+    env.calls.matches.length = 0;
+    const res = await dispatch(env, 'fetch', req).response;
+    eq(res && res.body, 'q', '缓存中存在查询键时，纯路径请求仍靠回退命中');
+    ok(env.calls.matches.some((m) => m.ignoreSearch), 'activate 重算发现查询键 → 保留 ignoreSearch 回退');
   }
 
   console.log('\n================ 汇总 ================');
