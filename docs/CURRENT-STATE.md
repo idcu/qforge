@@ -41,7 +41,7 @@ npm run verify
 
 它依次执行：
 
-- `verify:fast`：`check-ngm` → `check-modules` → `check-layers` → `check-deps` → `check-csp` → `check-changelog` → `check-deletions` → `docs-links` → `check-ci-coverage` → `check-async-hygiene` → `test-all` → `docs-check --static` → `check-release`；
+- `verify:fast`：`check-ngm` → `check-modules` → `check-layers` → `check-deps` → `check-csp` → `check-changelog` → `check-deletions` → `docs-links` → `check-ci-coverage` → `check-async-hygiene` → `check-bundle-size` → `test-all` → `docs-check --static` → `check-release`；
 - `bench`：`node --expose-gc scripts/bench.mjs --assert`（63 项门禁）；
 - `check-discipline --strict`：架构纪律扫描（文件规模、层边界、豁免到期等）。
 

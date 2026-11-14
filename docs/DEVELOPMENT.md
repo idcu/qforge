@@ -158,7 +158,7 @@ WEBDAV_USER=u WEBDAV_PASS=p PORT=8899 node scripts/serve-webdav.mjs
 - 已覆盖的复习设置弹窗（三档宽度）：`scrollWidth == clientWidth`；11 个控件实际点击矩形 ≥44×44；复选框 `Space`、下拉 `↓` 可切换；`Esc` 后焦点回位。
 - **未覆盖**：拖拽导入；外层弹窗内再开内层弹窗的真机 Esc；`confirmDialog` 在无弹窗异步回调中调用；`SyncDAV` 弹窗；复习设置之外的键盘操作；14 份渲染快照之外的动态题型/材料题子问。新增弹窗或入口时必须先补静态断言，再按需补真机用例。
 
-**本地全量门禁**：`npm run verify` = `npm run verify:fast`（check-ngm → check-modules → check-layers → check-deps → check-csp → check-changelog → check-deletions → docs-links → check-ci-coverage → test-all → docs-check --static → check-release）→ `npm run bench`（默认带 `--assert`）→ `node scripts/check-discipline.mjs --strict`。只想快速回归用 `npm run verify:fast`（不含性能与纪律）。**异步卫生**由 `scripts/check-async-hygiene.mjs` 提供读数（空 catch / 未处理 Promise，历史存量走 `scripts/hygiene-baseline.json` 的带到期日豁免；CI 的 `docs-check` job 也直接跑它）。纪律看板区分 ✅ 通过 / ⚠️ 不适用 / ⏭️ 临时跳过（`{reason, expires}`，到期自动转缺口）/ ❌ 缺口，`--strict` 遇任一缺口即 exit 1。
+**本地全量门禁**：`npm run verify` = `npm run verify:fast`（check-ngm → check-modules → check-layers → check-deps → check-csp → check-changelog → check-deletions → docs-links → check-ci-coverage → check-async-hygiene → check-bundle-size → test-all → docs-check --static → check-release）→ `npm run bench`（默认带 `--assert`）→ `node scripts/check-discipline.mjs --strict`。只想快速回归用 `npm run verify:fast`（不含性能与纪律）。**异步卫生**由 `scripts/check-async-hygiene.mjs` 提供读数（空 catch / 未处理 Promise，历史存量走 `scripts/hygiene-baseline.json` 的带到期日豁免；CI 的 `docs-check` job 也直接跑它）。**按需包体积上限**由 `scripts/check-bundle-size.mjs` 守（backup/import/editor/export + 全包去重，口径与首屏体积一致；这是防漂移线，不是优化目标，见 `docs/BENCH.md` §3.2）。纪律看板区分 ✅ 通过 / ⚠️ 不适用 / ⏭️ 临时跳过（`{reason, expires}`，到期自动转缺口）/ ❌ 缺口，`--strict` 遇任一缺口即 exit 1。
 
 ## 5. 扩展指南（最小改动路径）
 
