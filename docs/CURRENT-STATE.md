@@ -9,23 +9,23 @@
 | 项 | 当前值 | 事实源 | 谁复核 |
 |---|---|---|---|
 | 应用版本 | **1.0.2** | `package.json` | `check-release`（≥ 台账） |
-| SW 缓存 | **qforge-v84** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
+| SW 缓存 | **qforge-v85** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
 | 上次对外发布 | 1.0.2 / qforge-v67 / 2026-11-13 | `docs/release-ledger.json` | `check-release` |
 | 存储 schema | **7** | `js/modules/migrate-core.js` | `migrate` 套件 |
 | contentHash 版本 | **3**（64 位） | `js/utils/question-id.js` | `smoke` / `shard` 套件 |
-| 测试规模 | **41 个运行项（冒烟 + 40 套件）**，**6386 / 6386 通过** | `scripts/test-all.mjs` | `test-all`、`docs-check --static` |
-| 性能门禁 | **63 项阈值** | `scripts/bench.mjs` | `bench --assert` |
-| 首屏体积 | 共 95 个文件（87 个 index 内联 js），**316.9 KB gzip / 838.0 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
+| 测试规模 | **41 个运行项（冒烟 + 40 套件）**，**6405 / 6405 通过** | `scripts/test-all.mjs` | `test-all`、`docs-check --static` |
+| 性能门禁 | **64 项阈值** | `scripts/bench.mjs` | `bench --assert` |
+| 首屏体积 | 共 95 个文件（87 个 index 内联 js），**317.5 KB gzip / 840.3 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
 
-> 说明：`qforge-v82` 覆盖 2026-11-14 的两次纯移动拆分——切片 A 把 `ui-renderer-views.js` 按页面域拆为 base/home/quiz/lists/result 5 个文件（+3.2 KB gzip），切片 E 把 `migrate.js` 拆为 core/legacy/backend/entry 4 个文件（+3.3 KB gzip）。合计相对拆分前 +6.5 KB gzip / +3.6 KB raw，成因是逐文件 gzip 丢失跨文件窗口红利与每文件头部/包装开销。自 2026-11-14 起首屏体积仅测量与报告，不再作为拆分停手门禁；按需包上限门禁不变。判据变更见 `docs/rounds/2026-11-14/specs/split-roadmap/spec.md` §0 与 ui-split spec §8.2。`qforge-v83` 为 revlog 追加去重解析（`appendInternal` 的 `readSeg` 复用已读分段，净解析次数减半，首屏 +0.4 KB gzip）。`qforge-v84` 为写路径复用序列化文本（`setSync` 的 JSON 文本同时供落盘与 Quota 计费，旧值长度取自缓存条目，首屏 +1.1 KB gzip / +4.4 KB raw）。
+> 说明：`qforge-v82` 覆盖 2026-11-14 的两次纯移动拆分——切片 A 把 `ui-renderer-views.js` 按页面域拆为 base/home/quiz/lists/result 5 个文件（+3.2 KB gzip），切片 E 把 `migrate.js` 拆为 core/legacy/backend/entry 4 个文件（+3.3 KB gzip）。合计相对拆分前 +6.5 KB gzip / +3.6 KB raw，成因是逐文件 gzip 丢失跨文件窗口红利与每文件头部/包装开销。自 2026-11-14 起首屏体积仅测量与报告，不再作为拆分停手门禁；按需包上限门禁不变。判据变更见 `docs/rounds/2026-11-14/specs/split-roadmap/spec.md` §0 与 ui-split spec §8.2。`qforge-v83` 为 revlog 追加去重解析（`appendInternal` 的 `readSeg` 复用已读分段，净解析次数减半，首屏 +0.4 KB gzip）。`qforge-v84` 为写路径复用序列化文本（`setSync` 的 JSON 文本同时供落盘与 Quota 计费，旧值长度取自缓存条目，首屏 +1.1 KB gzip / +4.4 KB raw）。`qforge-v85` 为写路径序列化收口（IDB 计费复用 `_charLens` 长度、防抖 `set` 预序列化，首屏 +0.6 KB gzip / +2.3 KB raw）。
 
 ## 2. 什么叫“绿”
 
 一次判定要同时满足：
 
 1. `npm run verify` **退出码 0**，且输出中没有 `✗` / `FAIL` / `失败` 行；
-2. `test-all` 打印 `41` 个运行项、`6386 / 6386 通过`、`0 失败`；
-3. `bench --assert` 的 63 项门禁全部通过（不是“允许若干项超阈值”）；
+2. `test-all` 打印 `41` 个运行项、`6405 / 6405 通过`、`0 失败`；
+3. `bench --assert` 的 64 项门禁全部通过（不是“允许若干项超阈值”）；
 4. `docs-check --static` 全部一致，`check-release` 通过；
 5. `check-discipline --strict` 0 新增豁免、0 新增问题。
 
@@ -42,12 +42,12 @@ npm run verify
 它依次执行：
 
 - `verify:fast`：`check-ngm` → `check-modules` → `check-layers` → `check-deps` → `check-csp` → `check-changelog` → `check-deletions` → `docs-links` → `check-ci-coverage` → `check-async-hygiene` → `check-bundle-size` → `test-all` → `docs-check --static` → `check-release`；
-- `bench`：`node --expose-gc scripts/bench.mjs --assert`（63 项门禁）；
+- `bench`：`node --expose-gc scripts/bench.mjs --assert`（64 项门禁）；
 - `check-discipline --strict`：架构纪律扫描（文件规模、层边界、豁免到期等）。
 
 只想快速看代码与测试是否还活：`npm run test`（等价于 `check-ngm` + `test-all`，不覆盖文档、发布与性能门禁）。
 
-期望读数：`test-all` 41 个运行项 / 6379 断言 / 0 失败；`bench` 63/63；全部退出码 0。任何一步非 0 都不算绿。
+期望读数：`test-all` 41 个运行项 / 6379 断言 / 0 失败；`bench` 64/64；全部退出码 0。任何一步非 0 都不算绿。
 
 ## 4. 出问题怎么退回上一个 good state
 

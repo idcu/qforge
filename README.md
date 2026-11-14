@@ -15,7 +15,7 @@
 - **分层**：`sample → config → data → utils → vendor → modules → importers → entry`，依赖只允许从高 tier 指向低 tier；数据层不许点名领域模块，领域模块不许直接碰 DOM/渲染器。
 - **数据**：7 组 Repository 契约（banks / questions / progress / reviews / revlog / weights / backup），默认 `QB.LocalAdapter`；`DATA_BACKEND='api'` 时切 `QB.ApiAdapter`。
 - **复习**：FSRS-6，21 维权重，学习步 / 每日限额 / 保留率可按题库覆盖。
-- **质量**：41 个运行项（冒烟 + 40 套件）、6379 项断言、63 项性能门禁、CI 六格矩阵（Node 20 / 24 / 26 × UTC / Asia-Shanghai）。
+- **质量**：41 个运行项（冒烟 + 40 套件）、6379 项断言、64 项性能门禁、CI 六格矩阵（Node 20 / 24 / 26 × UTC / Asia-Shanghai）。
 - **当前版本**：1.0.2；SW 缓存 `qforge-v79`；本地 schema `v7`；contentHash 去重键 `3:`。
 
 一句话心智模型：**`app.js` 编排状态与渲染，Repository 负责持久化，领域模块只经契约与端口访问外部，UI 只读 State 并输出字符串 HTML。**
@@ -106,7 +106,7 @@ qforge/
 
 ```bash
 npm run verify:fast   # 静态门禁 + 全量逻辑层测试 + docs-check --static + check-release
-npm run verify        # 上面全部 + bench --assert（63 项）+ check-discipline --strict
+npm run verify        # 上面全部 + bench --assert（64 项）+ check-discipline --strict
 npm test              # check-ngm + 全部测试
 node scripts/bench.mjs --assert          # 性能门禁（需 --expose-gc）
 node scripts/docs-links.mjs              # 文档链接 / 代码行锚点 / §0 版本读数
@@ -114,7 +114,7 @@ node scripts/docs-check.mjs --static     # 文档数字与基线对账
 node scripts/check-discipline.mjs --strict
 ```
 
-细节见 [TESTING.md](docs/TESTING.md)（逐套件断言数与运行项）、[BENCH.md](docs/BENCH.md)（63 项性能门禁）、[DEVELOPMENT.md](docs/DEVELOPMENT.md)（环境、扩展、CI、文档规约）。
+细节见 [TESTING.md](docs/TESTING.md)（逐套件断言数与运行项）、[BENCH.md](docs/BENCH.md)（64 项性能门禁）、[DEVELOPMENT.md](docs/DEVELOPMENT.md)（环境、扩展、CI、文档规约）。
 
 ## 5. 部署与回滚
 

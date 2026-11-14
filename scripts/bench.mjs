@@ -42,6 +42,16 @@
  *   （只给首次构建样本前置忙等，1.5×/2× 均判红）；写入即失效场景用 QF_BENCH_INJECT_KEYS_REBUILD=1。
  *   原理与实测见 docs/BENCH.md「3-B-1. keys() 视图门禁」。
  *
+ * 生产形态门禁（2026-11-14 定稿，第 64 项）：
+ *   `SRSStore.gradeMany 批量 20 题（IDB + Quota ready）` 用与 SRS 完全同构的比值口径
+ *   （21 轮×200、同轮标定、p25），只把后端换成 IDB、Quota 快照置为 ready——否则线上
+ *   （IDB + Quota ready）的成本永远不被门禁覆盖（D-13：生产比门禁形态慢 1.75×）。
+ *   基线 13.071（20 个独立进程的 p25 中位）× 容差 1.06 = 13.86；容差按
+ *   max/p50 = 13.390/13.071 = 1.024 × 1.03 采样余量向上取两位，等价于「最坏值之上留 3.5%」。
+ *   确定性承诺只到 +20%；+10% 为概率性（余量 1.2%）；不做自动复跑（会把误报转成漏报）。
+ *   只有 Node 26 有该形态基线，其它大版本显式跳过（不拿别的引擎数字顶替）。
+ *   冷读不设门禁：Node 内存 IDB 替身无磁盘 I/O/IPC，读数是下界（见 docs/BENCH.md 3-B-3）。
+ *
  * IDB 单次评分写入门禁（不做比值，改用最小样本）：
  *   `IDB 单次评分写入（5000/20000/50000）` 每档 5 轮 × 20 样本、每轮前强制 GC，判定值取
  *   **全局最小样本**，上限仍是 1 ms。不套同轮标定比值：该路径抖动来自事务提交与 GC/调度
@@ -1753,12 +1763,12 @@ let c018GetSeq = 0;
 
 /* ---------- 12e. 方向 F：50k IDB 热点夹具（--hotspots，默认不跑） ----------
  * 目的：让「最坏用例」可复现——50k 题 + 50k 复习状态 + 20k revlog 落在同一个 IDB 库，
- * 给审计列出的每条热点一个可测读数与独立红线（输出前缀 `  [H] `，**不计入** GATE_TOTAL=63）。
+ * 给审计列出的每条热点一个可测读数与独立红线（输出前缀 `  [H] `，**不计入** GATE_TOTAL=64）。
  * 口径：
  *   - 独立 IDB harness + createMemoryIDB（与 12c/12d 同来源），不污染主 harness 与既有门禁；
  *   - 读路径 3 轮 × 5 样本取轮中位数；写路径 5 轮 × 20 样本取**全局最小样本**（与 3-B-2 同口径）；
  *   - 阈值只拦「量级回归」（实测基线 × 3–10），不放宽任何既有阈值，也不删除任何既有门禁；
- *   - 负向证明：QF_BENCH_HOTSPOT_SCALE=10 把判定值放大 10×，热点门禁应判红（63 项仍全绿）。
+ *   - 负向证明：QF_BENCH_HOTSPOT_SCALE=10 把判定值放大 10×，热点门禁应判红（64 项仍全绿）。
  */
 const hotspotRows = [];
 const HOT_INJECT = Number(process.env.QF_BENCH_HOTSPOT_SCALE || 1);
@@ -2123,6 +2133,54 @@ function writeBenchSnapshot(gateLines) {
   }
 }
 
+/* ---------- 5c. 生产形态（IDB + Quota ready）gradeMany 门禁（3-B-3） ----------
+ * 上面的 SRS 门禁跑在 ls + Quota 未就绪；线上是 IDB + Quota ready，二者不是同一形态
+ * （D-13：生产 gradeMany 慢 1.75×），ls 读数不能代表生产。
+ * 这里用独立 harness 复刻生产形态，口径与 3-B 完全同构（21 轮×200、同轮标定、p25），
+ * 只换后端与 Quota 状态；夹具/预热与 20 进程基线探针一致（20 题批、revlog 灌满、60 轮预热）。
+ * 基线按 Node 大版本存放；无该版本基线时显式跳过（当前只有 Node 26），不拿别的引擎数字顶替。
+ * 必须放在全部既有测量之后：独立 harness 会增加堆占用，前置会扰动
+ * `IDB 单次评分写入（50000）` 的最小样本（实测 0.54 → 1.21 ms），把既有门禁挤红。 */
+let idbonGradeMany = null;
+{
+  const idb = createMemoryIDB();
+  const h = await createHarness(QB_DIR, {
+    indexedDB: idb,
+    storageEstimate: () => ({ usage: idb.usageBytes(), quota: 0 })
+  });
+  const IQ = h.QB;
+  IQ.Store.writeMarker('idb');
+  await IQ.Storage.initStore();
+  IQ.DB.init();
+  await IQ.Quota.refresh();
+  const probeQs = [];
+  for (let i = 0; i < 20; i++) {
+    probeQs.push({
+      type: 'single', question: '门禁探针第 ' + i + ' 题？' + 'q'.repeat(i % 32),
+      options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }],
+      answer: 'A', category: 'c' + (i % 5), difficulty: (i % 5) + 1
+    });
+  }
+  const probeBank = await IQ.DB.banks.create({ name: 'idbon 门禁', category: 'bench' });
+  await IQ.DB.questions.insertMany(probeBank.id, probeQs, { dedupe: false });
+  const probeGradeQs = (await IQ.DB.questions.list(probeBank.id, {})).items;
+  const cap = (IQ.CONFIG.LIMITS && IQ.CONFIG.LIMITS.REVLOG_MAX) || 20000;
+  await IQ.DB.revlog.append(Array.from({ length: cap }, (_, i) => ({
+    t: qNow + i, h: 'bench-idbon-cap-' + (i % 20), r: 3, b: 'bench-idbon-cap'
+  })));
+  await IQ.Storage.flush();
+  const probeBatch = probeGradeQs.map((q) => ({ question: q, rating: IQ.SRS.RATINGS.good }));
+  let probeTick = 0;
+  for (let i = 0; i < 60; i++) await IQ.SRSStore.gradeMany(probeBank.id, probeBatch, qNow + (++probeTick) * 1000);
+  await IQ.Storage.flush();
+  idbonGradeMany = await calibratedTimed(async () => {
+    await IQ.SRSStore.gradeMany(probeBank.id, probeBatch, qNow + (++probeTick) * 1000);
+  }, 200, 21, 10);
+  row('SRSStore.gradeMany 批量 20 题（IDB + Quota ready）', idbonGradeMany,
+    '生产形态：IDB 后端 + 结构化克隆 + 事务排队 + 计费 ready；21 轮×200；门禁=同轮标定比值 p25');
+}
+bestEffortGc();
+
 /* ---------- 性能门禁（可选 --assert） ----------
  * 阈值取本次基线 × 约 3–10 倍，用于拦截「量级回归」而非机器差异；
  * 绝对值不追求严格，CI 与本地都不会因小波动误报。 */
@@ -2134,7 +2192,7 @@ if (process.argv.indexOf('--assert') >= 0) {
   /* 门禁声明总数：与实跑输出的 ✓/✗ 行数逐条核对（见本块末尾），不一致即红。
      scripts/docs-check.mjs 也读这个数，并与 docs-baseline.json 的 gateCount、文档里的
      「N 项阈值」三方对账——所以「加/删门禁忘了同步数字」不再能静默漂移。 */
-  const GATE_TOTAL = 63;
+  const GATE_TOTAL = 64;
   const BUDGETS = [
     ['JSON.parse', 20],
     ['insertMany 落库', 30],
@@ -2293,6 +2351,33 @@ if (process.argv.indexOf('--assert') >= 0) {
         + (r.injectRatio ? '；负向注入 +' + (r.injectRatio * 100).toFixed(0) + '%（' + ((r.injectMs || 0) * 1000).toFixed(1) + ' µs/样本）' : '') + '）');
       if (!ok) fails.push(needle + ' ratio' + (isSrs ? '(p25)' : '') + ' ' + measured.toFixed(2) + ' > Node ' + NODE_MAJOR + ' 基线×' + tol + ' ' + max.toFixed(2));
     });
+  // 生产形态（IDB + Quota ready）gradeMany：口径与 3-B 同构，只换后端与 Quota 状态。
+  // 阈值 13.86 = 20 进程 p25 分布最坏值 13.390 之上留 3.5%，也等于中位 13.071 × 容差 1.06。
+  // 确定性承诺只到 +20%；+10% 为概率性（余量 1.2%）；不做自动复跑（会把误报转成漏报）。
+  // 只有 Node 26 有该形态基线：其它大版本显式跳过并保留可见行（不拿别的引擎数字顶替）。
+  {
+    const ibNeedle = 'SRSStore.gradeMany 批量 20 题（IDB + Quota ready）';
+    const ibRow = report.find((x) => x.name.indexOf(ibNeedle) === 0);
+    const ibBase = nodeBaseline && nodeBaseline.idbonGradeMany;
+    if (!isFinite(ibBase)) {
+      console.log('  ✓ ' + ibNeedle + '：Node ' + NODE_MAJOR + ' 无该形态基线，跳过判定'
+        + '（仅 Node 26 判定；见 docs/BENCH.md 3-B-3）');
+    } else if (!ibRow || !isFinite(ibRow.ratioP25)) {
+      console.log('  ✗ ' + ibNeedle + '：比值打点缺失');
+      fails.push(ibNeedle + ' 比值打点缺失');
+    } else {
+      const ibTol = toleranceOf('idbonGradeMany');
+      const ibMax = ibBase * ibTol;
+      const ibOk = ibRow.ratioP25 <= ibMax;
+      console.log((ibOk ? '  ✓ ' : '  ✗ ') + ibNeedle + '：比值(p25) ' + ibRow.ratioP25.toFixed(2) + ' ≤ ' + ibMax.toFixed(2)
+        + '（Node ' + NODE_MAJOR + ' 基线 ' + ibBase.toFixed(3) + ' ×' + ibTol
+        + '；p50 ' + ibRow.p50.toFixed(4) + ' ms / 标定 ' + (ibRow.unitMs * 1000).toFixed(1) + ' µs；'
+        + ibRow.runs + ' 轮×' + (ibRow.samples / ibRow.runs) + ' 样本，轮中位 ' + ibRow.ratio.toFixed(2)
+        + '，轮间极差 ' + ibRow.ratioSpread.toFixed(2) + '×'
+        + (ibRow.injectRatio ? '；负向注入 +' + (ibRow.injectRatio * 100).toFixed(0) + '%' : '') + '）');
+      if (!ibOk) fails.push(ibNeedle + ' ratio(p25) ' + ibRow.ratioP25.toFixed(2) + ' > Node ' + NODE_MAJOR + ' 基线×' + ibTol + ' ' + ibMax.toFixed(2));
+    }
+  }
   // keys() 视图：① 首次构建用 10 轮最小值的绝对门禁（按 Node 大版本分基线，未知版本 fail-closed）；
   // ② 附加「写入已存在键后 ≤ max(首次/10, 1 ms)」的同进程自比值，抓「任何写入即失效」。
   // 为什么用最小值：负载只会让某一轮变慢，不会把最小值拉低；10 轮 × 20 样本的最小值是稳定的绝对估计，
@@ -2446,10 +2531,10 @@ if (process.argv.indexOf('--assert') >= 0) {
   console.log((r19Ok ? '  ✓ ' : '  ✗ ') + 'R-19 分享前估算：估算字符数与真实编码一致 ' + r19EstExact + '/2（540 题 / 8MB 边界）');
   if (!r19Ok) fails.push('R-19 分享前估算与真实编码字符数不一致：' + r19EstExact + '/2');
   // 方向 F 热点门禁（--hotspots，opt-in）：前缀 `  [H] ✓/✗ ` 不匹配 `^  [✓✗] `，
-  // 因此不进入 GATE_TOTAL=63 的自校验；既有 63 项的阈值与判据一条都没动。
+  // 因此不进入 GATE_TOTAL=64 的自校验；既有 64 项的阈值与判据一条都没动。
   // 判定值 = 实测 × HOT_INJECT（默认 1；QF_BENCH_HOTSPOT_SCALE=10 用于证明红线仍会红）。
   if (hotspotRows.length) {
-    console.log('---- 热点夹具（--hotspots，独立于 63 项）----');
+    console.log('---- 热点夹具（--hotspots，独立于 64 项）----');
     hotspotRows.forEach((r) => {
       const judged = r.measured * HOT_INJECT;
       const ok = judged <= r.budget;

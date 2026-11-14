@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-11-14T06:05:31.437Z",
+  "generatedAt": "2026-11-14T07:51:43.193Z",
   "runItems": 41,
   "suiteFiles": 40,
   "totalAssertions": 6405,
-  "gateCount": 63,
+  "gateCount": 64,
   "counts": {
     "smoke-test.mjs": 751,
     "a11y.test.mjs": 103,
