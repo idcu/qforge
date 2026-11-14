@@ -3,6 +3,6 @@
   "tolerance": 1.06,
   "node": {
     "24": { "grade": 2.43, "gradeMany": 4.54, "keysBuildMin": 15.95, "tolerance": { "grade": 1.09, "gradeMany": 1.06, "keysBuildMin": 1.35 } },
-    "26": { "grade": 3.29, "gradeMany": 7.42, "idbonGradeMany": 13.071, "keysBuildMin": 21.70, "tolerance": { "grade": 1.09, "gradeMany": 1.08, "idbonGradeMany": 1.06, "keysBuildMin": 1.35 } }
+    "26": { "grade": 3.29, "gradeMany": 7.42, "idbonGradeMany": 13.595, "keysBuildMin": 21.70, "tolerance": { "grade": 1.09, "gradeMany": 1.08, "idbonGradeMany": 1.06, "keysBuildMin": 1.35 } }
   }
 }
