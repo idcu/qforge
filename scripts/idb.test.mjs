@@ -524,6 +524,71 @@ section('C009：IDB 用量走 navigator.storage.estimate（quota 未知也用它
   ok(v2.usedBytes < v.usedBytes, '再次 refresh 取到更小的 used（' + v.usedBytes + ' → ' + v2.usedBytes + ' B）');
 }
 
+section('C009 续：IDB 写路径只付一次序列化（旧值长度缓存 / 计数逐字节一致 / 回退同一规则）');
+{
+  const idb = createMemoryIDB();
+  const h = await makeHarness({ indexedDB: idb }); // 不注入 estimate：refresh 走 usageBytes 全量口径
+  const QB = h.QB;
+  QB.Store.writeMarker('idb');
+  await QB.Storage.initStore();
+  const S = QB.Storage;
+  const Q = QB.Quota;
+  S.clearAll();
+  await S.flush();
+  eq(S._isIdb(), true, 'IDB 后端');
+  S.setSync('r11-base', { a: 'base' });
+  await S.flush();
+  Q.reset();
+  await Q.refresh();
+  eq(Q.view().usedBytes, S.usageBytes(), 'IDB 基线 = usageBytes（同一计费口径）');
+  eq(Q.limitBytes(), Infinity, 'IDB 上限由浏览器管理（不套用 5MB LS 配额）');
+  ok(Q.canFitQuestions([{ question: 'x'.repeat(1000), options: [{ letter: 'A', text: '甲' }] }]),
+    'IDB 不做同步上限拒绝（等价于改动前）');
+
+  // 1) 首次写（旧值不在缓存）：只序列化新值一次
+  const origStr = JSON.stringify;
+  let strCalls = 0;
+  JSON.stringify = function () { strCalls++; return origStr.apply(JSON, arguments); };
+  let first = 0;
+  let second = 0;
+  try {
+    S.setSync('r11-new', { a: 'x'.repeat(40), b: [1, 2, 3] });
+    first = strCalls;
+    S.setSync('r11-new', { a: 'x'.repeat(10), b: [4, 5] }); // 旧值长度应取自 _charLens
+    second = strCalls - first;
+  } finally { JSON.stringify = origStr; }
+  eq(first, 1, 'IDB 首次 setSync 只序列化一次（实测 ' + first + ' 次）');
+  eq(second, 1, 'IDB 覆盖写旧值长度取缓存，仍只序列化一次（实测 ' + second + ' 次）');
+  await S.flush();
+  eq(Q.view().usedBytes, S.usageBytes(), 'IDB 覆盖写后计数逐字节一致');
+
+  // 2) 防抖 set 路径同样只付一次（与 LS 同一条 `_trackQuotaSet`）
+  strCalls = 0;
+  let setFirst = 0;
+  let setSecond = 0;
+  JSON.stringify = function () { strCalls++; return origStr.apply(JSON, arguments); };
+  try {
+    S.set('r11-set', { a: 'y'.repeat(30) });
+    setFirst = strCalls;
+    S.set('r11-set', { a: 'y'.repeat(50) });
+    setSecond = strCalls - setFirst;
+  } finally { JSON.stringify = origStr; }
+  eq(setFirst, 1, 'IDB set 当次只序列化一次（实测 ' + setFirst + ' 次）');
+  eq(setSecond, 1, 'IDB 同键二次 set 仍只序列化一次（实测 ' + setSecond + ' 次）');
+  await S.flush();
+  eq(Q.view().usedBytes, S.usageBytes(), 'IDB set 路径计数逐字节一致');
+
+  // 3) 缓存失配：沿用同一条回退规则（diskBytes）；IDB 无 LS 原文 → 0（缓存权威），refresh 可校正
+  eq(Q.diskBytes('r11-new'), 0, 'IDB 无 LS 原文 → diskBytes=0（缓存即权威）');
+  S._cache.delete('r11-new'); // 模拟「物理存在但同步视图缺失」
+  S.setSync('r11-new', { a: 'z'.repeat(20) });
+  await S.flush();
+  ok(Q.view().usedBytes > 0, '缓存失配时仍能记账（不抛错、不中断写入）');
+  Q.reset();
+  await Q.refresh();
+  eq(Q.view().usedBytes, S.usageBytes(), 'refresh 全量校正后回到逐字节一致');
+}
+
 /* ---------- v6→v7：复习状态物理分块 ---------- */
 
 /** 直接向内存 IDB 写物理记录（测试构造 v6 per-hash 布局，不经过 Store 的逻辑键转换） */

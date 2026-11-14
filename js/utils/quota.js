@@ -124,6 +124,12 @@
     return (chars + String(key).length + 2) * 2;
   }
 
+  /**
+   * 写路径据此决定「是否为计费付一次序列化」：快照未就绪时 trackWrite 直接返回，
+   * 此时为长度序列化纯属浪费（例如启动 refresh 之前、或门禁形态 Quota.meter.ready=false）。
+   */
+  function isMeterReady() { return meter.ready; }
+
   function diskBytes(key) {
     if (isIdb()) return 0;
     try {
@@ -224,7 +230,8 @@
     shardOverheadBytes: shardOverheadBytes, estimateQuestions: estimateQuestions,
     canFitQuestions: canFitQuestions, canFitQuestionsAsync: canFitQuestionsAsync,
     estimateAsync: estimateAsync, formatBytes: formatBytes,
-    bytesOfValue: bytesOfValue, diskBytes: diskBytes,
+    bytesOfValue: bytesOfValue, bytesOfChars: bytesOfChars, diskBytes: diskBytes,
+    isMeterReady: isMeterReady,
     trackWrite: trackWrite, trackDelete: trackDelete, reset: reset, view: view, refresh: refresh
   });
 })(typeof window !== 'undefined' ? window : globalThis);

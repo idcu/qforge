@@ -574,6 +574,56 @@ section('R-09 配额计费复用写路径序列化：单次序列化 / 计数等
 }
 
 
+section('R-10 防抖 set 预序列化：落盘与计费共用一次 / 同窗口多次写计数不漂移');
+{
+  const S = QB.Storage;
+  const Q = QB.Quota;
+  S.clearAll();
+  Q.reset();
+  S.setSync('r10-base', { a: 'base' });
+  await Q.refresh();
+
+  const origStr = JSON.stringify;
+  let strCalls = 0;
+  JSON.stringify = function () { strCalls++; return origStr.apply(JSON, arguments); };
+  let atSet = 0;
+  let atFlush = 0;
+  try {
+    S.set('r10-once', { a: 'y'.repeat(60), b: [1, 2, 3] });
+    atSet = strCalls;
+    S.forceSync(); // LS 模式同步落盘
+    atFlush = strCalls;
+  } finally { JSON.stringify = origStr; }
+  eq(atSet, 1, 'set（防抖）当次只序列化一次（实测 ' + atSet + ' 次）');
+  eq(atFlush, 1, '落盘复用同一份文本，forceSync 不再序列化（实测 ' + atFlush + ' 次）');
+  eq(Q.view().usedBytes, S.usageBytes(), '预序列化后计数与全量估算逐字节一致');
+
+  // 同一防抖窗口内对同一键连写两次：旧值长度必须跟缓存走（不能沿用磁盘旧长度）
+  S.setSync('r10-stale', { a: 'x'.repeat(100) });
+  S.set('r10-stale', { a: 'y'.repeat(20) });
+  S.set('r10-stale', { a: 'z'.repeat(80) });
+  S.forceSync();
+  eq(Q.view().usedBytes, S.usageBytes(), '同窗口两次写同一键后逐字节一致（旧值长度取缓存）');
+
+  // 计费未就绪时不为「用不到的长度」付费：set 不序列化，落盘才序列化一次
+  Q.reset();
+  strCalls = 0;
+  JSON.stringify = function () { strCalls++; return origStr.apply(JSON, arguments); };
+  let offSet = 0;
+  let offFlush = 0;
+  try {
+    S.set('r10-off', { a: 'w'.repeat(40) });
+    offSet = strCalls;
+    S.forceSync();
+    offFlush = strCalls;
+  } finally { JSON.stringify = origStr; }
+  eq(offSet, 0, '计费未就绪时 set 不额外序列化（实测 ' + offSet + ' 次）');
+  eq(offFlush, 1, '落盘仍只序列化一次（实测 ' + offFlush + ' 次）');
+  S.clearAll();
+  Q.reset();
+}
+
+
 section('本地 reviews.record（A4/A5）：写前重读合并 + 失败回滚');
 {
   S.clearAll();

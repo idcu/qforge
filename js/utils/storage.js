@@ -138,14 +138,16 @@
     _keysRevCached: -1,
     _pending: new Map(),
     /**
-     * 预序列化文本（key → JSON 文本）。setSync 为 LS 落盘本来就要 stringify 一次，
-     * 把这份文本留到这里，_writeNow 直接复用，写入与配额计费共用同一次序列化。
+     * 预序列化文本（key → JSON 文本）。LS 落盘本来就要 stringify 一次（setSync 与
+     * 防抖 set 都预序列化），把这份文本留到这里，_writeNow 直接复用，
+     * 落盘与配额计费共用同一次序列化。
      */
     _pendingStr: new Map(),
     /**
-     * 已序列化字符数缓存（key → 当前缓存值的 JSON 文本长度）：供 Quota 免二次 stringify。
-     * 只在长度确实来自本次序列化或磁盘原文时登记；缓存值来源不明（合并/外部变更/水合）处删除，
-     * 失配即回退旧口径（bytesOfValue / diskBytes），保证计费与改动前逐字节一致。
+     * 已序列化字符数缓存（key → **当前缓存值**的 JSON 文本长度）：供 Quota 免二次 stringify。
+     * 长度只有三种可信来源：写路径本次序列化、磁盘原文、IDB 计费时的等价一次序列化；
+     * 其余来源（水合/合并/外部变更）一律删除，失配即回退旧口径（bytesOfValue / diskBytes），
+     * 保证计费与改动前逐字节一致。
      */
     _charLens: new Map(),
     _timer: null,
@@ -943,10 +945,31 @@
     },
 
     /**
+     * 计费快照是否就绪：未就绪时 Quota.trackWrite 本身不做任何事，
+     * 写路径也就不该为「用不到的长度」付出序列化。
+     */
+    _quotaReady() {
+      return !!(QB.Quota && typeof QB.Quota.isMeterReady === 'function' && QB.Quota.isMeterReady());
+    },
+
+    /**
+     * 值的 JSON 文本长度（仅在计费就绪时调用）。
+     * IDB 落盘走结构化克隆、没有 JSON 文本，但配额口径是 JSON 文本长度：
+     * 这里序列化**一次**，长度登记到 `_charLens`，下一次写同一键的旧值长度直接复用。
+     * 序列化失败（循环引用等）返回 undefined，由 Quota 走 bytesOfValue 的等价兜底。
+     */
+    _charsOfValue(value) {
+      try {
+        const str = JSON.stringify(value);
+        return typeof str === 'string' ? str.length : undefined;
+      } catch (_) { return undefined; }
+    },
+
+    /**
      * C009：把本次写入的字节增量交给 QB.Quota 快照（渲染只读 view()，不再全量 stringify）。
      * 旧值在缓存里就算精确差值；不在缓存则让 Quota 从磁盘原文探测（LS）或按 0（IDB 缓存权威）。
-     * 新增 `newChars`/`_charLens`：写路径已经序列化过的长度直接复用，Quota 不再重复 stringify；
-     * 任一侧长度未知（IDB 无序列化、值来源不明）就传 undefined，由 Quota 走原口径。
+     * newChars/oldChars：**当前缓存值**的 JSON 文本长度，写路径已持有就传进来，Quota 不再重复
+     * stringify。IDB 无 JSON 文本，就绪时在这里等价地算一次（见 `_charsOfValue`）。
      */
     _trackQuotaSet(key, value, newChars) {
       if (!QB.Quota || typeof QB.Quota.trackWrite !== 'function') return;
@@ -956,8 +979,12 @@
         const chunked = this._chunkLookup(key);
         if (chunked !== undefined) { oldKnown = true; oldValue = chunked; }
       }
+      // 旧值长度必须在登记新长度之前读（_charLens 语义 = 当前缓存值）
       const oldChars = oldKnown && this._charLens.has(key) ? this._charLens.get(key) : undefined;
+      if (newChars === undefined && this._isIdb() && this._quotaReady()) newChars = this._charsOfValue(value);
       QB.Quota.trackWrite(key, value, oldValue, oldKnown, newChars, oldChars);
+      if (typeof newChars === 'number') this._charLens.set(key, newChars);
+      else this._charLens.delete(key);
     },
 
     _notifyError(e) {
@@ -972,7 +999,8 @@
       const snapshot = Array.from(this._pending.entries());
       try {
         snapshot.forEach(([key, value]) => {
-          // setSync 已提前序列化（_pendingStr）→ 直接复用；防抖 set 才需要在这里序列化
+          // setSync / set（计费就绪时）已提前序列化（_pendingStr）→ 直接复用；
+          // 仅计费未就绪的防抖 set 才需要在这里序列化
           let str = this._pendingStr.get(key);
           if (typeof str !== 'string') str = JSON.stringify(value);
           global.localStorage.setItem(fullKeyOf(key), str);
@@ -1132,12 +1160,20 @@
         try { return this._writeBootstrap(key, value); } catch (e) { this._notifyError(e); throw e; }
       }
       this._demoteFallbackOnBusinessWrite(key);
-      // 防抖写入不额外序列化；值已更新，上一份预序列化文本作废
-      this._pendingStr.delete(key);
-      this._trackQuotaSet(key, value);
+      // LS 落盘与配额计费共用同一份文本：计费就绪时在这里序列化**一次**，
+      // 长度传给计费、文本留给 _writeNow 复用（否则 _writeNow 与 Quota 各序列化一次）。
+      // 计费未就绪则不为「用不到的长度」付出序列化 —— 行为与改动前一致。
+      let str = null;
+      if (!this._isIdb() && !this._awaiting && this._quotaReady()) {
+        try { str = JSON.stringify(value); } catch (_) { str = null; }
+        if (typeof str !== 'string') str = null;
+      }
+      this._trackQuotaSet(key, value, str === null ? undefined : str.length);
       const beforeVisible = this._logicalKeyVisible(key);
       this._cache.set(key, value);
       this._pending.set(key, value);
+      if (str === null) this._pendingStr.delete(key);
+      else this._pendingStr.set(key, str);
       this._invalidateKeysIfChanged(key, beforeVisible);
       if (this._awaiting) return true; // F2：只排队，不落 LS
       if (this._isIdb()) {
