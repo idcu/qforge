@@ -48,11 +48,14 @@
     setMeta(bankId, meta) { Storage.set(K.questionsMeta(bankId), meta); },
 
     shardOf(bankId, i) {
+      // 外壳水合：未加载分片必须响亮失败（返回 [] 会被上层当成「这题不存在」）
+      Storage.assertQuestionShardLoaded(bankId, i);
       const s = Storage.getScoped(K.questionShard(bankId, i), bankId, []);
       return Array.isArray(s) ? s : [];
     },
     /** 磁盘权威分片（绕过本页缓存） */
     shardOfFresh(bankId, i) {
+      Storage.assertQuestionShardLoaded(bankId, i);
       const s = Storage.getScopedFresh(K.questionShard(bankId, i), bankId, []);
       return Array.isArray(s) ? s : [];
     },
@@ -65,6 +68,8 @@
      * 删除后重编号与损坏修复都必须以本方法为准。
      */
     indexesOf(bankId) {
+      // 物理键枚举必须基于全量题目视图：部分视图会漏掉未加载分片（漏删孤儿/误判损坏）
+      Storage.assertQuestionsFullyLoaded(bankId);
       const prefix = 'questions:' + bankId + ':';
       return Storage.keysScoped(bankId)
         .filter((k) => k.indexOf(prefix) === 0 && k.slice(prefix.length) !== 'meta')
@@ -247,6 +252,8 @@
     /** 清除某库全部分片与清单（含旧单 blob 与高位孤儿分片），删库级联/重写用 */
     clear(bankId) {
       invalidateQuestionIndex(); // C018：清库 → 索引失效
+      // 全量题目视图守卫：部分视图下枚举不到未加载分片，删库会留孤儿
+      Storage.assertQuestionsFullyLoaded(bankId);
       const idxs = new Set();
       try {
         QuestionShards.indexesOf(bankId).forEach((i) => idxs.add(i));
@@ -270,6 +277,7 @@
      */
     compact(bankId) {
       invalidateQuestionIndex(); // C018：重编号改变位置 → 索引失效
+      Storage.assertQuestionsFullyLoaded(bankId);
       const meta = QuestionShards.metaOf(bankId);
       if (!meta) return { rewrote: false, count: QuestionShards.legacyOf(bankId).length };
       const idxs = QuestionShards.indexesOf(bankId);
@@ -296,6 +304,7 @@
      *            missing:number[], extra:number[], countMismatch:boolean}}
      */
     invariant(bankId) {
+      Storage.assertQuestionsFullyLoaded(bankId);
       const meta = QuestionShards.metaOf(bankId);
       if (!meta) return { ok: true, meta: null, indexes: [], sizeSum: 0, actual: 0, missing: [], extra: [], countMismatch: false };
       const indexes = QuestionShards.indexesOf(bankId);

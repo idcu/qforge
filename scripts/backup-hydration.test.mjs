@@ -320,7 +320,9 @@ async function main() {
   const keysBefore = Q2.Storage.keysScoped(banks[0].id);
   A.eq(countReviewLogicalKeys(keysBefore), Q_PER_BANK, '启动后复习键（逻辑键计数）= 12,500（仅当前库）');
   A.eq(countReviewLogicalKeys(keysBefore, banks[1].id), 0, '库B 复习键不可见（未水合）');
-  A.eq(countQuestionKeys(keysBefore), 64, '启动后题目键 = 64（仅当前库）');
+  // 外壳水合：启动只读题目清单（questions:<bank>:meta），正文分片按需扩窗
+  A.eq(countQuestionKeys(keysBefore), 1, '启动后题目键 = 1（外壳水合：仅清单，正文 0 片）');
+  A.eq(Q2.Storage.isQuestionsHydrated(banks[0].id), false, '当前库题目视图为部分（外壳态）');
   A.eq(Q2.Storage.isBankHydrated(banks[1].id), false, '库B isBankHydrated = false');
   if (RED) {
     Q2.Storage.ensureAll = async () => ({ mode: 'noop', records: 0 });
@@ -384,23 +386,33 @@ async function main() {
   if (RED) Q3.Storage.ensureAll = async () => ({ mode: 'noop', records: 0 });
 
   A.eq(Q3.Storage.isBankHydrated(bankF.id), false, 'F 未水合');
-  // 本段验证「宽松契约本身」（生产默认 __strictReads=false 的结论 b），故局部关闭 CI 严格守卫
+  // 本段验证「宽松单键读取」仍保留（__strictReads=false 的结论 b），但**键集/用量**在部分
+  // 视图下必须响亮拒绝（D-Q=A 修订：绝不返回部分推导值）。
   Q3.Storage.__strictReads = false;
   A.eq(Q3.Storage.get(Q3.KEYS.reviewState(bankF.id, bankF.hash), 'SENTINEL'), 'SENTINEL',
     'Storage.get 读未水合库 → 返回 defaultValue（结论 b，不抛错）');
   A.eq(Q3.Storage.getFresh(Q3.KEYS.reviewState(bankF.id, bankF.hash), 'SENTINEL'), 'SENTINEL',
     'Storage.getFresh 读未水合库 → 返回 defaultValue（结论 b，不抛错）');
-  A.ok(!Q3.Storage.keys().includes(Q3.KEYS.reviewState(bankF.id, bankF.hash)), 'F 复习键不在 keys() 视图');
-  A.eq(Q3.Storage.get(Q3.KEYS.questionsMeta(bankF.id), null), null, 'F 题目清单读不到（返回 null）');
+  let fKeysErr = null;
+  try { Q3.Storage.keys(); } catch (e) { fKeysErr = e; }
+  A.ok(!!fKeysErr && fKeysErr.code === 'STORAGE_NOT_HYDRATED',
+    '部分视图 keys() 响亮拒绝（不返回残集；D-Q=A 修订）');
+  const fMeta = Q3.Storage.get(Q3.KEYS.questionsMeta(bankF.id), null);
+  A.ok(fMeta && Number(fMeta.count) === 1,
+    '外壳水合：F 题目清单（1 题）随启动读入，供 count/扩窗定位');
+  A.eq(Q3.Storage.isQuestionsHydrated(bankF.id), false, 'F 题目分片未加载（正文按需扩窗）');
   await Q3.Storage.ensureBank(bankF.id);
   A.eq(Q3.Storage.isBankHydrated(bankF.id), true, 'ensureBank(F) 后 F 已水合');
   const fState = Q3.Storage.get(Q3.KEYS.reviewState(bankF.id, bankF.hash), null);
   A.ok(fState && typeof fState === 'object', 'ensureBank(F) 后同一业务键可读到状态');
-  A.ok(Q3.Storage.keys().includes(Q3.KEYS.reviewState(bankF.id, bankF.hash)), 'ensureBank(F) 后键进入视图');
+  A.ok(Q3.Storage.keysScoped(bankF.id).includes(Q3.KEYS.reviewState(bankF.id, bankF.hash)),
+    'ensureBank(F) 后键进入作用域视图（全局 keys() 仍需全量视图）');
   A.eq(Q3.Storage.isBankHydrated(bankE.id), false, 'E 仍未水合（保留给恢复残留断言）');
   const metaBankIds = Q3.Storage.get(Q3.KEYS.banks, []).map((b) => b.id);
-  A.ok(!Q3.Storage.keys().includes(Q3.KEYS.reviewState(banks[1].id, banks[1].hash)),
-    'A20 前置证据：未水合库B的复习状态键不在同步视图（跨库状态读取必须全量前置）');
+  let bKeysErr = null;
+  try { Q3.Storage.keysScoped(banks[1].id); } catch (e) { bKeysErr = e; }
+  A.ok(!!bKeysErr && bKeysErr.name === 'NotHydratedError',
+    'A20 前置证据：未水合库B的作用域键响亮拒绝（跨库状态读取必须全量前置）');
   A.ok(Q3.ReviewStore.bankIds().includes(banks[1].id),
     'A20 bankIds 仍枚举到未水合库B（全局 banks/清单补全，未丢库）');
   A.ok(Q3.ReviewStore.convertMetaLayouts().banks >= metaBankIds.length,

@@ -1294,19 +1294,30 @@ async function idbMigrationPass(tier, mode) {
 }
 
 /**
- * 阶段 0：启动全量水合（第二轮启动，共享同一 IDB）。
- * 口径：新建 harness（脚本已加载完毕后计时）→ 写 idb 标记 → Store.init() 全量 readAll
- * → Storage.adoptStore() 复制进内存缓存。heap 在「readAll 返回的记录 Map」与
- * 「adoptStore 复制后的 _cache」两个边界采样，取较大值；不是连续采样峰值。
+ * 阶段 0：启动水合（第二轮启动，共享同一 IDB）。
+ * 口径：新建 harness（脚本已加载完毕后计时）→ 写 idb 标记 → 水合 → Storage.adoptStore()
+ * 复制进内存缓存。heap 在「readAll 返回的记录 Map」与「adoptStore 复制后的 _cache」
+ * 两个边界采样，取较大值；不是连续采样峰值。
  * Node 内存 IDB 的数据本身也在 JS 堆里，故绝对值偏大；浏览器真实堆占用未实测。
+ * @param {'shell'|'full'} mode
+ *   - 'shell'：`Store.init()` 的真实首屏路径（外壳水合：全局键 + 当前库复习块 + 各库题目
+ *     清单，题目正文留待按窗口补读）。这是线上启动形态。
+ *   - 'full'：显式无 opts `Store.readAll(true, true)` 后 adoptStore，保留改造前的
+ *     「整库一次读满」对照口径（同一 harness/采样边界，便于直接比较省掉的读量）。
  */
-async function hydrationPass(idb, tier) {
+async function hydrationPass(idb, tier, mode) {
   const h = await createHarness(QB_DIR, { indexedDB: idb });
   h.QB.Store.writeMarker('idb');
   const heap0 = (bestEffortGc(), process.memoryUsage().heapUsed);
   let peak = heap0;
   const t0 = process.hrtime.bigint();
-  const info = await h.QB.Store.init();
+  let info;
+  if (mode === 'full') {
+    const records = await h.QB.Store.readAll(true, true);
+    info = { mode: 'idb', available: true, records: records, cleanup: null, scopeBank: null, shell: false };
+  } else {
+    info = await h.QB.Store.init();
+  }
   peak = Math.max(peak, process.memoryUsage().heapUsed);
   h.QB.Storage.adoptStore(info);
   peak = Math.max(peak, process.memoryUsage().heapUsed);
@@ -1324,7 +1335,11 @@ async function hydrationPass(idb, tier) {
   const heapPeakMb = (peak - heap0) / 1024 / 1024;
   bestEffortGc();
   const retainedMb = Math.max(0, (process.memoryUsage().heapUsed - heap0) / 1024 / 1024);
-  return { tier, ms: msHydrate, records: recs.size, domain, bytes, cache, heapPeakMb, retainedMb };
+  return {
+    tier, mode: info.shell ? 'shell' : 'full', ms: msHydrate,
+    records: recs.size, domain, bytes, cache, heapPeakMb, retainedMb,
+    h: h, bankId: info.scopeBank || null
+  };
 }
 
 for (const tier of [5000, 20000, 50000]) {
@@ -1371,6 +1386,9 @@ for (const tier of [5000, 20000, 50000]) {
   const qBeforeCleanup = Q.QuestionShards.readAll(legacy.bankId).length;
   const lsBytesBeforeCleanup = Q.Store.legacyLSUsedBytes();
   const initRes = await Q.Storage.initStore();
+  // 外壳水合后本标签是部分视图：后续清理对照要直读题目/复习，keys() 视图门禁也要求全量。
+  // 显式补齐（真实代码路径，不是放宽断言）；外壳与全量等价性由 idb.test 断言钉死。
+  await Q.Storage.ensureAll();
   const cleanup = (Q.Store.lastInit && Q.Store.lastInit.cleanup) || initRes.cleanup || null;
   const qAfterCleanup = Q.QuestionShards.readAll(legacy.bankId).length;
   const cleanupOk = !!(cleanup && cleanup.removed > 0 && Q.Store.legacyLSUsedBytes() === 0
@@ -1525,16 +1543,69 @@ for (const tier of [5000, 20000, 50000]) {
     });
   }
 
-  // 阶段 0：启动全量水合（同机第二轮启动，复用本档迁移后的 IDB；只取 5k/50k 两档）
+  // 阶段 0：启动水合（同机第二轮启动，复用本档迁移后的 IDB；只取 5k/50k 两档）
   if (tier === 5000 || tier === 50000) {
-    const hyd = await hydrationPass(pass.idb, tier);
+    // 单次水合读数受 GC/调度相位影响可达 ±12%，两种口径各跑 3 轮取中位数，
+    // 否则「外壳 vs 全量」的差值会被单次噪声淹没。整库读取在 Node 内存后端是克隆开销，
+    // 真实浏览器还有反序列化与 IPC，绝对值不可直接外推（见 docs/BENCH.md）。
+    const HYDR_RUNS = 3;
+    let hyd = null;
+    const fullMs = [];
+    for (let r = 0; r < HYDR_RUNS; r++) {
+      hyd = await hydrationPass(pass.idb, tier, 'full');
+      fullMs.push(hyd.ms);
+    }
+    const fullMedian = median(fullMs);
+    const fullInfo = {
+      records: hyd.records, domain: hyd.domain, bytes: hyd.bytes, cache: hyd.cache,
+      heapPeakMb: hyd.heapPeakMb, retainedMb: hyd.retainedMb
+    };
+    hyd = null; // 先释放全量会话（含 20MB 级 records/_cache），否则它会作为存活对象抬高外壳轮的 GC 成本
+    bestEffortGc();
     report.push({
       name: '启动全量水合（' + tier + ' 题 · IDB）',
-      median: hyd.ms, min: hyd.ms, max: hyd.ms,
-      extra: '记录 ' + hyd.records + '（业务 ' + hyd.domain + '），序列化 ' + mb(hyd.bytes)
-        + '，_cache ' + hyd.cache + ' 键，heap 边界峰值 +' + hyd.heapPeakMb.toFixed(2)
-        + ' MB（GC 后驻留 +' + hyd.retainedMb.toFixed(2) + ' MB，含 Node 内存 IDB 拷贝）'
+      median: fullMedian, min: Math.min.apply(null, fullMs), max: Math.max.apply(null, fullMs),
+      runs: HYDR_RUNS, samples: HYDR_RUNS,
+      extra: '记录 ' + fullInfo.records + '（业务 ' + fullInfo.domain + '），序列化 ' + mb(fullInfo.bytes)
+        + '，_cache ' + fullInfo.cache + ' 键，heap 边界峰值 +' + fullInfo.heapPeakMb.toFixed(2)
+        + ' MB（GC 后驻留 +' + fullInfo.retainedMb.toFixed(2) + ' MB，含 Node 内存 IDB 拷贝）；'
+        + HYDR_RUNS + ' 轮 ' + fullMs.map((v) => v.toFixed(2)).join('/') + ' ms'
     });
+    // 线上首屏形态：外壳水合（题目正文不整库读），观测项，不设门禁。
+    let shellHyd = null;
+    const shellMs = [];
+    for (let r = 0; r < HYDR_RUNS; r++) {
+      shellHyd = await hydrationPass(pass.idb, tier, 'shell');
+      shellMs.push(shellHyd.ms);
+    }
+    const shellMedian = median(shellMs);
+    report.push({
+      name: '启动外壳水合（' + tier + ' 题 · IDB，未进门禁）',
+      median: shellMedian, min: Math.min.apply(null, shellMs), max: Math.max.apply(null, shellMs),
+      runs: HYDR_RUNS, samples: HYDR_RUNS,
+      extra: '记录 ' + shellHyd.records + '（业务 ' + shellHyd.domain + '，仅清单/复习块），序列化 '
+        + mb(shellHyd.bytes) + '，_cache ' + shellHyd.cache + ' 键，heap 边界峰值 +'
+        + shellHyd.heapPeakMb.toFixed(2) + ' MB（GC 后驻留 +' + shellHyd.retainedMb.toFixed(2)
+        + ' MB）；' + HYDR_RUNS + ' 轮 ' + shellMs.map((v) => v.toFixed(2)).join('/') + ' ms；全量对照 '
+        + ms(fullMedian) + ' / ' + mb(fullInfo.bytes)
+    });
+    // 首窗口：外壳会话里第一次读 0..200（按清单定位分片），只量一次，不设门禁。
+    const sh = shellHyd.h;
+    const bankId = shellHyd.bankId;
+    if (bankId) {
+      const tEnsure0 = process.hrtime.bigint();
+      const ensured = await sh.QB.Storage.ensureQuestions(bankId, 0, 200);
+      const ensureMs = Number(process.hrtime.bigint() - tEnsure0) / 1e6;
+      const tRead0 = process.hrtime.bigint();
+      const win = sh.QB.QuestionShards.readRange(bankId, 0, 200);
+      const readMs = Number(process.hrtime.bigint() - tRead0) / 1e6;
+      report.push({
+        name: '首窗口读取（0..200 · ' + tier + ' 题 · IDB，未进门禁）',
+        median: ensureMs + readMs, min: ensureMs + readMs, max: ensureMs + readMs,
+        extra: 'ensureQuestions ' + ms(ensureMs) + '（补读 ' + (ensured.loaded || 0) + ' 片）'
+          + ' + readRange ' + ms(readMs) + '，返回 ' + win.length + ' 题'
+      });
+    }
   }
 }
 

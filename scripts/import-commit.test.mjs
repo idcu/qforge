@@ -329,9 +329,9 @@ const c1 = await makeQB({});
     '成功 toast 在落盘确认之后（persist@' + persistIdx + ', flush@' + flushIdx + ', success@' + successIdx + '）');
 }
 
-/* ================= 10. P0-6 IDB 配额预检 ================= */
+/* ================= 10. 配额口径（D-Q=A 修订）：estimate 只作诊断 ================= */
 {
-  section('P0-6 IDB 配额预检：接近上限时写入前拒绝、0 键变化');
+  section('P0-6 配额口径：estimate 是物理字节，只作诊断、不参与准入');
   const raw = new Map();
   const H = await createHarness(ROOT, {
     raw: raw,
@@ -340,19 +340,21 @@ const c1 = await makeQB({});
   H.QB.DB.init();
   const b = await H.QB.DB.banks.create({ name: 'P0-6库' });
   H.QB.Storage._isIdb = () => true;
-  const keysBefore = H.QB.Storage.keys().slice().sort().join('|');
   const big = {
     type: 'single',
     question: 'x'.repeat(4000),
     options: [{ letter: 'A', text: '甲' }, { letter: 'B', text: '乙' }],
     answer: 'A'
   };
-  let err = null;
-  try { await H.QB.DB.questions.insertMany(b.id, [big]); } catch (e) { err = e; }
-  ok(!!err, '可用空间不足时 insertMany 抛错');
-  eq(err && err.code, 'QUOTA_PRECHECK', '错误码标记为配额预检拒绝');
-  eq(H.QB.Storage.keys().slice().sort().join('|'), keysBefore, '拒绝发生在写入前：键集合零变化');
-  eq(await H.QB.DB.questions.count(b.id), 0, '题库仍为 0 题（未写半批）');
+  const fit = await H.QB.Quota.canFitQuestionsAsync([big]);
+  eq(fit.checked, false, 'estimate 仅诊断 → checked:false（不冒充已检查）');
+  eq(fit.ok, true, '物理字节不进入限额判断（不因 estimate 接近上限而误拒）');
+  eq(fit.available, null, '不把物理字节当作字符口径的可用空间交付');
+  const est = await H.QB.Quota.estimateAsync();
+  ok(!!est && est.usage === 95000, 'estimate 仍可读（诊断用途：物理字节 ' + (est && est.usage) + '）');
+  const res = await H.QB.DB.questions.insertMany(b.id, [big]);
+  eq(res.inserted, 1, '写入路径不依赖 estimate 预检（由落盘回读 + 回滚兜底）');
+  eq(await H.QB.DB.questions.count(b.id), 1, '题目已落库 1 条（未半写）');
 }
 
 {

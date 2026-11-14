@@ -69,8 +69,14 @@
       if (cascade) {
         // 分阶段水合（Phase 0 批次2）：级联删除按库枚举键（分片/复习状态），先确保该库可见；
         // 否则删除非当前库只会清掉元数据，题目与复习状态成为孤儿（占用空间且不随库删除）。
-        if (Storage.mode === 'idb' && typeof Storage.isBankHydrated === 'function' && !Storage.isBankHydrated(id)) {
-          await Storage.ensureBank(id);
+        if (Storage.mode === 'idb') {
+          if (typeof Storage.isBankHydrated === 'function' && !Storage.isBankHydrated(id)) {
+            await Storage.ensureBank(id);
+          } else if (typeof Storage.ensureQuestionsFull === 'function' &&
+                     typeof Storage.isQuestionsHydrated === 'function' && !Storage.isQuestionsHydrated(id)) {
+            // 外壳水合：当前库题目可能只加载了窗口；级联删除必须枚举全部物理分片才不漏删
+            await Storage.ensureQuestionsFull(id);
+          }
         }
         handleCascade(id); // 级联清理由唯一入口负责（见下方 cascadeDelete）
       }

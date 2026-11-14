@@ -94,8 +94,8 @@ users 1 ──<（wrong_questions / favorites / attempts / sessions）   # 多�
 
 ## 5.1 首屏水合作用域（Phase 0 批次2）
 
-IDB 模式下启动**只水合当前库**，作用域单一来源是 `Store.readScopeBank()`：单事务读 `kv` 的
-`banks` 与 `meta:currentBank`（当前库合法 → 用它；否则第一库），记入 `Store.lastInit.scopeBank`。
+IDB 模式下启动**只水合当前库**，作用域在 `txGetAllSplit` 首次事务里与 `banks` 一起解析（同读
+`meta:currentBank`；当前库合法 → 用它，否则第一库），经 `state.bank` 回写并记入 `Store.lastInit.scopeBank`。
 
 | 记录类别 | 启动可见性 |
 |---|---|

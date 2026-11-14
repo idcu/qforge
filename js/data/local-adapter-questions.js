@@ -80,8 +80,41 @@
     const list = await banks.list();
     for (let i = 0; i < list.length; i += 1) {
       const id = list[i] && list[i].id;
-      if (id && !Storage.isBankHydrated(id)) { await Storage.ensureAll(); return; }
+      if (!id) continue;
+      // 复习状态与题目分片任一不完整都需要全量视图（索引跨库跨分片定位）
+      if (!Storage.isBankHydrated(id) ||
+          (typeof Storage.isQuestionsHydrated === 'function' && !Storage.isQuestionsHydrated(id))) {
+        await Storage.ensureAll();
+        return;
+      }
     }
+  }
+
+  /** 题目窗口可见性（外壳水合）：ensureQuestions 自身在 LS/全量视图下是 no-op */
+  async function ensureQuestionWindow(bankId, start, end) {
+    const S = QB.Storage;
+    if (!S || typeof S.ensureQuestions !== 'function') return;
+    await S.ensureQuestions(bankId, start, end);
+  }
+
+  /** 整库题目可见性（筛选/全量拼接/写路径用） */
+  async function ensureQuestionsFull(bankId) {
+    const S = QB.Storage;
+    if (!S || typeof S.ensureQuestionsFull !== 'function') return;
+    await S.ensureQuestionsFull(bankId);
+  }
+
+  /** 写单题（append）前：确保尾分片可见（库本身未水合时先整库读） */
+  async function ensureTailForAppend(bankId) {
+    const S = QB.Storage;
+    if (!S || S.mode !== 'idb') return;
+    if (typeof S.isBankHydrated === 'function' && !S.isBankHydrated(bankId)) {
+      await S.ensureBank(bankId);
+      return;
+    }
+    if (typeof S.isQuestionsHydrated === 'function' && S.isQuestionsHydrated(bankId)) return;
+    const total = QuestionShards.count(bankId);
+    await ensureQuestionWindow(bankId, Math.max(0, total - 1), total + 1);
   }
 
   /**
@@ -125,6 +158,8 @@
       let items;
       let outTotal = total;
       if (filtered) {
+        // 筛选必须在整库上做（分片窗口会漏项）
+        await ensureQuestionsFull(bankId);
         items = QuestionShards.readAll(bankId);
         if (query.type) items = items.filter((q) => q.type === query.type);
         if (query.category) items = items.filter((q) => q.category === query.category);
@@ -135,8 +170,11 @@
         outTotal = items.length;
         if (useOffset || usePage) items = items.slice(start, end);
       } else if (useOffset || usePage) {
+        // 按需扩窗：只补读覆盖 [start,end) 的分片（total 直读清单，O(1)）
+        await ensureQuestionWindow(bankId, start, end);
         items = QuestionShards.readRange(bankId, start, end);
       } else {
+        await ensureQuestionsFull(bankId);
         items = QuestionShards.readAll(bankId);
       }
       return { items, total: outTotal, page, size };
@@ -176,6 +214,7 @@
 
     async create(bankId, question) {
       const item = stampQuestion(question, bankId);
+      await ensureTailForAppend(bankId); // 外壳水合：append 只重写尾分片，先确保尾分片可见
       QuestionShards.append(bankId, [item]); // 只重写尾分片/新增分片
       Core.bumpRev();
       return item;
@@ -348,18 +387,9 @@
       // 分阶段水合：读写目标库分片与跨库去重索引都需要全量可见性（ensureAll 失败上抛）
       await ensureIndexBanksHydrated();
 
-      // P0-6：IDB 模式同步上限为 Infinity（浏览器引擎管理磁盘配额），这里用 estimate 做写入前预检；
-      // 放不下就整包拒绝、不写任何键，避免「写到一半失败 + 回滚」把半批数据暴露给并发读者。
-      if (QB.Quota && typeof QB.Quota.canFitQuestionsAsync === 'function') {
-        const fit = await QB.Quota.canFitQuestionsAsync(incoming || []);
-        if (fit.checked && !fit.ok) {
-          const e = new Error('可用空间不足：本题库约需 ' +
-            QB.Quota.formatBytes(fit.need) + '，当前仅剩 ' + QB.Quota.formatBytes(fit.available) + '');
-          e.name = 'QuotaExceededError';
-          e.code = 'QUOTA_PRECHECK';
-          throw e;
-        }
-      }
+      // 配额口径（D-Q=A 修订）：IDB 同步上限为 Infinity，浏览器按磁盘配额管理；
+      // 不做任何 estimate 预检（物理字节 ≠ 字符口径）。放不下的唯一判定是真实落盘，
+      // 失败由下方回滚基线把半批数据撤销，绝不半写。
 
       // 回滚基线（C006）：overwrite 必须保留原库全量（失败时整库恢复）；
       // merge 只追加尾部分片，失败时用「索引前的总数」截断即可，无需预先 readAll（C018）。
@@ -472,6 +502,7 @@
 
     async removeMany(ids) {
       Qi.invalidate(); // C018：批量删除会改变多个分片的位置，先整体失效
+      await ensureIndexBanksHydrated(); // 外壳水合：逐分片改写/compact 需要全量题目视图
       const idSet = new Set(ids || []);
       const bankList = await banks.list();
       let removed = 0;

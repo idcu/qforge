@@ -63,28 +63,19 @@
   }
 
   /**
-   * 异步容量预检（P0-6）：IDB 模式同步 API 拿不到上限，改用 navigator.storage.estimate()。
-   * - 非 IDB：checked=false（容量预检仍由导入入口的同步 canFitQuestions 负责，避免两套口径）；
-   * - IDB 且 estimate 可用：按 available 与估算比较，checked=true；
-   * - IDB 且 estimate 不可用（隐私模式/无权限/quota=0）：checked=false 显式退化，
-   *   由写入路径的异常捕获 + 回滚兜底，绝不冒充「已检查」。
+   * 异步容量预检（P0-6）：**不做任何准入判断**。
+   * `navigator.storage.estimate()` 是磁盘物理字节（LevelDB 压缩后与字符口径差约 4.5 倍），
+   * 拿它和字符口径的估算比较会把「保守拒绝」变成「静默放行到写不进去」，故只作诊断
+   * （见 `estimateAsync`，UI/日志须标注「物理字节」）。
+   * 幂等落盘仍由写入路径的异常捕获 + 落盘回读 + 回滚兜底，绝不冒充「已检查」。
    * @param {Array<Object>} list
-   * @returns {Promise<{ok:boolean, checked:boolean, need:number, available:number|null}>}
+   * @returns {Promise<{ok:boolean, checked:boolean, need:number, available:null}>}
    */
   async function canFitQuestionsAsync(list) {
-    const need = estimateQuestions(list);
-    // 非 IDB：沿用既有同步预检（data-io 入口），此处显式标记未检查，避免重复口径/误拒压测夹具
-    if (!isIdb()) {
-      return { ok: true, checked: false, need: need, available: null };
-    }
-    const est = await estimateAsync();
-    if (!est || !(est.quota > 0)) {
-      return { ok: true, checked: false, need: need, available: null };
-    }
-    return { ok: need <= est.available, checked: true, need: need, available: est.available };
+    return { ok: true, checked: false, need: estimateQuestions(list), available: null };
   }
 
-  /** IDB 模式异步估算（navigator.storage.estimate()；不可用时返回 null） */
+  /** IDB 模式异步估算（诊断用：物理字节；不可用时返回 null；禁止进入限额判断） */
   async function estimateAsync() {
     try {
       const st = global.navigator && global.navigator.storage;
@@ -109,7 +100,11 @@
    * 增量出现负值/未知删除 → 标记 dirty，下一次 refresh 全量校正（兜底，不静默错账）。
    */
   const meter = {
-    ready: false, used: 0, limit: 0, backend: 'ls', at: 0, dirty: false
+    ready: false, used: 0, limit: 0, backend: 'ls', at: 0, dirty: false,
+    /** 部分视图（外壳水合）：用量未统计，不推导、不参与限额判断 */
+    partial: false,
+    /** used/limit 是否来自 navigator.storage.estimate（物理字节，仅展示/诊断） */
+    physical: false
   };
 
   /** 值字节唯一实现（R-07）：JSON 长度 + 键长 + 2，×2（UTF-16）；Storage.usageBytes 复用 */
@@ -170,16 +165,19 @@
   /** 后端切换/整库清空：丢弃快照，下一次 refresh 重建基线 */
   function reset() {
     meter.ready = false; meter.used = 0; meter.limit = 0; meter.dirty = false; meter.at = 0;
+    meter.partial = false; meter.physical = false;
   }
 
   /**
    * 渲染直接读的快照（O(1)，绝不做全量序列化）。
-   * @returns {{ready:boolean, backend:string, usedBytes:number, limitBytes:number, ratio:number|null, dirty:boolean}}
+   * @returns {{ready:boolean, partial:boolean, physical:boolean, backend:string, usedBytes:number, limitBytes:number, ratio:number|null, dirty:boolean}}
    */
   function view() {
     const limit = meter.limit > 0 ? meter.limit : null;
     return {
       ready: meter.ready,
+      partial: meter.partial === true,
+      physical: meter.physical === true,
       backend: meter.backend,
       usedBytes: Math.max(0, Math.round(meter.used)),
       limitBytes: limit,
@@ -191,8 +189,10 @@
 
   /**
    * 重建快照（启动、恢复/导入等低频路径调用一次；不在渲染里调）。
-   * IDB 优先用 `navigator.storage.estimate()` 的真实 usage/quota；拿不到时：
-   * used 走全量估算，limit=0（未知上限，UI 不显示百分比，避免把 5MB LS 配额套到 IDB 上）。
+   * 外壳水合（部分题目视图）下**不推导**：置 ready=false + partial=true，不自动全量读；
+   * 需要数值的异步路径先 `await Storage.ensureAll()` 再调本函数。
+   * IDB 全量视图优先用 `navigator.storage.estimate()` 的 usage/quota 展示（**物理字节**，
+   * 仅展示/诊断，禁止进入任何限额判断）；拿不到时 used 走字符口径全量估算、limit=0。
    * @returns {Promise<object>} view()
    */
   async function refresh() {
@@ -200,24 +200,40 @@
     if (!S) return reset(), view();
     let used = 0;
     let limit = 0;
+    let physical = false;
     if (isIdb()) {
+      if (typeof S.isFullyHydrated === 'function' && !S.isFullyHydrated()) {
+        // 部分视图：绝不返回部分推导值（会把字符口径低估成「放行导入」）
+        meter.ready = false;
+        meter.partial = true;
+        meter.physical = false;
+        meter.backend = 'idb';
+        meter.used = 0;
+        meter.limit = 0;
+        meter.dirty = false;
+        meter.at = Date.now();
+        return view();
+      }
+      meter.partial = false;
       const est = await estimateAsync();
-      // estimate 成功即用它：quota 为 0/未知只影响上限展示，不代表 usage 不可用。
+      // estimate 成功即用它展示：quota 为 0/未知只影响上限展示，不代表 usage 不可用。
       // （C009 复测：旧逻辑要求 quota>0，Node 替身返回 quota=0 时退回全量扫描，
       // 50k 题库一次 refresh 产生 39.6MB 大对象垃圾、峰值超 40MB；浏览器真实路径不会这样。）
       if (est) {
         limit = est.quota > 0 ? est.quota : 0;
-        used = est.usage > 0 ? est.usage : usageBytes();
+        if (est.usage > 0) { used = est.usage; physical = true; } else { used = usageBytes(); }
       } else {
         limit = 0;
         used = usageBytes();
       }
     } else {
+      meter.partial = false;
       limit = limitBytes();
       used = usageBytes();
     }
     meter.ready = true;
     meter.backend = isIdb() ? 'idb' : 'ls';
+    meter.physical = physical;
     meter.used = Math.max(0, Number(used) || 0);
     meter.limit = Number(limit) || 0;
     meter.dirty = false;

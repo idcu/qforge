@@ -150,6 +150,14 @@
      * 保证计费与改动前逐字节一致。
      */
     _charLens: new Map(),
+    /**
+     * 题目分片的「已加载」台账：`bank → Set<shardIndex> | true`（true = 该库题目已整库可见）。
+     * `null` = 全量视图（题目分片全部可见，LS 模式 / 全量水合 / 迁移后）。
+     * 外壳水合（启动只读清单）下这是唯一判定「题目视图是否完整」的依据：
+     * 未加载分片的 `shardOf/readRange/indexesOf/keys/usageBytes` 必须响亮失败，
+     * **不得**返回空数组或部分推导值（否则会静默低估容量、漏删孤儿分片）。
+     */
+    _qShards: null,
     _timer: null,
     _errorListeners: [],
     _mergeHooks: [],
@@ -281,6 +289,8 @@
       this._keysRev += 1;
       // 已水合的库集合：分阶段水合时只包含当前库；null = 未知/全量视图（LS 或迁移后沿用缓存）
       this._hydratedBanks = null;
+      // 题目分片台账：null = 全量视图；外壳水合时为 Map（见 _qShards 注释）
+      this._qShards = null;
       if (i.mode === 'idb') {
         // 启动水合带 records；迁移完成路径不带 records —— 调用方已保证现有缓存包含全部业务键，
         // 直接沿用可避免整库再解析一遍（少一份全量克隆，降低迁移峰值）。
@@ -301,6 +311,20 @@
           // 当前作用域库即使没有任何复习状态也已水合（其题目/收藏等记录已整体读入）；
           // 不能因为「空库」就让 getScoped/keysScoped 误报未水合。
           if (i.scopeBank) this._hydratedBanks.add(String(i.scopeBank));
+          // 外壳水合：启动只读了题目清单（或老布局整库），题目正文分片要按窗口补读。
+          // 每个已知库先记为空集；当前库若无清单（老布局单 blob）则整库已可见 → 记 true。
+          if (i.shell) {
+            const shards = new Map();
+            const ids = this._knownBankIds();
+            if (ids) ids.forEach((id) => shards.set(id, new Set()));
+            if (i.scopeBank) {
+              const scope = String(i.scopeBank);
+              const hasMeta = this._cache.get(QB.KEYS.questionsMeta(scope)) != null;
+              if (!hasMeta) shards.set(scope, true);
+              else if (!shards.has(scope)) shards.set(scope, new Set());
+            }
+            this._qShards = shards;
+          }
         }
         this.mode = 'idb';
         QB.Store.onWrite = (keys) => this._broadcastIdbWrite(keys);
@@ -371,6 +395,7 @@
       this._mergePhysicalRecords(records);
       // ensureAll 后同步视图覆盖全部物理记录（等价于全量水合）
       this._hydratedBanks = null;
+      this._qShards = null;
       this._invalidateKeys();
       return { mode: 'idb', records: records.size };
     },
@@ -398,6 +423,8 @@
       }
       this._mergePhysicalRecords(records);
       this._hydratedBanks.add(id);
+      // readBank 读的是该库全部物理键（复习块 + 题目分片），题目视图随之完整可见
+      if (this._qShards) this._qShards.set(id, true);
       this._invalidateKeys();
       return { mode: 'idb', records: records.size, bank: id };
     },
@@ -447,6 +474,204 @@
       for (const k of this._cache.keys()) { if (k.indexOf(statePrefix) === 0) return true; }
       for (const k of this._pending.keys()) { if (k.indexOf(statePrefix) === 0) return true; }
       return false;
+    },
+
+    /**
+     * 某库题目分片是否全部可见（外壳水合的核心判定）。
+     * LS / 全量视图（`_qShards=null`）恒 true；外壳水合下按「清单 sizes × 已加载台账」判定，
+     * 本标签会话内新写入的分片也算可见（缓存/待写有值）。
+     * @param {string} bankId
+     * @returns {boolean}
+     */
+    isQuestionsHydrated(bankId) {
+      if (!this._isIdb()) return true;
+      if (!this._qShards) return true;
+      const id = String(bankId);
+      if (!this._qShards.has(id)) return false;
+      const rec = this._qShards.get(id);
+      if (rec === true) return true;
+      const meta = this._metaOfCache(id);
+      if (!meta) return this._hasVisibleKey(QB.KEYS.questions(id));
+      for (let i = 0; i < meta.sizes.length; i += 1) {
+        if (rec.has(i)) continue;
+        if (this._hasVisibleKey(QB.KEYS.questionShard(id, i))) continue;
+        return false;
+      }
+      return true;
+    },
+
+    /** 键在当前同步视图（缓存/待写）中是否有值 */
+    _hasVisibleKey(key) {
+      if (this._pending.has(key)) return this._pending.get(key) !== undefined;
+      if (this._ops.has(key)) return this._ops.get(key) !== 'del';
+      return this._cache.get(key) !== undefined;
+    },
+
+    /** 同步视图里的题目清单（缓存的 `questions:<bank>:meta`） */
+    _metaOfCache(bankId) {
+      const raw = this._cache.get(QB.KEYS.questionsMeta(String(bankId)));
+      return raw && typeof raw === 'object' && Array.isArray(raw.sizes) ? raw : null;
+    },
+
+    /**
+     * 全量视图判定（keys/usageBytes 的准入条件）：所有已知库的复习状态与题目分片都可见。
+     * 清单不可解析时 fail-closed（宁可报错也不返回残缺键集/低估用量）。
+     * @returns {boolean}
+     */
+    isFullyHydrated() {
+      if (!this._isIdb()) return true;
+      if (this._qShards === null && this._hydratedBanks === null) return true;
+      const ids = this._knownBankIds();
+      if (!ids) {
+        // 无 banks 清单：只可能是空库（仅全局键）。台账里若还记着库，说明清单丢了 → fail-closed。
+        if (this._qShards && this._qShards.size) return false;
+        if (this._hydratedBanks && this._hydratedBanks.size) return false;
+        return true;
+      }
+      for (let i = 0; i < ids.length; i += 1) {
+        if (!this.isBankHydrated(ids[i])) return false;
+        if (!this.isQuestionsHydrated(ids[i])) return false;
+      }
+      return true;
+    },
+
+    /**
+     * 配额/键集口径守卫（D-Q=A 修订）：部分视图下 `keys()/usageBytes()` **必须**响亮失败，
+     * 绝不返回部分推导值（部分视图会把字符口径低估成「放行导入」）。
+     * 需要数值的异步路径先 `await ensureAll()` 再按字符口径测量。
+     */
+    assertFullUsageView() {
+      if (!this._isIdb() || this.isFullyHydrated()) return;
+      throw new NotHydratedError(this._scopeBankHint(), null,
+        'keys()/usageBytes() 要求全量视图：先 await Storage.ensureAll()（部分视图不返回推导值）');
+    },
+
+    /**
+     * 同步读某分片前的守卫：未加载 → 抛 NotHydratedError（不返回伪空）。
+     * 超出清单尾部（追加的新分片）视为空分片，放行。
+     */
+    assertQuestionShardLoaded(bankId, shardIndex) {
+      if (!this._isIdb() || !this._qShards) return;
+      const id = String(bankId);
+      const idx = Number(shardIndex);
+      const key = QB.KEYS.questionShard(id, idx);
+      const rec = this._qShards.get(id);
+      if (rec === true || this._hasVisibleKey(key)) return;
+      const meta = this._metaOfCache(id);
+      if (meta && idx >= meta.sizes.length) return;
+      throw new NotHydratedError(id, key,
+        '题目分片未加载：先 await Storage.ensureQuestions(bankId, start, end) 或 ensureQuestionsFull(bankId)');
+    },
+
+    /** 物理键枚举/整库改写前的守卫：题目视图不完整 → 抛 NotHydratedError（避免漏删孤儿分片） */
+    assertQuestionsFullyLoaded(bankId) {
+      if (!this._isIdb() || !this._qShards) return;
+      const id = String(bankId == null ? '' : bankId);
+      if (this.isQuestionsHydrated(id)) return;
+      throw new NotHydratedError(id, null,
+        '题目视图不完整：先 await Storage.ensureQuestionsFull(bankId) 或 Storage.ensureAll()');
+    },
+
+    /**
+     * 按窗口补读题目分片（外壳水合主路径）：按清单 `sizes` 算出覆盖 `[start,end)` 的分片集合，
+     * 只对**尚未加载**的分片直接读物理键，合并进同步视图；幂等（重复调用不重复读键）。
+     * 未水合的库（复习维度也不可见）→ 整库读一次（与 ensureBank 同口径）。
+     * 老布局（无清单）→ 整库读，绝不把窗口当成「该库只有这些题」。
+     * @param {string} bankId
+     * @param {number} start 起始题序（含）
+     * @param {number|null} end 结束题序（不含）；null = 到末尾
+     * @returns {Promise<{mode:string, records:number, bank:string, loaded:number}>}
+     */
+    async ensureQuestions(bankId, start, end) {
+      const id = String(bankId || '');
+      if (!id) throw new Error('Storage.ensureQuestions：缺少 bankId');
+      if (!this._isIdb() || !this._qShards) {
+        return { mode: this._isIdb() ? 'idb' : 'ls', records: 0, bank: id, loaded: 0 };
+      }
+      if (this.isQuestionsHydrated(id)) return { mode: 'idb', records: 0, bank: id, loaded: 0 };
+      const rec = this._qShards.get(id);
+      if (rec === undefined) {
+        // 该库启动时完全未水合（题目/复习都不可见）→ 整库读一次
+        await this.ensureBank(id);
+        return { mode: 'idb', records: 0, bank: id, loaded: 0 };
+      }
+      const meta = this._metaOfCache(id);
+      if (!meta) {
+        // 老布局（单 blob、无清单）或清单缺失 → 整库读，不伪造窗口
+        await this._readBankIntoCache(id);
+        return { mode: 'idb', records: 0, bank: id, loaded: 0 };
+      }
+      const sizes = meta.sizes;
+      const from = Math.max(0, Math.floor(Number(start) || 0));
+      const to = (end === null || end === undefined) ? Infinity : Math.max(from, Math.floor(Number(end) || 0));
+      const need = [];
+      let pos = 0;
+      for (let i = 0; i < sizes.length; i += 1) {
+        const len = Number(sizes[i]) || 0;
+        const shardStart = pos;
+        const shardEnd = pos + len;
+        pos = shardEnd;
+        if (shardEnd <= from || shardStart >= to) continue;
+        if (rec.has(i)) continue;
+        const key = QB.KEYS.questionShard(id, i);
+        if (this._hasVisibleKey(key)) { rec.add(i); continue; }
+        need.push(i);
+      }
+      if (!need.length) return { mode: 'idb', records: 0, bank: id, loaded: 0 };
+      const S = QB.Store;
+      if (!S || typeof S.readPhysicalMany !== 'function') throw new Error('Storage.ensureQuestions：QB.Store.readPhysicalMany 不可用');
+      // 先把本标签待写落盘：失败上抛（读旧值合并会覆盖本地新写）
+      if (this._pending.size || this._ops.size) await this.flush();
+      const keys = need.map((i) => QB.KEYS.questionShard(id, i));
+      const vals = await S.readPhysicalMany(keys);
+      if (!vals || typeof vals !== 'object') throw new Error('Storage.ensureQuestions：物理读返回值无效');
+      const records = new Map();
+      keys.forEach((k) => records.set(k, vals[k]));
+      this._mergePhysicalRecords(records);
+      need.forEach((i) => rec.add(i));
+      this._invalidateKeys();
+      return { mode: 'idb', records: keys.length, bank: id, loaded: need.length };
+    },
+
+    /** 补齐某库**全部**题目分片（写路径/整库读取用） */
+    async ensureQuestionsFull(bankId) {
+      const id = String(bankId || '');
+      if (!id) throw new Error('Storage.ensureQuestionsFull：缺少 bankId');
+      if (!this._isIdb() || !this._qShards) {
+        return { mode: this._isIdb() ? 'idb' : 'ls', records: 0, bank: id, loaded: 0 };
+      }
+      if (this.isQuestionsHydrated(id)) return { mode: 'idb', records: 0, bank: id, loaded: 0 };
+      return this.ensureQuestions(id, 0, null);
+    },
+
+    /**
+     * 复习状态可见性保障：未水合的库由整库读补入（复习块与题目分片同一口径，
+     * 不按 hash 单点读，避免与物理块拆分语义分叉）。已水合 → 直接返回。
+     */
+    async ensureReview(bankId) {
+      const id = String(bankId || '');
+      if (!id) throw new Error('Storage.ensureReview：缺少 bankId');
+      if (!this._isIdb()) return { mode: 'ls', records: 0, bank: id };
+      if (this.isBankHydrated(id)) return { mode: 'idb', records: 0, bank: id };
+      await this.ensureBank(id);
+      return { mode: 'idb', records: 0, bank: id };
+    },
+
+    /** 整库读并入同步视图（ensureBank / ensureQuestions 共用；已水合判定由调用方负责） */
+    async _readBankIntoCache(bankId) {
+      const id = String(bankId);
+      const S = QB.Store;
+      if (!S || typeof S.readBank !== 'function') throw new Error('Storage.ensureBank：QB.Store.readBank 不可用');
+      if (this._pending.size || this._ops.size) await this.flush();
+      const records = await S.readBank(id);
+      if (!records || typeof records.forEach !== 'function') {
+        throw new Error('Storage.ensureBank：QB.Store.readBank 返回值无效');
+      }
+      this._mergePhysicalRecords(records);
+      if (this._hydratedBanks) this._hydratedBanks.add(id);
+      if (this._qShards) this._qShards.set(id, true);
+      this._invalidateKeys();
+      return records;
     },
 
     /**
@@ -1536,6 +1761,8 @@
      */
     keys() {
       this._assertFullViewForStrict();
+      // 外壳水合（部分题目视图）下 keys() 必然是残集 → 响亮拒绝，不返回部分推导值
+      this.assertFullUsageView();
       return this._keysRawCached().slice();
     },
 
@@ -1584,6 +1811,9 @@
     clearAll() {
       // C009：整库清空后用量快照必然失效，交给下一次 refresh 重建基线
       if (QB.Quota && typeof QB.Quota.reset === 'function') QB.Quota.reset();
+      // 清空后的同步视图是「完整的空」：水合台账一并归一
+      this._hydratedBanks = null;
+      this._qShards = null;
       this._chunkStates.clear();
       this._charLens.clear();
       this._pendingStr.clear();
@@ -1623,6 +1853,8 @@
       const Q = QB.Quota;
       let total = 0;
       if (this._isIdb()) {
+        // 外壳水合（部分题目视图）下逐值累加必然低估 → 响亮拒绝，不返回部分推导值
+        this.assertFullUsageView();
         this._cache.forEach((v, k) => {
           if (v === undefined) return;
           total += Q.bytesOfValue(k, v);

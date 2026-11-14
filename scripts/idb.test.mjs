@@ -1315,7 +1315,9 @@ section('作用域读取 API + 严格守卫（C 步骤1：API + 契约测试，�
   eq(S.__strictReads, false, '局部关闭后验证宽松契约（__strictReads=false）');
   eq(S.get(bKey, 'SENTINEL'), 'SENTINEL', '默认关闭：未水合库 get 仍返回 defaultValue（逐字不变）');
   eq(S.getFresh(bKey, 'SENTINEL'), 'SENTINEL', '默认关闭：未水合库 getFresh 仍返回 defaultValue（逐字不变）');
-  ok(S.keys().indexOf(bKey) < 0, '默认关闭：keys() 仍不含未水合库键（逐字不变）');
+  // D-Q=A 修订：部分视图下 keys() 不再返回残集 —— 必须响亮拒绝，绝不返回部分推导值
+  ok(errorOf(() => S.keys()).name === 'NotHydratedError',
+    '默认关闭：keys() 在部分视图下仍响亮拒绝（不返回残集）');
 
   // 公共 API 存在性
   ok(typeof S.getScoped === 'function', 'Storage.getScoped 已实现');
@@ -1678,6 +1680,7 @@ section('C 步骤4 冷路径：8 处作用域读取（818/826/832/845/142/152/11
   const fav2 = await Q2.DB.progress.favoriteToggle(E.id, bQ[0]);
   eq(fav2 && fav2.added, true, '等价 845：再次切换为新增（added=true）');
   eq((await Q2.DB.progress.favoriteList(E.id)).length, 1, '等价 845：新增后收藏为 1');
+  await S.ensureQuestionsFull(A.id); // 外壳水合：物理键枚举前先补齐该库题目分片
   eq(Q2.QuestionShards.indexesOf(A.id).join(','), '0',
     '等价 142：已水合 indexesOf 仍返回物理分片索引（2 题 → [0]）');
   const legacy = Q2.QuestionShards.legacyOf(E.id);
@@ -1808,6 +1811,8 @@ section('C 步骤4 后半：3 处只读渲染路径（124 metaOf / 129 shardOf /
     '前置：B 的分片清单键不在同步视图（旧实现因此读到 null/[]）');
 
   // 等价性先行：已水合场景（迁移前后结果必须逐项相同）
+  // 外壳水合：只读渲染路径经 DB.loadQuestions/list 会按需补读；此处直读分片前显式补齐
+  await S.ensureQuestionsFull(A.id);
   eq(Q2.QuestionShards.metaOf(A.id).count, 2,
     '等价 124：已水合 metaOf 返回真实清单（count=2）');
   eq(Q2.QuestionShards.shardOf(A.id, 0).length, 2,
@@ -2401,6 +2406,130 @@ section('缺陷①：分阶段水合下全局题目索引不抛 NotHydratedError
   ok(!gb.error && gb.value && gb.value.id === bId,
     '分阶段水合：ensureAll 后可按 id 定位非当前库题目',
     '（实测 ' + (gb.error ? gb.error.name : JSON.stringify(gb.value && gb.value.id)) + '）');
+}
+
+/* ============================================================ */
+section('外壳水合（M1/M2）：按需扩窗 + 配额口径不返回部分值');
+{
+  const idb = createMemoryIDB();
+  const raw = new Map();
+  const H1 = await makeHarness({ indexedDB: idb, raw });
+  const Q1 = H1.QB;
+  Q1.DB.init();
+  await Q1.Storage.initStore();
+  const seeded = await seedData(Q1); // 420 题 / 1 库 / 30 条复习
+  await Q1.Storage.flush();
+  await Q1.Migration.run(); // 切 IDB（全量视图）
+  const bankId = seeded.bank.id;
+  const total = seeded.items.length;
+  ok(Q1.Storage.isFullyHydrated(), '前置：迁移后为全量视图');
+
+  // 全量对照页（同一 IDB，ensureAll 后作为逐字节基准）
+  const H3 = await makeHarness({ indexedDB: idb, raw });
+  const Q3 = H3.QB;
+  Q3.DB.init();
+  await Q3.Storage.initStore();
+  await Q3.Storage.ensureAll();
+  const fullKeys = Q3.Storage.keys().slice().sort();
+  const fullBytes = Q3.Storage.usageBytes();
+  const fullMeter = await Q3.Quota.refresh();
+  eq(fullMeter.usedBytes, fullBytes, '基准：全量视图 meter.usedBytes = usageBytes（字符口径）');
+
+  // 外壳页：启动只拿清单 + 复习块
+  const H2 = await makeHarness({ indexedDB: idb, raw });
+  const Q2 = H2.QB;
+  Q2.DB.init();
+  const info = await Q2.Storage.initStore();
+  const S = Q2.Storage;
+  const errOf = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const asyncErrOf = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
+  ok(info.shell === true, '外壳水合：Store.init 读为部分题目视图（shell=true）');
+  eq(info.scopeBank, bankId, '作用域库 = 当前库');
+  eq(S.isBankHydrated(bankId), true, '复习维度仍水合（既有契约不变）');
+  eq(S.isQuestionsHydrated(bankId), false, '题目分片未全部加载（外壳态）');
+  ok(S.keysScoped(bankId).some((k) => k.indexOf('user:review:' + bankId + ':') === 0),
+    '当前库复习状态仍在启动读里（既有契约不变）');
+  // 全局键必须在外壳视图里（真机 reload 曾因 rest 过滤把 banks/meta:* 一起滤掉 → 题库列表变空；
+  // Node 降级路径不走该过滤器，所以这条契约单独钉死，含 restKeep 判据本身）
+  const shellBanks = S.get(Q2.KEYS.banks);
+  ok(Array.isArray(shellBanks) && shellBanks.length === 1, '外壳视图含全局 banks 记录（启动必需）');
+  ok(Q2.Store.restKeep(Q2.KEYS.metaCurrentBank, bankId, true) === true,
+    'restKeep：外壳态保留 meta:currentBank');
+  const rk = Q2.Store.restKeep;
+  ok(rk(Q2.KEYS.banks, bankId, true) === true, 'restKeep：外壳态保留全局 banks');
+  ok(rk('meta:theme', bankId, true) === true, 'restKeep：外壳态保留 meta:* 全局键');
+  ok(rk(Q2.KEYS.questionsMeta(bankId), bankId, true) === true, 'restKeep：外壳态补读当前库题目清单');
+  ok(rk(Q2.KEYS.questionShard(bankId, 0), bankId, true) === false, 'restKeep：外壳态不逐键补读题目分片');
+  ok(rk('user:reviewMeta:other', bankId, true) === true, 'restKeep：其它库保留复习布局标记');
+  ok(rk('questions:other:0', bankId, true) === false, 'restKeep：其它库不读题目分片');
+  eq(await Q2.DB.questions.count(bankId), total, 'count 直读清单 O(1)：' + total + ' 题');
+
+  // 未加载分片必须响亮失败（不得返回空数组/伪空）
+  const eShard = errOf(() => Q2.QuestionShards.shardOf(bankId, 0));
+  ok(!!eShard && eShard.code === 'STORAGE_NOT_HYDRATED', '未加载分片 shardOf 抛 NotHydratedError',
+    '（实测 ' + (eShard && eShard.name) + '）');
+  const eRange = errOf(() => Q2.QuestionShards.readRange(bankId, 0, 5));
+  ok(!!eRange && eRange.code === 'STORAGE_NOT_HYDRATED', '未加载分片 readRange 抛 NotHydratedError');
+  const eIdx = errOf(() => Q2.QuestionShards.indexesOf(bankId));
+  ok(!!eIdx && eIdx.code === 'STORAGE_NOT_HYDRATED', '物理键枚举 indexesOf 在部分视图抛 NotHydratedError');
+
+  // 配额/键集口径：partial 必须响亮拒绝，绝不返回部分推导值
+  const eKeys = errOf(() => S.keys());
+  ok(!!eKeys && eKeys.code === 'STORAGE_NOT_HYDRATED', 'partial 态 keys() 响亮拒绝（不返回残集）');
+  const eUsage = errOf(() => S.usageBytes());
+  ok(!!eUsage && eUsage.code === 'STORAGE_NOT_HYDRATED', 'partial 态 usageBytes() 响亮拒绝（不低估）');
+  const eQuotaUsage = errOf(() => Q2.Quota.usageBytes());
+  ok(!!eQuotaUsage && eQuotaUsage.code === 'STORAGE_NOT_HYDRATED', 'partial 态 Quota.usageBytes() 响亮拒绝');
+  const partialMeter = await Q2.Quota.refresh();
+  eq(partialMeter.ready, false, 'partial 态 Quota.refresh：ready=false（不推导、不自动全量读）');
+  eq(partialMeter.partial, true, 'partial 态 Quota.refresh：partial=true（UI 显示未统计）');
+  ok(S.isQuestionsHydrated(bankId) === false, 'refresh 未偷偷触发全量水合');
+  const fit = await Q2.Quota.canFitQuestionsAsync([{ question: 'x'.repeat(200) }]);
+  eq(fit.checked, false, 'canFitQuestionsAsync：不做 estimate 准入（checked=false）');
+  eq(fit.available, null, 'canFitQuestionsAsync：不交付物理字节（available=null）');
+  ok(fit.ok === true, 'canFitQuestionsAsync：物理字节不误拒导入');
+
+  // 扩窗读：只补读覆盖 [0,5) 的分片
+  const win = await Q2.DB.questions.list(bankId, { offset: 0, limit: 5 });
+  eq(win.items.length, 5, '扩窗 list(0,5) 返回 5 题');
+  eq(win.total, total, '扩窗 list total 仍为 ' + total);
+  eq(S.isQuestionsHydrated(bankId), false, '扩窗后仍未全量加载（只补了首分片）');
+  eq(Q2.QuestionShards.shardOf(bankId, 0).length, 200, '首分片内容可读（SHARD_SIZE=200 题）');
+
+  // 幂等：重复 ensure 不重复读键
+  let reads = 0;
+  const origRead = Q2.Store.readPhysicalMany;
+  Q2.Store.readPhysicalMany = async function (keys) { reads += 1; return origRead.call(this, keys); };
+  await S.ensureQuestions(bankId, 0, 200);
+  eq(reads, 0, 'ensureQuestions 幂等：已加载窗口不重复读键');
+  await S.ensureQuestionsFull(bankId);
+  eq(reads, 1, 'ensureQuestionsFull 只补读未加载分片（1 次批量读）');
+  Q2.Store.readPhysicalMany = origRead;
+
+  // ensure 后与全量水合逐字节一致（keys / usageBytes / meter）
+  ok(S.isQuestionsHydrated(bankId), 'ensureQuestionsFull 后题目视图完整');
+  ok(S.isFullyHydrated(), '单库场景 ensure 后 isFullyHydrated=true');
+  eq(S.keys().slice().sort().join('|'), fullKeys.join('|'), 'ensure 后 keys() 与全量水合逐字节一致');
+  eq(S.usageBytes(), fullBytes, 'ensure 后 usageBytes() 与全量水合逐字节一致');
+  const meter = await Q2.Quota.refresh();
+  eq(meter.ready, true, 'ensure 后 Quota.refresh：ready=true');
+  eq(meter.partial, false, 'ensure 后 Quota.refresh：partial=false');
+  eq(meter.usedBytes, fullMeter.usedBytes, 'ensure 后 meter.usedBytes 与全量水合 meter 一致');
+  eq(meter.usedBytes, Q2.Storage.usageBytes(), 'ensure 后 meter 与 usageBytes 同口径');
+
+  // partial 态导入：写路径显式 ensure（不是静默低估放行）
+  const H4 = await makeHarness({ indexedDB: idb, raw });
+  const Q4 = H4.QB;
+  Q4.DB.init();
+  const info4 = await Q4.Storage.initStore();
+  ok(info4.shell === true && Q4.Storage.isQuestionsHydrated(bankId) === false,
+    '导入页：启动为部分题目视图');
+  const ins = await Q4.DB.questions.insertMany(bankId, [{
+    type: 'judge', question: '外壳导入题', answer: '正确'
+  }], { dedupe: false });
+  eq(ins.inserted, 1, '部分视图下导入成功（入口显式 ensure，不静默放行）');
+  ok(Q4.Storage.isFullyHydrated(), '导入完成后全量视图成立（写路径 ensure 生效）');
+  eq(await Q4.DB.questions.count(bankId), total + 1, '导入后题目数 +1（未半写）');
 }
 
 /* ============================================================ */

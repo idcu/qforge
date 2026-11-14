@@ -145,8 +145,8 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   → 失效键视图；失败 reject，调用方不得退回部分视图。LS 模式直接返回 `{mode:'ls'}`。
 - **按库读取（`Store.readBank(bankId)`）** 等价 `readAll(true, true, {bank})`；`Store.readAll/getAll`
   新增可选作用域参数：作用域库取全部键，其它库只保留 `reviewMeta`/`reviewRev`（否则退回全量）。
-  **启动作用域来源**：`Store.readScopeBank()` 单事务读 IDB 的 `banks` + `meta:currentBank`，
-  合法当前库优先、否则第一库；结果记在 `Store.lastInit.scopeBank`。
+  **启动作用域来源**：`txGetAllSplit` 首次事务同时读 IDB 的 `banks` + `meta:currentBank`，
+  合法当前库优先、否则第一库（经 `state.bank` 回写，不再单发 `readScopeBank` 往返）；结果记在 `Store.lastInit.scopeBank`。
 - **`keys()` 合并 `_pending`**：未落盘的新键在同步视图里立即可见（`_buildKeys` 与
   `_logicalKeyVisible` 同构），避免「刚写入的键要等 flush 才出现」。
 - **全量操作清单（必须前置 `ensureAll`）**：备份导出 / 自动备份 / 恢复 `applyData` /

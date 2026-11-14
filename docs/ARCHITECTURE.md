@@ -148,7 +148,7 @@ qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：�
 | `Storage.isBankHydrated(bankId)` | 库作用域可见性判定：只认复习块/逻辑复习键，不用 `reviewMeta/reviewRev`；`adoptStore` 把 `lastInit.scopeBank` 标记为已水合 | `ensureBank` 早退、迁移 `skipped` 判定、删库前置 |
 | `Storage.getScoped/getScopedFresh/keysScoped` + `QB.NotHydratedError` | 作用域读取唯一入口：未水合库抛 `NotHydratedError`（`code='STORAGE_NOT_HYDRATED'`、`bankId`、`key`、`hint`）；`bankOfKey` + `BANK_SCOPED_PREFIXES` 是键归属唯一解析 | 步骤 2–6 待迁移调用点；当前 `idb` 合约测试使用 |
 | `Store.readBank(bankId)` / `Store.readAll(...)` | 作用域读：`readBank` = 单库全键；`readAll` 作用域库取全部键、其它库仅 `reviewMeta/reviewRev`，作用域缺失退回全量 | `Storage.ensureBank` / `init` |
-| `Store.readScopeBank()` / `Store.lastInit.scopeBank` | 启动作用域唯一来源：单事务读 `banks` + `meta:currentBank` | `Store.init`、诊断/测试 |
+| `Store.lastInit.scopeBank` | 启动作用域唯一结果：`txGetAllSplit` 在同一事务里读 `banks` + `meta:currentBank` 后经 `state.bank` 回写 | `Store.init`、诊断/测试 |
 | `revlog.revision()` | 同步写修订号（append/record/patch/级联/备份后自增） | 统计页缓存、forecast 缓存 |
 | `QB.OPTIONAL_CONTRACTS` + `QB.hasCapability` + `QB.assertOptional` | 可选契约唯一判定入口：`reviews[get,patch]`、`revlog[revision]`、`progress[wrongAddMany]` 可缺失；`DB.init` 校验"提供则必须是函数" | `SRSStore`、`WrongBook.addMany`、统计页、第三方适配器 |
 | `questions.revision()` + `bumpRev()` | 整库题目读缓存失效唯一机制：任意题目写路径同步 +1；`DB.loadQuestions` 以 `(bankId, rev)` 判定命中 | local/api-adapter、备份恢复、`DB.loadQuestions` |

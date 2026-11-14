@@ -355,9 +355,10 @@ switchBank(nextId) = 快照 {bankId, view}
 
 ### 4.21 分阶段水合（Phase 0 批次2）
 
-- **启动作用域**：`Store.init()` 先单事务读 `banks` + `meta:currentBank`（`readScopeBank()`；
-  当前库合法 → 用它，否则第一库），只水合该库的复习块/题目分片/按库小键；
-  其它库只保留 `reviewMeta`/`reviewRev` 两枚小标记（迁移提示可见）。作用域记入 `Store.lastInit.scopeBank`。
+- **启动作用域**：`Store.init()` 在 `txGetAllSplit` 的第一次事务里同时读 `banks` + `meta:currentBank`
+  （当前库合法 → 用它，否则第一库；不再单发 `readScopeBank` 往返，作用域经 `state.bank` 回写），
+  只水合该库的复习块/题目分片/按库小键；其它库只保留 `reviewMeta`/`reviewRev` 两枚小标记（迁移提示可见）。
+  作用域记入 `Store.lastInit.scopeBank`。
 - **不建全量键视图**：启动期不物化 5 万级逻辑键（实测 139.3 ms 会抵消收益）；
   `keys()` 按需从已水合库的块/缓存物化，并合并 `_pending`。
 - **按库惰性物化**：`Storage.ensureBank(bankId)` 在切库/导出/导入/删库前补齐目标库；
