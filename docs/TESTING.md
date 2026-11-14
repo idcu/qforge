@@ -11,7 +11,7 @@
 
 **装配顺序也是一条判据**：没有打包器，`index.html` 里 71 个首屏 `<script>` 的顺序就是依赖图（`js/**` 另有 88 个手写文件，其余 23 个由 `js/modules/loader.js` 按需注入）。`node scripts/check-modules.mjs` 核对九件事（事实源 `contracts/modules.json`）：清单合法、`index.html` 与 core 逐条相等、`requires` 是前置依赖 DAG、按需包合法、`keeps` 导出在源码确有赋值、入口 `js/app.js` 最后且 `js/config.js` 最先、`js/**` 每个脚本都被引用（`js/workers/*` 例外）、每个 src 真实存在、tier 不得向上（越级须登记 `allowUpward` 与到期日）。`--selftest` 用 9 个负例证明这九类违约都会红——顺序错只在首次用到时 `undefined`。
 
-合计 **39 个运行项（冒烟 + 38 套件）**：每个套件单独 spawn，末尾打印「通过: N」，本文表格里的数字就是它。
+合计 **40 个运行项（冒烟 + 39 套件）**：每个套件单独 spawn，末尾打印「通过: N」，本文表格里的数字就是它。
 
 ## 2. 总闸与判据
 
@@ -23,7 +23,7 @@
 
 **时间注入（R-18）**：R-18 不再「等秒数出现」，改用 app-boot 已有的 `new Function` 参数缝注入三样：`injectNow`（测试推进 t=0/1s/2s 并逐帧断言文案）、`setInterval`/`clearInterval`（换成登记表，用 `fire()` 触发每帧，30ms 轮询已删）、接管 promise 的 `release()`。浏览器里未定义时 `typeof` 兜底为真实实现，不新增 `QB.*` 符号。护栏是一条真实定时器端到端（`injectWaitTickMs=120`），断言秒数与真实流逝一致（±1 秒）。边界：只注入等待计时与刷新节奏，其余 `Date.now()`/`setTimeout` 仍真实；`QFORGE_TEST_BLOCK_MS` 可在等待窗口内插同步忙等模拟抢占。
 
-**断言原语（C024）**：39 个运行项（1 冒烟 + 38 套件）的 `ok/eq/deepEq/section/throws` 统一来自 `scripts/lib/assert.mjs` 的 `createAssert({ failures, onPass })`。各套件保留自己的计数与失败数组，通过 `onPass` 回写、共享 `failures` 收集——输出格式、基线计数与总闸语义不变。`createAssert` 只做断言与记录，不接管汇总、不调用 `process.exit`；需要深比对的套件（`idb` / `import-commit`）传 `deep: true`；套件特有辅助仍可保留。
+**断言原语（C024）**：40 个运行项（1 冒烟 + 39 套件）的 `ok/eq/deepEq/section/throws` 统一来自 `scripts/lib/assert.mjs` 的 `createAssert({ failures, onPass })`。各套件保留自己的计数与失败数组，通过 `onPass` 回写、共享 `failures` 收集——输出格式、基线计数与总闸语义不变。`createAssert` 只做断言与记录，不接管汇总、不调用 `process.exit`；需要深比对的套件（`idb` / `import-commit`）传 `deep: true`；套件特有辅助仍可保留。
 
 **严格读取默认开启（C 步骤5）**：`scripts/_harness.mjs::createHarness` 加载完全部模块后默认 `QB.Storage.__strictReads = true`，让「未水合库走旧入口」在测试期真实抛 `NotHydratedError`；需要验证宽松契约的段落显式局部关闭并在用例末尾恢复，或用 `QFORGE_STRICT_READS=0` 跑整个进程。生产默认仍为 `false`（见 [STORAGE.md](STORAGE.md)「C 步骤6」）；分阶段水合下的归类错误是已知风险，见 [ARCHITECTURE.md](ARCHITECTURE.md#8-已知问题与风险) 第 1 条。
 
@@ -33,9 +33,9 @@
 
 ## 3. 套件矩阵（摘要）
 
-合计 **39 个运行项（冒烟 + 38 套件）、6296 项断言**；逐套件的断言数与覆盖范围见 **[TESTING-SUITES.md](TESTING-SUITES.md)**。
+合计 **40 个运行项（冒烟 + 39 套件）、6335 项断言**；逐套件的断言数与覆盖范围见 **[TESTING-SUITES.md](TESTING-SUITES.md)**。
 
-判定口径：每个套件独立 spawn、单独打印「通过: N」；6296 是这 39 项之和，与 `scripts/docs-baseline.json` 一致。新增/删除断言后必须 `--write` 刷新基线并同 commit 提交。
+判定口径：每个套件独立 spawn、单独打印「通过: N」；6335 是这 40 项之和，与 `scripts/docs-baseline.json` 一致。新增/删除断言后必须 `--write` 刷新基线并同 commit 提交。
 
 ## 4. 红了怎么定位
 

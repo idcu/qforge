@@ -9,10 +9,10 @@
 
 | 项 | 数量 | 说明 |
 | --- | --- | --- |
-| 清单总条数 | 98 | `modules.json` 的 `modules` 数组 |
+| 清单总条数 | 99 | `modules.json` 的 `modules` 数组 |
 | 首屏脚本 | 72 | `index.html` 内联 `<script src>`，与清单中无 `load` 字段的条目逐条相等 |
 | 按需模块 | 26 | `load: "on-demand"`，由 `js/modules/loader.js` 的 `BUNDLES` 注入 |
-| 手写 js 文件 | 92 | `js/**` 全部文件（23,689 行）；含未进首屏的 Worker 入口等 |
+| 手写 js 文件 | 93 | `js/**` 全部文件（23,713 行）；含未进首屏的 Worker 入口等 |
 | 按需包 | 4 | `import` / `export` / `editor` / `backup` |
 
 > 历史上"88 个 script"的说法已废弃：88 是当时 `js/**` 文件数，不是首屏脚本数。首屏是 72。
@@ -57,7 +57,7 @@
 | `import` | 17 个：`adapters` → `line-parser` → `json/csv/dsv/xlsx/sqlite/docx/qbk/md/anki-package/anki/quizlet` → `registry` → `data-io` | 导入文件/拖拽/URL/粘贴/分享码 |
 | `export` | 6 个：`dsv` vendor → xlsx `vendor/xlsx` → xlsx `core` → `office-writer` → `share-page` → `exporter` | 导出、分享页、分享码 |
 | `editor` | 2 个：`adapters` → `question-editor` | 新建/编辑题目 |
-| `backup` | 2 个：`backup` → `sync-dav` | 备份/恢复/WebDAV |
+| `backup` | 3 个：`backup-pack` → `backup` → `sync-dav` | 备份/恢复/WebDAV |
 
 加载规则：
 

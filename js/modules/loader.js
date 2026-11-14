@@ -59,6 +59,7 @@
     ],
     // 备份/恢复链路（迁移前的自动备份也会走这里）
     backup: [
+      'js/modules/backup-pack.js',
       'js/modules/backup.js',
       'js/modules/sync-dav.js'
     ]

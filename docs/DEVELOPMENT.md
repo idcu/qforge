@@ -9,7 +9,7 @@
 
 | 读数 | 当前值 | 事实源 |
 | --- | --- | --- |
-| SW 缓存版本 | qforge-v77 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
+| SW 缓存版本 | qforge-v78 | `sw.js` 的 `CACHE`（缓存删除只作用于同 `CACHE_PREFIX` 命名空间；改 `js/**` 或 `css/**` 后必须递增，并同步 `scripts/sw-baseline.json`） |
 | 数据 schemaVersion | 7 | `js/modules/migrate.js` 的 `SCHEMA_VERSION` |
 | 去重键版本 | 3 | `js/utils/question-id.js` 的 `HASH_VERSION` |
 
@@ -31,7 +31,7 @@
 
 本节与 `docs/release-ledger.json` 的 `versionPolicy` 同源，改一处必须同步另一处，不许两边各说一套。
 
-- **计划与实际的偏差**：原计划分三档发布——阶段 1 → v1.0.2、阶段 2A → v1.1.0、阶段 3 → v1.2.0。实际三个阶段（含 2B/2C、性能与 UI 拆分）在同一轮内连续完成并通过总闸，**只发布了一次 v1.0.2**，CACHE 随每批递增到当前 `qforge-v77`。
+- **计划与实际的偏差**：原计划分三档发布——阶段 1 → v1.0.2、阶段 2A → v1.1.0、阶段 3 → v1.2.0。实际三个阶段（含 2B/2C、性能与 UI 拆分）在同一轮内连续完成并通过总闸，**只发布了一次 v1.0.2**，CACHE 随每批递增到当前 `qforge-v78`。
 - **后两档作废**：v1.1.0 / v1.2.0 不再作为待办或对外承诺；它们的交付内容（2A 契约对等、阶段 3 治理）已包含在 v1.0.2 的变更集中，不等于没做。
 - **下一版起点**：**1.0.3**。台账 `lastReleased.version` 为 `1.0.2`，下一版必须严格大于它。
 

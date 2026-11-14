@@ -1299,6 +1299,30 @@
       "load": "on-demand"
     },
     {
+      "id": "modules.backup-pack",
+      "file": "js/modules/backup-pack.js",
+      "layer": "modules",
+      "tier": "L2",
+      "requires": [
+        "config",
+        "data.store",
+        "utils.storage",
+        "utils.question-id",
+        "utils.zip-reader",
+        "utils.assets",
+        "utils.review-merge",
+        "data.contracts",
+        "data.wire",
+        "data.local-adapter",
+        "data.db",
+        "modules.qbk"
+      ],
+      "keeps": [
+        "QB.BackupPack"
+      ],
+      "load": "on-demand"
+    },
+    {
       "id": "modules.backup",
       "file": "js/modules/backup.js",
       "layer": "modules",
@@ -1316,7 +1340,8 @@
         "data.wire",
         "data.local-adapter",
         "data.db",
-        "modules.qbk"
+        "modules.qbk",
+        "modules.backup-pack"
       ],
       "keeps": [
         "QB.Backup"

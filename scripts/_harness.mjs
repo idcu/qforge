@@ -88,6 +88,7 @@ const MODULES = [
   'js/modules/share-link.js',
   'js/modules/exporter-formats.js',
   'js/modules/exporter.js',
+  'js/modules/backup-pack.js',
   'js/modules/backup.js',
   'js/modules/migrate.js',
   'js/modules/sync-dav.js',
