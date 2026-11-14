@@ -103,20 +103,25 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 静态资源：缓存优先 + 后台更新
-  // ignoreSearch：staging 产物给脚本加 ?v=<version>，而预缓存键是无查询串的相对路径；
-  // 不忽略查询串会让版本化请求在离线时全部落空（按需包尤其致命：它不在首屏请求过）。
+  // 查询顺序：先精确匹配，未命中再退回 ignoreSearch。ignoreSearch 会让 CacheStorage
+  // 放弃 URL 索引、对缓存做线性扫描（实测 123 条时约 20 ms/请求，精确匹配约 0.2 ms）；
+  // 而它仅用于 staging 的 ?v=<version> 请求回退到无查询串的预缓存键，属低频路径。
+  // 保留该回退是必要的：不忽略查询串会让版本化请求在离线时全部落空（按需包尤其致命：
+  // 它不在首屏请求过）。
   event.respondWith(
-    caches.match(req, { ignoreSearch: true }).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    caches.match(req)
+      .then((hit) => hit || caches.match(req, { ignoreSearch: true }))
+      .then((cached) => {
+        const network = fetch(req)
+          .then((res) => {
+            if (res && res.status === 200) {
+              const copy = res.clone();
+              caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+            }
+            return res;
+          })
+          .catch(() => cached);
+        return cached || network;
+      })
   );
 });
