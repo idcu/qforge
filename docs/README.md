@@ -115,7 +115,7 @@ node scripts/check-discipline.mjs --strict
 
 - **链接与锚点**：`docs/**/*.md` 与根 `README.md` 的所有相对链接必须存在；`file.md#L12-L34` 的行号不得超出文件行数。
 - **数字**：`README`、`CURRENT-STATE`、`DEVELOPMENT`、`TESTING`、`BENCH`、`BENCH-DATA` 里的运行项数、断言数、门禁数、首屏体积必须与 `scripts/docs-baseline.json` 和实测一致（`CURRENT-STATE` 已加入 `docs-check` 的 `DOCS_WITH_NUMBERS`）。新增测试后跑 `node scripts/docs-check.mjs --write` 刷新基线，再同步文档。
-- **版本读数**：只有 [DEVELOPMENT §0](DEVELOPMENT.md) 与 [CURRENT-STATE](CURRENT-STATE.md) 的读数表可以声明 SW 缓存版本 / schemaVersion / 去重键版本；前者由 `docs-links` 与 `sw.js`、`migrate.js`、`question-id.js` 逐字核对，后者必须与前者一致。
+- **版本读数**：只有 [DEVELOPMENT §0](DEVELOPMENT.md) 与 [CURRENT-STATE](CURRENT-STATE.md) 的读数表可以声明 SW 缓存版本 / schemaVersion / 去重键版本；前者由 `docs-links` 与 `sw.js`、`migrate-core.js`、`question-id.js` 逐字核对，后者必须与前者一致。
 - **章节标题唯一**：同一文件内 H1/H2 不得重名；H3 只在同名 H2 小节内要求唯一。
 - **单文件体积**：单个文档 ≤ 60 KB 且 ≤ 600 行（`check-discipline` 第 11 问）；超限请拆分，不要删内容。
 - **不写本地绝对路径**：文档里不要出现盘符路径或用户主目录路径，门禁会拦。

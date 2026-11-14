@@ -90,15 +90,16 @@
 
 ### 3.1 边界
 
-| 文件（新） | 内容 | 预估行数 |
-|---|---|---|
-| `migrate-core.js` | 常量/版本探测、迁移锁（含心跳）、快照/回滚、`writeQuestions`/`remapRevlog`、映射持久化、分片构建与校验 | ~300 |
-| `migrate-legacy.js` | v1→v2、v2→v3、v3→v4、v4→v5（含 `upgradeBank`）、`ensureLayout` | ~290 |
-| `migrate-backend.js` | v5→v6（本地库→IDB）、v6→v7（分片布局） | ~200 |
-| `migrate.js`（保留） | `run/doRun` 编排、进度、`QB.Migration` 导出与注册 | ~150 |
+| 文件（新） | 内容 | 计划行数 | 实际行数 |
+|---|---|---|---|
+| `migrate-core.js` | 常量/版本探测、迁移锁（含心跳）、快照/回滚 | ~300 | 122 |
+| `migrate-legacy.js` | v1→v2（含 `writeQuestions`/`remapRevlog`）、v2→v3、v3→v4、v4→v5（含映射持久化与 `upgradeBank`）、`ensureLayout` | ~290 | 335 |
+| `migrate-backend.js` | v5→v6（本地库→IDB）、v6→v7（分片布局，含分块构建/写入/校验） | ~200 | 220 |
+| `migrate.js`（保留） | `run/doRun` 编排、进度、`QB.Migration` 导出与注册 | ~150 | 206 |
 
+- 实际边界与计划的差异：`writeQuestions`/`remapRevlog` 只被 v1→v2 使用，映射持久化只被 v4→v5 使用，分块 helper 只被 v6→v7 使用——它们**留在消费它的阶段文件**里，而不是上提到 core；core 只保留真正跨阶段的版本/锁/快照协议。这是「按依赖归属」而不是「按名字好看」。
 - 阶段函数保持原签名与调用顺序；`QB.Migration` 的导出键逐一保留（测试可能直接调用阶段函数）。
-- core 暴露 `QB.MigrationCore`；legacy/backend 暴露 `QB.MigrationStages`；编排文件只按原顺序调用。
+- 命名空间实际为：core 暴露 `QB.MigrationCore`，legacy 暴露 `QB.MigrationLegacy`，backend 暴露 `QB.MigrationBackend`（未合并成单一 `QB.MigrationStages`：三组之间没有互相调用，合并只会制造假耦合）。
 - 迁移锁与快照留在 core：它们是「事务边界」而不是某个版本的知识。
 
 ### 3.2 理由
@@ -118,6 +119,13 @@
 2. 阶段直调：逐阶段入口（含幂等重入、失败回滚、锁竞争）输出相等。
 3. 套件：`migrate.test.mjs`、`idb.test.mjs`、`backup.test.mjs`、`storage*.test.mjs` 定向；最后全量。
 4. 装配与门禁同 §2.4。
+
+### 3.5 执行记录（2026-11-14）
+
+- 4 文件 raw 42,056 字节 / gzip 17,346 字节；原单文件 raw 40,020 / gzip 13,977。首屏 **312.1 → 315.4 KB gzip（+3.3 KB / +1.1%）**，raw 830.7 → 832.8 KB（+2.1 KB）。高于预估（+0.4~0.9 KB），成因同切片 A：4 份文件头注释、IIFE 包装与跨文件解构行，且逐文件 gzip 失去跨文件窗口红利。按新判据仅记录，不停手。
+- 等价性（迁移全链路，不是只看测试通过）：原单文件与拆分后四文件各跑一次完整的 v1→v7 迁移（固定 `Math.random`/`Date.now`，跳过由墙钟写入的 `qb:meta:lsMigratedAt`），比对 run 结果、11 个逻辑键、9 个物理 IDB 键、9 个 LS 残留键与 12 个导出键，sha256 均为 `4a5eabb53542e9891da8f43380d20ee6b00604ee4207de3d4f0c4186ee7f0b7b`。
+- 调用点冻结：`backup-hydration.test.mjs` 的 `EXPECTED_SITES` 由 `migrate.js: 20` 拆为 core 8 / legacy 5 / backend 6 / entry 1（合计仍 20），断言总数 96 不变——是同一口径的重新归属，不是放宽。
+- 文档事实源同步：`SCHEMA_VERSION` 的代码路径由 `migrate.js` 改为 `migrate-core.js`（`docs-links` 的读数对账与 selftest 夹具同步改）。
 
 ## 4. 不拆的三项：证据
 

@@ -9,17 +9,17 @@
 
 | 项 | 数量 | 说明 |
 | --- | --- | --- |
-| 清单总条数 | 99 | `modules.json` 的 `modules` 数组 |
-| 首屏脚本 | 72 | `index.html` 内联 `<script src>`，与清单中无 `load` 字段的条目逐条相等 |
-| 按需模块 | 26 | `load: "on-demand"`，由 `js/modules/loader.js` 的 `BUNDLES` 注入 |
-| 手写 js 文件 | 93 | `js/**` 全部文件（23,713 行）；含未进首屏的 Worker 入口等 |
+| 清单总条数 | 115 | `modules.json` 的 `modules` 数组 |
+| 首屏脚本 | 87 | `index.html` 内联 `<script src>`，与清单中无 `load` 字段的条目逐条相等 |
+| 按需模块 | 28 | `load: "on-demand"`，由 `js/modules/loader.js` 的 `BUNDLES` 注入 |
+| 手写 js 文件 | 109 | `js/**` 全部文件（23,991 行）；含未进首屏的 Worker 入口等 |
 | 按需包 | 4 | `import` / `export` / `editor` / `backup` |
 
-> 历史上"88 个 script"的说法已废弃：88 是当时 `js/**` 文件数，不是首屏脚本数。首屏是 72。
+> 历史上"88 个 script"的说法已废弃：88 是当时 `js/**` 文件数，不是首屏脚本数；首屏数以上表为准。
 
 ## 1. 为什么是「装配清单」，不是可插拔模块
 
-淬题是**双击 `index.html` 即用**的纯静态单页应用：首屏 80 个 classic `<script>` 顺序加载，全部挂在单一全局命名空间 `QB` 上。没有打包器，所以**顺序就是依赖图**；顺序错了不会在启动时报错，只在某个功能第一次用到时才 `undefined`。
+淬题是**双击 `index.html` 即用**的纯静态单页应用：首屏 87 个 classic `<script>` 顺序加载，全部挂在单一全局命名空间 `QB` 上。没有打包器，所以**顺序就是依赖图**；顺序错了不会在启动时报错，只在某个功能第一次用到时才 `undefined`。
 
 改成 `<script type="module">` 或引入运行时装配器，在 `file://` 下会被 CORS 拦掉，等于放弃离线双击即用。而且前端没有"请求边界"：LocalStorage / IndexedDB 里的题库、已注册的导入器、DOM 事件监听都和模块绑在一起，停用模块不只是反注册路由那么简单。
 

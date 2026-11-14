@@ -3,7 +3,7 @@
 > **这份文件是什么**：`ARCHITECTURE.md` 原 §9 —— 后端选择、v6 迁移十步、回滚路径。
 > **版本边界**：当前 `SCHEMA_VERSION` 为 **7**。本文主体讲 v6（LocalStorage → IndexedDB 底座）；v7 只把复习状态改为物理分块、不动逻辑键与备份格式，见 §9.7。
 > **为什么单独成文**：这一节是全文档最长的一块，且每次迁移修复都会追加。
-> **谁能改**：改 `js/data/store.js` 或 `js/modules/migrate.js` 的同一提交里改这里。
+> **谁能改**：改 `js/data/store.js` 或 `js/modules/migrate*.js` 的同一提交里改这里。
 > 分层见 [ARCHITECTURE.md](ARCHITECTURE.md)；表结构与迁移版本见 [DATABASE.md](DATABASE.md)。
 ## 存储底座：LocalStorage → IndexedDB（Phase G / schema v6）
 
@@ -200,7 +200,7 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   的兜底枚举显式写入，新增 `keys()`+`keysScoped()` 两个点，故 90）。
   早期转述的 **85** 未留扫描脚本/口径，无法逐一复现；本轮固定以可执行 hit=90 冻结，
   差异 3 处不做猜测性归因，复盘中请以上述逐文件计数为准。
-- **调用点逐类归属（复核口径同上，G/C/B/A/S 合计 90）**：
+- **调用点逐类归属（复核口径同上；逐文件冻结见 `scripts/backup-hydration.test.mjs` 的 `EXPECTED_SITES`，当前合计 96）**：
 
   | 文件 | 调用点 | 类别 | 保障方式 |
   | --- | --- | --- | --- |
@@ -208,7 +208,10 @@ WebDAV 密码的解密密钥（不可导出 CryptoKey）存独立 IDB 库 `qforg
   | `js/data/db.js` | 1 | G | `meta:currentBank` 全局键 |
   | `js/data/local-adapter.js` | 51 | S 26 / G 22 / A 1 / B 2 | S 26：`getScoped` 5 + `getScopedFresh` 17 + `getScopedIndicator` 1 + `keysScoped` 3（未水合必抛）；G 22：`banks`/`history`/`session`/权重/`metaCurrentBank` 及全局 revlog 分段（含 `RevlogStore.clear` 的全局键枚举）；A 1：`bankIds` 的 `keys()` 置于 try/catch，严格模式下命中 `STORAGE_NOT_HYDRATED` 才回退到 `banks` 元数据 + 已水合库 `keysScoped`；B 2：`reviews.save` 的 `prevMeta`/`prevLegacy`（**留档不迁**，见 C 步骤4） |
   | `js/modules/backup.js` | 10 | A 7 / G 3 | `readAllData`/`collectRawData`/`applyData`/`applyBackup` 共 7 处由 ensureAll 入口调用；`metaMigrationBackup` 3 处为运行期全局键 |
-  | `js/modules/migrate.js` | 19 | A 12 / G 7 | `doRun` 锁内 `ensureAll`；仅 LS 目标（`idbUsable=false`）的 snapshot/restore 在 LS 全量视图；schema/lock/revlog 为全局键 |
+  | `js/modules/migrate-core.js` | 8 | A 8 | `snapshotAll`/`restoreAll`；仅 LS 目标（`idbUsable=false`）的快照/回滚在 LS 全量视图 |
+  | `js/modules/migrate-legacy.js` | 5 | A 5 | `migrateV2ToV3`/`upgradeBank`，`doRun` 锁内 `ensureAll` 之后（或 LS 全量视图） |
+  | `js/modules/migrate-backend.js` | 6 | A 6 | `migrateV5ToV6`/`migrateV6ToV7`，`doRun` 锁内 `ensureAll` 之后（或 LS 全量视图） |
+  | `js/modules/migrate.js` | 1 | G 1 | 编排入口 `doRun` 锁内 `ensureAll`；schema/lock 为全局键 |
   | `js/modules/package.js` | 1 | G | `meta:pkgHistory` 全局键 |
   | `js/modules/start-prefs.js` | 2 | G | `meta:startPrefs` 全局键 |
   | `js/modules/sync-dav.js` | 3 | G | `meta:dav` 配置；上传/下载载荷经 `Backup`（已 ensureAll） |

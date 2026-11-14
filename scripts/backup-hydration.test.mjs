@@ -239,7 +239,12 @@ async function main() {
     'js/data/local-adapter.js': 7,
     'js/modules/backup-pack.js': 2,
     'js/modules/backup.js': 10,
-    'js/modules/migrate.js': 20,
+    // migrate 拆为 core/legacy/backend/entry（纯移动）：原 20 处按函数归属落到四文件，
+    // 合计不变；口径不变，不是放宽。
+    'js/modules/migrate-backend.js': 6,
+    'js/modules/migrate-core.js': 8,
+    'js/modules/migrate-legacy.js': 5,
+    'js/modules/migrate.js': 1,
     'js/modules/package.js': 1,
     'js/modules/start-prefs.js': 2,
     'js/modules/sync-dav.js': 3,

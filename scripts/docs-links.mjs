@@ -148,7 +148,7 @@ const READINGS = [
   {
     name: '数据 schemaVersion',
     doc: 'docs/DEVELOPMENT.md',
-    code: 'js/modules/migrate.js',
+    code: 'js/modules/migrate-core.js',
     pattern: /const SCHEMA_VERSION = (\d+)/,
     valueOf: (m) => m[1]
   },
@@ -221,11 +221,11 @@ if (process.argv.includes('--selftest')) {
       '## 当前版本读数', '',
       '| 读数 | 当前值 | 事实源 |', '| --- | --- | --- |',
       '| SW 缓存版本 | qforge-v9 | sw.js |',
-      '| 数据 schemaVersion | 6 | migrate.js |',
+      '| 数据 schemaVersion | 6 | migrate-core.js |',
       '| 去重键版本 | 3 | question-id.js |', ''
     ].join('\n'));
     fs.writeFileSync(path.join(tmp, 'sw.js'), "const CACHE = 'qforge-v8';\n");
-    fs.writeFileSync(path.join(tmp, 'js', 'modules', 'migrate.js'), 'const SCHEMA_VERSION = 6;\n');
+    fs.writeFileSync(path.join(tmp, 'js', 'modules', 'migrate-core.js'), 'const SCHEMA_VERSION = 6;\n');
     fs.writeFileSync(path.join(tmp, 'js', 'utils', 'question-id.js'), "const HASH_VERSION = '3';\n");
 
     const r = spawnSync(process.execPath, [path.join(tmp, 'scripts', 'check.mjs')], { encoding: 'utf8' });

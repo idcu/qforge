@@ -439,7 +439,7 @@ switchBank(nextId) = 快照 {bankId, view}
   `question-editor.js:602/713` errBox。
   **B5/B6 补完（2026-11-08）**：B6 `QB.HashRemap.remapList(storageKey, mapping, mergeFn, bankId)`
   签名新增 `bankId`（公共 API 变更），读取改 `getScopedFresh(storageKey, bankId, null)`；调用方
-  `migrate.js` 4 处与 `local-adapter.remapUserData` 2 处全部显式传库；`remapUserData` 先调
+  `migrate*.js` 4 处与 `local-adapter.remapUserData` 2 处全部显式传库；`remapUserData` 先调
   `ReviewStore.remap`，未水合会先在作用域读取处抛错，故 `remapList` 无独立上游落点，
   但作为**独立 API** 直接调用可构造负例（未水合抛 `NotHydratedError{key=wrong:<B>}`）。
   B5 无有效行为负例（语义保持），以静态断言 + `convertMetaLayouts` 行为等价用例取证。

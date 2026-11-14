@@ -81,7 +81,7 @@
 | `backup-pack.js` | 备份可移植层（`QB.BackupPack`）：`buildBackup`（含 `legacy` 降级）、`toLegacyPayload`/`foldLayout`/`readAllData`/`redactSecrets`、`.qfbk` 打包与解析（`buildAssetBundle`/`parseBackupFile`）、图片资产（`globallyReferencedAssetIds`/`restoreAssets`/`validateAssets`）、导入导出体积上限（`assertExportablePayload`/`assertExportableBundle`/`backupLimits`） |
 | `backup.js` | 全量备份/恢复的外壳与流程：载荷经 `QB.DB.backup.export/import`；恢复（`applyData`/`applyBackup`）、迁移前自动备份、下载与选择文件 UI、`confirmRestore` 供文件与 WebDAV 共用；覆盖恢复先快照再写，失败回滚；跨布局 `isServerFormat/isLocalFormat/serverToLocal/localToServer`（复用 `QB.Wire`、`QB.QuestionShards.plan/concatShards`）。载荷构建、`.qfbk` 打包解析与图片资产在 `backup-pack.js`，`QB.Backup` 门面逐键不变 |
 | `sync-dav.js` | `QB.SyncDAV`：WebDAV PUT/GET 固定对象备份（Basic Auth，fetch 可注入）；CORS 受限如实报错 |
-| `migrate.js` | `QB.Migration.run({force?})`：本地 schema 版本化迁移（**当前 schema=7**：v1→v2 contentHash、v2→v3 题目分片、v3→v4 分片一致修复、v4→v5 hash 64 位 + 复习 per-hash + 日志分段、v5→v6 IDB 后端、v6→v7 复习 256 桶 + 逻辑键视图）；分片复用 `QuestionShards`、hash 重映射复用 `HashRemap`、旧布局归一复用 `ReviewStore/RevlogStore`。可靠性：迁移前全量快照（失败 `restoreAll`）、`meta:migrationLock`（30s 陈旧锁可接管）+ 单飞 + 二读确认；中断重入幂等；备份恢复用 `force:true` 自愈。返回 `{migrated, sharded, repaired, layout}` |
+| `migrate.js` + `migrate-core/legacy/backend.js` | `QB.Migration.run({force?})`：本地 schema 版本化迁移（**当前 schema=7**：v1→v2 contentHash、v2→v3 题目分片、v3→v4 分片一致修复、v4→v5 hash 64 位 + 复习 per-hash + 日志分段、v5→v6 IDB 后端、v6→v7 复习 256 桶 + 逻辑键视图）；按职责拆为 4 个文件——`migrate.js` 编排（`run/doRun`）、`migrate-core.js` 版本/锁/快照、`migrate-legacy.js` v1→v5、`migrate-backend.js` v5→v7。分片复用 `QuestionShards`、hash 重映射复用 `HashRemap`、旧布局归一复用 `ReviewStore/RevlogStore`。可靠性：迁移前全量快照（失败 `restoreAll`）、`meta:migrationLock`（30s 陈旧锁可接管）+ 单飞 + 二读确认；中断重入幂等；备份恢复用 `force:true` 自愈。返回 `{migrated, sharded, repaired, layout}` |
 
 ## 5. 表现层（L3）
 

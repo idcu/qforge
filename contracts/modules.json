@@ -1570,13 +1570,27 @@
       "load": "on-demand"
     },
     {
-      "id": "modules.migrate",
-      "file": "js/modules/migrate.js",
+      "id": "modules.migrate-core",
+      "file": "js/modules/migrate-core.js",
       "layer": "modules",
       "tier": "L2",
       "at": 75,
       "requires": [
-        "data.store",
+        "utils.storage",
+        "data.contracts",
+        "data.store"
+      ],
+      "keeps": [
+        "QB.MigrationCore"
+      ]
+    },
+    {
+      "id": "modules.migrate-legacy",
+      "file": "js/modules/migrate-legacy.js",
+      "layer": "modules",
+      "tier": "L2",
+      "at": 76,
+      "requires": [
         "utils.helpers",
         "utils.storage",
         "utils.question-id",
@@ -1584,6 +1598,42 @@
         "data.contracts",
         "data.local-adapter",
         "data.db"
+      ],
+      "keeps": [
+        "QB.MigrationLegacy"
+      ]
+    },
+    {
+      "id": "modules.migrate-backend",
+      "file": "js/modules/migrate-backend.js",
+      "layer": "modules",
+      "tier": "L2",
+      "at": 77,
+      "requires": [
+        "utils.helpers",
+        "utils.storage",
+        "data.contracts",
+        "data.store",
+        "data.local-adapter"
+      ],
+      "keeps": [
+        "QB.MigrationBackend"
+      ]
+    },
+    {
+      "id": "modules.migrate",
+      "file": "js/modules/migrate.js",
+      "layer": "modules",
+      "tier": "L2",
+      "at": 78,
+      "requires": [
+        "utils.storage",
+        "data.contracts",
+        "data.store",
+        "data.local-adapter",
+        "modules.migrate-core",
+        "modules.migrate-legacy",
+        "modules.migrate-backend"
       ],
       "keeps": [
         "QB.Migration"
@@ -1613,7 +1663,7 @@
       "file": "js/modules/blueprint.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 76,
+      "at": 79,
       "requires": [
         "config",
         "utils.shuffle"
@@ -1627,7 +1677,7 @@
       "file": "js/modules/practice-builder.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 77,
+      "at": 80,
       "requires": [
         "config",
         "utils.shuffle",
@@ -1643,7 +1693,7 @@
       "file": "js/modules/quiz-session.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 78,
+      "at": 81,
       "requires": [
         "config",
         "utils.helpers",
@@ -1671,7 +1721,7 @@
       "file": "js/modules/quiz-dialogs.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 79,
+      "at": 82,
       "requires": [
         "config",
         "modules.blueprint",
@@ -1690,7 +1740,7 @@
       "file": "js/modules/boot-diagnostics.js",
       "layer": "modules",
       "tier": "L2",
-      "at": 80,
+      "at": 83,
       "requires": [
         "data.store",
         "utils.storage",
@@ -1710,14 +1760,14 @@
         "QB.Loader",
         "QB.BUNDLES"
       ],
-      "at": 81
+      "at": 84
     },
     {
       "id": "app",
       "file": "js/app.js",
       "layer": "entry",
       "tier": "L3",
-      "at": 82,
+      "at": 85,
       "requires": [
         "data.sample-data",
         "config",
@@ -1771,7 +1821,7 @@
       "file": "js/modules/action-router.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 83,
+      "at": 86,
       "loadAfterEntry": true,
       "requires": [
         "modules.ui-renderer",
@@ -1786,7 +1836,7 @@
       "file": "js/modules/view-router.js",
       "layer": "modules",
       "tier": "L3",
-      "at": 84,
+      "at": 87,
       "loadAfterEntry": true,
       "requires": [
         "modules.ui-renderer",

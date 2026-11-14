@@ -2205,7 +2205,8 @@ section('C 步骤4 B 段补完：convertMetaLayouts 指示键 + HashRemap（B5/B
     'B6 静态：remapList 读取改走 getScopedFresh');
   ok(hrSrc.indexOf('function remapList(storageKey, mapping, mergeFn, bankId)') >= 0,
     'B6 静态：remapList 签名新增 bankId');
-  const miSrc = fs.readFileSync(path.join(ROOT, 'js/modules/migrate.js'), 'utf8');
+  const miSrc = ['migrate-core', 'migrate-legacy', 'migrate-backend', 'migrate']
+    .map((n) => fs.readFileSync(path.join(ROOT, 'js/modules/' + n + '.js'), 'utf8')).join('\n');
   eq((miSrc.match(/QB\.HashRemap\.remapList\([^\n]*bankId\);/g) || []).length, 4,
     'B6 前置：migrate 4 处调用均传 bankId');
   eq((laSrcB.match(/QB\.HashRemap\.remapList\([^\n]*bankId\);/g) || []).length, 2,

@@ -17,18 +17,18 @@
   | A5 | `js/modules/backup.js:533` | `keys()` | `applyData`→`backup.js:525` `ensureAll` | 已有前置，无需补 |
   | A6 | `js/modules/backup.js:534` | `get(k)` | 同上 | 已有前置，无需补 |
   | A7 | `js/modules/backup.js:584` | `get(k)` | 读 `LOCAL_ONLY_META_KEYS`（`metaDav`/`metaTheme`/`metaCurrentBank`/`metaSchema`/`metaStartPrefs`），全为全局键 | **无需全量**：全局键在部分视图中恒可见；随后 `applyData` 仍 ensureAll |
-  | A8 | `js/modules/migrate.js:94` | `keys()` | `run`→`migrate.js:728` `ensureAll`（IDB）；LS 目标本身是全量视图 | 已有前置，无需补 |
-  | A9 | `js/modules/migrate.js:101` | `get(k)` | 同上 | 已有前置，无需补 |
-  | A10 | `js/modules/migrate.js:111` | `keys()` | `restoreAll` 仅在 `idbUsable=false` 时调用（`snap=null` 时提前返回），LS 全量视图 | **等价前置**（LS 视图），无需补 |
-  | A11 | `js/modules/migrate.js:239` | `keys()` | `migrateV2ToV3`，`run` 内 `ensureAll` 之后（或 LS 全量视图） | 已有前置，无需补 |
-  | A12 | `js/modules/migrate.js:244` | `get(k)` | 同上 | 已有前置，无需补 |
-  | A13 | `js/modules/migrate.js:281` | `getFresh(k)` | `upgradeBank`，调用方 `run` 内 `ensureAll`（或 LS 全量视图） | 已有前置，无需补 |
-  | A14 | `js/modules/migrate.js:475` | `keys()` | `migrateV5ToV6` 只在 `fromVersion<6` 运行，此时数据仍在 LS（全量视图） | **等价前置**（LS 视图），无需补 |
-  | A15 | `js/modules/migrate.js:486` | `get(k)` | 同上（源键均在 LS 全量视图） | **等价前置**（LS 视图），无需补 |
-  | A16 | `js/modules/migrate.js:503` | `get(k)` | `migrateV6ToV7` 只在 IDB 目标运行，`run`→`ensureAll` 之后 | 已有前置，无需补 |
-  | A17 | `js/modules/migrate.js:524` | `get(k)` | 同上（校验阶段） | 已有前置，无需补 |
-  | A18 | `js/modules/migrate.js:547` | `keys()` | 同上（枚举阶段，`ensureAll` 已合并全部库记录） | 已有前置，无需补 |
-  | A19 | `js/modules/migrate.js:633` | `get(k)` | 同上（删除阶段 dirty 合并） | 已有前置，无需补 |
+  | A8 | `js/modules/migrate-core.js` `snapshotAll` | `keys()` | `run`（`js/modules/migrate.js`）→ `ensureAll`（IDB）；LS 目标本身是全量视图 | 已有前置，无需补 |
+  | A9 | `js/modules/migrate-core.js` `snapshotAll` | `get(k)` | 同上 | 已有前置，无需补 |
+  | A10 | `js/modules/migrate-core.js` `restoreAll` | `keys()` | `restoreAll` 仅在 `idbUsable=false` 时调用（`snap=null` 时提前返回），LS 全量视图 | **等价前置**（LS 视图），无需补 |
+  | A11 | `js/modules/migrate-legacy.js` `migrateV2ToV3` | `keys()` | `run` 内 `ensureAll` 之后（或 LS 全量视图） | 已有前置，无需补 |
+  | A12 | `js/modules/migrate-legacy.js` `migrateV2ToV3` | `get(k)` | 同上 | 已有前置，无需补 |
+  | A13 | `js/modules/migrate-legacy.js` `upgradeBank` | `getFresh(k)` | 调用方 `run` 内 `ensureAll`（或 LS 全量视图） | 已有前置，无需补 |
+  | A14 | `js/modules/migrate-backend.js` `migrateV5ToV6` | `keys()` | 只在 `fromVersion<6` 运行，此时数据仍在 LS（全量视图） | **等价前置**（LS 视图），无需补 |
+  | A15 | `js/modules/migrate-backend.js` `migrateV5ToV6` | `get(k)` | 同上（源键均在 LS 全量视图） | **等价前置**（LS 视图），无需补 |
+  | A16 | `js/modules/migrate-backend.js` `migrateV6ToV7` | `get(k)` | 只在 IDB 目标运行，`run`→`ensureAll` 之后 | 已有前置，无需补 |
+  | A17 | `js/modules/migrate-backend.js` `migrateV6ToV7` | `get(k)` | 同上（校验阶段） | 已有前置，无需补 |
+  | A18 | `js/modules/migrate-backend.js` `migrateV6ToV7` | `keys()` | 同上（枚举阶段，`ensureAll` 已合并全部库记录） | 已有前置，无需补 |
+  | A19 | `js/modules/migrate-backend.js` `migrateV6ToV7` | `get(k)` | 同上（删除阶段 dirty 合并） | 已有前置，无需补 |
   | A20 | `js/data/local-adapter.js:1073` | `keys()` | `bankIds` 的三个调用方：`migrateV4ToV5`/`ensureLayout` 在 `ensureAll` 后；启动稳态 `convertMetaLayouts` 用全局 `banks` 清单补全库 id 并显式跳过未水合库 | **等价前置**（全局 `banks` 补全），无需补；未水合库的 v3 清单判定属 B 段（`local-adapter.js:1185`，已知缺口，步骤 3/4 处理） |
 
 - **红/绿证据**：备份 7 处（A1–A7 中的 6 处状态读取）由 `QFORGE_HYDRATION_RED=1`（`ensureAll` 置 no-op）
@@ -326,7 +326,7 @@
   不成为绕过作用域的通用后门；读取主体复用 `getFresh` 抽出的 `_freshValue`（避免复制读取逻辑）。
 - **B6 `QB.HashRemap.remapList(storageKey, mapping, mergeFn, bankId)`**：**公共 API 签名变更**
   （第 4 参数必传），读取改 `getScopedFresh(storageKey, bankId, null)`。调用方
-  `migrate.js` 4 处（HMR/迁移两条链）与 `local-adapter.remapUserData` 2 处全部显式传库；
+  `migrate*.js` 4 处（HMR/迁移两条链）与 `local-adapter.remapUserData` 2 处全部显式传库；
   未水合直接抛 `NotHydratedError`。影响范围：仓库内 6 处调用全部已同步；外部若直接调用
   `QB.HashRemap.remapList` 需补 `bankId`，缺失会因键归属不一致抛 `TypeError`（fail-loud，不静默）。
 - **负例**：B6 作为独立 API 可直接构造（未水合抛 `NotHydratedError{key=user:wrong:<B>}`；

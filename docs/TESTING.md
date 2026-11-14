@@ -48,7 +48,7 @@
 | `js/utils/question-id.js` | smoke + migrate + shard | contentHash 牵动迁移与分片键 |
 | 调度模块（fsrs / srs / sched） | fsrs + fsrs-opt + srs + sched | 算法与参数唯一解析点 |
 | `js/data/storage.js` / `local-adapter.js` | storage + idb + backup-hydration | 键布局、水合、跨标签合并 |
-| `js/modules/backup.js` / `migrate.js` | backup + migrate + backup-hydration | 备份、恢复、迁移同一条写路径 |
+| `js/modules/backup.js` / `migrate*.js` | backup + migrate + backup-hydration | 备份、恢复、迁移同一条写路径 |
 | `js/modules/ui-renderer*.js` | ui-renderer + a11y + dom-patch | 渲染快照与无障碍断言直接覆盖 |
 | `loader.js` / `contracts/modules.json` / `index.html` | check-modules --selftest + app-boot | 装配顺序与按需包 |
 | `sw.js` / 首屏资源 | sw-runtime + pwa + 递增 CACHE | 预缓存清单与缓存版本 |

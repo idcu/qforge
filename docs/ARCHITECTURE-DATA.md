@@ -8,9 +8,9 @@
 
 | 项 | 值 | 唯一声明处 |
 | --- | --- | --- |
-| 本地 schemaVersion | `7` | `js/modules/migrate.js` |
+| 本地 schemaVersion | `7` | `js/modules/migrate-core.js` |
 | contentHash 版本 | `3:` + 16 位 hex | `js/utils/question-id.js` |
-| SW 缓存 | `qforge-v81`，前缀 `qforge-` | `sw.js` |
+| SW 缓存 | `qforge-v82`，前缀 `qforge-` | `sw.js` |
 | IDB 业务库 | `qforge-kv` / store `kv`（DB_VERSION=1，keyPath `key`） | `js/data/store.js` |
 | IDB 资产库 | `qforge` / store `assets` | `js/config.js` |
 | LS 物理前缀 | `qb:` | `js/config.js` 的 `STORAGE.PREFIX` |
@@ -134,7 +134,7 @@ QB.LocalAdapter | QB.ApiAdapter   实现（DATA_BACKEND='local' 默认 / 'api'�
 ## 5. schema 与迁移
 
 - 版本链：v1 单键 → v3 题目分片 → v5 复习整表 → v6 IDB 后端 + revlog 分段 → **v7 复习 256 桶 + 逻辑键视图**。
-- 迁移入口 `js/modules/migrate.js`；**只处理本地后端**（api 模式跳过）。步骤与回滚路径见 [STORAGE.md](STORAGE.md)、[DATABASE.md](DATABASE.md)。
+- 迁移入口 `js/modules/migrate.js`（编排与 `run/doRun`）；版本/锁/快照在 `migrate-core.js`，v1→v5 在 `migrate-legacy.js`，v5→v7 在 `migrate-backend.js`；**只处理本地后端**（api 模式跳过）。步骤与回滚路径见 [STORAGE.md](STORAGE.md)、[DATABASE.md](DATABASE.md)。
 - 迁移必须在 `meta:migrationLock` 互斥内执行；全量迁移前 `Storage.ensureAll()`，否则 v6→v7 会只迁当前库（静默数据缺口）。
 - 迁移失败：保持兼容模式、**不推进** `meta:schemaVersion`，启动可见提示，不阻断 boot；残留 `meta:migrationPending` 由下次启动自愈。
 - 迁移映射写 `meta:hashMap:<bankId>`；错题/收藏/复习键必须同步重映射，且只重映射一次（幂等）。
@@ -164,7 +164,7 @@ QB.LocalAdapter | QB.ApiAdapter   实现（DATA_BACKEND='local' 默认 / 'api'�
 
 ## 8. Service Worker 与缓存
 
-- `sw.js` 顶部 `CACHE='qforge-v81'`，`CACHE_PREFIX='qforge-'`；**任何 `js/**` / `index.html` 改动都要 CACHE +1**。
+- `sw.js` 顶部 `CACHE='qforge-v82'`，`CACHE_PREFIX='qforge-'`；**任何 `js/**` / `index.html` 改动都要 CACHE +1**。
 - install：预缓存 `CORE`（shell、图标、worker 链、27 个按需文件）；首屏 80 个 js **不在 CORE**，靠运行时缓存（已知缺口，见 [ARCHITECTURE §8](ARCHITECTURE.md) 问题 4）。
 - activate：只删除 `qforge-` 命名空间的旧缓存，然后 `clients.claim()`；不得删除同源其他应用的 CacheStorage。
 - fetch：同源 GET 走 stale-while-revalidate；导航请求回退 `index.html`；跨源/非 GET 直连网络。
