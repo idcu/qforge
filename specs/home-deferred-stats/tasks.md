@@ -57,5 +57,10 @@
 
 ## T7 提交与推送
 
-- [ ] 工作区干净、`git merge-base --is-ancestor origin/main HEAD`、不 force、不动 tag、不改版本号
-- [ ] 提交并推送 main，报提交 hash、实测数字、远端核验结果
+- [x] 工作区干净、`git merge-base --is-ancestor origin/main HEAD`、不 force、不动 tag、不改版本号
+- [x] 提交并推送 main，报提交 hash、实测数字、远端核验结果
+
+完成记录：实施提交 `dd31237`（16 文件，含本规格与任务清单），`npm run verify` 退出码 0
+（41 运行项 / 6521 断言 / 64 项性能门禁 / discipline L4）。首次 bench 阶段遇 V8
+`Zone Allocation failed`（非断言失败，未改阈值），重跑通过。推送 `fb6451d..dd31237`
+到 Gitee，GitHub 镜像在约 45 秒后同步到同一 sha。
