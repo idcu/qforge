@@ -2,14 +2,14 @@
   "generatedAt": "2026-11-14T21:51:35.704Z",
   "runItems": 41,
   "suiteFiles": 40,
-  "totalAssertions": 6494,
+  "totalAssertions": 6521,
   "gateCount": 64,
   "counts": {
     "smoke-test.mjs": 751,
     "a11y.test.mjs": 103,
     "annotation.test.mjs": 90,
     "api-backend.test.mjs": 341,
-    "app-boot.test.mjs": 149,
+    "app-boot.test.mjs": 166,
     "assets.test.mjs": 182,
     "backup-hydration.test.mjs": 60,
     "backup-roundtrip.test.mjs": 39,
@@ -44,7 +44,7 @@
     "sw-runtime.test.mjs": 50,
     "sync-dav.test.mjs": 85,
     "ui-port.test.mjs": 25,
-    "ui-renderer.test.mjs": 220,
+    "ui-renderer.test.mjs": 230,
     "xml-lite.test.mjs": 39
   },
   "firstScreen": {

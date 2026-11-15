@@ -713,6 +713,26 @@ section('C010 一键组卷入口（首页 + 错题页共用同一 action）');
   ok(toolbar && toolbar.html.indexOf('data-action="start-smart-practice"') >= 0, '错题页工具栏含同一 action');
 }
 
+section('首页延后统计：首帧显式占位（方案 A）');
+{
+  const pending = UI.renderHome({ name: '占位库' }, { total: 40, byType: {}, dueReview: 0, statsReady: false });
+  ok(pending.indexOf('题型统计中…') >= 0, '未就绪：题型分布显示「题型统计中…」而非 0');
+  ok(pending.indexOf('统计中…') >= 0, '未就绪：今日到期显示「统计中…」');
+  ok(pending.indexOf('0 题到期') < 0, '未就绪：不渲染「0 题到期」');
+  ok(/class="menu-item hot"[^>]*data-action="start-review"/.test(pending), '未就绪：今日复习仍标 hot');
+  ok(pending.indexOf('题目总数：<b>40</b>') >= 0, '未就绪：总数仍是 O(1) 精确值');
+  const ready = UI.renderHome({ name: '就绪库' }, { total: 40, byType: { single: 40 }, dueReview: 3, statsReady: true });
+  ok(ready.indexOf('题型统计中…') < 0 && ready.indexOf('统计中…') < 0, '已就绪：不出现占位文案');
+  ok(/class="menu-item hot"[^>]*data-action="start-review"/.test(ready), '已就绪：有到期 → hot');
+  const noDue = UI.renderHome({ name: '无到期' },
+    { total: 5, byType: { single: 5 }, dueReview: 0, statsReady: true, queue: { total: 0 } });
+  ok(noDue.indexOf('class="menu-item hot"') < 0, '已就绪且队列为 0 → 不标 hot');
+  const failed = UI.renderHome({ name: '失败库' },
+    { total: 40, byType: {}, dueReview: 0, statsReady: false, statsError: true });
+  ok(failed.indexOf('统计失败') >= 0 && failed.indexOf('统计中…') < 0, '统计失败：文案不再谎称「统计中」');
+  ok(/class="menu-item hot"[^>]*data-action="start-review"/.test(failed), '统计失败：今日复习仍标 hot');
+}
+
 section('C011 分享入口与 manifest.packageId 展示');
 {
   const counts = { total: 1, byType: { single: 1 }, dueReview: 0 };

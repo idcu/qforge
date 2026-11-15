@@ -16,6 +16,7 @@
   let notifyBackgroundError = null;
   let invalidateReviewLog = null;
   let reviewLogFor = null;
+  let ensureBankQuestions = null;
 
   function attach(ctx) {
     State = ctx.State;
@@ -25,6 +26,7 @@
     notifyBackgroundError = ctx.notifyBackgroundError;
     invalidateReviewLog = ctx.invalidateReviewLog;
     reviewLogFor = ctx.reviewLogFor;
+    ensureBankQuestions = ctx.ensureBankQuestions;
   }
 
   function beginQuiz(questions, mode, title, opts) {
@@ -317,10 +319,15 @@
 
   /** 今日复习：按题库限额排 learning → 到期 → 新题（不再一次性灌全库） */
   async function startReview() {
-    const reviewMap = await QB.SRSStore.readMap(State.bankId);
-    const log = await reviewLogFor(State.bankId);
-    const daily = QB.ReviewQueue.dailyFromLog(log, State.bankId, Date.now());
-    const queue = QB.ReviewQueue.build(State.allQuestions, reviewMap, {
+    if (!State.bankId) { UI.toast('请先打开一个题库', 'err'); return; }
+    const bankId = State.bankId;
+    // 首页首帧不再整库装载，这里必须等待正文（失败上抛，绝不拿空题池排复习）
+    const items = await ensureBankQuestions();
+    if (State.bankId !== bankId) return; // 等待期间已切库：丢弃本次
+    const reviewMap = await QB.SRSStore.readMap(bankId);
+    const log = await reviewLogFor(bankId);
+    const daily = QB.ReviewQueue.dailyFromLog(log, bankId, Date.now());
+    const queue = QB.ReviewQueue.build(items, reviewMap, {
       settings: QB.SchedSettings.ofBank(State.bank),
       now: Date.now(),
       daily: daily

@@ -114,13 +114,18 @@
   function renderHome(bank, counts) {
     if (!bank) return renderBanks([], null);
     const total = counts.total || 0;
+    // 延后统计（方案 A）：首帧题型分布/今日到期尚未算出时给明确占位，绝不渲染成 0
+    const statsReady = counts.statsReady !== false;
+    const statsLabel = counts.statsError ? '统计失败，点「今日复习」重试' : '统计中…';
     const proto = global.location && global.location.protocol;
     const isHttp = proto === 'http:' || proto === 'https:';
     const src = QB.Source.normalize(bank.source);
+    const typeLine = statsReady
+      ? QB.CONFIG.TYPES.map((t) => QB.typeLabel(t) + ' ' + (counts.byType[t] || 0)).join('　')
+      : (counts.statsError ? '题型统计失败' : '题型统计中…');
     let html = '<div class="card"><h3 class="card-title">' + esc(bank.name) + '</h3>' +
       '<div class="bank-meta">' + (bank.description ? esc(bank.description) + '<br>' : '') +
-      '题目总数：<b>' + total + '</b>　' +
-      QB.CONFIG.TYPES.map((t) => QB.typeLabel(t) + ' ' + (counts.byType[t] || 0)).join('　') +
+      '题目总数：<b>' + total + '</b>　' + typeLine +
       '</div><div style="margin-top:8px">' + sourceChip(bank) + '</div></div>';
 
     if (!total) {
@@ -133,11 +138,14 @@
 
     const due = counts.dueReview || 0;
     const queue = counts.queue;
-    const reviewSub = queue
-      ? (queue.total + ' 题（新 ' + queue.newPicked + ' / 到期 ' + queue.duePicked + (queue.learning ? ' / 学习中 ' + queue.learning : '') + '）')
-      : (due + ' 题到期（间隔重复）');
+    const reviewSub = !statsReady
+      ? statsLabel
+      : (queue
+        ? (queue.total + ' 题（新 ' + queue.newPicked + ' / 到期 ' + queue.duePicked + (queue.learning ? ' / 学习中 ' + queue.learning : '') + '）')
+        : (due + ' 题到期（间隔重复）'));
     const menu = [
-      { action: 'start-review', ico: '🧠', label: '今日复习', sub: reviewSub, hot: (queue ? queue.total : due) > 0 },
+      // 统计未就绪时 due 是占位值，不得据此把「今日复习」判成不紧急
+      { action: 'start-review', ico: '🧠', label: '今日复习', sub: reviewSub, hot: !statsReady || (queue ? queue.total : due) > 0 },
       { action: 'start-practice', ico: '✍️', label: '练习模式', sub: '边答边看解析' },
       { action: 'start-exam', ico: '⏱️', label: '考试模式', sub: '限时 / 交卷' },
       { action: 'start-mixed', ico: '🎲', label: '组卷', sub: '题型/分类/难度' },

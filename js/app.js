@@ -23,7 +23,13 @@
     bankId: null,
     bank: null,
     allQuestions: [],
-    counts: { total: 0, byType: {} },
+    // 题目正文归属（延后装载）：allQuestionsBankId 记录当前正文属于哪个库，
+    // allQuestionsLoaded 表示已完整装载。切库立即清空两者，杜绝跨库串题。
+    allQuestionsBankId: null,
+    allQuestionsLoaded: false,
+    // statsStale：复习维度（到期/队列）失效标记，由 invalidateReviewLog 置位
+    statsStale: true,
+    counts: { total: 0, byType: {}, dueReview: 0, statsReady: true },
     view: 'home',          // home | banks | quiz | result | wrong | favorites | history | stats | search
     engine: null,
     timer: null,
@@ -63,6 +69,16 @@
   // 渲染代次（R-01）：每次 render 取号；await 结束后若已被更新的 render 取代，丢弃本次结果，
   // 避免「慢的旧渲染」覆盖用户已经切到的新视图（典型：列表/统计页在慢读盘期间切换标签）。
   let renderSeq = 0;
+  // 首页延后统计代次：每次发起新任务取号；回写 State 前比对，过期结果直接丢弃。
+  let statsSeq = 0;
+  // 题目正文单飞：{ bankId, promise }。同库并发调用共享同一份 Promise（只做一次 I/O）。
+  let questionsLoad = null;
+  // 首页延后统计单飞：{ bankId, promise }（同库复用，避免每次 render 叠加任务）
+  let homeStatsTask = null;
+  // counts 归属的库：仅当库真的换了才重置正文/统计，避免「失败 → 重置 → 再调度」自旋
+  let countsBankId = null;
+  // 分块补读粒度：5000 题 ≈ 25 个分片（SHARD_SIZE=200），50k 档切 10 段。
+  const QUESTIONS_CHUNK = 5000;
 
   /* ---------------- 主题 ---------------- */
 
@@ -141,13 +157,128 @@
 
   /**
    * 当前视图是否需要整库题目（阶段 A·UI 级按需加载）：
-   *   home / search / stats 需要（首页统计、搜索过滤、到期预报）；
-   *   quiz / result / wrong / favorites / history 不需要——答题用 engine、列表读各自存储，
-   *   从而避免每次作答交互都解析整库。
+   *   search / stats 需要（搜索过滤、到期预测必须在整库上做）；
+   *   其余视图都不需要——首页只用 O(1) 计数 + 延后统计（见 scheduleHomeCounts），
+   *   答题用 engine、列表读各自存储，从而避免每次交互都解析整库。
    */
   function needsFullQuestions() {
-    if (State.view === 'home' || State.view === 'search' || State.view === 'stats') return true;
-    return State.view === 'quiz' && !State.engine; // 无引擎时 quiz 视图回退渲染首页
+    return State.view === 'search' || State.view === 'stats';
+  }
+
+  /** 当前视图是否会渲染首页（quiz 无引擎时回退首页，同样消费 counts） */
+  function rendersHome() {
+    return State.view === 'home' || (State.view === 'quiz' && !State.engine);
+  }
+
+  /** 题目写修订号（同步数值；非数值适配器返回 null = 不做精确失效判定） */
+  function questionRev() {
+    const raw = QB.DB && QB.DB.questions && QB.DB.questions.revision ? QB.DB.questions.revision() : null;
+    return typeof raw === 'number' ? raw : null;
+  }
+
+  /** 让出主线程一帧：分块补读之间给渲染/输入插队的机会 */
+  function yieldToMain() {
+    return new Promise((resolve) => {
+      if (typeof setTimeout === 'function') setTimeout(resolve, 0);
+      else resolve();
+    });
+  }
+
+  /**
+   * 装载某库题目正文（单飞 + 分块）：同一库并发调用共享同一个 Promise，只做一份 I/O。
+   * 已水合的库跳过补读，直接走 DB.loadQuestions 的 (bankId, rev) 缓存。
+   * 失败一律抛错；「清单有题但读回空」视为装载不完整，绝不返回空题池。
+   * @param {string} bankId
+   * @returns {Promise<Array>}
+   */
+  function loadBankQuestions(bankId) {
+    if (questionsLoad && questionsLoad.bankId === bankId) return questionsLoad.promise;
+    const rec = { bankId: bankId, promise: null };
+    rec.promise = (async () => {
+      const total = await QB.DB.questions.count(bankId);
+      const hydrated = typeof QB.Storage.isQuestionsHydrated === 'function' &&
+        QB.Storage.isQuestionsHydrated(bankId);
+      if (!hydrated) {
+        for (let start = 0; start < total; start += QUESTIONS_CHUNK) {
+          await QB.Storage.ensureQuestions(bankId, start, Math.min(total, start + QUESTIONS_CHUNK));
+          if (start + QUESTIONS_CHUNK < total) await yieldToMain(); // 最后一块不必再让出
+        }
+      }
+      const { items } = await QB.DB.loadQuestions(bankId);
+      if (!items || (!items.length && total > 0)) {
+        throw new Error('题目装载不完整（清单 ' + total + ' 题，已载入 ' +
+          ((items && items.length) || 0) + ' 题）');
+      }
+      return items;
+    })();
+    questionsLoad = rec;
+    const clear = () => { if (questionsLoad === rec) questionsLoad = null; };
+    rec.promise.then(clear, clear);
+    return rec.promise;
+  }
+
+  /**
+   * 等待当前库题目正文（五处消费者统一入口）：失败上抛，绝不返回空题池。
+   * 仅在库未变时回写 State，避免把旧库的题画到已切走的新库上。
+   */
+  async function ensureBankQuestions() {
+    const bankId = State.bankId;
+    if (!bankId) throw new Error('请先选择题库');
+    const items = await loadBankQuestions(bankId);
+    if (State.bankId === bankId) {
+      State.allQuestions = items;
+      State.allQuestionsBankId = bankId;
+      State.allQuestionsLoaded = true;
+    }
+    return items;
+  }
+
+  /**
+   * 首页延后统计（方案 A）：首帧只给 O(1) 总数占位，题型分布/今日到期在这里分块补算。
+   * 同库已有在跑任务时直接复用（幂等）；回写受「代次 + 库 + 视图」三重守卫。
+   */
+  function scheduleHomeCounts(bankId) {
+    if (homeStatsTask && homeStatsTask.bankId === bankId) return homeStatsTask.promise;
+    const seq = ++statsSeq;
+    const rev = questionRev(); // 以装载前的写修订号为口径：期间有新写 → 下次渲染自然重算
+    const rec = { bankId: bankId, promise: null };
+    homeStatsTask = rec;
+    rec.promise = (async () => {
+      const items = await ensureBankQuestions();
+      if (seq !== statsSeq || State.bankId !== bankId) return; // 已被更新任务取代 / 已切库
+      const byType = {};
+      QB.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
+      items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
+      // 今日队列（按题库限额 + 今日已用额度）：到期数走队列口径，避免首页显示「3000 题到期」的洪水
+      const reviewMap = await QB.SRSStore.readMap(bankId);
+      const log = await reviewLogFor(bankId);
+      const daily = QB.ReviewQueue.dailyFromLog(log, bankId, Date.now());
+      const queue = QB.ReviewQueue.build(items, reviewMap, {
+        settings: QB.SchedSettings.ofBank(State.bank),
+        now: Date.now(),
+        daily: daily
+      });
+      if (seq !== statsSeq || State.bankId !== bankId) return; // await 期间又过期了
+      State.statsStale = false;
+      State.counts = {
+        total: items.length, byType: byType,
+        dueReview: queue.counts.total,
+        queue: queue.counts,
+        statsReady: true,
+        qRev: rev
+      };
+      if (rendersHome()) render();
+    })();
+    const onFail = (e) => {
+      if (homeStatsTask === rec) homeStatsTask = null;
+      if (seq !== statsSeq || State.bankId !== bankId) return;
+      notifyBackgroundError('首页统计失败', e);
+      // 占位改口径：不再谎称「统计中」，但绝不写入 0
+      State.counts = Object.assign({}, State.counts, { statsReady: false, statsError: true });
+      if (rendersHome()) render();
+    };
+    rec.promise.then(() => { if (homeStatsTask === rec) homeStatsTask = null; }, onFail);
+    return rec.promise;
   }
 
   async function loadBankData(opts) {
@@ -162,11 +293,25 @@
     }
     if (!State.bankId) {
       State.bank = null;
+      countsBankId = null;
       State.allQuestions = [];
+      State.allQuestionsBankId = null;
+      State.allQuestionsLoaded = false;
+      State.counts = { total: 0, byType: {}, dueReview: 0, statsReady: true };
       State.favoriteKeys = new Set();
       State.favoriteBankId = null;
-      State.counts = { total: 0, byType: {}, dueReview: 0 };
       return;
+    }
+    // 库已换：立即丢弃上一个库的正文与统计，绝不允许带过来
+    if (countsBankId !== State.bankId) {
+      countsBankId = State.bankId;
+      statsSeq++;      // 作废上一个库在跑的延后统计
+      homeStatsTask = null;
+      State.allQuestions = [];
+      State.allQuestionsBankId = null;
+      State.allQuestionsLoaded = false;
+      State.counts = { total: 0, byType: {}, dueReview: 0, statsReady: false };
+      State.statsStale = true;
     }
     // 收藏键按库缓存：作答渲染走内存集合（api 模式下省掉每次作答的 GET favorites）
     if (State.favoriteBankId !== State.bankId) {
@@ -177,18 +322,38 @@
     // 总数直读分片清单（O(1)），供状态栏显示，与是否装载整库无关
     const total = await QB.DB.questions.count(State.bankId);
     if (!needsFullQuestions()) {
-      State.counts = {
-        total: total,
-        byType: State.counts.byType || {},
-        dueReview: State.counts.dueReview || 0
-      };
+      // 首页（含 quiz 无引擎回退）：首帧只给 O(1) 总数，题型/到期先占位，正文与统计延后补算
+      if (rendersHome()) {
+        const rev = questionRev();
+        // 延后统计失败后不再自动重试（否则失败 → 渲染 → 再调度会自旋）；
+        // 仅保留占位文案与错误态，等 invalidateReviewLog / 切库 / 用户手动触发再试。
+        if (State.counts.statsError === true) {
+          State.counts = Object.assign({}, State.counts, { total: total });
+          return;
+        }
+        const fresh = State.counts.statsReady === true && !State.statsStale &&
+          State.counts.qRev === rev && State.allQuestionsLoaded &&
+          State.allQuestionsBankId === State.bankId;
+        if (fresh) {
+          State.counts = Object.assign({}, State.counts, { total: total });
+        } else {
+          State.counts = { total: total, byType: {}, dueReview: 0, statsReady: false };
+          scheduleHomeCounts(State.bankId);
+        }
+        return;
+      }
+      // 其它视图（答题/列表/结果）不消费统计，只刷新状态栏口径
+      State.counts = Object.assign({}, State.counts, { total: total });
       return;
     }
+    const rev = questionRev();
     const { items } = await QB.DB.loadQuestions(State.bankId); // 缓存命中则不重复解析整库
     const byType = {};
     QB.CONFIG.TYPES.forEach((t) => { byType[t] = 0; });
     items.forEach((q) => { if (byType[q.type] !== undefined) byType[q.type]++; });
     State.allQuestions = items;
+    State.allQuestionsBankId = State.bankId;
+    State.allQuestionsLoaded = true;
     // 今日队列（按题库限额 + 今日已用额度）：到期数走队列口径，避免首页显示「3000 题到期」的洪水
     const reviewMap = await QB.SRSStore.readMap(State.bankId);
     const log = await reviewLogFor(State.bankId);
@@ -198,10 +363,13 @@
       now: Date.now(),
       daily: daily
     });
+    State.statsStale = false;
     State.counts = {
       total: items.length, byType: byType,
       dueReview: queue.counts.total,
-      queue: queue.counts
+      queue: queue.counts,
+      statsReady: true,
+      qRev: rev
     };
   }
 
@@ -219,6 +387,8 @@
     State.reviewLogBankId = null;
     State.fsrsDiag = null; // 评分日志变化后统计页诊断缓存一并失效
     State.forecastCache = null; // P-6：统计页预测缓存同步失效
+    State.statsStale = true; // 首页延后统计（到期/队列）同步失效，下次渲染重算
+    if (State.counts) State.counts.statsError = false; // 失败态允许重试（评分/交卷/导入后重算）
   }
 
   /** 题库列表/当前库元数据变更后使缓存失效（本地可精确失效，api 模式避免多余 GET） */
@@ -237,6 +407,16 @@
   async function switchBank(nextId) {
     const prev = { bankId: State.bankId, view: State.view };
     try {
+      // 切库第一件事：丢弃上一个库的题目正文与统计占位（任何 await 之前），
+      // 避免切库过程中的任何渲染把旧库的题带进新库视图。
+      State.allQuestions = [];
+      State.allQuestionsBankId = null;
+      State.allQuestionsLoaded = false;
+      State.counts = { total: 0, byType: {}, dueReview: 0, statsReady: false };
+      State.statsStale = true;
+      countsBankId = null; // 归属清空：下一次 loadBankData 按新库重新装载
+      statsSeq++;          // 作废在跑的延后统计（其回写会被代次守卫丢弃）
+      homeStatsTask = null;
       if (nextId) await QB.Storage.ensureBank(nextId); // 只水合目标库（分阶段水合主路径）
       await QB.DB.setCurrentBankId(nextId);
       State.bankId = nextId || null;
@@ -619,11 +799,12 @@
       QB.QuizSession.attach({
         State: State, UI: UI, render: render, updateStatus: updateStatus,
         notifyBackgroundError: notifyBackgroundError, invalidateReviewLog: invalidateReviewLog,
-        reviewLogFor: reviewLogFor
+        reviewLogFor: reviewLogFor, ensureBankQuestions: ensureBankQuestions
       });
       QB.QuizDialogs.attach({
         State: State, UI: UI, esc: esc, render: render,
-        invalidateReviewLog: invalidateReviewLog, beginQuiz: QB.QuizSession.beginQuiz
+        invalidateReviewLog: invalidateReviewLog, beginQuiz: QB.QuizSession.beginQuiz,
+        ensureBankQuestions: ensureBankQuestions
       });
       QB.BootDiagnostics.attach({ State: State, UI: UI, esc: esc, view: view, bindView: bindView });
       await startApp();
@@ -858,6 +1039,8 @@
 
   QB.App = {
     State: State, render: render,
-    beginQuiz: QB.QuizSession.beginQuiz, finishQuiz: QB.QuizSession.finishQuiz
+    beginQuiz: QB.QuizSession.beginQuiz, finishQuiz: QB.QuizSession.finishQuiz,
+    // 题目正文统一等待入口（五处消费者用）：单飞、失败上抛、绝不返回空题池
+    ensureBankQuestions: ensureBankQuestions
   };
 })(window);

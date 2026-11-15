@@ -405,25 +405,43 @@ section('作用域读取抛错：render 顶层 catch 的可见反馈（124/129/8
     QB.QuestionShards.metaOf = () => { throw notHydrated('分片清单'); };
   }, () => { QB.QuestionShards.metaOf = origMeta; });
 
+  /**
+   * 首帧延后统计（方案 A）后，分片读取/复习整表都在延后任务里发生：
+   * 失败走 notifyBackgroundError（「首页统计失败」）+ statsError 占位，同样不白屏、无 unhandled rejection。
+   */
+  async function scenarioDeferred(label, patch, restore) {
+    const before = rejections.length;
+    patch();
+    QB.App.State.banksLoaded = false;
+    QB.App.State.statsStale = true;
+    QB.App.State.counts = { total: 0, byType: {}, dueReview: 0, statsReady: false };
+    QB.App.render();
+    await tick(12);
+    restore();
+    eq(rejections.length, before, label + '：延后任务失败无 unhandled rejection');
+    ok(toastsText(env).indexOf('首页统计失败：未水合：' + label) >= 0,
+      label + '：toast 可见（实测：' + (toastsText(env) || '无提示') + '）');
+    eq(QB.App.State.counts.statsError, true, label + '：占位改「统计失败」而非谎称统计中');
+    ok(viewHtml().length > 0, label + '：无白屏（保留上次已渲染内容 ' + viewHtml().length + ' 字符）');
+    rejections.length = before;
+  }
+
   const origShard = QB.QuestionShards.shardOf;
   QB.App.State.favoriteBankId = bank.id;
-  QB.App.State.banksLoaded = false;
-  await scenario('分片读取', () => {
+  await scenarioDeferred('分片读取', () => {
     QB.QuestionShards.shardOf = () => { throw notHydrated('分片读取'); };
   }, () => { QB.QuestionShards.shardOf = origShard; });
 
   // C 步骤4 第三批：984 / 1000 在 render 内的抛错同样必须被顶层 catch 接住
   const origStatesScoped = QB.Storage.reviewStatesScoped;
   QB.App.State.favoriteBankId = bank.id; // 跳过收藏读取，让 readMap → reviewStatesScoped 成为首个抛错点
-  QB.App.State.banksLoaded = false;
-  await scenario('复习键枚举', () => {
+  await scenarioDeferred('复习键枚举', () => {
     QB.Storage.reviewStatesScoped = () => { throw notHydrated('复习键枚举'); };
   }, () => { QB.Storage.reviewStatesScoped = origStatesScoped; });
 
   const origReadMap = QB.ReviewStore.readMap;
   QB.App.State.favoriteBankId = bank.id;
-  QB.App.State.banksLoaded = false;
-  await scenario('复习整表', () => {
+  await scenarioDeferred('复习整表', () => {
     QB.ReviewStore.readMap = () => { throw notHydrated('复习整表'); };
   }, () => { QB.ReviewStore.readMap = origReadMap; });
 
@@ -469,6 +487,102 @@ section('切库事务化：失败回滚原库，不留下半更新状态');
   await tick(20);
   eq(QB.App.State.bankId, b.id, '正常切库生效');
   ok(statusText().indexOf('库B') >= 0, '状态栏跟随新库：' + statusText());
+  env.restore();
+}
+
+/* ============================================================
+ * 1.7b 首页首帧延后统计（方案 A）：占位 / 单飞 / 失败抛错 / 切库清空
+ * ============================================================ */
+section('首页首帧延后统计：占位、单飞、失败抛错、切库清空');
+{
+  const env = await makeEnv({});
+  const QB = env.QB;
+  const bank = await QB.DB.banks.create({ name: '统计库', description: '' });
+  await QB.DB.questions.insertMany(bank.id, [
+    { type: 'single', question: '题1', options: [{ letter: 'A', text: '甲' }], answer: 'A' },
+    { type: 'judge', question: '题2', answer: '对' }
+  ], { dedupe: false, mode: 'overwrite' });
+  await QB.DB.setCurrentBankId(bank.id);
+  QB.App.State.bankId = bank.id;
+  QB.App.State.banksLoaded = false;
+  QB.App.State.view = 'home';
+  QB.App.State.allQuestions = [];
+  QB.App.State.allQuestionsBankId = null;
+  QB.App.State.allQuestionsLoaded = false;
+  QB.App.State.statsStale = true;
+
+  // 记录每次首页渲染收到的 counts（用来证明首帧确实是占位）
+  const seen = [];
+  const origHome = QB.UIRenderer.renderHome;
+  QB.UIRenderer.renderHome = (b, counts) => {
+    seen.push(counts && counts.statsReady !== false);
+    return origHome(b, counts);
+  };
+  await QB.App.render();
+  eq(seen[0], false, '首帧首页为占位（statsReady=false）');
+  ok(viewHtml(env).indexOf('题型统计中…') >= 0, '首帧 DOM 显示「题型统计中…」而非 0');
+  ok(viewHtml(env).indexOf('统计中…') >= 0, '首帧 DOM 显示「统计中…」而非「0 题到期」');
+  ok(/class="menu-item hot"[^>]*data-action="start-review"/.test(viewHtml(env)),
+    '首帧「今日复习」仍标 hot（dueReview=0 不得判成不紧急）');
+
+  // 延后统计完成：题型分布合计 == 总数，今日到期为数值
+  await waitUntil(() => QB.App.State.counts.statsReady === true, 2000);
+  const c = QB.App.State.counts;
+  const sum = QB.CONFIG.TYPES.reduce((n, t) => n + (c.byType[t] || 0), 0);
+  eq(sum, c.total, '延后统计：题型分布合计 == 总数（实测 ' + sum + '/' + c.total + '）');
+  eq(typeof c.dueReview, 'number', '延后统计：今日到期为数值（实测 ' + c.dueReview + '）');
+  eq(seen.indexOf(true) >= 0, true, '延后完成后重渲染（首帧之外出现一次就绪渲染）');
+
+  // 单飞：并发两次只触发一次整库读，且拿到同一份数组
+  const origLoad = QB.DB.loadQuestions;
+  let loadCalls = 0;
+  QB.DB.loadQuestions = function (...args) { loadCalls++; return origLoad.apply(QB.DB, args); };
+  const [i1, i2] = await Promise.all([QB.App.ensureBankQuestions(), QB.App.ensureBankQuestions()]);
+  eq(loadCalls, 1, '单飞：并发两次只做一次整库读（实测 ' + loadCalls + ' 次）');
+  ok(i1 === i2 && i1.length === 2, '单飞：两次拿到同一份正文（' + i1.length + ' 题）');
+
+  // 失败必须抛错，不得把 State 改写成空题池
+  const prevLen = QB.App.State.allQuestions.length;
+  QB.DB.loadQuestions = async () => { throw new Error('注入：装载失败'); };
+  let err = null;
+  try { await QB.App.ensureBankQuestions(); } catch (e) { err = e; }
+  ok(!!err && err.message.indexOf('注入：装载失败') >= 0,
+    '装载失败必须抛错（实测：' + (err ? err.message : '未抛错') + '）');
+  eq(QB.App.State.allQuestions.length, prevLen, '装载失败不把正文改写成空池');
+
+  // 清单有题但读回空 → 装载不完整，抛错而不是返回空池
+  QB.DB.loadQuestions = async () => ({ items: [], total: 0 });
+  const origCount = QB.DB.questions.count;
+  QB.DB.questions.count = async () => 5;
+  err = null;
+  try { await QB.App.ensureBankQuestions(); } catch (e) { err = e; }
+  ok(!!err && err.message.indexOf('装载不完整') >= 0,
+    '读回空池必须抛「装载不完整」（实测：' + (err ? err.message : '未抛错') + '）');
+  QB.DB.questions.count = origCount;
+  QB.DB.loadQuestions = origLoad;
+
+  // 切库：入口（任何 await 之前）立即清空正文 + 统计复位占位
+  const b2 = await QB.DB.banks.create({ name: '空库B', description: '' });
+  const origSet = QB.DB.setCurrentBankId;
+  let atSwitch = null;
+  QB.DB.setCurrentBankId = async (x) => {
+    if (atSwitch === null) {
+      atSwitch = { len: QB.App.State.allQuestions.length, ready: QB.App.State.counts.statsReady };
+    }
+    return origSet.call(QB.DB, x);
+  };
+  await clickAction(env, 'bank-select', { 'data-id': b2.id });
+  await tick(20);
+  ok(!!atSwitch, '切库确实走到持久化（观测点命中）');
+  if (atSwitch) {
+    eq(atSwitch.len, 0, '切库入口立即清空题目正文（实测 ' + atSwitch.len + ' 题）');
+    eq(atSwitch.ready, false, '切库入口立即把统计复位为占位');
+  }
+  await waitUntil(() => QB.App.State.bankId === b2.id, 2000);
+  eq(QB.App.State.allQuestions.length, 0, '切到空库后不带上一个库的题');
+  QB.DB.setCurrentBankId = origSet;
+  QB.UIRenderer.renderHome = origHome;
+  eq(rejections.length, 0, '该路径无未处理 rejection');
   env.restore();
 }
 

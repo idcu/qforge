@@ -15,6 +15,7 @@
   let render = null;
   let invalidateReviewLog = null;
   let beginQuiz = null;
+  let ensureBankQuestions = null;
 
   function attach(ctx) {
     State = ctx.State;
@@ -23,14 +24,16 @@
     render = ctx.render;
     invalidateReviewLog = ctx.invalidateReviewLog;
     beginQuiz = ctx.beginQuiz;
+    ensureBankQuestions = ctx.ensureBankQuestions;
   }
 
   /** 错题重练：在错题池上可选题型/分类/题量后再练（池=当前错题本） */
   async function openWrongDialog() {
+    await ensureBankQuestions(); // 错题池要挂题目正文：先等装载完成（失败上抛）
     const list = await QB.WrongBook.list(State.bankId);
     if (!list.length) { UI.toast('错题本是空的', 'err'); return; }
     const pool = list.map((x) => x.question);
-    openStartDialog('practice', {
+    return openStartDialog('practice', {
       pool: pool,
       title: '错题重练（' + pool.length + ' 题）',
       quizTitle: '错题重练'
@@ -38,7 +41,9 @@
   }
 
   /** 章节顺序练习：按分类保持题库原始顺序逐题作答（题目不洗牌，选项乱序仍按设置） */
-  function openChapterDialog() {
+  async function openChapterDialog() {
+    // 首页首帧不再整库装载：先等题目正文（失败上抛 → 统一错误出口）
+    await ensureBankQuestions();
     const cats = QB.SearchFilter.categories(State.allQuestions);
     const uncategorized = State.allQuestions.filter((q) => !q.category).length;
     const options = ['<option value="">全部分类（按题库原序）</option>']
@@ -91,7 +96,9 @@
     return { counts: counts, points: points };
   }
 
-  function openMixedDialog() {
+  async function openMixedDialog() {
+    // 首页首帧不再整库装载：先等题目正文（失败上抛 → 统一错误出口）
+    await ensureBankQuestions();
     const avail = QB.Blueprint.availability(State.allQuestions, {});
     const cats = QB.SearchFilter.categories(State.allQuestions);
     UI.openModal(UI.renderMixDialog(avail, cats), (modal) => {
@@ -131,9 +138,12 @@
    *   pool? 题池（默认 State.allQuestions；错题重练传入错题池）
    *   title? 弹窗标题；quizTitle? 入场标题
    */
-  function openStartDialog(mode, opts) {
+  async function openStartDialog(mode, opts) {
     opts = opts || {};
     if (!State.bank) { UI.toast('请先选择题库或新建题库', 'err'); return; }
+    // 默认题池是整库：首页首帧不再整库装载，这里先等正文（失败上抛）。
+    // 传了 pool（如错题重练）时题池自带题目，不重复整库读。
+    if (!opts.pool) await ensureBankQuestions();
     const pool0 = opts.pool || State.allQuestions;
     if (!pool0.length) { UI.toast('当前题池没有题目，请先导入或换题库', 'err'); return; }
     const avail = QB.Blueprint.availability(pool0, {});
