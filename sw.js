@@ -1,7 +1,9 @@
 /**
  * qforge Service Worker —— 离线应用壳
- * 策略：安装时预缓存入口；同源 GET 采用「缓存优先 + 后台更新」（stale-while-revalidate），
- * 导航请求离线时回退到 index.html。相对路径注册使其在 GitHub Pages 子路径下同样可用。
+ * 策略：安装时先预缓存 CORE（壳、图标、Worker 链、按需包），再按 index.html 的
+ * 实际引用补齐首屏脚本与样式（首访后即可断网刷新）；同源 GET 采用「缓存优先 + 后台更新」
+ * （stale-while-revalidate），导航请求离线时回退到 index.html。相对路径注册使其在
+ * GitHub Pages 子路径下同样可用。
  *
  * **后端 REST（`/api/*`）一律不拦截、不缓存**：api 模式（DATA_BACKEND='api'）下数据可写变，
  * 缓存会造成「写后仍读到旧数据」；且 stale-while-revalidate 的后台 revalidate 请求在页面
@@ -12,7 +14,7 @@
  * 见 CHANGELOG.internal.md da7c197 条目）；换代后 activate 会删除旧缓存，新 SW 下首次请求
  * 未命中即回源，能确定性拿到新资源，不必依赖后台 revalidate 是否跑完。
  */
-const CACHE = 'qforge-v92';
+const CACHE = 'qforge-v94';
 // 本站缓存命名空间（R-11）：activate 只清理自己的旧版本，绝不动同源其他应用的缓存
 const CACHE_PREFIX = 'qforge-';
 const CORE = [
@@ -100,12 +102,46 @@ self.addEventListener('install', (event) => {
   // 预缓存失败必须让 install 可观察地失败：旧实现在 catch 里无条件 skipWaiting，
   // 会让带残缺缓存的 SW 直接激活（离线时缺资源且浏览器不再重试安装）。
   // 失败时旧 SW 继续服务，浏览器下次检查会重试。
-  event.waitUntil(
-    caches.open(CACHE)
-      .then((cache) => cache.addAll(CORE))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(precache());
 });
+
+/**
+ * 从已缓存的 index.html 解析首屏引用（脚本 + 样式表），归一为 './path' 形式。
+ * 只认相对路径：跨源（协议/协议相对）引用交给浏览器，不写本站缓存。
+ */
+function shellAssetList(html) {
+  const out = [];
+  const add = (p) => {
+    if (!p || p.charAt(0) === '#' || /^[a-z]+:\/\//i.test(p) || p.indexOf('//') === 0) return;
+    const norm = p.charAt(0) === '.' ? p : './' + p.replace(/^\/+/, '');
+    if (out.indexOf(norm) < 0) out.push(norm);
+  };
+  let m;
+  const scriptRe = /<script[^>]*\ssrc="([^"]+)"/g;
+  while ((m = scriptRe.exec(html))) add(m[1]);
+  const styleRe = /<link[^>]*\srel="stylesheet"[^>]*\shref="([^"]+)"/g;
+  while ((m = styleRe.exec(html))) add(m[1]);
+  return out;
+}
+
+/**
+ * 安装期预缓存：先 CORE，再按 index.html 实际引用补齐首屏脚本与样式。
+ * 为什么不写死首屏清单：清单就是 index.html 的引用顺序，抄一份必然漂移；
+ * 从已预缓存的 index.html 解析可保证「装完即可离线刷新」，且不新增构建步骤。
+ * 补齐失败与 CORE 失败同等对待（install 拒绝 → 旧 SW 继续服务、下次重试），
+ * 否则会出现「SW 已激活但首访后断网刷新缺脚本」的静默缺口（ARCHITECTURE §8 #4）。
+ */
+async function precache() {
+  const cache = await caches.open(CACHE);
+  await cache.addAll(CORE);
+  const shell = await cache.match('./index.html');
+  if (!shell) throw new Error('预缓存缺少 index.html，无法确定首屏清单');
+  const html = await shell.text();
+  const known = new Set(CORE);
+  const missing = shellAssetList(html).filter((p) => !known.has(p));
+  if (missing.length) await cache.addAll(missing);
+  await self.skipWaiting();
+}
 
 self.addEventListener('activate', (event) => {
   // 顺序：先刷新探针、再删旧缓存、最后 claim。

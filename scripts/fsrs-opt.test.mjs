@@ -560,6 +560,71 @@ section('#9 权重保存串行化（并发 scope 不互相覆盖）');
   ok(!!store.banks.bankB, '并发保存后 bankB preset 仍在');
 }
 
+section('#9b 跨标签权重写互斥（Web Locks）：读改写整体在锁内');
+{
+  const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const events = [];
+  let busy = false;
+  const queue = [];
+  const pump = () => {
+    if (busy || !queue.length) return;
+    const run = queue.shift();
+    busy = true;
+    run();
+  };
+  // 真实 Web Locks 语义的替身：同名锁互斥、后到排队；记录持锁区间
+  const locks = {
+    request(name, task) {
+      return new Promise((resolve, reject) => {
+        queue.push(async () => {
+          events.push('acquire:' + name);
+          try {
+            const r = await task();
+            events.push('release:' + name);
+            resolve(r);
+          } catch (e) {
+            events.push('release:' + name);
+            reject(e);
+          } finally {
+            busy = false;
+            pump();
+          }
+        });
+        pump();
+      });
+    }
+  };
+  Object.defineProperty(globalThis, 'navigator', { value: { locks: locks }, configurable: true });
+
+  const origRead = QB.DB.weights.read;
+  const origWrite = QB.DB.weights.write;
+  const origRemove = QB.DB.weights.remove;
+  QB.DB.weights.read = async () => {
+    events.push(busy ? 'read:locked' : 'read:unlocked');
+    return { global: null, banks: {} };
+  };
+  QB.DB.weights.write = async () => { events.push(busy ? 'write:locked' : 'write:unlocked'); };
+  QB.DB.weights.remove = async () => { events.push(busy ? 'remove:locked' : 'remove:unlocked'); };
+
+  const w = QB.FSRS.DEFAULT_W.map((x) => x + 0.02);
+  try {
+    await O.saveWeights(w, { tag: 'G' });
+    await O.saveWeights(w, { tag: 'A' }, 'bankA');
+    await O.resetWeights('bankA');
+  } finally {
+    Object.defineProperty(globalThis, 'navigator', navDesc);
+    QB.DB.weights.read = origRead;
+    QB.DB.weights.write = origWrite;
+    QB.DB.weights.remove = origRemove;
+  }
+  const acquires = events.filter((e) => e === 'acquire:qforge:fsrs-weights').length;
+  eq(acquires, 3, '保存两次 + 删除一次各取同一把锁一次（实测 ' + acquires + '）');
+  eq(events.filter((e) => e.indexOf(':unlocked') >= 0).length, 0,
+    '读/写/删全部发生在锁内（实测事件：' + events.join(' → ') + '）');
+  ok(events.indexOf('read:locked') < events.indexOf('release:qforge:fsrs-weights'),
+    '读改写整体在同一个锁区间内');
+}
+
 console.log('\n================ 汇总 ================');
 console.log('通过: ' + pass + '，失败: ' + failures.length);
 if (failures.length) {

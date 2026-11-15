@@ -106,7 +106,10 @@
   }
 
   /* 权重整表读改写必须串行：两个 scope 并发训练时，后写若用旧快照会覆盖先写的 preset。
-     队列只保证同页内顺序（跨标签仍未原子，见 ARCHITECTURE §8 #9 的残留说明）。 */
+     页内用队列保序；跨标签在支持 Web Locks 的环境（https/localhost/现代浏览器）用同名锁
+     把「读 → 改 → 写」整体包住，避免两个标签各持旧快照互相覆盖。
+     不支持的浏览器（或 file:// 下的旧实现）自动退回页内队列——语义退化为原先的行为，
+     不引入存储格式变化，也不阻塞保存。 */
   let writeQueue = Promise.resolve();
   function enqueueWrite(task) {
     const run = writeQueue.then(task, task);
@@ -114,19 +117,35 @@
     return run;
   }
 
+  /** 所有标签写的是同一份权重存储，锁名必须固定且带应用前缀 */
+  const WEIGHTS_LOCK = 'qforge:fsrs-weights';
+
+  /** Web Locks 能力探测（每次调用时取，便于测试注入与运行时降级） */
+  function locksApi() {
+    const nav = typeof navigator !== 'undefined' ? navigator : null;
+    return nav && nav.locks && typeof nav.locks.request === 'function' ? nav.locks : null;
+  }
+
+  /** 在跨标签锁内执行读改写；无 Web Locks 时直接执行（页内队列已保证本页串行） */
+  function withWeightsLock(task) {
+    const locks = locksApi();
+    if (!locks) return task();
+    return locks.request(WEIGHTS_LOCK, task);
+  }
+
   function saveWeights(w, meta, bankId) {
-    return enqueueWrite(async () => {
+    return enqueueWrite(() => withWeightsLock(async () => {
       const store = await readStore();
       const entry = Object.assign({ w: w.slice(), trainedAt: Date.now() }, meta || {});
       if (bankId) store.banks[bankId] = entry;
       else store.global = entry;
       await writeStore(store);
-    });
+    }));
   }
 
-  /** 删除某题库 preset；省略 bankId 时清除全局权重（与保存同队列，避免读改写交错） */
+  /** 删除某题库 preset；省略 bankId 时清除全局权重（与保存同队列 + 同一把跨标签锁） */
   function resetWeights(bankId) {
-    return enqueueWrite(() => QB.DB.weights.remove(bankId));
+    return enqueueWrite(() => withWeightsLock(() => QB.DB.weights.remove(bankId)));
   }
 
   /* ---------------- 一键训练 ---------------- */

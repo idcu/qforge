@@ -1,15 +1,15 @@
 {
-  "generatedAt": "2026-11-14T21:51:35.704Z",
+  "generatedAt": "2026-11-15T11:29:25.487Z",
   "runItems": 41,
   "suiteFiles": 40,
-  "totalAssertions": 6521,
+  "totalAssertions": 6547,
   "gateCount": 64,
   "counts": {
     "smoke-test.mjs": 751,
     "a11y.test.mjs": 103,
     "annotation.test.mjs": 90,
     "api-backend.test.mjs": 341,
-    "app-boot.test.mjs": 166,
+    "app-boot.test.mjs": 182,
     "assets.test.mjs": 182,
     "backup-hydration.test.mjs": 60,
     "backup-roundtrip.test.mjs": 39,
@@ -20,7 +20,7 @@
     "editor-dom.test.mjs": 44,
     "editor.test.mjs": 82,
     "exporter.test.mjs": 207,
-    "fsrs-opt.test.mjs": 117,
+    "fsrs-opt.test.mjs": 120,
     "fsrs.test.mjs": 136,
     "idb.test.mjs": 517,
     "import-commit.test.mjs": 69,
@@ -41,7 +41,7 @@
     "srs.test.mjs": 99,
     "static-server.test.mjs": 29,
     "storage.test.mjs": 136,
-    "sw-runtime.test.mjs": 50,
+    "sw-runtime.test.mjs": 57,
     "sync-dav.test.mjs": 85,
     "ui-port.test.mjs": 25,
     "ui-renderer.test.mjs": 230,
@@ -50,7 +50,7 @@
   "firstScreen": {
     "scripts": 87,
     "files": 95,
-    "rawKB": "867.8",
-    "gzipKB": "326.1"
+    "rawKB": "882.3",
+    "gzipKB": "330.7"
   }
 }

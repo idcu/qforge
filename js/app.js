@@ -813,6 +813,43 @@
       console.error('[qforge] 启动失败：', e);
       State.bootError = e;
       QB.BootDiagnostics.renderBootFailure(e);
+      return;
+    }
+    // 首屏已渲染：之后的步骤（恢复答题 / 分享回链 / 注册 SW / 配额探测）失败只影响自身，
+    // 绝不能把可用界面替换成「启动失败」页，因此放在 boot 的整体 try 之外（见 afterFirstPaint）。
+    await afterFirstPaint();
+  }
+
+  /**
+   * 首屏之后的阶段：每步独立 try，失败经 notifyBackgroundError 提示一次并继续执行后续步骤。
+   * 执行顺序与拆分前逐字一致：恢复未完成答题 → 分享回链 → 注册 SW → 空闲探测配额。
+   * 这些步骤的共同点：主界面已经可用，失败不应该让用户失去已渲染的页面（数据本身不受影响）。
+   */
+  async function afterFirstPaint() {
+    await runPaintStep('恢复答题进度', () => QB.QuizSession.maybeResume());
+    await runPaintStep('分享回链处理', () => handleShareHash());
+    await runPaintStep('离线缓存注册', () => registerSW());
+    // 运行时 LocalStorage 配额探测放到首屏空闲期（首次约数百 ms，之后命中缓存 ~0.x ms）：
+    // IDB 可用时预检恒定放行，容量只用于 nearLimit 提示；IDB 不可用会在预检里同步探测。
+    const probeQuota = () => {
+      try { QB.Store.ensureLSQuota(); } catch (e) { /* 探测失败已内部回退，不打断页面 */ }
+    };
+    try {
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(probeQuota, { timeout: 2000 });
+      else setTimeout(probeQuota, 800);
+    } catch (e) {
+      notifyBackgroundError('配额探测调度失败', e);
+    }
+  }
+
+  /** 首屏后单步执行：失败可见（同错误去重）但不向上抛，保证后续步骤继续执行 */
+  async function runPaintStep(label, fn) {
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      notifyBackgroundError(label + '失败', e);
+      return false;
     }
   }
 
@@ -992,16 +1029,6 @@
     State.bankId = await QB.DB.getCurrentBankId();
     State.view = State.bankId ? 'home' : 'banks';
     if (!(await render())) throw new Error('首屏渲染失败');
-    await QB.QuizSession.maybeResume();
-    await handleShareHash();
-    registerSW();
-    // 运行时 LocalStorage 配额探测放到首屏空闲期（首次约数百 ms，之后命中缓存 ~0.x ms）：
-    // IDB 可用时预检恒定放行，容量只用于 nearLimit 提示；IDB 不可用会在预检里同步探测。
-    const probeQuota = () => {
-      try { QB.Store.ensureLSQuota(); } catch (e) { /* 探测失败已内部回退，不打断页面 */ }
-    };
-    if (typeof requestIdleCallback === 'function') requestIdleCallback(probeQuota, { timeout: 2000 });
-    else setTimeout(probeQuota, 800);
   }
 
   /** 注册 Service Worker（仅 http(s) 环境；file:// 与不支持的浏览器静默跳过） */

@@ -81,7 +81,8 @@ ok(app.indexOf('当前环境不支持本地新版存储，已回退到兼容模�
 ok(app.indexOf("window.addEventListener('load'") < 0, 'SW 注册不依赖 window load 事件');
 ok(/function registerSW\(\)[\s\S]{0,520}navigator\.serviceWorker\.register\('sw\.js'/.test(app),
   'registerSW 内直接调用 navigator.serviceWorker.register（脚本/DOM 就绪即可注册）');
-ok(app.indexOf('registerSW();') >= 0, 'boot 内调用 registerSW（不等待 load）');
+ok(/function afterFirstPaint\(\)[\s\S]{0,600}registerSW\(\)/.test(app),
+  '首屏渲染后的阶段调用 registerSW（不等待 load；失败只提示不替换界面）');
 
 section('悬浮滚动按钮（回到顶部 / 直达底部）');
 ok(index.indexOf('id="btn-top"') >= 0, 'index.html 含「回到顶部」按钮 #btn-top');

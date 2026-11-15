@@ -46,6 +46,22 @@ function parseCore(src) {
 }
 const CORE = parseCore(SW_SRC);
 
+/**
+ * 首屏引用（脚本 + 样式表）的期望清单：独立于 sw.js 的实现，按 index.html 顺序归一为 './path'。
+ * 用于核对 install 的第二次预缓存确实覆盖了首访后断网刷新所需的全部资源。
+ */
+function shellRefsOf(html) {
+  const out = [];
+  const add = (p) => {
+    const norm = p.charAt(0) === '.' ? p : './' + p.replace(/^\/+/, '');
+    if (out.indexOf(norm) < 0) out.push(norm);
+  };
+  for (const m of html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)) add(m[1]);
+  for (const m of html.matchAll(/<link[^>]*\srel="stylesheet"[^>]*\shref="([^"]+)"/g)) add(m[1]);
+  return out;
+}
+const SHELL_REFS = shellRefsOf(INDEX_SRC);
+
 /** 版本守卫覆盖的文件：CORE 中真实存在的 + index.html 引用的同源 js/css */
 function assetFiles() {
   const set = new Set(['index.html']);
@@ -111,9 +127,18 @@ if (WRITE_BASELINE) {
       status: status,
       ok: status >= 200 && status < 300,
       body: body == null ? '' : body,
-      clone() { return makeResponse(status, body); }
+      clone() { return makeResponse(status, body); },
+      /** 用真实文件内容模拟响应体（install 需要读 index.html 解析首屏清单） */
+      text() { return Promise.resolve(String(body == null ? '' : body)); }
     };
     return res;
+  }
+
+  /** 预缓存条目对应的响应体：仓库里存在的文件读真实内容，否则用占位串 */
+  function precacheBody(entry) {
+    const f = entry === './' ? 'index.html' : entry.replace(/^\.\//, '');
+    const abs = path.join(ROOT, f);
+    return fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : 'precached ' + entry;
   }
 
   /**
@@ -134,8 +159,10 @@ if (WRITE_BASELINE) {
       return {
         addAll(entries) {
           calls.addAll.push(entries.slice());
+          const idx = calls.addAll.length - 1;
           if (o.precacheFails) return Promise.reject(new Error('precache failed'));
-          entries.forEach((e) => ensure(name).set(keyOf(e), makeResponse(200, 'precached ' + e)));
+          if (o.failAddAllIndex === idx) return Promise.reject(new Error('precache failed at addAll#' + idx));
+          entries.forEach((e) => ensure(name).set(keyOf(e), makeResponse(200, precacheBody(e))));
           return Promise.resolve();
         },
         put(k, res) {
@@ -229,6 +256,24 @@ if (WRITE_BASELINE) {
     eq(env.calls.skip, 1, '成功后调用 skipWaiting（新 SW 立即接管）');
     eq(env.calls.opened[0], CACHE, '打开当前版本缓存 ' + CACHE);
     eq(JSON.stringify(env.calls.addAll[0]), JSON.stringify(CORE), 'install 预缓存清单与源码 CORE 逐项一致');
+
+    // 批次 C：首访离线完整性——index.html 引用的首屏脚本/样式必须在安装期补齐
+    const extras = SHELL_REFS.filter((p) => CORE.indexOf(p) < 0);
+    ok(extras.length > 0, 'index.html 存在 CORE 之外的首屏引用（' + extras.length + ' 项）');
+    eq(JSON.stringify(env.calls.addAll[1]), JSON.stringify(extras),
+      '第二次预缓存 = 首屏脚本/样式（按 index.html 顺序，共 ' + extras.length + ' 项）');
+    ok(extras.some((p) => /\/app\.js$/.test(p)), '首屏入口脚本在预缓存内');
+    ok(extras.some((p) => /\.css$/.test(p)), '首屏样式表在预缓存内');
+
+    // 装完后断网：首屏每一个引用都必须能命中缓存（首访 → 离线刷新可用）
+    const missing = [];
+    for (const p of SHELL_REFS) {
+      const url = ORIGIN + '/' + p.replace(/^\.\//, '');
+      const res = await dispatch(env, 'fetch', { method: 'GET', mode: 'cors', url: url }).response;
+      if (!res || !res.ok) missing.push(p);
+    }
+    eq(missing.length, 0, '首访安装完成后断网，首屏资源全部可离线命中（缺：' +
+      (missing.slice(0, 5).join(', ') || '无') + '）');
   }
   {
     const env = createEnv({ precacheFails: true });
@@ -237,6 +282,15 @@ if (WRITE_BASELINE) {
     try { await ev.pending; } catch (e) { rejected = e; }
     ok(!!rejected, '预缓存失败时 install 等待链必须 reject（旧实现 catch 吞错 → 此项红）');
     eq(env.calls.skip, 0, '失败时不 skipWaiting（旧 SW 继续服务，下次安装可重试）');
+  }
+  {
+    // 首屏补齐失败与 CORE 失败同等对待：不得带着「缺脚本」的缓存激活
+    const env = createEnv({ failAddAllIndex: 1 });
+    const ev = dispatch(env, 'install');
+    let rejected = null;
+    try { await ev.pending; } catch (e) { rejected = e; }
+    ok(!!rejected, '首屏补齐预缓存失败时 install 必须 reject（否则离线刷新缺脚本）');
+    eq(env.calls.skip, 0, '首屏补齐失败时不 skipWaiting');
   }
 
   /* ============================ 3. 导航请求 ============================ */

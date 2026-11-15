@@ -9,29 +9,29 @@
 | 项 | 当前值 | 事实源 | 谁复核 |
 |---|---|---|---|
 | 应用版本 | **1.0.3** | `package.json` | `check-release`（≥ 台账） |
-| SW 缓存 | **qforge-v92** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
+| SW 缓存 | **qforge-v94** | `sw.js` 的 `CACHE` | `check-release`（≥ 台账）、`sw-runtime`（基线） |
 | 上次对外发布 | 1.0.3 / qforge-v89 / 2026-11-14 | `docs/release-ledger.json` | `check-release` |
 | 存储 schema | **7** | `js/modules/migrate-core.js` | `migrate` 套件 |
 | contentHash 版本 | **3**（64 位） | `js/utils/question-id.js` | `smoke` / `shard` 套件 |
-| 测试规模 | **41 个运行项（冒烟 + 40 套件）**，**6521 / 6521 通过** | `scripts/test-all.mjs` | `test-all`、`docs-check --static` |
+| 测试规模 | **41 个运行项（冒烟 + 40 套件）**，**6547 / 6547 通过** | `scripts/test-all.mjs` | `test-all`、`docs-check --static` |
 | 性能门禁 | **64 项阈值** | `scripts/bench.mjs` | `bench --assert` |
-| 首屏体积 | 共 95 个文件（87 个 index 内联 js），**329.1 KB gzip / 878.1 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
+| 首屏体积 | 共 95 个文件（87 个 index 内联 js），**330.7 KB gzip / 882.3 KB raw** | 逐文件 `gzip -9` | `docs-check --static` |
 
-> 说明：`qforge-v82` 覆盖 2026-11-14 的两次纯移动拆分——切片 A 把 `ui-renderer-views.js` 按页面域拆为 base/home/quiz/lists/result 5 个文件（+3.2 KB gzip），切片 E 把 `migrate.js` 拆为 core/legacy/backend/entry 4 个文件（+3.3 KB gzip）。合计相对拆分前 +6.5 KB gzip / +3.6 KB raw，成因是逐文件 gzip 丢失跨文件窗口红利与每文件头部/包装开销。自 2026-11-14 起首屏体积仅测量与报告，不再作为拆分停手门禁；按需包上限门禁不变。判据变更见 `docs/rounds/2026-11-14/specs/split-roadmap/spec.md` §0 与 ui-split spec §8.2。`qforge-v83` 为 revlog 追加去重解析（`appendInternal` 的 `readSeg` 复用已读分段，净解析次数减半，首屏 +0.4 KB gzip）。`qforge-v84` 为写路径复用序列化文本（`setSync` 的 JSON 文本同时供落盘与 Quota 计费，旧值长度取自缓存条目，首屏 +1.1 KB gzip / +4.4 KB raw）。`qforge-v85` 为写路径序列化收口（IDB 计费复用 `_charLens` 长度、防抖 `set` 预序列化，首屏 +0.6 KB gzip / +2.3 KB raw）。`qforge-v86` 为分片拼接线性化（`concatShards` 由逐片 `Array#concat` 改为原地 `push`；50k 题整库 `readAll` 34.2→1.2 ms，逐项引用与顺序不变；首屏体积 317.5 KB gzip 无可显示变化）。`qforge-v87` 为冷启存储两处去重：迁移稳态快速路径（v7 且 meta 已是 v4 紧凑标记时不枚举物理状态键，未水合/旧库/半迁移/损坏态仍走完整检查）与 `readMap` 单次物理快照（`Storage.reviewStatesScoped`，不再把 50k 块内状态展开成逻辑键再逐键解析回来）；语义与合并顺序不变。`qforge-v88` 为首访回退收窄：新增模块级「缓存里是否存在带查询串的键」探针（宁真勿假：带查询串写入同步置位、activate 全量 `keys()` 重算、探测失败按真），仅当请求不带查询串且探针为假时跳过 `ignoreSearch`（此时回退必然落空，跳过不改变返回值）；首访每个纯路径请求省一次线性扫描（实测约 20 ms/条），离线与 `?v=`/`?r=1` 回退语义不变。同时把 activate 改为「先重算探针、再删旧缓存」：`caches.open()` 会创建不存在的缓存，原顺序下删除与新扫描交错会把旧版本缓存重建成空缓存（真实浏览器实测复现）。`qforge-v89` 为 v1.0.3 发版：应用版本号变更落在 `js/config.js`，按「任何 `js/**` 改动都必须 CACHE +1」规则递增缓存键，行为无变化。`qforge-v90` 为首屏整库装载结构改造（外壳水合）：启动只读全局键 + 当前库复习块 + 各库题目清单 `questions:<bank>:meta`，题目正文按窗口补读；作用域库与 `banks` 在同一次事务里解析（不再单发一次串行往返）；外壳态 `keys()`/`usageBytes()` 一律响亮拒绝（`NotHydratedError`），`navigator.storage.estimate` 只作物理字节诊断、禁止进入任何限额判断；首次 `ensure*` 后与全量视图逐字节一致（`idb.test` 钉死）。首屏 +5.6 KB gzip / +19.8 KB raw，主要来自按需扩窗与守卫代码。`qforge-v91` 修外壳水合遗漏：当前库的 `reviewMeta`/`reviewRev` 必须在 rest 补读中保留（否则 `ReviewStore.convertMetaLayout` 走不进稳态快速路径，每次启动枚举整库状态键；真机 50k 实测 +50 ms），新增 3 条断言钉死；首屏 +0.2 KB gzip。`qforge-v92` 为首页首帧退出整库装载（方案 A）：`needsFullQuestions` 收窄为 `search`/`stats`，首页首帧只读 O(1) 总数并以「统计中…」显式占位（`statsReady:false`，未就绪时「今日复习」强制保持 hot，`dueReview=0` 不得判成不紧急），题型分布与今日队列交给单飞 + 5000 题/块分块的延后任务补算（代次 + 库 + 视图三重守卫，块间让出主线程）；五处消费者（`startReview`、练习/考试开始、组卷、章节顺序练、错题重练）统一 `await QB.App.ensureBankQuestions()`，装载失败或「清单有题而读回空」一律抛错，绝不返回空题池；切库在任何 await 之前清空 `State.allQuestions`。`idb.test` 517 条不变，`ui-renderer` 220→230、`app-boot` 149→166 钉死占位/单飞/失败/切库语义。首屏 +3.0 KB gzip / +10.3 KB raw。
+> 说明：`qforge-v82` 覆盖 2026-11-14 的两次纯移动拆分——切片 A 把 `ui-renderer-views.js` 按页面域拆为 base/home/quiz/lists/result 5 个文件（+3.2 KB gzip），切片 E 把 `migrate.js` 拆为 core/legacy/backend/entry 4 个文件（+3.3 KB gzip）。合计相对拆分前 +6.5 KB gzip / +3.6 KB raw，成因是逐文件 gzip 丢失跨文件窗口红利与每文件头部/包装开销。自 2026-11-14 起首屏体积仅测量与报告，不再作为拆分停手门禁；按需包上限门禁不变。判据变更见 `docs/rounds/2026-11-14/specs/split-roadmap/spec.md` §0 与 ui-split spec §8.2。`qforge-v83` 为 revlog 追加去重解析（`appendInternal` 的 `readSeg` 复用已读分段，净解析次数减半，首屏 +0.4 KB gzip）。`qforge-v84` 为写路径复用序列化文本（`setSync` 的 JSON 文本同时供落盘与 Quota 计费，旧值长度取自缓存条目，首屏 +1.1 KB gzip / +4.4 KB raw）。`qforge-v85` 为写路径序列化收口（IDB 计费复用 `_charLens` 长度、防抖 `set` 预序列化，首屏 +0.6 KB gzip / +2.3 KB raw）。`qforge-v86` 为分片拼接线性化（`concatShards` 由逐片 `Array#concat` 改为原地 `push`；50k 题整库 `readAll` 34.2→1.2 ms，逐项引用与顺序不变；首屏体积 317.5 KB gzip 无可显示变化）。`qforge-v87` 为冷启存储两处去重：迁移稳态快速路径（v7 且 meta 已是 v4 紧凑标记时不枚举物理状态键，未水合/旧库/半迁移/损坏态仍走完整检查）与 `readMap` 单次物理快照（`Storage.reviewStatesScoped`，不再把 50k 块内状态展开成逻辑键再逐键解析回来）；语义与合并顺序不变。`qforge-v88` 为首访回退收窄：新增模块级「缓存里是否存在带查询串的键」探针（宁真勿假：带查询串写入同步置位、activate 全量 `keys()` 重算、探测失败按真），仅当请求不带查询串且探针为假时跳过 `ignoreSearch`（此时回退必然落空，跳过不改变返回值）；首访每个纯路径请求省一次线性扫描（实测约 20 ms/条），离线与 `?v=`/`?r=1` 回退语义不变。同时把 activate 改为「先重算探针、再删旧缓存」：`caches.open()` 会创建不存在的缓存，原顺序下删除与新扫描交错会把旧版本缓存重建成空缓存（真实浏览器实测复现）。`qforge-v89` 为 v1.0.3 发版：应用版本号变更落在 `js/config.js`，按「任何 `js/**` 改动都必须 CACHE +1」规则递增缓存键，行为无变化。`qforge-v90` 为首屏整库装载结构改造（外壳水合）：启动只读全局键 + 当前库复习块 + 各库题目清单 `questions:<bank>:meta`，题目正文按窗口补读；作用域库与 `banks` 在同一次事务里解析（不再单发一次串行往返）；外壳态 `keys()`/`usageBytes()` 一律响亮拒绝（`NotHydratedError`），`navigator.storage.estimate` 只作物理字节诊断、禁止进入任何限额判断；首次 `ensure*` 后与全量视图逐字节一致（`idb.test` 钉死）。首屏 +5.6 KB gzip / +19.8 KB raw，主要来自按需扩窗与守卫代码。`qforge-v91` 修外壳水合遗漏：当前库的 `reviewMeta`/`reviewRev` 必须在 rest 补读中保留（否则 `ReviewStore.convertMetaLayout` 走不进稳态快速路径，每次启动枚举整库状态键；真机 50k 实测 +50 ms），新增 3 条断言钉死；首屏 +0.2 KB gzip。`qforge-v92` 为首页首帧退出整库装载（方案 A）：`needsFullQuestions` 收窄为 `search`/`stats`，首页首帧只读 O(1) 总数并以「统计中…」显式占位（`statsReady:false`，未就绪时「今日复习」强制保持 hot，`dueReview=0` 不得判成不紧急），题型分布与今日队列交给单飞 + 5000 题/块分块的延后任务补算（代次 + 库 + 视图三重守卫，块间让出主线程）；五处消费者（`startReview`、练习/考试开始、组卷、章节顺序练、错题重练）统一 `await QB.App.ensureBankQuestions()`，装载失败或「清单有题而读回空」一律抛错，绝不返回空题池；切库在任何 await 之前清空 `State.allQuestions`。`idb.test` 517 条不变，`ui-renderer` 220→230、`app-boot` 149→166 钉死占位/单飞/失败/切库语义。首屏 +3.0 KB gzip / +10.3 KB raw。`qforge-v93` 为首屏后阶段错误隔离：`boot()` 的整体 try 只覆盖到首屏渲染，其后的恢复答题 / 分享回链 / 注册 SW / 配额探测各自独立 try，失败经后台错误提示（同错误去重）上报，不替换已渲染界面、不阻断后续步骤；`app-boot` 166→182 钉死「失败后 `bootError` 仍为 null、主视图保留、后续步骤继续」。`qforge-v94` 为首访离线完整性：install 在 `CORE` 之后读取已缓存的 `index.html`，按其 `<script src>` 与样式表引用补齐首屏资源（不写死清单，避免与 index.html 漂移），补齐失败与 `CORE` 失败同等 reject；`sw-runtime` 50→57 钉死「首屏逐项进缓存、装完断网全部命中、补齐失败不 skipWaiting」。同批 `fsrs-opt` 权重写加跨标签 Web Locks（锁名 `qforge:fsrs-weights`，读改写整体在锁内；无 Web Locks 自动退回页内队列），新增 3 条断言。v93+v94 合计首屏 +1.6 KB gzip / +4.2 KB raw。
 
 ## 2. 什么叫“绿”
 
 一次判定要同时满足：
 
 1. `npm run verify` **退出码 0**，且输出中没有 `✗` / `FAIL` / `失败` 行；
-2. `test-all` 打印 `41` 个运行项、`6521 / 6521 通过`、`0 失败`；
+2. `test-all` 打印 `41` 个运行项、`6547 / 6547 通过`、`0 失败`；
 3. `bench --assert` 的 64 项门禁全部通过（不是“允许若干项超阈值”）；
 4. `docs-check --static` 全部一致，`check-release` 通过；
 5. `check-discipline --strict` 0 新增豁免、0 新增问题。
 
 **允许存在的告警**：`docs-links` 的“本机绝对路径不可复现”告警不阻断（当前 7 条，属于既有文档的本地路径说明）；除此之外的 `⚠` 都要当作未完成处理。
 
-**已知盲区（必须知道）**：`verify` 里的 `docs-check --static` 读的是 `scripts/docs-baseline.json`，**不会重跑测试**。改过断言、门禁或首屏文件后，必须执行一次 `node scripts/docs-check.mjs --write` 刷新基线，否则会出现“文档数字绿、实测已漂移”。发版前用 live 模式（不带 `--static`）再跑一次复核。
+**已知盲区（必须知道）**：`verify` 里的 `docs-check --static` 读的是 `scripts/docs-baseline.json`，**不会重跑测试**。改过断言、门禁或首屏文件后，必须执行一次 `node scripts/docs-check.mjs --write` 刷新基线，否则会出现“文档数字绿、实测已漂移”。发版前用 live 模式（不带 `--static`）再跑一次复核。2026-11-15 起 `docs-check` 额外校验「N 个运行项 / M 断言」这句期望读数与 §1/基线同源——此前本文件 §3 写 6379、§1 与基线均为 6521，因落在所有既有模式之外长期无人发现。
 
 ## 3. 一条命令验证
 
@@ -47,7 +47,7 @@ npm run verify
 
 只想快速看代码与测试是否还活：`npm run test`（等价于 `check-ngm` + `test-all`，不覆盖文档、发布与性能门禁）。
 
-期望读数：`test-all` 41 个运行项 / 6379 断言 / 0 失败；`bench` 64/64；全部退出码 0。任何一步非 0 都不算绿。
+期望读数：`test-all` 41 个运行项 / 6547 断言 / 0 失败；`bench` 64/64；全部退出码 0。任何一步非 0 都不算绿。
 
 ## 4. 出问题怎么退回上一个 good state
 

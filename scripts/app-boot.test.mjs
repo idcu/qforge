@@ -215,6 +215,20 @@ async function makeEnv(opts) {
 
   if (o.shareCode || o.share) dom.location.hash = (o.share && o.share.hash) || '#share=SHARE1';
 
+  // 首屏后阶段故障注入（每步独立隔离的负向验证）：在 app.js 执行前替换对应实现
+  if (o.failResume) {
+    QB.QuizSession.maybeResume = async () => { throw new Error(o.failResume); };
+  }
+  if (o.failShareCreate) {
+    // QB.DB.banks 在 init 之后才有实体，因此包一层 init 再替换（分享回链建库失败）
+    const origShareInit = QB.DB.init;
+    QB.DB.init = function (...args) {
+      const r = origShareInit.apply(QB.DB, args);
+      QB.DB.banks.create = async () => { throw new Error(o.failShareCreate); };
+      return r;
+    };
+  }
+
   const source = o.appSource || APP_FOR_ENV;
   // 启动失败注入：DB.init 之后把首个数据读取替换为 reject（模拟 IDB 损坏 / 适配器异常）
   if (o.bootFail) {
@@ -888,6 +902,41 @@ section('boot 失败：可见错误态 + 无未处理 rejection + 诊断可下�
     ok(String(report.error && report.error.stack || '').length > 0, '诊断内容保留调用栈');
     eq(report.state && report.state.banksLoaded, false, '诊断内容含当时的启动状态');
   }
+  env.restore();
+}
+
+/* ============================================================
+ * 5.1 首屏后阶段错误隔离：单步失败不得替换已渲染界面，也不阻断后续步骤
+ * ============================================================ */
+section('首屏后阶段错误隔离：单步失败不替换界面、不阻断后续步骤');
+{
+  // 场景 1：恢复答题进度抛错。界面已可用（分享题包已导入并渲染），不得变成「启动失败」页。
+  const env = await makeEnv({ share: {}, failResume: '注入：恢复失败' });
+  const QB = env.QB;
+  ok(env.booted, 'maybeResume 抛错时 boot 仍宣告完成（banksLoaded=true）');
+  eq(QB.App.State.bootError, null, 'State.bootError 保持 null（不进入启动失败态）');
+  ok(viewHtml(env).indexOf('启动失败') < 0, '已渲染界面未被「启动失败」页替换');
+  ok(viewHtml(env).indexOf('分享题包') >= 0, '失败之后分享回链步骤照常执行并渲染');
+  ok(toastsText(env).indexOf('恢复答题进度失败：注入：恢复失败') >= 0,
+    '失败有可见提示（实测：' + (toastsText(env) || '无提示') + '）');
+  eq(env.dom.navigator.serviceWorker.registrations.length, 1, '失败之后仍注册 SW');
+  eq(env.dom.idleTasks.length, 1, '失败之后仍排入配额探测');
+  eq(rejections.length, 0, '该路径无未处理 rejection');
+  env.restore();
+}
+{
+  // 场景 2：分享回链内部抛错（建库失败）。首屏保持可用的空态，SW/配额步骤继续。
+  const env = await makeEnv({ share: {}, failShareCreate: '注入：建库失败' });
+  const QB = env.QB;
+  eq(env.booted, true, '分享回链抛错时 boot 仍宣告完成');
+  eq(QB.App.State.bootError, null, 'State.bootError 保持 null');
+  ok(viewHtml(env).indexOf('启动失败') < 0, '已渲染界面未被「启动失败」页替换');
+  ok(viewHtml(env).indexOf('还没有题库') >= 0, '首屏空态保持可用');
+  ok(toastsText(env).indexOf('分享回链处理失败：注入：建库失败') >= 0,
+    '分享回链失败有可见提示（实测：' + (toastsText(env) || '无提示') + '）');
+  eq(env.dom.navigator.serviceWorker.registrations.length, 1, '失败之后仍注册 SW');
+  eq(env.dom.idleTasks.length, 1, '失败之后仍排入配额探测');
+  eq(rejections.length, 0, '该路径无未处理 rejection');
   env.restore();
 }
 
