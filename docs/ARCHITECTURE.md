@@ -10,11 +10,11 @@
 
 qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：题库、作答记录、复习调度全部存浏览器本地（LocalStorage 或 IndexedDB），可选连 REST 后端或 WebDAV 同步；没有账号体系、没有服务端渲染、没有运行时依赖。
 
-- **形态**：静态文件即产物。87 个首屏 classic `<script>` + 28 个按需模块，全部挂在单一全局 `QB` 上（`js/**` 实际 109 个文件 / 23,991 行），无打包器、无 ESM、无 npm 运行时依赖；`file://` 双击可用（SW 只在 http(s) 注册）。
+- **形态**：静态文件即产物。87 个首屏 classic `<script>` + 28 个按需模块，全部挂在单一全局 `QB` 上（`js/**` 实际 109 个文件 / 24,957 行），无打包器、无 ESM、无 npm 运行时依赖；`file://` 双击可用（SW 只在 http(s) 注册）。
 - **装配**：`contracts/modules.json` 115 条（87 首屏 + 28 按需），`index.html` 的 script 顺序必须逐条相等。
 - **数据**：7 组 Repository 契约（`js/data/contracts.js`），默认 `QB.LocalAdapter`；`DATA_BACKEND='api'` 时切 `QB.ApiAdapter`。
 - **复习**：FSRS-6，21 维权重；学习步 / 每日限额 / 保留率可按题库覆盖。
-- **质量**：41 个运行项、6379 项断言、63 项性能门禁、CI 六格矩阵。
+- **质量**：41 个运行项、6547 项断言、64 项性能门禁、CI 六格矩阵。
 
 一句话心智模型：**app.js 编排状态与渲染，Repository 负责持久化，领域模块（答题/复习/导入/导出/备份）只经契约与端口访问外部，UI 只读 State 并输出字符串 HTML。**
 
@@ -226,27 +226,27 @@ qforge 是一个**离线优先的单机刷题 / 考试 / 间隔复习 PWA**：�
 
 ## 8. 已知问题与风险
 
-> 这些是 2026-11-13 逐行分析确认的**现存缺陷/薄弱面**。复核状态分四档：**已复核** = 主控直接读代码确认；**待复核** = 子分析者报告、主控只核对了结构未复现；**已修复** = 本地改动已合入且带回归断言（未提交，提交后补提交号）；**已修复（部分）/有意取舍** = 已修但保留明确边界或语义选择，条目内写明残留。§8 #5–#11 已于 2026-11-13 逐条复核并收口。修之前先按"验证方式"复现。
+> 这些是 2026-11-13 逐行分析确认的**现存缺陷/薄弱面**。复核状态分四档：**已复核** = 主控直接读代码确认；**待复核** = 子分析者报告、主控只核对了结构未复现；**已修复** = 已合入且带回归断言（条目内写提交号）；**已修复（部分）/有意取舍** = 已修但保留明确边界或语义选择，条目内写明残留。§8 #5–#11 已于 2026-11-13 逐条复核并收口。修之前先按"验证方式"复现。
 
 | # | 严重度 | 位置 | 问题 | 复核状态 | 验证方式 |
 |---|---|---|---|---|---|
-| 1 | 高 | `js/data/local-adapter.js` `buildQuestionIndex`；`js/utils/storage.js` `getScoped*` | 分阶段水合下索引构建遍历**所有库**的分片，访问非当前库时抛 `NotHydratedError`，导致导入/编辑/去重链路中断 | **已修复**（本地改动，未提交）：`get/update/remove/insertMany` 前置 `ensureIndexBanksHydrated()` → `ensureAll()`，失败仍上抛 | `scripts/idb.test.mjs` 分阶段水合 section（修复前 4 红，修复后绿） |
-| 2 | 高 | `js/modules/loader.js` 的 `export` BUNDLES；`js/modules/exporter.js` 的 CSV/XLSX 分支 | `export` 包不含 `DSV` / xlsx vendor，而导出器直接调 `global.DSV.formatRows`；新页面首次导出 CSV/XLSX 报 `ReferenceError` | **已修复**（本地改动，未提交）：export 包补 3 个 vendor；`modules.json` 补 requires；CACHE 递增（本批收口 v74） | `scripts/exporter.test.mjs` «export 按需包依赖完整»（修复前 3 红） |
-| 3 | 中 | `js/modules/ui-renderer-views-lists.js` `renderStats` | 有 forecast 数据时 `prefix` 被重写，`renderFsrsCard`（个性化/训练入口）被丢弃；无 forecast 时入口正常 | **已修复**（本地改动，未提交）：forecast 分支同样拼 `renderFsrsCard(fsrsInfo)` | `scripts/ui-renderer.test.mjs` «有预测数据时保留 FSRS 入口»（修复前 1 红） |
-| 4 | 中 | `sw.js` 的 `CORE` | 预缓存含 shell/图标/worker 链/28 个按需文件，但**不含首屏 87 个 js**；首屏脚本靠受控页面的运行时缓存，首访后立刻断网刷新可能缺脚本 | **已复核**（`CORE` 实读） | 干净 profile：首访 → 立刻离线刷新 |
-| 5 | 中 | `js/modules/quiz-session.js` 交卷顺序 | 顺序为 错题→SRS→历史→`locked`→清会话；"历史已写、清会话失败"时下次续答再交卷可能产生重复历史（`History.add` 失败有锁释放） | **已修复**（本地改动，未提交）：engine 持久化 `sessionId/historyId`，`clear` 失败降级为可观测错误不阻断结果页；local `historyAdd` 按 `sessionId` 去重 | `scripts/storage.test.mjs` «#5 交卷幂等»（修复前 4 红；残留：api 跨设备未做会话唯一约束） |
-| 6 | 中 | `js/modules/data-io.js` 粘贴/分享导入 | 丢失 `errors`，可绕过致命校验 | **已修复**（本地改动，未提交）：`importTextFlow` 透传 `errors`，与文件/URL 入口一致 | `scripts/import-commit.test.mjs` «粘贴入口保留致命 errors»（修复前 3 红） |
-| 7 | 中 | `js/modules/backup.js` 导出 | `.qfbk` 导出无上限，导入端有 64 MiB 上限，可能自产不可恢复备份 | **已修复**（本地改动，未提交）：导出前 `assertExportableBundle` 与导入共用上限，超限明确拒绝并给分库/压缩图片的下一步；**不变量：可导出必可导入** | `scripts/backup.test.mjs` «#7 资产包导出与导入共用同一上限»（修复前 5 红） |
-| 8 | 中 | `js/data/local-adapter.js` `questions.update` | 本地实现忽略 `baseUpdatedAt`，并发编辑静默覆盖 | **已修复**（本地改动，未提交）：`update(id, patch, opts)` 写前校验，冲突抛 `status=409`、`code='CONFLICT'`（与 api/banks 同形） | `scripts/shard.test.mjs` «#8 本地题目更新遵循 baseUpdatedAt»（修复前 2 红） |
-| 9 | 中 | `js/modules/fsrs-opt.js` 保存权重 | 无互斥的整 store 读改写，跨作用域训练可丢 preset | **已修复（模块内串行）**（本地改动，未提交）：`saveWeights`/`resetWeights` 经 `enqueueWrite` 队列；**跨标签仍可能互相覆盖**（无 Web Locks/CAS，有意残留） | `scripts/fsrs-opt.test.mjs` «#9 权重保存串行化»（修复前 2 红） |
+| 1 | 高 | `js/data/local-adapter.js` `buildQuestionIndex`；`js/utils/storage.js` `getScoped*` | 分阶段水合下索引构建遍历**所有库**的分片，访问非当前库时抛 `NotHydratedError`，导致导入/编辑/去重链路中断 | **已修复**（提交 `5613bbb`）：`get/update/remove/insertMany` 前置 `ensureIndexBanksHydrated()` → `ensureAll()`，失败仍上抛 | `scripts/idb.test.mjs` 分阶段水合 section（修复前 4 红，修复后绿） |
+| 2 | 高 | `js/modules/loader.js` 的 `export` BUNDLES；`js/modules/exporter.js` 的 CSV/XLSX 分支 | `export` 包不含 `DSV` / xlsx vendor，而导出器直接调 `global.DSV.formatRows`；新页面首次导出 CSV/XLSX 报 `ReferenceError` | **已修复**（提交 `5613bbb`）：export 包补 3 个 vendor；`modules.json` 补 requires；CACHE 递增（本批收口 v74） | `scripts/exporter.test.mjs` «export 按需包依赖完整»（修复前 3 红） |
+| 3 | 中 | `js/modules/ui-renderer-views-lists.js` `renderStats` | 有 forecast 数据时 `prefix` 被重写，`renderFsrsCard`（个性化/训练入口）被丢弃；无 forecast 时入口正常 | **已修复**（提交 `5613bbb`）：forecast 分支同样拼 `renderFsrsCard(fsrsInfo)` | `scripts/ui-renderer.test.mjs` «有预测数据时保留 FSRS 入口»（修复前 1 红） |
+| 4 | 中 | `sw.js` 的 `CORE` | 预缓存含 shell/图标/worker 链/28 个按需文件，但**不含首屏 87 个 js**；首屏脚本靠受控页面的运行时缓存，首访后立刻断网刷新可能缺脚本 | **已修复**（2026-11-15，`qforge-v94`）：install 先缓存 `CORE`，再读已缓存的 `index.html`、按实际 `<script src>` / 样式表引用补齐首屏资源（不写死清单，避免与 index.html 漂移）；补齐失败与 `CORE` 失败同等 reject，不带残缺缓存激活 | `scripts/sw-runtime.test.mjs` install 段（首屏引用逐项进缓存、装完断网全部可命中、补齐失败必 reject 且不 skipWaiting） |
+| 5 | 中 | `js/modules/quiz-session.js` 交卷顺序 | 顺序为 错题→SRS→历史→`locked`→清会话；"历史已写、清会话失败"时下次续答再交卷可能产生重复历史（`History.add` 失败有锁释放） | **已修复**（提交 `5613bbb`）：engine 持久化 `sessionId/historyId`，`clear` 失败降级为可观测错误不阻断结果页；local `historyAdd` 按 `sessionId` 去重 | `scripts/storage.test.mjs` «#5 交卷幂等»（修复前 4 红；残留：api 跨设备未做会话唯一约束） |
+| 6 | 中 | `js/modules/data-io.js` 粘贴/分享导入 | 丢失 `errors`，可绕过致命校验 | **已修复**（提交 `5613bbb`）：`importTextFlow` 透传 `errors`，与文件/URL 入口一致 | `scripts/import-commit.test.mjs` «粘贴入口保留致命 errors»（修复前 3 红） |
+| 7 | 中 | `js/modules/backup.js` 导出 | `.qfbk` 导出无上限，导入端有 64 MiB 上限，可能自产不可恢复备份 | **已修复**（提交 `5613bbb`）：导出前 `assertExportableBundle` 与导入共用上限，超限明确拒绝并给分库/压缩图片的下一步；**不变量：可导出必可导入** | `scripts/backup.test.mjs` «#7 资产包导出与导入共用同一上限»（修复前 5 红） |
+| 8 | 中 | `js/data/local-adapter.js` `questions.update` | 本地实现忽略 `baseUpdatedAt`，并发编辑静默覆盖 | **已修复**（提交 `5613bbb`）：`update(id, patch, opts)` 写前校验，冲突抛 `status=409`、`code='CONFLICT'`（与 api/banks 同形） | `scripts/shard.test.mjs` «#8 本地题目更新遵循 baseUpdatedAt»（修复前 2 红） |
+| 9 | 中 | `js/modules/fsrs-opt.js` 保存权重 | 无互斥的整 store 读改写，跨作用域训练可丢 preset | **已修复（页内队列 + 跨标签 Web Locks）**：`saveWeights`/`resetWeights` 先经 `enqueueWrite` 保序，再取同名锁 `qforge:fsrs-weights` 把「读 → 改 → 写」整体包住；无 Web Locks 的环境自动退回页内队列（等同修复前语义），存储格式不变 | `scripts/fsrs-opt.test.mjs` «#9 权重保存串行化»（修复前 2 红）+ «#9b 跨标签互斥»（锁名、读写删全在锁内） |
 | 10 | 中 | `js/modules/srs-store.js` `srsRecorded` 置位 | 置位早于真正落盘，pagehide 时机可能永久漏记 | **已修复（有意取舍：at-least-once）**：`collectGraded` 只入内存 in-flight，写盘成功后 `markGraded`；pagehide 不再漏记，代价是「已写、置位前崩溃」的极小窗口可能重复记一次评分 | `scripts/srs.test.mjs` «#10 srsRecorded 不早于落盘»（修复前 4 红） |
-| 11 | 低 | `js/data/local-adapter.js` `questions.update/remove`（`append` 已有 P0-3 保护；范围小于原判） | 双标签同时写同一分片可能丢题 | **已修复（部分）**（本地改动，未提交）：写入前 `locateFresh` + 写后回读校验 + 3 次重试，失败抛 `UPDATE_CONFLICT`/`REMOVE_CONFLICT`；未引入 Web Locks、未改存储格式，fresh 读与整段写之间的极小窗口仍在 | `scripts/shard.test.mjs` «#11 双标签更新/删除同一分片不丢改动»（修复前 3 红） |
+| 11 | 低 | `js/data/local-adapter.js` `questions.update/remove`（`append` 已有 P0-3 保护；范围小于原判） | 双标签同时写同一分片可能丢题 | **已修复（部分）**（提交 `5613bbb`）：写入前 `locateFresh` + 写后回读校验 + 3 次重试，失败抛 `UPDATE_CONFLICT`/`REMOVE_CONFLICT`；未引入 Web Locks、未改存储格式，fresh 读与整段写之间的极小窗口仍在 | `scripts/shard.test.mjs` «#11 双标签更新/删除同一分片不丢改动»（修复前 3 红） |
 
 处理原则：
 
-- 1、2、3 已在 2026-11-13 修复（本地改动，未提交）：1 用「全局索引前 `ensureAll`」而非把 `NotHydratedError` 改回"返回空数组"；2 用**补包**而非把 exporter 改成延迟 `require`；3 保留 `renderFsrsCard`。
-- 4 为「已复核、本批不改」的观察项（首屏脚本仍靠受控页面的运行时缓存，首访后立刻断网刷新可能缺脚本）。
-- 5–11 已于 2026-11-13 修复（本地改动，未提交）：提交后把状态里的「本地改动，未提交」替换为提交号，不要重复追。
+- 1、2、3 已在 2026-11-13 修复（提交 `5613bbb`）：1 用「全局索引前 `ensureAll`」而非把 `NotHydratedError` 改回"返回空数组"；2 用**补包**而非把 exporter 改成延迟 `require`；3 保留 `renderFsrsCard`。
+- 4 已于 2026-11-15 修复（`qforge-v94`）：install 期按 `index.html` 实际引用补齐首屏脚本/样式，装完即可断网刷新；见上表 #4。
+- 5–11 已于 2026-11-13 修复（提交 `5613bbb`，2026-11-14 入库）：状态已回填提交号，不要重复追。
 
 ## 9. 修改前的检查清单
 

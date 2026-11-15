@@ -164,8 +164,9 @@ QB.LocalAdapter | QB.ApiAdapter   实现（DATA_BACKEND='local' 默认 / 'api'�
 
 ## 8. Service Worker 与缓存
 
-- `sw.js` 顶部 `CACHE='qforge-v92'`，`CACHE_PREFIX='qforge-'`；**任何 `js/**` / `index.html` 改动都要 CACHE +1**。
-- install：预缓存 `CORE`（shell、图标、worker 链、27 个按需文件）；首屏 80 个 js **不在 CORE**，靠运行时缓存（已知缺口，见 [ARCHITECTURE §8](ARCHITECTURE.md) 问题 4）。
+- `sw.js` 顶部 `CACHE='qforge-v94'`，`CACHE_PREFIX='qforge-'`；**任何 `js/**` / `index.html` 改动都要 CACHE +1**。
+- install：先预缓存 `CORE`（shell、图标、worker 链、28 个按需文件），再读取已缓存的 `index.html`，把其 `<script src>` 与样式表引用（归一为 `./path`）中尚未覆盖的部分追加预缓存。首屏清单不写死——它就是 `index.html` 的引用顺序，抄一份必然漂移。
+- install 的两次 `addAll` 任一失败都让 install reject（不带残缺缓存激活；旧 SW 继续服务，浏览器下次重试）。`sw-runtime.test` 的 install 段会核对「装完断网后首屏全部可命中」。
 - activate：只删除 `qforge-` 命名空间的旧缓存，然后 `clients.claim()`；不得删除同源其他应用的 CacheStorage。
 - fetch：同源 GET 走 stale-while-revalidate；导航请求回退 `index.html`；跨源/非 GET 直连网络。
 - 注册：仅 http(s)；注册成功后首次访问需刷新一次才由 SW 接管当前页。

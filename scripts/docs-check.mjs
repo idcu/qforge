@@ -229,6 +229,11 @@ function auditDoc(doc, ctx) {
   // 门禁项数（README/DEVELOPMENT 各有「N 项阈值」等处）
   checkPattern(doc, /(\d+) 项量级阈值/, '门禁项数', ctx.gateCount, null, out);
   checkPattern(doc, /(\d+) 项阈值/, '门禁项数', ctx.gateCount, null, out);
+  // 「期望读数」一行（CURRENT-STATE §3）：必须与 §1 / 基线同一事实源。
+  // 2026-11-15 之前这句写 6379 而 §1 与基线都是 6521，长期无人发现——
+  // 因为它既不是表格行、也不匹配「N / N 通过」，正好落在所有既有模式之外。
+  checkPattern(doc, /(\d+) 个运行项 \/ \d+ 断言/, '运行项数（期望读数）', ctx.runOrder.length, null, out);
+  checkPattern(doc, /\d+ 个运行项 \/ (\d+) 断言/, '断言数（期望读数）', ctx.totalAssertions, null, out);
   // 首屏
   checkPattern(doc, /共 (\d+) 个文件/, '首屏文件数', ctx.firstScreen.files, null, out);
   checkPattern(doc, /(\d+) 个 index 内联 js/, '内联 js 数', ctx.firstScreen.scripts, null, out);
@@ -381,6 +386,21 @@ if (SELFTEST) {
     {
       name: '门禁条数一致（不得误杀）',
       hit: () => gateCountProblems(63, 63, 63, 'write').length === 0
+    },
+    {
+      // CURRENT-STATE §3 曾长期写 6379（§1 与基线 6521），落在所有既有模式之外
+      name: '「期望读数」断言数与事实源不一致必须红',
+      hit: () => auditDoc({
+        rel: 'FAKE.md', text: '期望读数：`test-all` 41 个运行项 / 6379 断言 / 0 失败。',
+        lines: ['期望读数：`test-all` 41 个运行项 / 6379 断言 / 0 失败。']
+      }, ctx).length > 0
+    },
+    {
+      name: '「期望读数」与事实源一致不得误杀',
+      hit: () => auditDoc({
+        rel: 'FAKE.md', text: '期望读数：`test-all` 2 个运行项 / 5 断言 / 0 失败。',
+        lines: ['期望读数：`test-all` 2 个运行项 / 5 断言 / 0 失败。']
+      }, ctx).length === 0
     }
   ];
   let ok = true;
